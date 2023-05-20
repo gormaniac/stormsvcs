@@ -1,7 +1,6 @@
-# synsvcs
+# stormsvcs
 
-A collection of custom Synapse services.
-
+A collection of custom Storm services.
 
 ## Services
 
