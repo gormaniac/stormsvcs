@@ -1,0 +1,22 @@
+name: Main Merge Pipeline
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - closed
+
+permissions:
+  contents: read
+
+jobs:
+  yarastorm:
+    if: github.event.pull_request.merged == true
+    uses: ./.github/workflows/yarastorm.yml
+    secrets: inherit
+
+  report-ingest:
+    if: github.event.pull_request.merged == true
+    uses: ./.github/workflows/report-ingest.yml
+    secrets: inherit

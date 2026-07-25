@@ -1,0 +1,38 @@
+name: slib.yara
+version: 0.0.1
+guid: f418c8589b13201801b9a4bf2b4f7842
+
+synapse_minversion: [2, 137, 0]
+
+genopts:
+    dotstorm: true
+
+author:
+  url: https://github.com/gormaniac
+  name: John Gorman
+
+desc: Dispatch Yara scans on files in an Axon.
+
+modules:
+  - name: slib.yara.lib
+    desc: A library for working with Yara rules.
+
+  - name: slib.yara.ingest
+    desc: Code for ingesting results of Yara scans.
+
+commands:
+  - name: slib.yara.scan
+    descr: |
+      Scan files with Yara.
+
+  - name: slib.yara.check
+    descr: |
+      Check if a Yara rule is valid and print compile errors, if any.
+
+  - name: slib.yara.enable
+    descr: |
+      Enable yara rules in the scanning system.
+
+  - name: slib.yara.disable
+    descr: |
+      Disable yara rules in the scanning system.

@@ -1,0 +1,9 @@
+[stormsvcs.yarastorm]
+name = YaraStorm
+src = svcs/yarastorm/
+workflow = .github/workflows/yarastorm.yml
+
+# [stormsvcs.reportingest]
+# name = Report Ingest
+# src = svcs/report-ingest/
+# workflow = .github/workflows/report-ingest.yml

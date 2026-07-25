@@ -1,20 +1,12 @@
-[build-system]
-requires = ["setuptools"]
-build-backend = "setuptools.build_meta"
-
 [project]
 name = "stormsvcs"
+authors = "John Gorman"
 version = "0.0.1"
+description = "A monorepo of independent custom Synapse Advanced Power-Ups"
 readme = "README.md"
-requires-python = ">=3.10"
+license = "LICENSE"
+requires-python = ">=3.14"
 dependencies = [
-    "synapse==3.8.4"
+    "stormlibpp>=0.10.1",
+    "synapse>=2.248.0,<3",
 ]
-
-[tool.setuptools.packages.find]
-namespaces = true
-where = ["src"]
-
-# We don't actually want to run this code, just make sure it stays with the package.
-[tool.setuptools.package-data]
-"stormsvcs.synmods" = ["*.py",]
