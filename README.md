@@ -8,7 +8,7 @@ Shared utility code lives upstream in the StormLib++ project. Each service shoul
 
 Actions run specific to each service, each service must maintain its own actions to build and test code + build and deploy docker images. However, a push to main requires that all tests pass regardless of which code is edited. The all in one testing action will call a registered test action for each service, as some services require custom environments/image builds.
 
-All original code in this repo is covered under the same Apache 2.0 license (see ``LICENSE``).
+All original code in this repo is covered under the same MIT license (see ``LICENSE``).
 
 Each service must have the following:
 - An entry in `services.toml` pointing to that service's:
