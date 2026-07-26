@@ -22,17 +22,28 @@ Each service must have the following:
 		- Each service will manage its own dependencies.
 		- A global `uv.lock` file will exist for the sake of ensuring the project wide development dependencies (`uv`, `tox`, `pylint`, etc.) are easily managed.
 		- All services will depend on at least `stormlibpp` (and can inherit that packages `synapse` dependency)
+		- Bootstrap the service folder with: `uv init --no-workspace --lib --build-backend uv --vcs none  --no-pin-python`
 	- A folder named `src/` that has all python and storm code for the Storm Service
 	- A folder named `tests/` that has:
 		- At least 1 pytest test
 		- No default tests that call out to external services for testing
 			- An optional gate is allowed to run external tests locally
 	- A folder named `docker/` that defines a docker image for the service.
+	- A LICENSE file that is a symlink of this repo's LICENSE file (`ln -s ../../LICENSE LICENSE`)
 - A CI workflow that tests and builds the service
 	- It must also build the docker image.
 	- It must only run on PRs when the service's folder is changed AND with a "workflow_run" flag AND with a manual run flag.
 - An entry in the global CI workflow pointing to the service's CI workflow.
 	- This will run on every merge to main.
+- All services, and their storm commands/modules, should namespace under `slib` (ex: `slib.yara`).
+	- This is because all services here should be seen as the Advanced Power-Up extensions for the [StormLib++](https://github.com/gormaniac/stormlibpp) project which uses this same namespace.
+		- Be careful of naming conflicts here.
+
+# Services
+
+- `yarastorm`
+  - Support for matching `it:prod:yara:rule` nodes to `file:bytes` nodes.
+
 
 ## Services Wish List/Plan
 
@@ -64,8 +75,6 @@ This is a ToDo/wish list, check `services.toml` for the current list of develope
   - Match PCAPs stored in `file:bytes` nodes against `rule:snort`/`rule:suricata` nodes.
 - `virustotal`
   - Enrich from VT.
-- `yara`
-  - Support for matching `rule:yara` nodes to `file:bytes` nodes.
 - `unattrib`
 	- Make unattrib HTTP and socks proxy requests from within Synapse
 - `spamhaus`
