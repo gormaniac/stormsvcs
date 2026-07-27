@@ -3,7 +3,7 @@ name = "yarastorm"
 version = "0.2.1"
 description = "The yarastorm Python package"
 readme = "README.md"
-license-files = "LICENSE"
+license-files = ["LICENSE"]
 authors = [
     { name = "John Gorman", email = "83027042+gormaniac@users.noreply.github.com" }
 ]
@@ -23,3 +23,9 @@ source-include = [
     "pkgproto/*.yaml",
     "pkgproto/storm/*/*.storm",
 ]
+
+[tool.pytest]
+testpaths = [
+    "tests",
+]
+asyncio_mode = "auto"
