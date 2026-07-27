@@ -1,0 +1,64 @@
+init {
+    $svc = $lib.service.get('slib.ipapi')
+}
+
+function query($query) {
+    return($svc.query($query))
+}
+
+function buildPlaceNode($data) {
+    [
+        geo:place=($data.lat, $data.long, $data.city)
+        :loc=($data.lat, $data.long)
+        :name=', '.join(($data.city, $data.regionName, $data.country))
+        :country=$data.country
+        :timezone=$data.timezone
+    ]
+
+    return($node)
+}
+
+
+function buildOrgNode($data) {
+    yield $lib.gen.orgFromName($data.isp)
+    [
+        :names=($data.asname, $data.as_,)
+        :orgtype=company.isp
+    ]
+
+    return($node)
+}
+
+function buildASNNode($data) {
+    $asnNode = $lib.null
+
+    [
+        inet:asn?=$data.as_.strip("AS").split(" ")[0]
+        :org={ yield $buildOrgNode($data) }
+    ]
+
+    return($asnNode)
+}
+
+function modelResult($data) {
+    $locNode = $buildLocNode($data)
+    $asnNode = $buildASNNode($data)
+
+    [
+        inet:ipv4?=$data.query
+        inet:ipv6?=$data.query
+        :asn=$asnNode
+    ]
+
+
+    // $result = $lib.dict()
+    // $result['query'] = $data.query
+    // $result['ip'] = $data.ip
+    // $result['hostname'] = $data.hostname
+    // $result['city'] = $data.city
+    // $result['region'] = $data.region
+    // $result['country'] = $data.country
+    // $result['loc'] = $data.loc
+    // $result['org'] = $data.org
+    // return($result)
+}
