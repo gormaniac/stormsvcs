@@ -97,3 +97,11 @@ commands:
         - [ slib, ip-api, admin ]
     descr: |
       Disable setting any tags on inet:ipv4/ipv6 nodes for the ip-api.com hosting/mobile/proxy results.
+
+  - name: slib.ip-api.admin.enabletag
+    perms:
+        - [ slib, ip-api, admin ]
+    descr: |
+      Enable setting tags on inet:ipv4/ipv6 nodes for the ip-api.com hosting/mobile/proxy results.
+
+      Use the slib.ip-api.admin.settag command to set a custom tag prefix.

@@ -1,0 +1,6 @@
+init {
+    $ipapiAdminLib = $lib.import("slib.ip-api.admin")
+    $prefixOpt = $cmdopts.prefix
+}
+
+$ipapiAdminLib.disableTagPrefix()

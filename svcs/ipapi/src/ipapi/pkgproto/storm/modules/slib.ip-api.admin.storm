@@ -1,0 +1,11 @@
+function setTagPrefix (prefix) {
+    $lib.globals.set("slib:ip-api:tag:prefix", prefix)
+}
+
+function disableTagPrefix () {
+    $lib.globals.set("slib:ip-api:tag:enabled", false)
+}
+
+function enableTagPrefix () {
+    $lib.globals.set("slib:ip-api:tag:enabled", true)
+}
