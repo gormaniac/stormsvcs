@@ -1,5 +1,5 @@
 init {
-    $svc = $lib.service.get('slib.ipapi')
+    $svc = $lib.service.get('slib.ip-api')
 }
 
 function query($query) {
@@ -13,6 +13,7 @@ function buildPlaceNode($data) {
         :name=', '.join(($data.city, $data.regionName, $data.country))
         :country=$data.country
         :timezone=$data.timezone
+        :type=city
     ]
 
     return($node)
@@ -41,7 +42,7 @@ function buildASNNode($data) {
 }
 
 function modelResult($data) {
-    $locNode = $buildLocNode($data)
+    $locNode = $buildPlaceNode($data)
     $asnNode = $buildASNNode($data)
 
     [

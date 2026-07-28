@@ -1,7 +1,7 @@
 import sys
 import asyncio
 
-from . import YaraSvc
+from . import IpApiSvc
 
 if __name__ == "__main__":
-    asyncio.run(YaraSvc.execmain(sys.argv[1:]))
+    asyncio.run(IpApiSvc.execmain(sys.argv[1:]))

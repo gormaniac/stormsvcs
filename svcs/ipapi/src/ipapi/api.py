@@ -10,7 +10,7 @@ from .defs import SVC_EVTS, PKGDEFS, SVC_NAME, SVC_VER
 
 
 class IpApiCellApi(s_cell.CellApi, s_stormsvc.StormSvc):
-    """The Telepath API endpoints for the ipapi service."""
+    """The Telepath API endpoints for the slib.ip-api service."""
 
     _storm_svc_name = SVC_NAME
     _storm_svc_vers = normver(SVC_VER)[1]

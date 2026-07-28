@@ -1,0 +1,99 @@
+name: slib.ip-api
+version: 0.1.0
+guid: 92cc9d722c63125d64911389cd39c685
+
+synapse_minversion: [2, 137, 0]
+
+genopts:
+    dotstorm: true
+
+author:
+  url: https://github.com/gormaniac
+  name: John Gorman
+
+desc: A Rapid Power-Up that calls the ip-api.com API to retrieve information about IP addresses.
+
+docs:
+  - title: README
+    path: README.md
+
+perms:
+  - perm: [ slib, ip-api, admin ]
+    gate: cortex
+    desc: Allows a user to call admin APIs of the slib.ip-api Storm Package.
+  - perm: [ slib, ip-api, user ]
+    gate: cortex
+    desc: Allows a user to call user APIs of the slib.ip-api Storm Package.
+
+modules:
+  - name: slib.ip-api.lib
+    perms:
+        - [ slib, ip-api, user ]
+  - name: slib.ip-api.admin
+    asroot:perms:
+        - [ slib, ip-api, admin ]
+
+commands:
+  - name: slib.ip-api.query
+    perms:
+        - [ slib, ip-api, user ]
+    descr: |
+      Query the ip-api.com API for information about the input IP addresses.
+
+      Examples:
+
+        // Lift some inet:ipv4 nodes and query ip-api.com for information.
+        inet:ipv4 | limit 5 | slib.ip-api.query
+
+        // Use a string argument to query for a specific IP address.
+        slib.ip-api.query --query 8.8.8.8
+
+    cmdargs:
+      - - --query
+        - type: str
+          default: ''
+          help: |
+            An IP address string to query for.
+
+            Ignores any nodes in the pipeline and uses only the string passed to this arg.
+
+      - - --yield
+        - default: false
+          action: store_true
+          help: |
+            Yield the newly created inet:ipv4/ipv6 records.
+            
+            A bit redundant when not using --query because nodes stay in the pipeline otherwise.
+
+    forms:
+      input:
+        - inet:ipv4
+        - inet:ipv6
+      output:
+        - inet:ipv4
+        - inet:ipv6
+
+  - name: slib.ip-api.admin.settag
+    perms:
+        - [ slib, ip-api, admin ]
+    descr: |
+      Set a custom tag prefix for modeling the ip-api.com hosting/mobile/proxy results.
+
+      slib.ip-api will use #<prefix>.hosting, #<prefix>.mobile, and #<prefix>.proxy tags on
+      inet:ipv4/ipv6 nodes if those values are "true" in the ip-api.com results.
+      By default, the prefix is "rep.ipapi".
+
+      This can be disabled using the slib.ip-api.admin.disabletag command.
+
+    cmdargs:
+      - - prefix
+        - type: str
+          default: ''
+          help: |
+            The custom tag prefix to use.
+
+  - name: slib.ip-api.admin.disabletag
+    perms:
+        - [ slib, ip-api, admin ]
+    descr: |
+      Disable setting any tags on inet:ipv4/ipv6 nodes for the ip-api.com hosting/mobile/proxy results.

@@ -1,4 +1,4 @@
-"""The ipapi service."""
+"""The slib.ip-api service."""
 
 
 import asyncio
@@ -66,7 +66,7 @@ class _QueueItem(NamedTuple):
 
 
 class IpApiSvc(s_cell.Cell):
-    """The Cell implementation for the ipapi service."""
+    """The Cell implementation for the slib.ip-api service."""
 
     cellapi = IpApiCellApi
 
@@ -227,5 +227,5 @@ class IpApiSvc(s_cell.Cell):
             return IpRetn(
                 data=None,
                 status=False,
-                mesg=f"ipapi service is shutting down, query for {ipaddr} was cancelled",
+                mesg=f"slib.ip-api service is shutting down, query for {ipaddr} was cancelled",
             )
