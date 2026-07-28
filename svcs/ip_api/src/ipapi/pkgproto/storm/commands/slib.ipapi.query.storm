@@ -1,5 +1,5 @@
 init {
-    $ipapilib = $lib.import("slib.ip-api.lib")
+    $ipapilib = $lib.import("slib.ipapi.lib")
     // TODO - cast query to an inet:ipv4/6 so we can error on bad input
     $queryOpt = $cmdopts.query
 }

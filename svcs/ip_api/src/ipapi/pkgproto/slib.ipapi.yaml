@@ -1,4 +1,4 @@
-name: slib.ip-api
+name: slib.ipapi
 version: 0.1.0
 guid: 92cc9d722c63125d64911389cd39c685
 
@@ -18,35 +18,35 @@ docs:
     path: README.md
 
 perms:
-  - perm: [ slib, ip-api, admin ]
+  - perm: [ slib, ipapi, admin ]
     gate: cortex
-    desc: Allows a user to call admin APIs of the slib.ip-api Storm Package.
-  - perm: [ slib, ip-api, user ]
+    desc: Allows a user to call admin APIs of the slib.ipapi Storm Package.
+  - perm: [ slib, ipapi, user ]
     gate: cortex
-    desc: Allows a user to call user APIs of the slib.ip-api Storm Package.
+    desc: Allows a user to call user APIs of the slib.ipapi Storm Package.
 
 modules:
-  - name: slib.ip-api.lib
+  - name: slib.ipapi.lib
     perms:
-        - [ slib, ip-api, user ]
-  - name: slib.ip-api.admin
+        - [ slib, ipapi, user ]
+  - name: slib.ipapi.admin
     asroot:perms:
-        - [ slib, ip-api, admin ]
+        - [ slib, ipapi, admin ]
 
 commands:
-  - name: slib.ip-api.query
+  - name: slib.ipapi.query
     perms:
-        - [ slib, ip-api, user ]
+        - [ slib, ipapi, user ]
     descr: |
       Query the ip-api.com API for information about the input IP addresses.
 
       Examples:
 
         // Lift some inet:ipv4 nodes and query ip-api.com for information.
-        inet:ipv4 | limit 5 | slib.ip-api.query
+        inet:ipv4 | limit 5 | slib.ipapi.query
 
         // Use a string argument to query for a specific IP address.
-        slib.ip-api.query --query 8.8.8.8
+        slib.ipapi.query --query 8.8.8.8
 
     cmdargs:
       - - --query
@@ -73,17 +73,17 @@ commands:
         - inet:ipv4
         - inet:ipv6
 
-  - name: slib.ip-api.admin.settag
+  - name: slib.ipapi.admin.settag
     perms:
-        - [ slib, ip-api, admin ]
+        - [ slib, ipapi, admin ]
     descr: |
       Set a custom tag prefix for modeling the ip-api.com hosting/mobile/proxy results.
 
-      slib.ip-api will use #<prefix>.hosting, #<prefix>.mobile, and #<prefix>.proxy tags on
+      slib.ipapi will use #<prefix>.hosting, #<prefix>.mobile, and #<prefix>.proxy tags on
       inet:ipv4/ipv6 nodes if those values are "true" in the ip-api.com results.
       By default, the prefix is "rep.ipapi".
 
-      This can be disabled using the slib.ip-api.admin.disabletag command.
+      This can be disabled using the slib.ipapi.admin.disabletag command.
 
     cmdargs:
       - - prefix
@@ -92,16 +92,16 @@ commands:
           help: |
             The custom tag prefix to use.
 
-  - name: slib.ip-api.admin.disabletag
+  - name: slib.ipapi.admin.disabletag
     perms:
-        - [ slib, ip-api, admin ]
+        - [ slib, ipapi, admin ]
     descr: |
       Disable setting any tags on inet:ipv4/ipv6 nodes for the ip-api.com hosting/mobile/proxy results.
 
-  - name: slib.ip-api.admin.enabletag
+  - name: slib.ipapi.admin.enabletag
     perms:
-        - [ slib, ip-api, admin ]
+        - [ slib, ipapi, admin ]
     descr: |
       Enable setting tags on inet:ipv4/ipv6 nodes for the ip-api.com hosting/mobile/proxy results.
 
-      Use the slib.ip-api.admin.settag command to set a custom tag prefix.
+      Use the slib.ipapi.admin.settag command to set a custom tag prefix.

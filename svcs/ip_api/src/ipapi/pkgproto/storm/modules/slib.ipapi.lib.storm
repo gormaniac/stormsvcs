@@ -1,18 +1,18 @@
 init {
-    $svc = $lib.service.get('slib.ip-api')
+    $svc = $lib.service.get('slib.ipapi')
 }
 
-function query($query) {
-    return($svc.query($query))
+function query(query) {
+    return($svc.queryIp($query))
 }
 
-function buildPlaceNode($data) {
+function buildPlaceNode(data) {
+    $placeName = (', ').join(($data.city, $data.regionName, $data.country))
+
     [
-        geo:place=($data.lat, $data.long, $data.city)
-        :loc=($data.lat, $data.long)
-        :name=', '.join(($data.city, $data.regionName, $data.country))
-        :country=$data.country
-        :timezone=$data.timezone
+        geo:place=($data.lat, $data.lon, $data.city)
+        :latlong=($data.lat, $data.lon)
+        :name=$placeName
         :type=city
     ]
 
@@ -20,8 +20,8 @@ function buildPlaceNode($data) {
 }
 
 
-function buildOrgNode($data) {
-    yield $lib.gen.orgFromName($data.isp)
+function buildOrgNode(data) {
+    yield $lib.gen.orgByName($data.isp)
     [
         :names=($data.asname, $data.as_,)
         :orgtype=company.isp
@@ -30,18 +30,20 @@ function buildOrgNode($data) {
     return($node)
 }
 
-function buildASNNode($data) {
-    $asnNode = $lib.null
+function buildASNNode(data) {
+    $asnParts = $data.as_.strip("AS").split(" ")
 
     [
-        inet:asn?=$data.as_.strip("AS").split(" ")[0]
-        :org={ yield $buildOrgNode($data) }
+        inet:asn?=$asnParts.0
+        :owner={ yield $buildOrgNode($data) }
     ]
+
+    $asnNode = $node
 
     return($asnNode)
 }
 
-function modelResult($data) {
+function modelResult(data) {
     $locNode = $buildPlaceNode($data)
     $asnNode = $buildASNNode($data)
 

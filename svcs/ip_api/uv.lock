@@ -459,6 +459,7 @@ dependencies = [
 dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
+    { name = "vcrpy" },
 ]
 
 [package.metadata]
@@ -468,6 +469,7 @@ requires-dist = [{ name = "stormlibpp", specifier = ">=0.10.1" }]
 dev = [
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "pytest-asyncio", specifier = ">=1.4.0" },
+    { name = "vcrpy", specifier = ">=8.3.0" },
 ]
 
 [[package]]

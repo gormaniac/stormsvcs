@@ -1,4 +1,4 @@
-"""The slib.ip-api Synapse Service."""
+"""The slib.ipapi Synapse Service."""
 
 __version__ = "0.1.0"
 

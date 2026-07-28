@@ -1,5 +1,5 @@
 init {
-    $ipapiAdminLib = $lib.import("slib.ip-api.admin")
+    $ipapiAdminLib = $lib.import("slib.ipapi.admin")
     $prefixOpt = $cmdopts.prefix
 }
 

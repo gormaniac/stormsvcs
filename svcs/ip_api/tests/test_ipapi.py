@@ -1,11 +1,16 @@
 """Pytests for ipapi's request queue and rate-limit handling."""
 
 import asyncio
+import pathlib
 from unittest import mock
 
 import synapse.tests.utils as s_tests
+import vcr
 
 from ipapi.svc import IpApiSvc, _RateLimited
+
+
+CASSETTE_DIR = pathlib.Path(__file__).parent / "vcr_cassettes"
 
 
 class TestIpApiSvcQueue(s_tests.SynTest):
@@ -122,3 +127,34 @@ class TestIpApiSvcQueue(s_tests.SynTest):
 
                 with self.raises(asyncio.CancelledError):
                     await task
+
+
+class TestIpApiSvcQueryHttp(s_tests.SynTest):
+    """Test suite for IpApiSvc._query()'s real HTTP request/response handling."""
+
+    async def test_query_parses_success_response(self):
+        with self.getTestDir() as dirn:
+            async with await IpApiSvc.anit(dirn) as svc:
+                with vcr.use_cassette(str(CASSETTE_DIR / "ipapi_query_success.yaml")):
+                    data, headers = await svc._query("8.8.8.8")
+
+                assert data["status"] == "success"
+                assert data["query"] == "8.8.8.8"
+                assert data["as_"] == "AS15169 Google LLC"
+                assert "as" not in data
+                assert data["isp"] == "Google LLC"
+                assert data["lat"] == 39.03
+                assert data["lon"] == -77.5
+                assert data["hosting"] is True
+
+                assert headers["X-Rl"] == "44"
+                assert headers["X-Ttl"] == "60"
+
+    async def test_query_raises_on_429(self):
+        with self.getTestDir() as dirn:
+            async with await IpApiSvc.anit(dirn) as svc:
+                with vcr.use_cassette(str(CASSETTE_DIR / "ipapi_query_ratelimited.yaml")):
+                    with self.raises(_RateLimited) as cm:
+                        await svc._query("9.9.9.9")
+
+                assert cm.exception.ttl == "5"
