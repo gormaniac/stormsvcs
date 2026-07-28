@@ -10,3 +10,8 @@ dependencies = [
     "stormlibpp>=0.10.1",
     "synapse>=2.248.0,<3",
 ]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.16.0",
+]
