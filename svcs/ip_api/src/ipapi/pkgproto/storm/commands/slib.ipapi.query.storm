@@ -13,7 +13,6 @@ if ( $queryOpt != '' ) {
     $query = $queryOpt
 }
 else {
-
     // TODO - Make this shorter somehow, one line...
     switch $node.form() {
         "inet:ipv4": {

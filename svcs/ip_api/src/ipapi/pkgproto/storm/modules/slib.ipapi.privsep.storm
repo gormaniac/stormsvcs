@@ -1,7 +1,12 @@
 function getIpApiTag() {
     $tagPrefix = $lib.globals.get("slib:ipapi:tag:prefix")
-    if ($tagPrefix) {
+    $tagEnabled = $lib.globals.get("slib:ipapi:tag:enabled")
+    if ($tagPrefix and $tagEnabled) {
         return($tagPrefix)
     }
+    elif ($tagEnabled and $tagPrefix = (null)) {
+        $lib.raise("The slib.ipapi tag prefix is not set. Please set it with the slib.ipapi.admin.settagprefix command.")
+    }
+
     return((null))
 }
