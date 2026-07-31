@@ -1,5 +1,5 @@
 [stormsvcs.yarastorm]
-name = YaraStorm
+name = Yara Storm
 src = svcs/yarastorm/
 workflow = .github/workflows/yarastorm.yml
 

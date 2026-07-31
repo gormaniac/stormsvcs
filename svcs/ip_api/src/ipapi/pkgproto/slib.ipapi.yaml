@@ -29,6 +29,9 @@ modules:
   - name: slib.ipapi.lib
     perms:
         - [ slib, ipapi, user ]
+  - name: slib.ipapi.privsep
+    asroot:perms:
+        - [ slib, ipapi, user ]
   - name: slib.ipapi.admin
     asroot:perms:
         - [ slib, ipapi, admin ]

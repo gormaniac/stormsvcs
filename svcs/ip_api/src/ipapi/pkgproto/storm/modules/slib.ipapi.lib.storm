@@ -1,29 +1,44 @@
 init {
     $svc = $lib.service.get('slib.ipapi')
+    // TODO - maybe let a user override this per call to modelResult()?
+    $tagPrefix = $lib.import("slib.ipapi.privsep").getIpApiTag()
 }
 
 function query(query) {
     return($svc.queryIp($query))
 }
 
+function buildGeoTelemNode (ipNode, placeNode, data) {
+    [ geo:telem=({"node": ([$ipNode.form(), $ipNode.value()]), "place": $placeNode}))
+        :time=($lib.now())
+        :place:name = {yield $placeNode :name -> *}
+        :place:latlong = {yield $placeNode :latlong -> *}
+        :place:country = $data.country
+        :place:countrycode = $data.countryCode
+        :desc = (`IP geolocation data for {$ipNode.form()}={$ipNode.value()} at the coordinates {$data.lat}, {$data.lon} per ip-api.com.`)
+    ]
+
+    return((null))
+}
+
 function buildPlaceNode(data) {
-    $placeName = (', ').join(($data.city, $data.regionName, $data.country))
+    $placeName = (', ').join(([$data.city, $data.regionName, $data.country]))
 
     [
         geo:place=($data.lat, $data.lon, $data.city)
         :latlong=($data.lat, $data.lon)
-        :name=$placeName
-        :type=city
+        :name=`$placeName ({$data.lat}, {$data.lon})`
+        :type=ip.geoloc.city
+        :desc=(`{$placeName} at the coordinates {$data.lat}, {$data.lon} per ip geolocation data.`)
     ]
 
     return($node)
 }
 
-
 function buildOrgNode(data) {
-    yield $lib.gen.orgByName($data.isp)
+    gen.ou.org($data.isp) --yield
     [
-        :names=($data.asname, $data.as_,)
+        :names=($data.asname, $data.as_, $data.as_.strip("AS").split(" ").0)
         :orgtype=company.isp
     ]
 
@@ -38,9 +53,7 @@ function buildASNNode(data) {
         :owner={ yield $buildOrgNode($data) }
     ]
 
-    $asnNode = $node
-
-    return($asnNode)
+    return($node)
 }
 
 function modelResult(data) {
@@ -53,15 +66,18 @@ function modelResult(data) {
         :asn=$asnNode
     ]
 
+    // TODO - add timestamps here
+    if ($tagPrefix != null) {
+        if (data.hosting) {
+            [+#`{$tagPrefix}.hosting`]
+        }
+        if ($data.proxy) {
+            [+#`{$tagPrefix}.proxy`]
+        }
+        if ($data.mobile) {
+            [+#`{$tagPrefix}.mobile`]
+        }
+    }
 
-    // $result = $lib.dict()
-    // $result['query'] = $data.query
-    // $result['ip'] = $data.ip
-    // $result['hostname'] = $data.hostname
-    // $result['city'] = $data.city
-    // $result['region'] = $data.region
-    // $result['country'] = $data.country
-    // $result['loc'] = $data.loc
-    // $result['org'] = $data.org
-    // return($result)
+    $buildGeoTelemNode($node, $locNode, $data)
 }

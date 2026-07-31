@@ -1,0 +1,7 @@
+function getIpApiTag() {
+    $tagPrefix = $lib.globals.get("slib:ipapi:tag:prefix")
+    if ($tagPrefix) {
+        return($tagPrefix)
+    }
+    return((null))
+}
