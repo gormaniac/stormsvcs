@@ -23,7 +23,7 @@ else {
             $query = $node.value()
         }
         *: {
-            $lib.log.warning(`The node form "{$node.form()}" is not supported by the slib.ipapi.query command.`)
+            $lib.warn(`The node form "{$node.form()}" is not supported by the slib.ipapi.query command.`)
         }
     }
 }
