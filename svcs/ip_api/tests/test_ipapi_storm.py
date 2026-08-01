@@ -122,13 +122,139 @@ class TestIpApiStorm(s_tests.SynTest):
         async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
             await core.nodes("[ inet:fqdn=example.com ]")
 
-            with self.getLoggerStream("synapse.storm.log") as stream:
-                msgs = await core.stormlist(f"inet:fqdn=example.com | {SVC_NAME}.query")
+            msgs = await core.stormlist(f"inet:fqdn=example.com | {SVC_NAME}.query")
+            self.stormHasNoErr(msgs)
+            self.stormIsInWarn("is not supported", msgs)
+
+    async def test_cmd_query_mixed_supported_unsupported_forms(self):
+        async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
+            await core.nodes("[ inet:ipv4=8.8.8.8 ] [ inet:fqdn=example.com ]")
+
+            async def fake_query(ipaddr):
+                return dict(SUCCESS_DATA), {}
+
+            with mock.patch.object(svc, "_query", fake_query):
+                msgs = await core.stormlist(
+                    f"inet:ipv4=8.8.8.8 inet:fqdn=example.com | {SVC_NAME}.query"
+                )
+                self.stormHasNoErr(msgs)
+                self.stormIsInWarn("is not supported", msgs)
+
+            nodes = await core.nodes("inet:ipv4=8.8.8.8")
+            assert nodes[0].get("asn") is not None
+
+    async def test_cmd_query_no_yield_by_default(self):
+        async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
+            await core.nodes("[ inet:ipv4=8.8.8.8 ]")
+
+            async def fake_query(ipaddr):
+                return dict(SUCCESS_DATA), {}
+
+            with mock.patch.object(svc, "_query", fake_query):
+                msgs = await core.stormlist(f"inet:ipv4=8.8.8.8 | {SVC_NAME}.query")
                 self.stormHasNoErr(msgs)
 
-                # LoggerStream.expect() raises AssertionError on timeout (it doesn't
-                # reliably return a truthy value on success), so just await it.
-                await stream.expect("is not supported")
+                nodeMsgs = [m for m in msgs if m[0] == "node"]
+                assert len(nodeMsgs) == 1
+                assert nodeMsgs[0][1][0] == ("inet:ipv4", 134744072)
+
+    async def test_cmd_query_ipv6_node_input(self):
+        async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
+            await core.nodes("[ inet:ipv6=2001:4860:4860::8888 ]")
+
+            data = dict(SUCCESS_DATA)
+            data["query"] = "2001:4860:4860::8888"
+
+            async def fake_query(ipaddr):
+                return data, {}
+
+            with mock.patch.object(svc, "_query", fake_query):
+                msgs = await core.stormlist(
+                    f"inet:ipv6=2001:4860:4860::8888 | {SVC_NAME}.query --yield"
+                )
+                self.stormHasNoErr(msgs)
+
+            nodes = await core.nodes("inet:ipv6=2001:4860:4860::8888")
+            assert len(nodes) == 1
+            assert nodes[0].get("asn") is not None
+
+    async def test_cmd_query_ipv6_string(self):
+        async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
+            data = dict(SUCCESS_DATA)
+            data["query"] = "2001:4860:4860::8888"
+
+            async def fake_query(ipaddr):
+                return data, {}
+
+            with mock.patch.object(svc, "_query", fake_query):
+                msgs = await core.stormlist(
+                    f'{SVC_NAME}.query --query "2001:4860:4860::8888" --yield'
+                )
+                self.stormHasNoErr(msgs)
+
+            nodes = await core.nodes("inet:ipv6=2001:4860:4860::8888")
+            assert len(nodes) == 1
+
+    async def test_cmd_query_malformed_asn_does_not_error(self):
+        async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
+            data = dict(SUCCESS_DATA)
+            data["as_"] = "not-a-valid-asn-format"
+
+            async def fake_query(ipaddr):
+                return data, {}
+
+            with mock.patch.object(svc, "_query", fake_query):
+                msgs = await core.stormlist(f"{SVC_NAME}.query --query 8.8.8.8 --yield")
+                self.stormHasNoErr(msgs)
+
+            nodes = await core.nodes("inet:ipv4=8.8.8.8")
+            assert len(nodes) == 1
+
+    async def test_cmd_query_applies_default_tags(self):
+        async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
+
+            async def fake_query(ipaddr):
+                return dict(SUCCESS_DATA), {}
+
+            with mock.patch.object(svc, "_query", fake_query):
+                msgs = await core.stormlist(f"{SVC_NAME}.query --query 8.8.8.8 --yield")
+                self.stormHasNoErr(msgs)
+
+            nodes = await core.nodes("inet:ipv4=8.8.8.8")
+            assert len(nodes) == 1
+            assert "rep.ipapi.infra.hosting" in nodes[0].tags
+            assert "rep.ipapi.infra.mobile" not in nodes[0].tags
+            assert "rep.ipapi.infra.proxy" not in nodes[0].tags
+
+    async def test_cmd_query_applies_custom_tag_prefix(self):
+        async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
+            msgs = await core.stormlist(f"{SVC_NAME}.admin.settag myorg")
+            self.stormHasNoErr(msgs)
+
+            async def fake_query(ipaddr):
+                return dict(SUCCESS_DATA), {}
+
+            with mock.patch.object(svc, "_query", fake_query):
+                msgs = await core.stormlist(f"{SVC_NAME}.query --query 8.8.8.8 --yield")
+                self.stormHasNoErr(msgs)
+
+            nodes = await core.nodes("inet:ipv4=8.8.8.8")
+            assert "myorg.infra.hosting" in nodes[0].tags
+
+    async def test_cmd_query_no_tags_when_disabled(self):
+        async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
+            msgs = await core.stormlist(f"{SVC_NAME}.admin.disabletag")
+            self.stormHasNoErr(msgs)
+
+            async def fake_query(ipaddr):
+                return dict(SUCCESS_DATA), {}
+
+            with mock.patch.object(svc, "_query", fake_query):
+                msgs = await core.stormlist(f"{SVC_NAME}.query --query 8.8.8.8 --yield")
+                self.stormHasNoErr(msgs)
+
+            nodes = await core.nodes("inet:ipv4=8.8.8.8")
+            assert len(nodes[0].tags) == 0
 
 
 class TestIpApiStormPerms(s_tests.SynTest):
