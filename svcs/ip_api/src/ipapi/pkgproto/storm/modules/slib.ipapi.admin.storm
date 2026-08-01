@@ -3,9 +3,9 @@ function setTagPrefix (prefix) {
 }
 
 function disableTagPrefix () {
-    $lib.globals.set("slib:ipapi:tag:enabled", false)
+    $lib.globals.set("slib:ipapi:tag:enabled", (false))
 }
 
 function enableTagPrefix () {
-    $lib.globals.set("slib:ipapi:tag:enabled", true)
+    $lib.globals.set("slib:ipapi:tag:enabled", (true))
 }

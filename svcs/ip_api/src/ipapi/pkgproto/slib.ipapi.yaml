@@ -84,7 +84,7 @@ commands:
 
       slib.ipapi will use #<prefix>.hosting, #<prefix>.mobile, and #<prefix>.proxy tags on
       inet:ipv4/ipv6 nodes if those values are "true" in the ip-api.com results.
-      By default, the prefix is "rep.ipapi".
+      By default, the prefix is "rep.ipapi.infra".
 
       This can be disabled using the slib.ipapi.admin.disabletag command.
 

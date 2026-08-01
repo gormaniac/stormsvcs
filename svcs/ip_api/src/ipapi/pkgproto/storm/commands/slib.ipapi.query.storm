@@ -2,6 +2,9 @@ init {
     $ipapilib = $lib.import("slib.ipapi.lib")
     // TODO - cast query to an inet:ipv4/6 so we can error on bad input
     $queryOpt = $cmdopts.query
+    // Read fresh on every command call so slib.ipapi.admin.settag/enabletag/disabletag
+    // take effect on subsequent queries without needing a package reload.
+    $tagPrefix = $lib.import("slib.ipapi.privsep").getIpApiTag()
 }
 
 $query = ''
@@ -30,7 +33,7 @@ else {
 $retn = $ipapilib.query($query)
 
 if $retn.status {
-    divert $cmdopts.yield $ipapilib.modelResult($retn.data)
+    divert $cmdopts.yield $ipapilib.modelResult($retn.data, $tagPrefix)
 }
 else {
     $lib.warn("There was an error querying the IPAPI service for '{query}': {err}",
