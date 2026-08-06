@@ -239,7 +239,7 @@ class TestIpApiStorm(s_tests.SynTest):
                 self.stormHasNoErr(msgs)
 
             nodes = await core.nodes("inet:ipv4=8.8.8.8")
-            assert "myorg.infra.hosting" in nodes[0].tags
+            assert "myorg.hosting" in nodes[0].tags
 
     async def test_cmd_query_no_tags_when_disabled(self):
         async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
