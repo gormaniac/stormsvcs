@@ -7,7 +7,9 @@ license-files = ["LICENSE"]
 authors = [
     { name = "John Gorman", email = "83027042+gormaniac@users.noreply.github.com" }
 ]
-requires-python = ">=3.14"
+
+# Stick with 3.11 until Synapse's base image changes
+requires-python = ">=3.11,<3.12"
 dependencies = [
     "stormlibpp>=0.10.1",
 ]
