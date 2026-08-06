@@ -20,3 +20,8 @@ jobs:
     if: github.event.pull_request.merged == true
     uses: ./.github/workflows/report-ingest.yml
     secrets: inherit
+
+  ip_api:
+    if: github.event.pull_request.merged == true
+    uses: ./.github/workflows/ip_api.yml
+    secrets: inherit
