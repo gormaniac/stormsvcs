@@ -46,7 +46,7 @@ jobs:
         uses: docker/build-push-action@v7.3.0
         with:
           context: ./svcs/ip_api
-          file: ./svcs/ip_api/docker/Dockerfile
+          file: ./svcs/ip_api/docker/prod/Dockerfile
           platforms: linux/amd64
           push: false
           tags: |
