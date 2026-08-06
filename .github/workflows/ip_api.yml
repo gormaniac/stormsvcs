@@ -11,6 +11,9 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: svcs/ip_api
     steps:
       - name: Checkout repo
         uses: actions/checkout@v7.0.1
