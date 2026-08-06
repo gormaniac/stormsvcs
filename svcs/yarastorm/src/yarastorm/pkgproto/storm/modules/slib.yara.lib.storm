@@ -16,6 +16,7 @@ function compile(rule, check) {
     return($svc.compileRule($rule.pack(), $check))
 }
 
+// TODO - Call back to the service to enable/disable the rule in addition to setting the property here.
 function enable_rule(rule) {
     yield $rule
     [ :enabled=$lib.true ]

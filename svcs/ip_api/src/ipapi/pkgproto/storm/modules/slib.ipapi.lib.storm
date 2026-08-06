@@ -1,0 +1,89 @@
+init {
+    $svc = $lib.service.get('slib.ipapi')
+}
+
+function query(query) {
+    return($svc.queryIp($query))
+}
+
+function buildGeoTelemNode (ipNode, placeNode, data) {
+    $countryNode = $lib.gen.polCountryByIso2($data.countryCode, try=$lib.true)
+
+    [ geo:telem=({"node": ([$ipNode.form(), $ipNode.value()]), "place": $placeNode})
+        :time=($lib.time.now())
+        :place:name = $placeNode.props.name
+        :place:latlong = $placeNode.props.latlong
+        :place:country ?= $countryNode
+        :place:country:code ?= $data.countryCode
+        :desc = (`IP geolocation data for {$ipNode.form()}={$ipNode.value()} at the coordinates {$data.lat}, {$data.lon} per ip-api.com.`)
+    ]
+
+    return((null))
+}
+
+function buildPlaceNode(data) {
+    $placeName = (', ').join(([$data.city, $data.regionName, $data.country]))
+
+    [
+        geo:place=($data.lat, $data.lon, $data.city)
+        :latlong=($data.lat, $data.lon)
+        :name=`$placeName ({$data.lat}, {$data.lon})`
+        :type=ip.geoloc.city
+        :desc=(`{$placeName} at the coordinates {$data.lat}, {$data.lon} per ip geolocation data.`)
+    ]
+
+    return($node)
+}
+
+function buildOrgNode(data) {
+    gen.ou.org $data.isp |
+    [
+        :names=($data.asname, $data.as_, $data.as_.strip("AS").split(" ").0)
+        :orgtype=company.isp
+    ]
+
+    return($node)
+}
+
+function buildASNNode(data) {
+    $asnParts = $data.as_.strip("AS").split(" ")
+
+    [
+        inet:asn?=$asnParts.0
+        :owner={ yield $buildOrgNode($data) }
+    ]
+
+    return($node)
+}
+
+function modelResult(data, tagPrefix) {
+    $locNode = $buildPlaceNode($data)
+    $asnNode = $buildASNNode($data)
+
+    [
+        inet:ipv4?=$data.query
+        inet:ipv6?=$data.query
+        :asn?=$asnNode
+    ]
+
+    // TODO - add tag timestamps here
+    if ($tagPrefix != null) {
+        if ($data.hosting) {
+            $hostingTag = `{$tagPrefix}.hosting`
+            [+#$hostingTag]
+        }
+        if ($data.proxy) {
+            $proxyTag = `{$tagPrefix}.proxy`
+            [+#$proxyTag]
+        }
+        if ($data.mobile) {
+            $mobileTag = `{$tagPrefix}.mobile`
+            [+#$mobileTag]
+        }
+    }
+
+    $buildGeoTelemNode($node, $locNode, $data)
+
+    // TODO - edge to the meta:source
+    // TODO - build a 2nd org for the IP WhoIS organization if different that get's edged to the ASN org node (<contains? <uses?) and IP node (<owns)
+}

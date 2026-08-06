@@ -1,0 +1,42 @@
+init {
+    $ipapilib = $lib.import("slib.ipapi.lib")
+    // TODO - cast query to an inet:ipv4/6 so we can error on bad input
+    $queryOpt = $cmdopts.query
+    // Read fresh on every command call so slib.ipapi.admin.settag/enabletag/disabletag
+    // take effect on subsequent queries without needing a package reload.
+    $tagPrefix = $lib.import("slib.ipapi.privsep").getIpApiTag()
+}
+
+$query = ''
+
+// Use the value in --query if it is passed
+if ( $queryOpt != '' ) {
+    // We spin when --query is used because this isn't meant to accept inbound nodes.
+    | spin |
+    $query = $queryOpt
+}
+else {
+    // TODO - Make this shorter somehow, one line...
+    switch $node.form() {
+        "inet:ipv4": {
+            $query = $node.value()
+        }
+        "inet:ipv6": {
+            $query = $node.value()
+        }
+        *: {
+            $lib.warn(`The node form "{$node.form()}" is not supported by the slib.ipapi.query command.`)
+        }
+    }
+}
+
+$retn = $ipapilib.query($query)
+
+if $retn.status {
+    divert $cmdopts.yield $ipapilib.modelResult($retn.data, $tagPrefix)
+}
+else {
+    $lib.warn("There was an error querying the IPAPI service for '{query}': {err}",
+        query=$query, err=$retn.mesg
+    )
+}
