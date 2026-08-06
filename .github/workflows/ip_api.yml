@@ -7,6 +7,10 @@ on:
     paths:
       - "svcs/ip_api/**"
 
+permissions:
+  contents: read
+  packages: write
+
 jobs:
 
   test:
