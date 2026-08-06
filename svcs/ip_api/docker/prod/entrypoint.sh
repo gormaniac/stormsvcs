@@ -1,0 +1,1 @@
+exec uv run --directory /opt/stormsvcs/ip_api/ python -O -m ipapi /vertex/storage
