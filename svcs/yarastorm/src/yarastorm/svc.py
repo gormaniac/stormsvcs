@@ -120,6 +120,28 @@ class YaraRules:
             compiled_rule.serialize_into(fd)
         self.load_rule(rule_path)
 
+    def remove(self, rule_id: str) -> None:
+        """Remove a Yara rule from this object and from disk.
+
+        Parameters
+        ----------
+        rule_id : str
+            The ID of the rule, which should equate to the rule's file basename
+            on disk. This should be the same as the rule's node GUID.
+
+        Returns
+        -------
+        None
+        """
+
+        if rule_id in self.rules:
+            del self.rules[rule_id]
+
+        try:
+            os.remove(utils.absjoin(self.ruledir, rule_id))
+        except FileNotFoundError:
+            return
+
     def get_rule_from_node(self, node: StormNode) -> yara_x.Rules | None:
         """Get a Yara rule from this object based on the given node.
 
