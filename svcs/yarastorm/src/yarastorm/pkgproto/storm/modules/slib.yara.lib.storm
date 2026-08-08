@@ -4,22 +4,25 @@ init {
 
 function get_enabled_rules() {
     $rules=$lib.set()
-    it:app:yara:rule:enabled=$lib.true { +it:app:yara:rule:enabled $rules.add($node)}
+    it:app:yara:rule:enabled=(true) { +it:app:yara:rule:enabled $rules.add($node)}
     return($rules)
 }
 
-function match(sha256, rule) {
-    return($svc.matchFile($sha256, $rule.pack()))
+function match(sha256) {
+    return($svc.matchFile($sha256))
 }
 
-function compile(rule, check) {
-    return($svc.compileRule($rule.pack(), $check))
+function compile(rule) {
+    return($svc.compileRule($rule.pack()))
 }
 
 // TODO - Call back to the service to enable/disable the rule in addition to setting the property here.
-function enable_rule(rule) {
+function enable_rule(rule, compile=(false)) {
     yield $rule
     [ :enabled=$lib.true ]
+    if $compile {
+        $svc.compileRule($rule.pack())
+    }
     return($lib.null)
 }
 
