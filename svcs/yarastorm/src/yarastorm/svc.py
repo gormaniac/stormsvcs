@@ -3,7 +3,7 @@
 
 import binascii
 import os
-from typing import TypedDict
+from typing import AsyncGenerator, TypedDict
 
 from stormlibpp import utils
 from stormlibpp.node import NodeTuple, StormNode
@@ -64,8 +64,11 @@ class YaraRules:
         None
         """
 
-        with open(rpath, "rb") as fd:
-            self.rules[os.path.basename(rpath)] = yara_x.Rules.deserialize_from(file=fd)
+        try:
+            with open(rpath, "rb") as fd:
+                self.rules[os.path.basename(rpath)] = yara_x.Rules.deserialize_from(fd)
+        except FileNotFoundError:
+            return
 
     def get(self, rule_id: str) -> yara_x.Rules | None:
         """Get a Yara rule from this object, loading from disk if needed.
@@ -96,6 +99,8 @@ class YaraRules:
     def add(self, rule_id: str, compiled_rule: yara_x.Rules) -> None:
         """Write a compiled Yara rule to disk and store it in this object.
 
+        Will overwrite any existing rule on disk or in the object with the same ``rule_id``.
+
         Parameters
         ----------
         rule_id : str
@@ -112,7 +117,7 @@ class YaraRules:
 
         rule_path = utils.absjoin(self.ruledir, rule_id)
         with open(rule_path, "wb") as fd:
-            compiled_rule.serialize_into(file=fd)
+            compiled_rule.serialize_into(fd)
         self.load_rule(rule_path)
 
     def get_rule_from_node(self, node: StormNode) -> yara_x.Rules | None:
@@ -206,10 +211,8 @@ class YaraSvc(s_cell.Cell):
 
         return buffer
 
-    async def matchFile(
-        self, file_sha256: str, yara_rules: list[NodeTuple]
-    ) -> MatchRetn:
-        """Test if the given Yara rules match the given file in the Axon."""
+    async def matchFile(self, file_sha256: str) -> AsyncGenerator[MatchRetn, None]:
+        """Test if the loaded Yara rules match the given file in the Axon."""
 
         file_bytes = await self._getBytes(file_sha256)
         if file_bytes is None:
@@ -220,10 +223,9 @@ class YaraSvc(s_cell.Cell):
             )
             return
 
-        for rule_node in [StormNode.unpack(rule) for rule in yara_rules]:
-            rule_id = rule_node.value
-            rule_obj = self.rules.get_rule_from_node(rule_node)
-            if rule_obj and rule_obj.match(data=file_bytes):
+        for rule_id in self.rules.keys():
+            rule_obj = self.rules.get(rule_id)
+            if rule_obj and rule_obj.scan(file_bytes):
                 yield MatchRetn(
                     status=True,
                     mesg="",
@@ -232,8 +234,8 @@ class YaraSvc(s_cell.Cell):
             elif rule_obj is None:
                 yield MatchRetn(
                     status=False,
-                    mesg=f"Either it:app:yara:rule={rule_id} has no rule contents "
-                    "or the rule contains an error.",
+                    mesg=f"Couldn't load it:app:yara:rule={rule_id} either the service has "
+                    "no rule contents for that node or the rule contains an error.",
                     data=None,
                 )
             else:

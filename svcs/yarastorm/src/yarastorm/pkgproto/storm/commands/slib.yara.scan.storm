@@ -1,16 +1,16 @@
 init {
     $yaralib = $lib.import(slib.yara.lib)
     $yaraingest = $lib.import(slib.yara.ingest)
-    $rules = $yaralib.get_enabled_rules($cmdopts.filter)
 }
 
 if ($node.form() = "file:bytes") {
     // We only want to support sha256 hashes
     +file:bytes:sha256
 
+    // TODO - Can we just read the sha256 property directly instead of stripping it from the node value?
     $sha256 = $node.value().strip("sha256:")
 
-    for $retn in $yaralib.match($sha256, $rules) {
+    for $retn in $yaralib.match($sha256) {
 
         if $retn.status {
             if $retn.data.matched {
