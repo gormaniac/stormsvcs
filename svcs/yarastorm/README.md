@@ -9,3 +9,4 @@ TODO:
 - Add a trigger on it:prod:yara:rule:enabled = true to send to this service and save it to the cell
     - reverse when :enabled = false
 - matchFile is not defined properly in svc.py, it takes a list and the api sends a single rule. Make the input optional, if no specific rule is given, match against every rule registered in the cell.
+- Move yara rule storage to the Cell's LMDB slab.
