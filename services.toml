@@ -1,14 +1,14 @@
 [stormsvcs.yarastorm]
-name = Yara Storm
-src = svcs/yarastorm/
-workflow = .github/workflows/yarastorm.yml
+name = "Yara Storm"
+src = "svcs/yarastorm/"
+workflow = ".github/workflows/yarastorm.yml"
 
 [stormsvcs.ip-api]
-name = Ip API
-src = svcs/ip_api/
-workflow = .github/workflows/ip_api.yml
+name = "Ip API"
+src = "svcs/ip_api/"
+workflow = ".github/workflows/ip_api.yml"
 
-# [stormsvcs.reportingest]
-# name = Report Ingest
-# src = svcs/report-ingest/
-# workflow = .github/workflows/report-ingest.yml
+# [stormsvcs.report-ingest]
+# name = "Report Ingest"
+# src = "svcs/report_ingest/"
+# workflow = ".github/workflows/report-ingest.yml"
