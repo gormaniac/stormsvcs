@@ -41,6 +41,14 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v7.0.1
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v9.0.0
+
+      - name: Save service version
+        id: version
+        working-directory: ./svcs/ip_api
+        run: echo "version=$(uv version --short)" >> "$GITHUB_OUTPUT"
+
       - name: Set up Buildx
         # The default docker driver can't use the `type=docker` exporter; the
         # docker-container driver from Buildx can, so we can save to a tarball.
@@ -56,6 +64,7 @@ jobs:
           tags: |
             ghcr.io/gormaniac/stormsvcs/ip_api:latest
             ghcr.io/gormaniac/stormsvcs/ip_api:${{ github.sha }}
+            ghcr.io/gormaniac/stormsvcs/ip_api:v${{ steps.version.outputs.version }}
           # Save the built image (with both tags) so later steps can either
           # attach it to the run or push it, without rebuilding.
           outputs: type=docker,dest=/tmp/stormsvcs-ip_api.tar
@@ -80,7 +89,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # TODO: Figure out how to handle versioned release tags.
       - name: Push to GHCR
         # Runs on push to main via _main.yml and manual dispatch — never on pull_request.
         if: github.event_name != 'pull_request'
@@ -88,3 +96,4 @@ jobs:
           docker load -i /tmp/stormsvcs-ip_api.tar
           docker push ghcr.io/gormaniac/stormsvcs/ip_api:latest
           docker push ghcr.io/gormaniac/stormsvcs/ip_api:${{ github.sha }}
+          docker push ghcr.io/gormaniac/stormsvcs/ip_api:v${{ steps.version.outputs.version }}
