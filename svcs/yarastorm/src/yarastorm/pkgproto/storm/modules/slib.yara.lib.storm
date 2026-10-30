@@ -12,22 +12,25 @@ function match(sha256) {
     return($svc.matchFile($sha256))
 }
 
-function compile(rule) {
-    return($svc.compileRule($rule.pack()))
+function compile(rule, check=(false)) {
+    return($svc.compileRule($rule.pack(), $check))
 }
 
-// TODO - Call back to the service to enable/disable the rule in addition to setting the property here.
-function enable_rule(rule, compile=(false)) {
-    yield $rule
-    [ :enabled=$lib.true ]
-    if $compile {
-        $svc.compileRule($rule.pack())
+// Compile the rule into the service (so scans use it) and mark it enabled.
+// Returns the service's compile result, the rule is left untouched if it fails to compile.
+function enable_rule(rule) {
+    $retn = $svc.compileRule($rule.pack())
+    if $retn.status {
+        yield $rule
+        [ :enabled=(true) ]
     }
-    return($lib.null)
+    return($retn)
 }
 
+// Remove the rule from the service (so scans skip it) and mark it disabled.
 function disable_rule(rule) {
+    $retn = $svc.removeRule($rule.value())
     yield $rule
-    [ :enabled=$lib.false ]
-    return($lib.null)
+    [ :enabled=(false) ]
+    return($retn)
 }

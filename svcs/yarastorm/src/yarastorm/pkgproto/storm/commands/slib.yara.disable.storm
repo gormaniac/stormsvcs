@@ -3,5 +3,12 @@ init {
 }
 
 if ($node.form() = "it:app:yara:rule") {
-    $yaralib.disable_rule($node)
+    $retn = $yaralib.disable_rule($node)
+    if (not $retn.status) {
+        $lib.warn(
+            "Unable to disable it:app:yara:rule={guid}: {err}",
+            guid=$node.value(),
+            err=$retn.mesg
+        )
+    }
 }

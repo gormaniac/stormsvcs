@@ -40,6 +40,7 @@ class YaraRules:
     def __init__(self, ruledir: str) -> None:
         self.ruledir = ruledir
         self.rules = {}
+        os.makedirs(self.ruledir, exist_ok=True)
         self.load()
 
     def load(self) -> None:
@@ -48,8 +49,9 @@ class YaraRules:
         Walks the ``ruledir`` and calls ``load_rule`` on each path.
         """
 
-        for dname, _, fname in os.walk(self.ruledir):
-            self.load_rule(utils.absjoin(dname, fname))
+        for dname, _, fnames in os.walk(self.ruledir):
+            for fname in fnames:
+                self.load_rule(utils.absjoin(dname, fname))
 
     def load_rule(self, rpath: str) -> None:
         """Load a Yara rule into this object.
@@ -245,13 +247,13 @@ class YaraSvc(s_cell.Cell):
             )
             return
 
-        for rule_id in self.rules.keys():
+        for rule_id in list(self.rules.rules):
             rule_obj = self.rules.get(rule_id)
-            if rule_obj and rule_obj.scan(file_bytes):
+            if rule_obj and rule_obj.scan(file_bytes).matching_rules:
                 yield MatchRetn(
                     status=True,
                     mesg="",
-                    data=YaraMatch(rule_id, file_sha256, True),
+                    data=YaraMatch(rule=rule_id, sha256=file_sha256, matched=True),
                 )
             elif rule_obj is None:
                 yield MatchRetn(
@@ -264,7 +266,7 @@ class YaraSvc(s_cell.Cell):
                 yield MatchRetn(
                     status=True,
                     mesg="",
-                    data=YaraMatch(rule_id, file_sha256, False),
+                    data=YaraMatch(rule=rule_id, sha256=file_sha256, matched=False),
                 )
 
         return
@@ -274,8 +276,15 @@ class YaraSvc(s_cell.Cell):
 
         rulenode = StormNode.unpack(yara_rule)
 
+        if not rulenode.props["text"]:
+            return BoolRetn(
+                status=False,
+                mesg=f"it:app:yara:rule={rulenode.value} has no :text to compile.",
+                data=False,
+            )
+
         try:
-            rule = yara_x.compile(source=rulenode.props["text"])
+            rule = yara_x.compile(rulenode.props["text"])
         except yara_x.CompileError as err:
             return BoolRetn(status=False, mesg=f"Yara Compile Error - {err}", data=False)
 
@@ -283,4 +292,10 @@ class YaraSvc(s_cell.Cell):
             return BoolRetn(status=True, mesg="Successfully compiled rule!", data=True)
 
         self.rules.add(rulenode.value, rule)
+        return BoolRetn(status=True, mesg="", data=True)
+
+    async def removeRule(self, rule_id: str) -> BoolRetn:
+        """Remove a compiled Yara rule from this Cell's storage."""
+
+        self.rules.remove(rule_id)
         return BoolRetn(status=True, mesg="", data=True)

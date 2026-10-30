@@ -9,7 +9,7 @@ RUN cp /opt/stormsvcs/LICENSE /opt/stormsvcs/yarastorm/LICENSE
 
 RUN uv sync --no-dev --locked --directory /opt/stormsvcs/yarastorm
 
-COPY docker/yarastorm/entrypoint.sh /opt/stormsvcs/yarastorm/entrypoint.sh
+COPY docker/prod/entrypoint.sh /opt/stormsvcs/yarastorm/entrypoint.sh
 RUN chmod +x /opt/stormsvcs/yarastorm/entrypoint.sh
 
 EXPOSE 4443
@@ -21,4 +21,4 @@ ENTRYPOINT ["tini", "--", "/opt/stormsvcs/yarastorm/entrypoint.sh"]
 
 HEALTHCHECK --start-period=10s --retries=1 --timeout=10s --interval=30s CMD \
     uv run --directory /opt/stormsvcs/yarastorm \
-    python -m synapse.tools.healthcheck -c cell:///vertex/storage/
+    python -m synapse.tools.service.healthcheck -c cell:///vertex/storage/
