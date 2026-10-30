@@ -1,1 +1,1 @@
-exec uv run --directory /opt/stormsvcs/shodan/ python -O -m shodansvc /vertex/storage
+exec uv run --no-sync --directory /opt/stormsvcs/shodan/ python -O -m shodansvc /vertex/storage
