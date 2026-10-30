@@ -127,10 +127,10 @@ class CrtshSvc(s_cell.Cell):
         },
         "crtsh:candidates": {
             "type": "integer",
-            "default": 20000,
+            "default": 10000,
             "description": (
-                "The max number of full text search candidates a search will filter. Searches "
-                "for very common names only see this many candidates."
+                "The max number of full text search candidates a search will filter (crt.sh's "
+                "own search uses 10000). Searches for very common names only see this many."
             ),
         },
     }
@@ -309,7 +309,7 @@ class CrtshSvc(s_cell.Cell):
             # Full text search on the most specific field, then filter on every field.
             text = next(fields[k] for k in ("dns", "email", "ip", "cn", "uri", "org", "ou",
                                             "subject", "identity") if k in fields)
-            candidates = min(max(limit * 10, 1000), self.conf.get("crtsh:candidates"))
+            candidates = min(max(limit * 5, 500), self.conf.get("crtsh:candidates"))
             rows = await self.db.certsByIdentity(text, caids=caids or None, valid=valid,
                                                  since=since, until=until, limit=candidates)
         else:

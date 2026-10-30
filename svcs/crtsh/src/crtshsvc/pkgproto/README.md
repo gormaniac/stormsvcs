@@ -15,8 +15,9 @@ and CRL revocation.
 
 The service registers the `slib.crtsh` Storm package.
 
-> **Status:** work in progress. The SQL in `src/crtshsvc/db.py` follows the certwatch schema
-> (https://github.com/crtsh/certwatch_db) but hasn't been validated against the live database yet.
+> **Status:** work in progress. The SQL in `src/crtshsvc/db.py` was checked against the certwatch
+> schema (https://github.com/crtsh/certwatch_db) and libx509pq sources, every lookup uses one of
+> crt.sh's indexes, but it hasn't been run against the live database yet.
 
 ## Deploying
 
@@ -42,7 +43,7 @@ The host needs outbound access to `crt.sh` on TCP 5432.
 | `crtsh:timeout` | `120` | Seconds before a query times out. |
 | `crtsh:retries` | `2` | Retries for transient failures (replica conflicts, dropped connections). |
 | `crtsh:limit` | `10000` | Max certificates any call returns. |
-| `crtsh:candidates` | `20000` | Max full text search candidates a search filters. |
+| `crtsh:candidates` | `10000` | Max full text search candidates a search filters. |
 
 ## Permissions
 

@@ -8,8 +8,9 @@ Every SQL statement the service runs lives in this module. The queries only
 depend on these parts of the certwatch schema (https://github.com/crtsh/certwatch_db):
 
 - ``certificate (id, issuer_ca_id, certificate)`` - every cert and precert, as DER.
+  Range partitioned by year on notAfter, see ``NOTAFTER_KEY``.
 - ``ca (id, name, public_key)`` - every issuing CA (a name + key pair).
-- ``ca_certificate (certificate_id, ca_id)`` - which certificates belong to a CA.
+- ``ca_certificate (certificate_id, ca_id)`` - which certificates belong to a CA (one CA each).
 - ``ct_log (id, name, url, operator)`` and ``ct_log_entry (certificate_id, ct_log_id,
   entry_id, entry_timestamp)`` - where and when each cert was logged.
 - ``crl_revoked (ca_id, serial_number, reason_code, revocation_date)`` - CRL revocations.
@@ -19,6 +20,10 @@ depend on these parts of the certwatch schema (https://github.com/crtsh/certwatc
   and ``x509_notAfter`` (libx509pq).
 
 Everything else about a certificate is parsed from its DER by ``crtshsvc.norm``.
+
+``certificate_identity`` is a stub view that only raises an error, and the
+``certificate_and_identities`` view parses every certificate it touches, so
+searches use the indexed ``identities()`` full text search on ``certificate``.
 
 ``CrtshDb`` is the only class that talks to PostgreSQL. Tests swap it for a fake
 with the same methods.
@@ -41,6 +46,9 @@ DEFAULT_DSN = "postgresql://guest@crt.sh:5432/certwatch"
 """crt.sh's public, read-only, password-less database."""
 
 CERT_COLS = "c.ID AS id, c.ISSUER_CA_ID AS issuer_ca_id, c.CERTIFICATE AS der"
+
+NOTAFTER_KEY = "coalesce(x509_notAfter(c.CERTIFICATE), 'infinity'::timestamp)"
+"""The expression ``certificate`` is range partitioned (by year) on."""
 
 # Unique (or near unique) certificate identifiers and the indexed expression crt.sh matches them on.
 LOOKUPS = {
@@ -83,15 +91,22 @@ def _filters(valid: bool = False, since: int | None = None, until: int | None = 
 
     ``since``/``until`` are epoch millis bounds on notBefore. ``argn`` is the
     number of the first positional argument to use.
+
+    ``certificate`` is partitioned by year on ``NOTAFTER_KEY``, so every bound that
+    implies a minimum notAfter is also applied to that expression, which lets
+    PostgreSQL skip whole partitions (crt.sh's own expiry filter does the same).
     """
 
     clauses, args = [], []
     if valid:
-        clauses.append("x509_notAfter(c.CERTIFICATE) > now() AT TIME ZONE 'UTC'")
+        clauses.append(f"{NOTAFTER_KEY} >= date_trunc('year', now() AT TIME ZONE 'UTC')")
+        clauses.append("x509_notAfter(c.CERTIFICATE) >= now() AT TIME ZONE 'UTC'")
     if since is not None:
         args.append(since / 1000)
-        clauses.append(f"x509_notBefore(c.CERTIFICATE) >= to_timestamp(${argn + len(args) - 1}) "
-                       "AT TIME ZONE 'UTC'")
+        argnum = argn + len(args) - 1
+        clauses.append(f"x509_notBefore(c.CERTIFICATE) >= to_timestamp(${argnum}) AT TIME ZONE 'UTC'")
+        # A certificate can't expire before it was issued.
+        clauses.append(f"{NOTAFTER_KEY} >= to_timestamp(${argnum}) AT TIME ZONE 'UTC'")
     if until is not None:
         args.append(until / 1000)
         clauses.append(f"x509_notBefore(c.CERTIFICATE) < to_timestamp(${argn + len(args) - 1}) "
