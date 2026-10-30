@@ -2,6 +2,7 @@ name: Main Merge Pipeline
 
 # Tests, builds, and publishes every service's image on each push to main
 # (a merged PR is a push to main), regardless of which service changed.
+# If the base image changed, it is rebuilt first so the services build on it.
 on:
   push:
     branches: [main]
@@ -14,14 +15,52 @@ permissions:
   packages: write
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      base: ${{ steps.base.outputs.changed }}
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Check for base image changes
+        id: base
+        # Manual runs have no "before" commit, and a force push's may be gone,
+        # so rebuild the base image whenever the diff can't be computed.
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [ -n "$BEFORE" ] && git cat-file -e "${BEFORE}^{commit}" 2>/dev/null \
+            && git diff --quiet "$BEFORE" "$GITHUB_SHA" -- \
+              docker/ LICENSE README.md .github/workflows/_base-image.yml; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  base:
+    needs: changes
+    if: needs.changes.outputs.base == 'true'
+    uses: ./.github/workflows/_base-image.yml
+    secrets: inherit
+
+  # The services run after base, even when it's skipped, but not if it failed.
   yarastorm:
+    needs: base
+    if: ${{ !failure() && !cancelled() }}
     uses: ./.github/workflows/yarastorm.yml
     secrets: inherit
 
   ip_api:
+    needs: base
+    if: ${{ !failure() && !cancelled() }}
     uses: ./.github/workflows/ip_api.yml
     secrets: inherit
 
   shodan:
+    needs: base
+    if: ${{ !failure() && !cancelled() }}
     uses: ./.github/workflows/shodan.yml
     secrets: inherit

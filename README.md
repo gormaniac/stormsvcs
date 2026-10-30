@@ -38,6 +38,7 @@ Each service must have the following:
 		- On PRs the image is uploaded as a build artifact; it is only pushed to GHCR from `main`.
 - An entry in the global CI workflow (`.github/workflows/_main.yml`) pointing to the service's CI workflow.
 	- This runs on every push to main (including merged PRs) and publishes every service's image.
+	- If the base image (`docker/`) changed, `_main.yml` rebuilds and pushes it first so the services build on it.
 - All services, and their storm commands/modules, should namespace under `slib` (ex: `slib.yara`).
 	- This is because all services here should be seen as the Advanced Power-Up extensions for the [StormLib++](https://github.com/gormaniac/stormlibpp) project which uses this same namespace.
 		- Be careful of naming conflicts here.

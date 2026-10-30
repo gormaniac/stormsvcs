@@ -6,13 +6,9 @@ on:
     paths:
       - "docker/**"
       - ".github/workflows/_base-image.yml"
-  push:
-    branches: [main]
-    paths:
-      - "LICENSE"
-      - "README.md"
-      - "docker/**"
-      - ".github/workflows/_base-image.yml"
+  # On main, _main.yml calls this before the service pipelines so they build on
+  # the new base image, instead of racing it.
+  workflow_call:
   workflow_dispatch:
 
 permissions:
@@ -22,6 +18,10 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      # In a called workflow, github.event_name is the *caller's* event, so this
+      # is decided by what triggered the top-level workflow. Only publish from main.
+      PUBLISH: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -46,9 +46,9 @@ jobs:
           outputs: type=docker,dest=/tmp/stormsvcs-base.tar
 
       - name: Upload image artifact (pull requests)
-        # On PRs, don't touch the registry — surface the image as a downloadable
-        # build artifact for review/testing instead.
-        if: github.event_name == 'pull_request'
+        # When not publishing (PRs, manual runs off main), don't touch the registry —
+        # surface the image as a downloadable build artifact for review/testing instead.
+        if: env.PUBLISH != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: stormsvcs-base
@@ -58,7 +58,7 @@ jobs:
       - name: Log in to GHCR
         # Only authenticate when we actually push (skips PRs, where the token
         # is read-only on forks anyway).
-        if: github.event_name != 'pull_request'
+        if: env.PUBLISH == 'true'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -66,8 +66,8 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Push to GHCR
-        # Runs on push to main and manual dispatch — never on pull_request.
-        if: github.event_name != 'pull_request'
+        # Runs on pushes to main via _main.yml and manual runs on main — never on pull_request.
+        if: env.PUBLISH == 'true'
         run: |
           docker load -i /tmp/stormsvcs-base.tar
           docker push ghcr.io/gormaniac/stormsvcs/base:latest
