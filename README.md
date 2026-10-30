@@ -33,6 +33,8 @@ Each service must have the following:
 - A CI workflow that tests and builds the service
 	- It must also build the docker image.
 	- It must only run on PRs when the service's folder is changed AND with a "workflow_run" flag AND with a manual run flag.
+	- Call the reusable `.github/workflows/_service.yml` pipeline instead of defining jobs, copy `.github/workflows/shodan.yml` and change the service name.
+		- It expects `svcs/<service>/docker/prod/Dockerfile` (override with the `dockerfile` input) and tags the image `latest`, the `pyproject.toml` version, and the commit SHA.
 - An entry in the global CI workflow pointing to the service's CI workflow.
 	- This will run on every merge to main.
 - All services, and their storm commands/modules, should namespace under `slib` (ex: `slib.yara`).
