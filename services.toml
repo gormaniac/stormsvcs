@@ -13,7 +13,7 @@ name = "Shodan"
 src = "svcs/shodan/"
 workflow = ".github/workflows/shodan.yml"
 
-# [stormsvcs.reportingest]
+# [stormsvcs.report-ingest]
 # name = "Report Ingest"
 # src = "svcs/report-ingest/"
 # workflow = ".github/workflows/report-ingest.yml"

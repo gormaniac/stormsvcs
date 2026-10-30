@@ -1,37 +1,21 @@
 name: YaraStorm Pipeline
 
 on:
+  workflow_dispatch:
   workflow_call:
   pull_request:
     paths:
       - "svcs/yarastorm/**"
+      - ".github/workflows/yarastorm.yml"
+      - ".github/workflows/_service.yml"
+
+permissions:
+  contents: read
+  packages: write
 
 jobs:
-
-  docker:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v3
-    - name: Build Docker image
-      run: |
-        echo "Building Docker image..."
-        # Add your Docker build commands here
-
-  test:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v3
-    - name: Run tests
-      run: |
-        echo "Running tests..."
-        # Add your test commands here
-
-  publish:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v3
-    - name: Publish
-      run: |
-        echo "Publishing..."
-        # Add your publish commands here
-
+  pipeline:
+    uses: ./.github/workflows/_service.yml
+    with:
+      service: yarastorm
+    secrets: inherit

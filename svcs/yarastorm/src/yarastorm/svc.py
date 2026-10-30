@@ -3,7 +3,7 @@
 
 import binascii
 import os
-from typing import TypedDict
+from typing import AsyncGenerator, TypedDict
 
 from stormlibpp import utils
 from stormlibpp.node import NodeTuple, StormNode
@@ -11,7 +11,7 @@ from stormlibpp.telepath import BoolRetn, TelepathRetn
 import synapse.exc as s_exc
 import synapse.lib.cell as s_cell
 import synapse.telepath as s_telepath
-import yara
+import yara_x
 
 from .api import YaraApi
 
@@ -40,6 +40,7 @@ class YaraRules:
     def __init__(self, ruledir: str) -> None:
         self.ruledir = ruledir
         self.rules = {}
+        os.makedirs(self.ruledir, exist_ok=True)
         self.load()
 
     def load(self) -> None:
@@ -48,8 +49,9 @@ class YaraRules:
         Walks the ``ruledir`` and calls ``load_rule`` on each path.
         """
 
-        for dname, _, fname in os.walk(self.ruledir):
-            self.load_rule(utils.absjoin(dname, fname))
+        for dname, _, fnames in os.walk(self.ruledir):
+            for fname in fnames:
+                self.load_rule(utils.absjoin(dname, fname))
 
     def load_rule(self, rpath: str) -> None:
         """Load a Yara rule into this object.
@@ -57,17 +59,20 @@ class YaraRules:
         A loaded rule is stored in ``rules`` with a key of the file's basename.
         This should equate to the Yara rule's Synapse guid.
 
-        The value is a compiled ``yara.Rules`` object.
+        The value is a compiled ``yara_x.Rules`` object.
 
         Returns
         -------
         None
         """
 
-        with open(rpath, "rb") as fd:
-            self.rules[os.path.basename(rpath)] = yara.load(file=fd)
+        try:
+            with open(rpath, "rb") as fd:
+                self.rules[os.path.basename(rpath)] = yara_x.Rules.deserialize_from(fd)
+        except FileNotFoundError:
+            return
 
-    def get(self, rule_id: str) -> yara.Rules | None:
+    def get(self, rule_id: str) -> yara_x.Rules | None:
         """Get a Yara rule from this object, loading from disk if needed.
 
         Will return None if the Yara rule is not known to this object
@@ -82,8 +87,8 @@ class YaraRules:
 
         Returns
         -------
-        yara.Rules | None
-            The compiled ``yara.Rules`` object from this object's memory. Or
+        yara_x.Rules | None
+            The compiled ``yara_x.Rules`` object from this object's memory. Or
             ``None`` if the rule is not stored in this object's memory and
             cannot be loaded from disk by the given ``rule_id``.
         """
@@ -93,8 +98,10 @@ class YaraRules:
 
         return self.rules.get(rule_id, None)
 
-    def add(self, rule_id: str, compiled_rule: yara.Rules) -> None:
+    def add(self, rule_id: str, compiled_rule: yara_x.Rules) -> None:
         """Write a compiled Yara rule to disk and store it in this object.
+
+        Will overwrite any existing rule on disk or in the object with the same ``rule_id``.
 
         Parameters
         ----------
@@ -102,7 +109,7 @@ class YaraRules:
             The ID of the rule, which should equate to the rule's file basename
             on disk. This should be the same as the GUID of the rule according
             to Synapse.
-        compiled_rule : yara.Rules
+        compiled_rule : yara_x.Rules
             The compiled Yara rule.
 
         Returns
@@ -111,11 +118,33 @@ class YaraRules:
         """
 
         rule_path = utils.absjoin(self.ruledir, rule_id)
-        with open(rule_path) as fd:
-            compiled_rule.save(file=fd)
+        with open(rule_path, "wb") as fd:
+            compiled_rule.serialize_into(fd)
         self.load_rule(rule_path)
 
-    def get_rule_from_node(self, node: StormNode) -> yara.Rules | None:
+    def remove(self, rule_id: str) -> None:
+        """Remove a Yara rule from this object and from disk.
+
+        Parameters
+        ----------
+        rule_id : str
+            The ID of the rule, which should equate to the rule's file basename
+            on disk. This should be the same as the rule's node GUID.
+
+        Returns
+        -------
+        None
+        """
+
+        if rule_id in self.rules:
+            del self.rules[rule_id]
+
+        try:
+            os.remove(utils.absjoin(self.ruledir, rule_id))
+        except FileNotFoundError:
+            return
+
+    def get_rule_from_node(self, node: StormNode) -> yara_x.Rules | None:
         """Get a Yara rule from this object based on the given node.
 
         This method also handles updating the compiled rule on disk if the node
@@ -132,7 +161,7 @@ class YaraRules:
 
         Returns
         -------
-        yara.Rules | None
+        yara_x.Rules | None
             The compiled Yara rule object or None if there was a problem.
             None may also be returned if for some reason the given node does
             not have a Yara rule stored in the ``text`` property.
@@ -155,8 +184,8 @@ class YaraRules:
             return rule
         if node.props["text"] is not None:
             try:
-                self.add(rule_id, yara.compile(node.props["text"]))
-            except yara.Error:
+                self.add(rule_id, yara_x.compile(node.props["text"]))
+            except yara_x.CompileError:
                 return None
             return self.get(rule_id)
 
@@ -168,6 +197,7 @@ class YaraSvc(s_cell.Cell):
 
     cellapi = YaraApi
 
+    # TODO - Switch to using the colon notation for the config keys.
     confdefs = {
         "axon_url": {
             "type": "string",
@@ -205,10 +235,8 @@ class YaraSvc(s_cell.Cell):
 
         return buffer
 
-    async def matchFile(
-        self, file_sha256: str, yara_rules: list[NodeTuple]
-    ) -> MatchRetn:
-        """Test if the given Yara rules match the given file in the Axon."""
+    async def matchFile(self, file_sha256: str) -> AsyncGenerator[MatchRetn, None]:
+        """Test if the loaded Yara rules match the given file in the Axon."""
 
         file_bytes = await self._getBytes(file_sha256)
         if file_bytes is None:
@@ -219,27 +247,26 @@ class YaraSvc(s_cell.Cell):
             )
             return
 
-        for rule_node in [StormNode.unpack(rule) for rule in yara_rules]:
-            rule_id = rule_node.value
-            rule_obj = self.rules.get_rule_from_node(rule_node)
-            if rule_obj and rule_obj.match(data=file_bytes):
+        for rule_id in list(self.rules.rules):
+            rule_obj = self.rules.get(rule_id)
+            if rule_obj and rule_obj.scan(file_bytes).matching_rules:
                 yield MatchRetn(
                     status=True,
                     mesg="",
-                    data=YaraMatch(rule_id, file_sha256, True),
+                    data=YaraMatch(rule=rule_id, sha256=file_sha256, matched=True),
                 )
             elif rule_obj is None:
                 yield MatchRetn(
                     status=False,
-                    mesg=f"Either it:app:yara:rule={rule_id} has no rule contents "
-                    "or the rule contains an error.",
+                    mesg=f"Couldn't load it:app:yara:rule={rule_id} either the service has "
+                    "no rule contents for that node or the rule contains an error.",
                     data=None,
                 )
             else:
                 yield MatchRetn(
                     status=True,
                     mesg="",
-                    data=YaraMatch(rule_id, file_sha256, False),
+                    data=YaraMatch(rule=rule_id, sha256=file_sha256, matched=False),
                 )
 
         return
@@ -249,15 +276,26 @@ class YaraSvc(s_cell.Cell):
 
         rulenode = StormNode.unpack(yara_rule)
 
+        if not rulenode.props["text"]:
+            return BoolRetn(
+                status=False,
+                mesg=f"it:app:yara:rule={rulenode.value} has no :text to compile.",
+                data=False,
+            )
+
         try:
-            rule = yara.compile(source=rulenode.props["text"], error_on_warning=True)
-        except yara.SyntaxError as err:
-            return BoolRetn(status=False, mesg=f"Yara Syntax Error - {err}", data=False)
-        except yara.Error as err:
-            return BoolRetn(status=False, mesg=f"Yara Error - {err}", data=False)
+            rule = yara_x.compile(rulenode.props["text"])
+        except yara_x.CompileError as err:
+            return BoolRetn(status=False, mesg=f"Yara Compile Error - {err}", data=False)
 
         if check:
             return BoolRetn(status=True, mesg="Successfully compiled rule!", data=True)
 
         self.rules.add(rulenode.value, rule)
+        return BoolRetn(status=True, mesg="", data=True)
+
+    async def removeRule(self, rule_id: str) -> BoolRetn:
+        """Remove a compiled Yara rule from this Cell's storage."""
+
+        self.rules.remove(rule_id)
         return BoolRetn(status=True, mesg="", data=True)

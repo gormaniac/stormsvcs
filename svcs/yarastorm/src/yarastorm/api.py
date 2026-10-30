@@ -17,12 +17,18 @@ class YaraApi(s_cell.CellApi, s_stormsvc.StormSvc):
     _storm_svc_evts = SVC_EVTS
     _storm_svc_pkgs = PKGDEFS
 
-    async def matchFile(self, file_sha256: str, yara_rule) -> BoolRetn:
-        """Test if a Yara rule matches a given file in the Axon."""
+    async def matchFile(self, file_sha256: str):
+        """Test if the service's Yara rules match a given file in the Axon."""
 
-        return await self.cell.matchFile(file_sha256, yara_rule)
+        async for retn in self.cell.matchFile(file_sha256):
+            yield retn
 
     async def compileRule(self, yara_rule, check: bool = False) -> BoolRetn:
         """Compile the given Yara rule and save it to this Cell's storage."""
 
         return await self.cell.compileRule(yara_rule, check)
+
+    async def removeRule(self, rule_id: str) -> BoolRetn:
+        """Remove a compiled Yara rule from this Cell's storage."""
+
+        return await self.cell.removeRule(rule_id)
