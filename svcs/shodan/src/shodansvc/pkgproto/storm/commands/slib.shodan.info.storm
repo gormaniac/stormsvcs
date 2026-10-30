@@ -1,0 +1,31 @@
+init {
+    $priv = $lib.import(slib.shodan.priv.user)
+    $util = $lib.import(slib.shodan.util)
+
+    $retn = $priv.profile()
+    if (not $util.failed($retn, "Retrieving the account profile")) {
+        $lib.print("Account:")
+        $lib.print("  Name: {name}", name=$retn.data.display_name)
+        $lib.print("  Member: {member}", member=$retn.data.member)
+        $lib.print("  Created: {created}", created=$retn.data.created)
+        $lib.print("  Credits: {credits}", credits=$retn.data.credits)
+    }
+
+    $retn = $priv.apiInfo()
+    if (not $util.failed($retn, "Retrieving the API plan info")) {
+        $info = $retn.data
+        $lib.print("API plan: {plan}", plan=$info.plan)
+        $util.table(([["credits", 20], ["remaining", 12], ["monthly limit", 14]]), (
+            ("query", $info.query_credits, $info.usage_limits.query_credits),
+            ("scan", $info.scan_credits, $info.usage_limits.scan_credits),
+            ("monitored IPs", $info.monitored_ips, $info.usage_limits.monitored_ips),
+        ))
+        $lib.print("Unlocked: {unlocked} (unlocked left: {left})", unlocked=$info.unlocked, left=$info.unlocked_left)
+        $lib.print("HTTPS: {https}  Telnet: {telnet}", https=$info.https, telnet=$info.telnet)
+    }
+
+    $retn = $priv.myip()
+    if (not $util.failed($retn, "Retrieving the service's IP")) {
+        $lib.print("slib.shodan service IP: {ip}", ip=$retn.data)
+    }
+}

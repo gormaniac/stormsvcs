@@ -1,0 +1,25 @@
+init {
+    $priv = $lib.import(slib.shodan.priv.user)
+    $model = $lib.import(slib.shodan.model)
+    $util = $lib.import(slib.shodan.util)
+
+    $cpes = ([])
+    $retn = $priv.cpes($cmdopts.product, limit=$cmdopts.limit, count=$cmdopts.count)
+    if (not $util.failed($retn, `CPE search for {$cmdopts.product}`)) {
+        if $cmdopts.count {
+            $lib.print("Total CPEs: {total}", total=$retn.data.total)
+        } else {
+            $cpes = $retn.data.cpes
+            for $cpe in $cpes { $lib.print($cpe) }
+        }
+    }
+}
+
+spin |
+
+if $cmdopts.yield {
+    for $cpe in $cpes {
+        [ it:sec:cpe?=$cpe ]
+        $model.seen($node)
+    }
+}

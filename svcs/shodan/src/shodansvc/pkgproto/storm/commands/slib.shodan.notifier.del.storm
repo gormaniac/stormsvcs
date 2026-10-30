@@ -1,0 +1,11 @@
+init {
+    $privalert = $lib.import(slib.shodan.priv.alert)
+    $util = $lib.import(slib.shodan.util)
+
+    for $nid in $cmdopts.ids {
+        $retn = $privalert.notifierDelete($nid)
+        if (not $util.failed($retn, `Deleting notifier {$nid}`)) {
+            $lib.print("slib.shodan.notifier.del: Deleted notifier {nid}.", nid=$nid)
+        }
+    }
+}

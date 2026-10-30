@@ -1,0 +1,23 @@
+init {
+    $privalert = $lib.import(slib.shodan.priv.alert)
+    $util = $lib.import(slib.shodan.util)
+
+    $args = ({})
+    $ok = (true)
+    for $arg in $cmdopts.arg {
+        $parts = $util.splitArg($arg)
+        if ($parts = $lib.null) {
+            $lib.warn("slib.shodan.notifier.add: {arg} is not in the format <name>=<value>.", arg=$arg)
+            $ok = (false)
+        } else {
+            $args.($parts.0) = $parts.1
+        }
+    }
+
+    if $ok {
+        $retn = $privalert.notifierCreate($cmdopts.provider, $args, desc=$cmdopts.desc)
+        if (not $util.failed($retn, "Creating the notifier")) {
+            $lib.print("slib.shodan.notifier.add: Created notifier {id}.", id=$retn.data.id)
+        }
+    }
+}

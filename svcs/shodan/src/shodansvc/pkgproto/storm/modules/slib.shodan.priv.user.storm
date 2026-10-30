@@ -1,0 +1,128 @@
+// Privileged (asroot) wrappers around the slib.shodan service for slib.shodan.user.
+// Every function returns the service's {status, mesg, data} dict, or emits them for generators.
+//
+// The calling user's own API key (a user scoped "shodan" vault) is passed to the service,
+// otherwise the service falls back to its stored/configured key. Only the user scope is
+// read so this module never exposes another user's or role's secrets.
+
+init {
+    $svc = $lib.service.get("slib.shodan")
+}
+
+function userKey() {
+    $vault = $lib.vault.bytype(shodan, scope=user)
+    if ($vault = $lib.null) { return($lib.null) }
+    $secrets = $vault.secrets
+    if ($secrets = $lib.null) { return($lib.null) }
+    return($secrets.apikey)
+}
+
+function hasKey() {
+    if $userKey() { return((true)) }
+    return($svc.hasApiKey().data)
+}
+
+function tagPrefix() {
+    if $lib.globals.get("slib:shodan:tag:enabled") {
+        return($lib.globals.get("slib:shodan:tag:prefix"))
+    }
+    return($lib.null)
+}
+
+// Search
+
+function host(ip, history=(false), minify=(false)) {
+    return($svc.normHost($ip, history=$history, minify=$minify, apikey=$userKey()))
+}
+
+function count(query, facets=$lib.null) {
+    return($svc.count($query, facets=$facets, apikey=$userKey()))
+}
+
+function search(query, page=(1), facets=$lib.null, minify=(false)) {
+    return($svc.search($query, page=$page, facets=$facets, minify=$minify, apikey=$userKey()))
+}
+
+function searchGenr(query, limit=(100), minify=(false), page=(1)) {
+    for $retn in $svc.searchGenr($query, limit=$limit, minify=$minify, page=$page, apikey=$userKey()) {
+        emit $retn
+    }
+}
+
+function searchFacets() { return($svc.searchFacets(apikey=$userKey())) }
+function searchFilters() { return($svc.searchFilters(apikey=$userKey())) }
+function searchTokens(query) { return($svc.searchTokens($query, apikey=$userKey())) }
+
+// Reference data
+
+function ports() { return($svc.ports(apikey=$userKey())) }
+function protocols() { return($svc.protocols(apikey=$userKey())) }
+function services() { return($svc.services(apikey=$userKey())) }
+function alertTriggers() { return($svc.alertTriggers(apikey=$userKey())) }
+function notifierProviders() { return($svc.notifierProviders(apikey=$userKey())) }
+
+// Account, API status, and utility
+
+function profile() { return($svc.profile(apikey=$userKey())) }
+function apiInfo() { return($svc.apiInfo(apikey=$userKey())) }
+function myip() { return($svc.myip(apikey=$userKey())) }
+function httpHeaders() { return($svc.httpHeaders(apikey=$userKey())) }
+function honeyscore(ip) { return($svc.honeyscore($ip, apikey=$userKey())) }
+
+// DNS
+
+function dnsDomain(domain, history=(false), rtype=$lib.null, maxpages=(10)) {
+    return($svc.dnsDomainAll($domain, history=$history, rtype=$rtype, maxpages=$maxpages, apikey=$userKey()))
+}
+
+function dnsResolve(hostnames) { return($svc.dnsResolve($hostnames, apikey=$userKey())) }
+function dnsReverse(ips) { return($svc.dnsReverse($ips, apikey=$userKey())) }
+
+// Directory
+
+function queries(page=(1), sort=timestamp, order=desc) {
+    return($svc.queries(page=$page, sort=$sort, order=$order, apikey=$userKey()))
+}
+function queriesSearch(query, page=(1)) { return($svc.queriesSearch($query, page=$page, apikey=$userKey())) }
+function queriesTags(size=(10)) { return($svc.queriesTags(size=$size, apikey=$userKey())) }
+
+// Exploits
+
+function exploitsSearch(query, facets=$lib.null, page=(1)) {
+    return($svc.exploitsSearch($query, facets=$facets, page=$page, apikey=$userKey()))
+}
+function exploitsCount(query, facets=$lib.null) {
+    return($svc.exploitsCount($query, facets=$facets, apikey=$userKey()))
+}
+
+// Trends
+
+function trendsSearch(query, facets=$lib.null) {
+    return($svc.trendsSearch($query, facets=$facets, apikey=$userKey()))
+}
+function trendsFacets() { return($svc.trendsFacets(apikey=$userKey())) }
+function trendsFilters() { return($svc.trendsFilters(apikey=$userKey())) }
+
+// InternetDB and CVEDB (free, no API key)
+
+function internetdb(ip) { return($svc.normInternetDb($ip)) }
+
+function cve(cveid) { return($svc.normCve($cveid)) }
+
+function cves(cpe23=$lib.null, product=$lib.null, kev=(false), epss=(false), limit=(100), start=$lib.null, end=$lib.null) {
+    return($svc.cves(cpe23=$cpe23, product=$product, is_kev=$kev, sort_by_epss=$epss,
+        limit=$limit, start_date=$start, end_date=$end))
+}
+
+function cpes(product, limit=(100), count=(false)) {
+    return($svc.cpes($product, limit=$limit, count=$count))
+}
+
+// Streaming
+
+function stream(kind=banners, values=$lib.null, query=$lib.null, aid=$lib.null, limit=(100), timeout=(60)) {
+    for $retn in $svc.stream(kind=$kind, values=$values, query=$query, aid=$aid,
+                             limit=$limit, timeout=$timeout, apikey=$userKey()) {
+        emit $retn
+    }
+}

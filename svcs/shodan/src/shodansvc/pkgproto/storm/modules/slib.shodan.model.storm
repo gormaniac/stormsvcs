@@ -1,0 +1,282 @@
+// Model normalized Shodan data (see shodansvc.norm) in Synapse.
+//
+// Node edits here run as the calling user. Every node created is linked to the
+// slib.shodan meta:source node with a -(seen)> edge.
+
+init {
+    $sourceGuid = "5c1b0a3d0e7f4b2e9a8c6d4f2b1e0a97"
+    $util = $lib.import(slib.shodan.util)
+}
+
+// ---- Helpers that return a single node ----
+//
+// NOTE: A for loop that runs while a node is in a function's pipeline sends the
+// node downstream after its first iteration, reaching return() and ending the
+// function early. So functions here only yield a node when they don't loop, and
+// loops call helpers that yield/edit the node in their own runtime instead.
+
+// Link the node to the slib.shodan meta:source and update its .seen.
+function seen(n, time=$lib.null) {
+    yield $n
+    [ <(seen)+ { [ meta:source=$sourceGuid :name=shodan ] } ]
+    if $time { [ .seen ?= $time ] }
+    return($n)
+}
+
+// Apply Shodan's tags (cloud, vpn, honeypot, etc.) to a node under the configured prefix.
+function applyTags(n, tagPrefix, tags) {
+    if ($tagPrefix = $lib.null or not $tags) { return($n) }
+    // Never loop with a node in a function's pipeline, the node would reach return() after the first iteration.
+    for $tag in $lib.tags.prefix($tags, $tagPrefix) { $addTag($n, $tag) }
+    return($n)
+}
+
+function addTag(n, tag) {
+    yield $n
+    [ +#$tag ]
+    return($n)
+}
+
+function ipNode(ip, time=$lib.null) {
+    if $util.isIpv6($ip) { [ inet:ipv6?=$ip ] }
+    else { [ inet:ipv4?=$ip ] }
+    return($seen($node, $time))
+}
+
+function fqdnNode(fqdn, time=$lib.null) {
+    [ inet:fqdn?=$fqdn ]
+    return($seen($node, $time))
+}
+
+function asnNode(asn, org=$lib.null) {
+    $num = $lib.regex.replace("(?i)^AS", "", $lib.cast(str, $asn))
+    [ inet:asn?=$num ]
+    if $org {
+        [ :owner ?= { yield $lib.gen.orgByName($org) } ]
+    }
+    return($node)
+}
+
+function dnsNode(fqdn, ip, time=$lib.null) {
+    if $util.isIpv6($ip) { [ inet:dns:aaaa?=($fqdn, $ip) ] }
+    else { [ inet:dns:a?=($fqdn, $ip) ] }
+    return($seen($node, $time))
+}
+
+function serverNode(ip, port, transport=tcp, time=$lib.null) {
+    if $util.isIpv6($ip) { $server = `{$transport}://[{$ip}]:{$port}` }
+    else { $server = `{$transport}://{$ip}:{$port}` }
+    [ inet:server?=$server ]
+    return($seen($node, $time))
+}
+
+function bannerNode(server, text, time=$lib.null) {
+    [ inet:banner?=($server, $text) ]
+    return($seen($node, $time))
+}
+
+// Create an it:prod:softver from a CPE (preferred) or a product name/version,
+// and link the node that runs it with a -(uses)> edge.
+function softverNode(user, cpe=$lib.null, product=$lib.null, version=$lib.null) {
+    $props = $lib.null
+    if $cpe {
+        ($ok, $normcpe) = $lib.trycast(it:sec:cpe, $cpe)
+        if $ok { $props = ({"cpe": $normcpe}) }
+    }
+    if ($props = $lib.null and $product) {
+        $props = ({"name": $product})
+        if $version { $props.vers = $version }
+    }
+    if ($props = $lib.null) { return($lib.null) }
+
+    [ it:prod:softver=$props ]
+    if $product { [ :name ?= $product ] }
+    if $version { [ :vers ?= $version ] }
+    if $user { [ <(uses)+ { yield $user } ] }
+    return($node)
+}
+
+function vulnNode(cve) {
+    return($lib.gen.vulnByCve($cve, try=(true)))
+}
+
+// Model that a node (inet:ipv4/6 or inet:server) is vulnerable to a CVE.
+function vulnerableNode(n, vuln, time=$lib.null) {
+    $vulnnode = $vulnNode($vuln.cve)
+    if ($vulnnode = $lib.null) { return($lib.null) }
+
+    if $vuln.summary { $setDesc($vulnnode, $vuln.summary) }
+
+    [ risk:vulnerable=({"node": [$n.form(), $n.value()], "vuln": $vulnnode.value()}) ]
+    return($seen($node, $time))
+}
+
+// Set :desc on a node only if it doesn't already have one.
+function setDesc(n, desc) {
+    yield $n
+    if (not :desc) { [ :desc ?= $desc ] }
+    return($n)
+}
+
+function certNode(server, cert, time=$lib.null) {
+    [ crypto:x509:cert=({"sha256": $cert.sha256}) ]
+    [
+        :sha1 ?= $cert.sha1
+        :serial ?= $cert.serial
+        :subject ?= $cert.subject
+        :issuer ?= $cert.issuer
+        :validity:notbefore ?= $cert.notbefore
+        :validity:notafter ?= $cert.notafter
+        :selfsigned ?= $cert.selfsigned
+        :version ?= $cert.version
+    ]
+    if $cert.subject_cn {
+        [ :identities:fqdns ?+= $cert.subject_cn ]
+    }
+    $certnode = $seen($node, $time)
+
+    [ inet:tls:servercert=($server, $certnode.value()) ]
+    $seen($node, $time)
+    return($certnode)
+}
+
+function setAsn(n, asn, org=$lib.null) {
+    $asnnode = $asnNode($asn, $org)
+    if ($asnnode = $lib.null) { return($n) }
+    yield $n
+    [ :asn ?= $asnnode.value() ]
+    return($n)
+}
+
+// Model a single DNS record from the Shodan DNS domain API.
+function dnsRecordNode(rec) {
+    $fqdn = $rec.fqdn
+    $valu = $rec.value
+    switch $rec.type {
+        "A": { [ inet:dns:a?=($fqdn, $valu) ] }
+        "AAAA": { [ inet:dns:aaaa?=($fqdn, $valu) ] }
+        "CNAME": { [ inet:dns:cname?=($fqdn, $valu) ] }
+        "MX": { [ inet:dns:mx?=($fqdn, $valu) ] }
+        "NS": { [ inet:dns:ns?=($fqdn, $valu) ] }
+        "TXT": { [ inet:dns:txt?=($fqdn, $valu) ] }
+        "SOA": { [ inet:dns:soa=({"fqdn": $fqdn, "ns": $valu}) ] }
+        *: { return($lib.null) }
+    }
+    return($seen($node, $rec.seen))
+}
+
+// ---- Modeling for full API results, each returns the primary node ----
+
+// Model a normalized banner. Returns the inet:server node.
+function banner(b, tagPrefix=$lib.null) {
+    $srv = $serverNode($b.ip, $b.port, $b.transport, $b.timestamp)
+    if ($srv = $lib.null) { return($lib.null) }
+    $applyTags($srv, $tagPrefix, $b.tags)
+
+    $ipnode = $ipNode($b.ip, $b.timestamp)
+    if ($b.asn and $ipnode) { $setAsn($ipnode, $b.asn, $b.org) }
+
+    if $b.data { $bannerNode($srv.repr(), $b.data, $b.timestamp) }
+
+    if $b.cpes {
+        for $cpe in $b.cpes { $softverNode($srv, $cpe, $b.product, $b.version) }
+    }
+    elif $b.product {
+        $softverNode($srv, $lib.null, $b.product, $b.version)
+    }
+
+    for $vuln in $b.vulns { $vulnerableNode($srv, $vuln, $b.timestamp) }
+
+    if $b.cert { $certNode($srv.repr(), $b.cert, $b.timestamp) }
+
+    for $hostname in $b.hostnames { $dnsNode($hostname, $b.ip, $b.timestamp) }
+
+    return($srv)
+}
+
+// Model a normalized host (from the Shodan host API or InternetDB). Returns the IP node.
+function host(h, tagPrefix=$lib.null) {
+    $ipnode = $ipNode($h.ip, $h.last_update)
+    if ($ipnode = $lib.null) { return($lib.null) }
+
+    if $h.asn { $setAsn($ipnode, $h.asn, $h.org) }
+    if $h.location { $setLocation($ipnode, $h.location) }
+
+    $applyTags($ipnode, $tagPrefix, $h.tags)
+
+    for $hostname in $h.hostnames { $dnsNode($hostname, $h.ip, $h.last_update) }
+
+    for $vuln in $h.vulns { $vulnerableNode($ipnode, $vuln, $h.last_update) }
+
+    // InternetDB results have CPEs at the host level.
+    if $h.cpes {
+        for $cpe in $h.cpes { $softverNode($ipnode, $cpe) }
+    }
+
+    if $h.banners {
+        for $b in $h.banners { $banner($b, $tagPrefix) }
+    } else {
+        // Minified host lookups and InternetDB only give us open ports.
+        for $port in $h.ports { $serverNode($h.ip, $port, tcp, $h.last_update) }
+    }
+
+    return($ipnode)
+}
+
+// Model a normalized CVE (from CVEDB). Returns the risk:vuln node.
+function cve(c, tagPrefix=$lib.null, cpes=(false)) {
+    $vulnnode = $vulnNode($c.cve)
+    if ($vulnnode = $lib.null) { return($lib.null) }
+
+    $cveNode($c)
+    $setVulnProps($vulnnode, $c)
+    if $c.kev { $applyTags($vulnnode, $tagPrefix, (kev,)) }
+    $seen($vulnnode, $c.published)
+
+    if $cpes {
+        for $cpe in $c.cpes {
+            ($ok, $normcpe) = $lib.trycast(it:sec:cpe, $cpe)
+            if $ok { $softverCve($normcpe, $c.cve) }
+        }
+    }
+
+    return($vulnnode)
+}
+
+function setVulnProps(n, c) {
+    yield $n
+    if $c.summary {
+        [ :cve:desc ?= $c.summary ]
+        if (not :desc) { [ :desc ?= $c.summary ] }
+    }
+    if $c.references { [ :cve:references ?= $c.references ] }
+    if $c.published { [ :timeline:published ?= $c.published ] }
+    if ($c.cvss_v3 != $lib.null) { [ :cvss:v3_1:score ?= $c.cvss_v3 ] }
+    if ($c.cvss_v2 != $lib.null) { [ :cvss:v2_0:score ?= $c.cvss_v2 ] }
+    return($n)
+}
+
+function setLocation(n, loc) {
+    yield $n
+    if $loc.latlong { [ :latlong ?= $loc.latlong ] }
+    if $loc.country_code { [ :loc ?= $loc.country_code ] }
+    return($n)
+}
+
+function cveNode(c) {
+    // it:sec:cve:desc/references are deprecated, the details live on the risk:vuln.
+    [ it:sec:cve?=$c.cve ]
+    return($seen($node, $c.published))
+}
+
+function softverCve(cpe, cve) {
+    [ it:prod:softver=({"cpe": $cpe}) :cves += $cve ]
+    return($node)
+}
+
+// Yield the given non-null nodes. Lets commands divert to nodes returned by the functions above.
+function nodes(items) {
+    for $item in $items {
+        if $item { yield $item }
+    }
+}

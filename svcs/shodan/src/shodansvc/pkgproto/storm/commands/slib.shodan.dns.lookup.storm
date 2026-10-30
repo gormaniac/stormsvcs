@@ -1,0 +1,16 @@
+init {
+    $shodan = $lib.import(slib.shodan.lib)
+    $model = $lib.import(slib.shodan.model)
+}
+
+switch $node.form() {
+    "inet:fqdn": { $results = ($shodan.resolve($node.repr()),) }
+    "inet:ipv4": { $results = $shodan.reverse($node.repr()) }
+    "inet:ipv6": { $results = $shodan.reverse($node.repr()) }
+    *: {
+        $results = ([])
+        $lib.warn("slib.shodan.dns.lookup: The node form {form} is not supported.", form=$node.form())
+    }
+}
+
+divert $cmdopts.yield $model.nodes($results)

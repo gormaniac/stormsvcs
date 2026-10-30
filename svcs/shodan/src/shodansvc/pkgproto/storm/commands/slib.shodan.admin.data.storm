@@ -1,0 +1,20 @@
+init {
+    $privadmin = $lib.import(slib.shodan.priv.admin)
+    $util = $lib.import(slib.shodan.util)
+
+    if $cmdopts.dataset {
+        $retn = $privadmin.datasetFiles($cmdopts.dataset)
+        if (not $util.failed($retn, `Listing dataset {$cmdopts.dataset}`)) {
+            $rows = ([])
+            for $file in $retn.data { $rows.append(($file.name, $file.size, $file.timestamp, $file.url)) }
+            $util.table(([["name", 40], ["size", 14], ["timestamp", 16], ["url", 60]]), $rows)
+        }
+    } else {
+        $retn = $privadmin.datasets()
+        if (not $util.failed($retn, "Listing datasets")) {
+            $rows = ([])
+            for $ds in $retn.data { $rows.append(($ds.name, $ds.description)) }
+            $util.table(([["dataset", 30], ["description", 80]]), $rows)
+        }
+    }
+}

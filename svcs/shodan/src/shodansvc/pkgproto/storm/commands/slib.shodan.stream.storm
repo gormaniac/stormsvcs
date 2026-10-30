@@ -1,0 +1,18 @@
+init {
+    $priv = $lib.import(slib.shodan.priv.user)
+    $model = $lib.import(slib.shodan.model)
+    $util = $lib.import(slib.shodan.util)
+    $tagPrefix = $priv.tagPrefix()
+}
+
+spin |
+
+for $retn in $priv.stream(kind=$cmdopts.type, values=$cmdopts.value, query=$cmdopts.query, aid=$cmdopts.alert,
+                          limit=$cmdopts.limit, timeout=$cmdopts.timeout) {
+    if $util.failed($retn, "Stream") { break }
+    $model.banner($retn.data, $tagPrefix)
+    $ipnode = $model.ipNode($retn.data.ip)
+    if $ipnode { yield $ipnode }
+}
+
+| uniq

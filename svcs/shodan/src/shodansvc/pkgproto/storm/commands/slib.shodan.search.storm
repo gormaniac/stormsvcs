@@ -1,0 +1,60 @@
+init {
+    $priv = $lib.import(slib.shodan.priv.user)
+    $model = $lib.import(slib.shodan.model)
+    $util = $lib.import(slib.shodan.util)
+    $query = $cmdopts.query
+
+    // Modes that only print, returning before any nodes are created.
+    $printonly = ($cmdopts.filters or $cmdopts.tokens or $cmdopts.count)
+
+    if $cmdopts.filters {
+        $retn = $priv.searchFilters()
+        if (not $util.failed($retn, "Listing search filters")) {
+            $lib.print("Filters: {filters}", filters=(", ").join($retn.data))
+        }
+        $retn = $priv.searchFacets()
+        if (not $util.failed($retn, "Listing search facets")) {
+            $lib.print("Facets: {facets}", facets=(", ").join($retn.data))
+        }
+    }
+    elif (not $query) {
+        $lib.raise(BadArg, "slib.shodan.search requires a query (or --filters).")
+    }
+    elif $cmdopts.tokens {
+        $retn = $priv.searchTokens($query)
+        if (not $util.failed($retn, "Parsing the query")) { $util.printJson($retn.data) }
+    }
+    elif $cmdopts.count {
+        $retn = $priv.count($query, facets=$cmdopts.facets)
+        if (not $util.failed($retn, "Counting results")) {
+            $lib.print("Total results: {total}", total=$retn.data.total)
+            $util.printFacets($retn.data.facets)
+        }
+    }
+    elif $cmdopts.facets {
+        // Facets come from a dedicated call to the free count API so we don't fetch page 1 twice.
+        $retn = $priv.count($query, facets=$cmdopts.facets)
+        if (not $util.failed($retn, "Retrieving facets")) {
+            $lib.print("Total results: {total}", total=$retn.data.total)
+            $util.printFacets($retn.data.facets)
+        }
+    }
+
+    if ($cmdopts.limit = 0) {
+        $lib.warn("slib.shodan.search: --limit 0 retrieves every result, using a query credit per 100 results.")
+    }
+    $tagPrefix = $priv.tagPrefix()
+}
+
+spin |
+
+if (not $printonly) {
+    for $retn in $priv.searchGenr($query, limit=$cmdopts.limit, minify=$cmdopts.minify, page=$cmdopts.page) {
+        if $util.failed($retn, "Search") { break }
+        $model.banner($retn.data, $tagPrefix)
+        $ipnode = $model.ipNode($retn.data.ip)
+        if $ipnode { yield $ipnode }
+    }
+}
+
+| uniq

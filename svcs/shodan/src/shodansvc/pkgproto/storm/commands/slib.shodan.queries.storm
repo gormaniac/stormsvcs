@@ -1,0 +1,28 @@
+init {
+    $priv = $lib.import(slib.shodan.priv.user)
+    $util = $lib.import(slib.shodan.util)
+
+    if $cmdopts.tags {
+        $retn = $priv.queriesTags(size=$cmdopts.size)
+        if (not $util.failed($retn, "Listing query tags")) {
+            $rows = ([])
+            for $tag in $retn.data.matches { $rows.append(($tag.value, $tag.count)) }
+            $util.table(([["tag", 30], ["count", 10]]), $rows)
+        }
+    }
+    else {
+        if $cmdopts.search {
+            $retn = $priv.queriesSearch($cmdopts.search, page=$cmdopts.page)
+        } else {
+            $retn = $priv.queries(page=$cmdopts.page, sort=$cmdopts.sort, order=$cmdopts.order)
+        }
+        if (not $util.failed($retn, "Listing saved queries")) {
+            $lib.print("Total saved queries: {total}", total=$retn.data.total)
+            $rows = ([])
+            for $q in $retn.data.matches {
+                $rows.append(($q.votes, $q.title, $q.query))
+            }
+            $util.table(([["votes", 6], ["title", 40], ["query", 60]]), $rows)
+        }
+    }
+}

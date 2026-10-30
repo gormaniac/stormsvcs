@@ -43,6 +43,10 @@ Each service must have the following:
 
 - `yarastorm`
   - Support for matching `it:prod:yara:rule` nodes to `file:bytes` nodes.
+- `ip_api`
+  - Enrich IPs from ip-api.com.
+- `shodan`
+  - Every Shodan API: host lookups, search, scanning, alerts, DNS, streaming, InternetDB, CVEDB, exploits, and trends.
 
 
 ## Services Wish List/Plan
@@ -69,8 +73,6 @@ This is a ToDo/wish list, check `services.toml` for the current list of develope
   - Enrich from MXToolbox.
 - `scraper`
   - Ingest and scrape a list of configured blogs, websites, social media accounts/searches.
-- `shodan`
-  - Enrich from Shodan.
 - `snort`
   - Match PCAPs stored in `file:bytes` nodes against `rule:snort`/`rule:suricata` nodes.
 - `virustotal`

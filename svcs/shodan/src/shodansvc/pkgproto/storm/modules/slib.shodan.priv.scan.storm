@@ -1,0 +1,19 @@
+// Privileged (asroot) wrappers around the slib.shodan service for slib.shodan.scan.
+
+init {
+    $svc = $lib.service.get("slib.shodan")
+}
+
+// Only reads the calling user's own vault, see slib.shodan.priv.user.
+function userKey() {
+    $vault = $lib.vault.bytype(shodan, scope=user)
+    if ($vault = $lib.null) { return($lib.null) }
+    $secrets = $vault.secrets
+    if ($secrets = $lib.null) { return($lib.null) }
+    return($secrets.apikey)
+}
+
+function scan(ips, force=(false)) { return($svc.scan($ips, force=$force, apikey=$userKey())) }
+function scanInternet(port, protocol) { return($svc.scanInternet($port, $protocol, apikey=$userKey())) }
+function scans(page=(1)) { return($svc.scans(page=$page, apikey=$userKey())) }
+function scanStatus(scanid) { return($svc.scanStatus($scanid, apikey=$userKey())) }

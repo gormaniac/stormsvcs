@@ -1,0 +1,6 @@
+init {
+    $shodan = $lib.import(slib.shodan.lib)
+    $model = $lib.import(slib.shodan.model)
+}
+
+divert $cmdopts.yield $model.nodes($shodan.enrich($node))

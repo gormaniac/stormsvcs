@@ -1,0 +1,35 @@
+// Privileged (asroot) wrappers around the slib.shodan service for slib.shodan.alert.
+
+init {
+    $svc = $lib.service.get("slib.shodan")
+}
+
+// Only reads the calling user's own vault, see slib.shodan.priv.user.
+function userKey() {
+    $vault = $lib.vault.bytype(shodan, scope=user)
+    if ($vault = $lib.null) { return($lib.null) }
+    $secrets = $vault.secrets
+    if ($secrets = $lib.null) { return($lib.null) }
+    return($secrets.apikey)
+}
+
+// Network alerts
+
+function alertCreate(name, ips, expires=(0)) { return($svc.alertCreate($name, $ips, expires=$expires, apikey=$userKey())) }
+function alertEdit(aid, ips) { return($svc.alertEdit($aid, $ips, apikey=$userKey())) }
+function alertInfo(aid=$lib.null, expired=(true)) { return($svc.alertInfo(aid=$aid, include_expired=$expired, apikey=$userKey())) }
+function alertDelete(aid) { return($svc.alertDelete($aid, apikey=$userKey())) }
+function alertTriggerEnable(aid, trigger) { return($svc.alertTriggerEnable($aid, $trigger, apikey=$userKey())) }
+function alertTriggerDisable(aid, trigger) { return($svc.alertTriggerDisable($aid, $trigger, apikey=$userKey())) }
+function alertTriggerIgnore(aid, trigger, service) { return($svc.alertTriggerIgnore($aid, $trigger, $service, apikey=$userKey())) }
+function alertTriggerUnignore(aid, trigger, service) { return($svc.alertTriggerUnignore($aid, $trigger, $service, apikey=$userKey())) }
+function alertNotifierAdd(aid, nid) { return($svc.alertNotifierAdd($aid, $nid, apikey=$userKey())) }
+function alertNotifierDel(aid, nid) { return($svc.alertNotifierDel($aid, $nid, apikey=$userKey())) }
+
+// Notifiers
+
+function notifiers() { return($svc.notifiers(apikey=$userKey())) }
+function notifierCreate(provider, args, desc=$lib.null) { return($svc.notifierCreate($provider, $args, desc=$desc, apikey=$userKey())) }
+function notifierGet(nid) { return($svc.notifierGet($nid, apikey=$userKey())) }
+function notifierEdit(nid, args) { return($svc.notifierEdit($nid, $args, apikey=$userKey())) }
+function notifierDelete(nid) { return($svc.notifierDelete($nid, apikey=$userKey())) }

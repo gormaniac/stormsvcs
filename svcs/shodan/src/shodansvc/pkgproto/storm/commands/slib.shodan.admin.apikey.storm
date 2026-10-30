@@ -1,0 +1,18 @@
+init {
+    $privadmin = $lib.import(slib.shodan.priv.admin)
+    $util = $lib.import(slib.shodan.util)
+
+    if $cmdopts.clear {
+        $retn = $privadmin.setApiKey($lib.null)
+        if (not $util.failed($retn, "Clearing the API key")) { $lib.print($retn.mesg) }
+    }
+    elif $cmdopts.apikey {
+        $retn = $privadmin.setApiKey($cmdopts.apikey)
+        if (not $util.failed($retn, "Setting the API key")) { $lib.print($retn.mesg) }
+    }
+    else {
+        $retn = $privadmin.hasApiKey()
+        if $retn.data { $lib.print("slib.shodan: A service-wide API key is set.") }
+        else { $lib.print("slib.shodan: No service-wide API key is set.") }
+    }
+}

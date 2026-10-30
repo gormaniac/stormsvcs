@@ -1,0 +1,45 @@
+// Privileged (asroot) wrappers around the slib.shodan service for slib.shodan.admin.
+
+init {
+    $svc = $lib.service.get("slib.shodan")
+}
+
+// Only reads the calling user's own vault, see slib.shodan.priv.user.
+function userKey() {
+    $vault = $lib.vault.bytype(shodan, scope=user)
+    if ($vault = $lib.null) { return($lib.null) }
+    $secrets = $vault.secrets
+    if ($secrets = $lib.null) { return($lib.null) }
+    return($secrets.apikey)
+}
+
+// API key and tag settings
+
+function setApiKey(apikey) { return($svc.setApiKey($apikey)) }
+function hasApiKey() { return($svc.hasApiKey()) }
+
+function tagSettings() {
+    return(({
+        "enabled": $lib.globals.get("slib:shodan:tag:enabled"),
+        "prefix": $lib.globals.get("slib:shodan:tag:prefix"),
+    }))
+}
+function setTagPrefix(prefix) { $lib.globals.set("slib:shodan:tag:prefix", $prefix) }
+function setTagsEnabled(enabled) { $lib.globals.set("slib:shodan:tag:enabled", $enabled) }
+
+// Bulk data
+
+function datasets() { return($svc.datasets(apikey=$userKey())) }
+function datasetFiles(dataset) { return($svc.datasetFiles($dataset, apikey=$userKey())) }
+
+// Organization
+
+function org() { return($svc.org(apikey=$userKey())) }
+function orgMemberAdd(user, notify=(false)) { return($svc.orgMemberAdd($user, notify=$notify, apikey=$userKey())) }
+function orgMemberDel(user) { return($svc.orgMemberDel($user, apikey=$userKey())) }
+
+// Raw requests
+
+function rawRequest(path, method=get, base=api, params=$lib.null, json=$lib.null) {
+    return($svc.rawRequest($method, $path, base=$base, params=$params, json_data=$json, apikey=$userKey()))
+}

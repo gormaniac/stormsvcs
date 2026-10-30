@@ -1,0 +1,156 @@
+// The slib.shodan user API. Each function queries Shodan, models the results,
+// and returns the resulting node(s). Errors are reported as warnings.
+//
+// Usable directly from Storm, ex:
+//     $shodan = $lib.import(slib.shodan.lib)
+//     $ipnode = $shodan.host(8.8.8.8)
+
+init {
+    $priv = $lib.import(slib.shodan.priv.user)
+    $model = $lib.import(slib.shodan.model)
+    $util = $lib.import(slib.shodan.util)
+}
+
+// The minimum honeyscore at which an IP is tagged as a honeypot.
+function honeyThreshold() { return((0.5)) }
+
+// Look up an IP in Shodan (or InternetDB) and model it. Returns the IP node, or null.
+function host(ip, history=(false), minify=(false), internetdb=(false), honeyscore=(false)) {
+    $ip = $lib.cast(str, $ip)
+    $tagPrefix = $priv.tagPrefix()
+
+    if ((not $internetdb) and (not $priv.hasKey())) {
+        $lib.warn("slib.shodan: No Shodan API key is available, falling back to InternetDB.")
+        $internetdb = (true)
+    }
+
+    if $internetdb {
+        $retn = $priv.internetdb($ip)
+        $what = `InternetDB lookup of {$ip}`
+    } else {
+        $retn = $priv.host($ip, history=$history, minify=$minify)
+        $what = `Host lookup of {$ip}`
+    }
+    if $util.failed($retn, $what) { return($lib.null) }
+
+    $ipnode = $model.host($retn.data, $tagPrefix)
+
+    if ($honeyscore and $ipnode) {
+        $hretn = $priv.honeyscore($ip)
+        if (not $util.failed($hretn, `Honeyscore of {$ip}`)) {
+            $lib.print("slib.shodan: {ip} honeyscore: {score}", ip=$ip, score=$hretn.data)
+            if ($hretn.data >= $honeyThreshold()) {
+                $model.applyTags($ipnode, $tagPrefix, (honeypot,))
+            }
+        }
+    }
+
+    return($ipnode)
+}
+
+// Retrieve and model the DNS records for a domain. Returns a list of the subdomain inet:fqdn nodes.
+function domain(domain, history=(false), rtype=$lib.null, maxpages=(10)) {
+    $domain = $lib.cast(str, $domain)
+    $retn = $priv.dnsDomain($domain, history=$history, rtype=$rtype, maxpages=$maxpages)
+    if $util.failed($retn, `DNS lookup of {$domain}`) { return(([])) }
+
+    $data = $retn.data
+    for $rec in $data.records { $model.dnsRecordNode($rec) }
+
+    $domnode = $model.fqdnNode($domain)
+    $model.applyTags($domnode, $priv.tagPrefix(), $data.tags)
+
+    $nodes = ([])
+    for $sub in $data.subdomains {
+        $subnode = $model.fqdnNode(`{$sub}.{$domain}`)
+        if $subnode { $nodes.append($subnode) }
+    }
+
+    if $data.more {
+        $lib.warn("slib.shodan: {domain} has more DNS results than were retrieved, increase --pages.", domain=$domain)
+    }
+
+    return($nodes)
+}
+
+// Resolve a hostname to an IP. Returns the IP node, or null.
+function resolve(fqdn) {
+    $fqdn = $lib.cast(str, $fqdn)
+    $retn = $priv.dnsResolve(($fqdn,))
+    if $util.failed($retn, `DNS resolution of {$fqdn}`) { return($lib.null) }
+
+    $ip = $retn.data.$fqdn
+    if (not $ip) { return($lib.null) }
+
+    $model.dnsNode($fqdn, $ip)
+    return($model.ipNode($ip))
+}
+
+// Reverse resolve an IP to hostnames. Returns a list of the inet:fqdn nodes.
+function reverse(ip) {
+    $ip = $lib.cast(str, $ip)
+    $retn = $priv.dnsReverse(($ip,))
+    if $util.failed($retn, `Reverse DNS lookup of {$ip}`) { return(([])) }
+
+    $nodes = ([])
+    $hostnames = $retn.data.$ip
+    if (not $hostnames) { return($nodes) }
+
+    $ipnode = $model.ipNode($ip)
+    for $hostname in $hostnames {
+        $model.dnsNode($hostname, $ip)
+        $fqdnnode = $model.fqdnNode($hostname)
+        if $fqdnnode { $nodes.append($fqdnnode) }
+    }
+    if ($ipnode and $nodes) {
+        yield $ipnode
+        [ :dns:rev ?= $hostnames.0 ]
+    }
+
+    return($nodes)
+}
+
+// Retrieve and model a CVE from CVEDB. Returns the risk:vuln node, or null.
+function cve(cveid, cpes=(false)) {
+    $cveid = $lib.cast(str, $cveid).upper()
+    $retn = $priv.cve($cveid)
+    if $util.failed($retn, `CVEDB lookup of {$cveid}`) { return($lib.null) }
+    return($model.cve($retn.data, $priv.tagPrefix(), $cpes))
+}
+
+// Search CVEDB for CVEs affecting a CPE or product. Returns a list of risk:vuln nodes.
+function cves(cpe23=$lib.null, product=$lib.null, kev=(false), epss=(false), limit=(100),
+              start=$lib.null, end=$lib.null, cpes=(false)) {
+
+    $retn = $priv.cves(cpe23=$cpe23, product=$product, kev=$kev, epss=$epss,
+                       limit=$limit, start=$start, end=$end)
+    if $util.failed($retn, "CVEDB search") { return(([])) }
+
+    $tagPrefix = $priv.tagPrefix()
+    $nodes = ([])
+    for $c in $retn.data.cves {
+        $vuln = $model.cve($c, $tagPrefix, $cpes)
+        if $vuln { $nodes.append($vuln) }
+    }
+    return($nodes)
+}
+
+// Enrich any supported node with the best matching Shodan API. Returns a list of the resulting nodes.
+function enrich(node) {
+    switch $node.form() {
+        "inet:ipv4": { return(($host($node.repr()),)) }
+        "inet:ipv6": { return(($host($node.repr()),)) }
+        "inet:fqdn": { return($domain($node.repr())) }
+        "risk:vuln": {
+            $cveid = $node.props.cve
+            if $cveid { return(($cve($cveid),)) }
+            $lib.warn("slib.shodan: risk:vuln {iden} has no :cve to enrich.", iden=$node.iden())
+        }
+        "it:sec:cve": { return(($cve($node.repr()),)) }
+        "it:sec:cpe": { return($cves(cpe23=$node.repr())) }
+        *: {
+            $lib.warn("slib.shodan: The node form {form} is not supported.", form=$node.form())
+        }
+    }
+    return(([]))
+}

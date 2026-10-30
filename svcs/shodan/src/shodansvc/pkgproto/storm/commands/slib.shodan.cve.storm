@@ -1,0 +1,40 @@
+init {
+    $shodan = $lib.import(slib.shodan.lib)
+    $model = $lib.import(slib.shodan.model)
+    $search = ($cmdopts.cpe or $cmdopts.product)
+}
+
+if ($cmdopts.cve or $search) {
+    // --cve/--cpe/--product ignore inbound nodes.
+    spin |
+    for $cveid in $cmdopts.cve {
+        $vuln = $shodan.cve($cveid, cpes=$cmdopts.cpes)
+        if ($cmdopts.yield and $vuln) { yield $vuln }
+    }
+    if $search {
+        $vulns = $shodan.cves(cpe23=$cmdopts.cpe, product=$cmdopts.product, kev=$cmdopts.kev,
+                              epss=$cmdopts.epss, limit=$cmdopts.limit, start=$cmdopts.start,
+                              end=$cmdopts.end, cpes=$cmdopts.cpes)
+        $lib.print("slib.shodan.cve: Found {count} CVEs.", count=$lib.len($vulns))
+        if $cmdopts.yield { yield $model.nodes($vulns) }
+    }
+}
+else {
+    switch $node.form() {
+        "risk:vuln": {
+            if :cve { $results = ($shodan.cve(:cve, cpes=$cmdopts.cpes),) }
+            else { $results = ([]) }
+        }
+        "it:sec:cve": { $results = ($shodan.cve($node.repr(), cpes=$cmdopts.cpes),) }
+        "it:sec:cpe": {
+            $results = $shodan.cves(cpe23=$node.repr(), kev=$cmdopts.kev, epss=$cmdopts.epss,
+                                    limit=$cmdopts.limit, start=$cmdopts.start, end=$cmdopts.end,
+                                    cpes=$cmdopts.cpes)
+        }
+        *: {
+            $results = ([])
+            $lib.warn("slib.shodan.cve: The node form {form} is not supported.", form=$node.form())
+        }
+    }
+    divert $cmdopts.yield $model.nodes($results)
+}

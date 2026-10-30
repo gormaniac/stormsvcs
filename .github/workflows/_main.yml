@@ -8,21 +8,29 @@ on:
       - closed
   workflow_dispatch:
 
+# Called workflows can't have more permissions than their caller, so this must
+# allow everything the service pipelines need (packages: write to push images).
 permissions:
   contents: read
+  packages: write
 
 jobs:
   yarastorm:
-    if: github.event.pull_request.merged == true
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     uses: ./.github/workflows/yarastorm.yml
     secrets: inherit
 
   report-ingest:
-    if: github.event.pull_request.merged == true
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     uses: ./.github/workflows/report-ingest.yml
     secrets: inherit
 
   ip_api:
-    if: github.event.pull_request.merged == true
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     uses: ./.github/workflows/ip_api.yml
+    secrets: inherit
+
+  shodan:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+    uses: ./.github/workflows/shodan.yml
     secrets: inherit
