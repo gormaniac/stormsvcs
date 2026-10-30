@@ -1,1 +1,1 @@
-exec uv run --directory /opt/stormsvcs/yarastorm python -O -m yarastorm /vertex/storage
+exec uv run --no-sync --directory /opt/stormsvcs/yarastorm python -O -m yarastorm /vertex/storage

@@ -20,5 +20,5 @@ VOLUME /vertex/storage
 ENTRYPOINT ["tini", "--", "/opt/stormsvcs/yarastorm/entrypoint.sh"]
 
 HEALTHCHECK --start-period=10s --retries=1 --timeout=10s --interval=30s CMD \
-    uv run --directory /opt/stormsvcs/yarastorm \
+    uv run --no-sync --directory /opt/stormsvcs/yarastorm \
     python -m synapse.tools.service.healthcheck -c cell:///vertex/storage/
