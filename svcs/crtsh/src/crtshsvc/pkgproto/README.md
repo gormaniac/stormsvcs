@@ -34,14 +34,22 @@ service.add slib.crtsh tcp://<user>:<passwd>@<host>:27492/*
 
 The host needs outbound access to `crt.sh` on TCP 5432.
 
+crt.sh's database is behind PgBouncer, which allows **one connection per client** and drops
+idle clients quickly. The service uses a single connection, queues every query on it, keeps
+it alive while it's busy, closes it after `crtsh:idle` seconds, and reconnects with backoff
+when crt.sh refuses a new connection. While the service holds the connection, other clients
+on the same IP (ex. psql) are refused, and vice versa.
+
 ### Configuration
 
 | Option | Default | Description |
 |---|---|---|
 | `crtsh:dsn` | `postgresql://guest@crt.sh:5432/certwatch` | The database DSN (or a mirror's). |
-| `crtsh:poolsize` | `2` | Max connections. crt.sh limits connections per IP. |
-| `crtsh:timeout` | `120` | Seconds before a query times out. |
-| `crtsh:retries` | `2` | Retries for transient failures (replica conflicts, dropped connections). |
+| `crtsh:timeout` | `0` | Seconds before a query times out, `0` for none. crt.sh can be very slow. |
+| `crtsh:retries` | `3` | Retries when the connection drops mid-query. |
+| `crtsh:keepalive` | `10` | Seconds between keepalive pings while the connection is in use. |
+| `crtsh:idle` | `300` | Seconds without a query before the connection is closed. |
+| `crtsh:connect:timeout` | `300` | Seconds to keep retrying (with backoff) when crt.sh refuses a connection. |
 | `crtsh:limit` | `10000` | Max certificates any call returns. |
 | `crtsh:candidates` | `10000` | Max full text search candidates a search filters. |
 

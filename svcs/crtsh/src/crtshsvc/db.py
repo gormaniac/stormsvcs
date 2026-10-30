@@ -25,13 +25,15 @@ Everything else about a certificate is parsed from its DER by ``crtshsvc.norm``.
 ``certificate_and_identities`` view parses every certificate it touches, so
 searches use the indexed ``identities()`` full text search on ``certificate``.
 
-``CrtshDb`` is the only class that talks to PostgreSQL. Tests swap it for a fake
-with the same methods.
+``CrtshDb`` is the only class that talks to PostgreSQL, over a single queued
+connection (crt.sh allows one per client, see its docstring). Tests swap it for a
+fake with the same methods.
 """
 
 
 import asyncio
 import logging
+import random
 import re
 from collections.abc import Iterable
 from typing import Any
@@ -58,7 +60,7 @@ NAME_TYPES = {
 }
 """The certificate_and_identities NAME_TYPEs (as crt.sh's web_apis uses them) of each search field."""
 
-NOTAFTER_KEY ="coalesce(x509_notAfter(c.CERTIFICATE), 'infinity'::timestamp)"
+NOTAFTER_KEY = "coalesce(x509_notAfter(c.CERTIFICATE), 'infinity'::timestamp)"
 """The expression ``certificate`` is range partitioned (by year) on."""
 
 # Unique (or near unique) certificate identifiers and the indexed expression crt.sh matches them on.
@@ -74,18 +76,20 @@ LOOKUPS = {
 }
 """Certificate lookup kinds, mapped to the WHERE clause that finds them."""
 
-# Errors worth retrying: the replica cancels queries that conflict with replication,
-# and crt.sh drops connections when it's overloaded.
-RETRY_ERRORS = (
-    asyncpg.exceptions.SerializationError,
+# Errors that mean the connection is gone (crt.sh's PgBouncer drops idle clients with
+# "client_idle_timeout"), the query is retried on a new connection.
+CONN_ERRORS = (
     asyncpg.exceptions.ConnectionDoesNotExistError,
-    asyncpg.exceptions.CannotConnectNowError,
-    asyncpg.exceptions.TooManyConnectionsError,
     asyncpg.exceptions.InterfaceError,
     ConnectionError,
     OSError,
-    asyncio.TimeoutError,
 )
+
+# Messages from crt.sh's PgBouncer (or Postgres) that mean "reconnect", or "back off, then reconnect".
+RECONNECT_MESGS = ("client_idle_timeout", "server conn crashed", "server_login_retry",
+                   "query_wait_timeout", "terminating connection")
+BACKOFF_MESGS = ("max_client_conn", "too many connections", "the database system is starting up",
+                 "the database system is in recovery mode", "cannot connect now")
 
 
 class CrtshDbError(Exception):
@@ -94,6 +98,11 @@ class CrtshDbError(Exception):
     def __init__(self, mesg: str):
         super().__init__(mesg)
         self.mesg = mesg
+
+
+def _mesgIn(err: BaseException, mesgs: tuple[str, ...]) -> bool:
+    text = str(err).lower()
+    return any(mesg in text for mesg in mesgs)
 
 
 def _filters(valid: bool = False, since: int | None = None, until: int | None = None,
@@ -143,68 +152,161 @@ def likeEscape(text: str) -> str:
 
 
 class CrtshDb:
-    """A small pool of connections to the crt.sh database.
+    """A single, queued connection to the crt.sh database.
 
-    Connections are opened on first use, so the service starts even when crt.sh
-    is unreachable. Every method returns rows as plain dicts.
+    crt.sh's database sits behind PgBouncer, which only allows one connection per
+    client and drops idle clients quickly (``client_idle_timeout``). So:
+
+    - Every query runs on one connection, queued behind an ``asyncio.Lock`` (FIFO).
+    - The connection is opened on first use (the service starts even when crt.sh is
+      unreachable) and kept alive with ``SELECT 1`` every ``keepalive`` seconds while
+      it's in use. After ``idle`` seconds without a query it's closed, freeing the
+      single slot (ex. for psql from the same IP).
+    - A dropped connection is reopened and the query retried. Reconnecting right after
+      a drop is often refused (``max_client_conn``) until crt.sh notices the old one
+      is gone, so connecting backs off (with jitter) for up to ``connect_timeout`` seconds.
+    - Queries have no timeout unless ``timeout`` is set, crt.sh can be very slow.
+
+    Every query method returns rows as plain dicts.
     """
 
-    def __init__(self, dsn: str = DEFAULT_DSN, poolsize: int = 2, timeout: float = 120,
-                 retries: int = 2):
+    def __init__(self, dsn: str = DEFAULT_DSN, timeout: float | None = None, retries: int = 3,
+                 keepalive: float = 10, idle: float = 300, connect_timeout: float = 300,
+                 backoff: float = 1.0, connect=None):
         self.dsn = dsn
-        self.poolsize = poolsize
-        self.timeout = timeout
+        self.timeout = timeout or None
         self.retries = retries
-        self._pool: asyncpg.Pool | None = None
+        self.keepalive = keepalive
+        self.idle = idle
+        self.connect_timeout = connect_timeout
+        self.backoff = backoff
+        self._connectFn = connect or asyncpg.connect
+
+        self._conn: asyncpg.Connection | None = None
         self._lock = asyncio.Lock()
+        self._lastUsed = 0.0
+        self._keeper: asyncio.Task | None = None
+        self._closed = False
 
-    async def pool(self) -> asyncpg.Pool:
-        """Get (creating it if needed) the connection pool."""
+    # ---- Connection management ----
 
-        async with self._lock:
-            if self._pool is None:
-                try:
-                    # crt.sh is a hot standby replica, statements are run outside transactions
-                    # and prepared statements aren't cached since most queries are one-offs.
-                    self._pool = await asyncpg.create_pool(
-                        self.dsn, min_size=0, max_size=self.poolsize,
-                        command_timeout=self.timeout, statement_cache_size=0,
-                        timeout=min(self.timeout, 30),
-                    )
-                except Exception as err:
+    async def _connectOnce(self) -> asyncpg.Connection:
+        # PgBouncer may pool by transaction, so no prepared statements are cached, and
+        # the read-only replica means statements run outside explicit transactions.
+        return await self._connectFn(self.dsn, statement_cache_size=0, timeout=30)
+
+    async def _connect(self) -> asyncpg.Connection:
+        """Open the connection, backing off while crt.sh refuses it."""
+
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self.connect_timeout
+        delay = self.backoff
+        while True:
+            try:
+                conn = await self._connectOnce()
+                logger.debug("Connected to the crt.sh database.")
+                return conn
+            except Exception as err:
+                transient = (_mesgIn(err, BACKOFF_MESGS + RECONNECT_MESGS)
+                             or isinstance(err, (*CONN_ERRORS, asyncio.TimeoutError,
+                                                 asyncpg.exceptions.CannotConnectNowError,
+                                                 asyncpg.exceptions.TooManyConnectionsError)))
+                if not transient or loop.time() + delay > deadline:
                     raise CrtshDbError(f"Unable to connect to the crt.sh database: {err}") from err
-            return self._pool
+                logger.info("crt.sh refused the connection (%s), retrying in %.1fs.", err, delay)
+                await asyncio.sleep(delay + random.uniform(0, delay))
+                delay = min(delay * 2, 30 * self.backoff)
+
+    async def _ensure(self) -> asyncpg.Connection:
+        """The open connection, (re)connecting if needed. Must hold the lock."""
+
+        if self._conn is None or self._conn.is_closed():
+            self._conn = await self._connect()
+            if self._keeper is None or self._keeper.done():
+                self._keeper = asyncio.get_running_loop().create_task(self._keepalive())
+        return self._conn
+
+    async def _drop(self) -> None:
+        """Close the connection without raising. Must hold the lock."""
+
+        conn, self._conn = self._conn, None
+        if conn is not None and not conn.is_closed():
+            try:
+                await asyncio.wait_for(conn.close(), timeout=5)
+            except Exception:
+                conn.terminate()
+
+    async def _keepalive(self) -> None:
+        """Ping the connection so PgBouncer doesn't drop it, until it's been idle too long."""
+
+        loop = asyncio.get_running_loop()
+        while not self._closed:
+            await asyncio.sleep(self.keepalive)
+            if self._lock.locked():
+                continue  # A query is running, the connection isn't idle.
+            async with self._lock:
+                if self._conn is None or self._conn.is_closed():
+                    return
+                if loop.time() - self._lastUsed >= self.idle:
+                    logger.debug("Closing the idle crt.sh connection.")
+                    await self._drop()
+                    return
+                try:
+                    await self._conn.fetchval("SELECT 1", timeout=30)
+                except Exception as err:
+                    # Reconnect lazily on the next query.
+                    logger.debug("crt.sh keepalive failed, dropping the connection: %s", err)
+                    await self._drop()
+                    return
 
     async def close(self) -> None:
-        """Close the connection pool."""
+        """Close the connection and stop the keepalive."""
 
-        if self._pool is not None:
-            await self._pool.close()
-            self._pool = None
+        self._closed = True
+        if self._keeper is not None:
+            self._keeper.cancel()
+            self._keeper = None
+        async with self._lock:
+            await self._drop()
 
     async def fetch(self, sql: str, *args) -> list[dict]:
-        """Run a query (retrying transient failures) and return its rows as dicts."""
+        """Queue a query, run it (reconnecting and retrying when the connection drops), and
+        return its rows as dicts."""
 
-        for attempt in range(self.retries + 1):
-            try:
-                pool = await self.pool()
-                async with pool.acquire() as conn:
-                    rows = await conn.fetch(sql, *args)
-                return [dict(row) for row in rows]
-            except CrtshDbError:
-                raise
-            except asyncpg.exceptions.QueryCanceledError as err:
-                raise CrtshDbError(
-                    f"crt.sh canceled the query (statement timeout), try a narrower search: {err}"
-                ) from err
-            except RETRY_ERRORS as err:
+        loop = asyncio.get_running_loop()
+        async with self._lock:
+            for attempt in range(self.retries + 1):
+                conn = await self._ensure()
+                self._lastUsed = loop.time()
+                try:
+                    rows = await conn.fetch(sql, *args, timeout=self.timeout)
+                    return [dict(row) for row in rows]
+                except asyncpg.exceptions.QueryCanceledError as err:
+                    raise CrtshDbError(
+                        f"crt.sh canceled the query (statement timeout), try a narrower search: {err}"
+                    ) from err
+                except asyncio.TimeoutError as err:
+                    # The connection is mid-query, it can't be reused.
+                    await self._drop()
+                    raise CrtshDbError(f"crt.sh query timed out after {self.timeout}s.") from err
+                except asyncpg.exceptions.SerializationError as err:
+                    # The replica canceled the query to apply replication, just retry it.
+                    retry = err
+                except Exception as err:
+                    if not (isinstance(err, CONN_ERRORS) or _mesgIn(err, RECONNECT_MESGS + BACKOFF_MESGS)):
+                        if isinstance(err, asyncpg.PostgresError):
+                            raise CrtshDbError(f"crt.sh query failed: {err}") from err
+                        raise
+                    retry = err
+                    await self._drop()
+                finally:
+                    self._lastUsed = loop.time()
+
                 if attempt >= self.retries:
-                    raise CrtshDbError(f"crt.sh query failed: {err}") from err
-                logger.warning("crt.sh query failed (attempt %d), retrying: %s", attempt + 1, err)
-                await asyncio.sleep(2 ** attempt)
-            except asyncpg.PostgresError as err:
-                raise CrtshDbError(f"crt.sh query failed: {err}") from err
+                    raise CrtshDbError(f"crt.sh query failed: {retry}") from retry
+                logger.warning("crt.sh query failed (attempt %d), retrying: %s", attempt + 1, retry)
         raise CrtshDbError("crt.sh query failed.")  # pragma: no cover
+
 
     # ---- Certificates ----
 

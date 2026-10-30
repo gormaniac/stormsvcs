@@ -135,23 +135,42 @@ class CrtshSvc(s_cell.Cell):
             "default": DEFAULT_DSN,
             "description": "The PostgreSQL DSN of the crt.sh certwatch database (or a mirror of it).",
         },
-        "crtsh:poolsize": {
-            "type": "integer",
-            "default": 2,
-            "description": (
-                "Max simultaneous connections to crt.sh. crt.sh limits connections per IP, "
-                "keep this small."
-            ),
-        },
         "crtsh:timeout": {
             "type": "number",
-            "default": 120,
-            "description": "Seconds before a single query times out.",
+            "default": 0,
+            "description": (
+                "Seconds before a single query times out, 0 for no timeout. crt.sh is slow, "
+                "big searches can take minutes."
+            ),
         },
         "crtsh:retries": {
             "type": "integer",
-            "default": 2,
-            "description": "How many times to retry a query that failed for a transient reason.",
+            "default": 3,
+            "description": "How many times to retry a query when the connection drops.",
+        },
+        "crtsh:keepalive": {
+            "type": "number",
+            "default": 10,
+            "description": (
+                "Seconds between keepalive pings while the connection is in use. crt.sh drops "
+                "idle clients quickly (client_idle_timeout)."
+            ),
+        },
+        "crtsh:idle": {
+            "type": "number",
+            "default": 300,
+            "description": (
+                "Seconds without a query before the connection is closed. crt.sh only allows one "
+                "connection per client, closing it frees it for others from the same IP."
+            ),
+        },
+        "crtsh:connect:timeout": {
+            "type": "number",
+            "default": 300,
+            "description": (
+                "Seconds to keep retrying (with backoff) when crt.sh refuses a connection, "
+                "ex. max_client_conn right after a dropped connection."
+            ),
         },
         "crtsh:limit": {
             "type": "integer",
@@ -173,9 +192,11 @@ class CrtshSvc(s_cell.Cell):
 
         self.db = CrtshDb(
             dsn=self.conf.get("crtsh:dsn"),
-            poolsize=self.conf.get("crtsh:poolsize"),
             timeout=self.conf.get("crtsh:timeout"),
             retries=self.conf.get("crtsh:retries"),
+            keepalive=self.conf.get("crtsh:keepalive"),
+            idle=self.conf.get("crtsh:idle"),
+            connect_timeout=self.conf.get("crtsh:connect:timeout"),
         )
         self.onfini(self.db.close)
 
