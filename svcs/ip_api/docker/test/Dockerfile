@@ -7,5 +7,5 @@ COPY tests /opt/stormsvcs/ip_api/tests
 # Don't resync the production venv since it already exists in the service's prod image.
 RUN uv sync --only-dev --locked --directory /opt/stormsvcs/ip_api
 
-COPY docker/tests/entrypoint.sh /opt/stormsvcs/ip_api/entrypoint.sh
+COPY docker/test/entrypoint.sh /opt/stormsvcs/ip_api/entrypoint.sh
 RUN chmod +x /opt/stormsvcs/ip_api/entrypoint.sh
