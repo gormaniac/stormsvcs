@@ -1,0 +1,56 @@
+init {
+    $crtsh = $lib.import(slib.crtsh.lib)
+    $util = $lib.import(slib.crtsh.util)
+
+    $opts = ({
+        "dns": $cmdopts.dns,
+        "cn": $cmdopts.cn,
+        "org": $cmdopts.org,
+        "ou": $cmdopts.ou,
+        "email": $cmdopts.email,
+        "ip": $cmdopts.ip,
+        "uri": $cmdopts.uri,
+        "subject": $cmdopts.subject,
+        "identity": $cmdopts.identity,
+        "issuer": $cmdopts.issuer,
+        "caids": $cmdopts.caid,
+        "exact": $cmdopts.exact,
+        "valid": $cmdopts.valid,
+        "since": $util.toTime($cmdopts.since),
+        "until": $util.toTime($cmdopts.until),
+        "precerts": (not $cmdopts.no_precerts),
+        "limit": $cmdopts.limit,
+    })
+
+    // Any search option means inbound nodes are ignored.
+    $explicit = $lib.false
+    for $field in (dns, cn, org, ou, email, ip, uri, subject, identity, issuer, caids) {
+        if $opts.$field { $explicit = $lib.true }
+    }
+}
+
+if $explicit {
+    spin |
+    for $n in $crtsh.search($opts, chain=$cmdopts.chain) { yield $n }
+}
+else {
+    $field = $lib.null
+    $valu = $node.repr()
+    switch $node.form() {
+        "inet:fqdn": { $field = dns }
+        "inet:email": { $field = email }
+        "inet:ipv4": { $field = ip }
+        "inet:ipv6": { $field = ip }
+        "inet:url": { $field = uri }
+        "ou:name": { $field = org }
+        "ou:org": { $field = org $valu = :name }
+    }
+    if (not $field or not $valu) {
+        $lib.warn("slib.crtsh.search: Unable to search for {form} {repr}.",
+                  form=$node.form(), repr=$node.repr())
+        spin
+    }
+    divert (true) $crtsh.search($util.withKey($opts, $field, $valu), chain=$cmdopts.chain)
+}
+
+| uniq

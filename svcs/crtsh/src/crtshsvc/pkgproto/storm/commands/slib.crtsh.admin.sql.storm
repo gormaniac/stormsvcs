@@ -1,0 +1,10 @@
+init {
+    $privadmin = $lib.import(slib.crtsh.priv.admin)
+    $util = $lib.import(slib.crtsh.util)
+
+    $retn = $privadmin.rawQuery($cmdopts.sql, args=$cmdopts.args)
+    if (not $util.failed($retn, "Query")) {
+        $lib.print("{count} rows", count=$lib.len($retn.data))
+        $util.printJson($retn.data)
+    }
+}

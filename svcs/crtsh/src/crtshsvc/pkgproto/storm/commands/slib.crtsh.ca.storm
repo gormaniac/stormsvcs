@@ -1,0 +1,45 @@
+init {
+    $crtsh = $lib.import(slib.crtsh.lib)
+    $model = $lib.import(slib.crtsh.model)
+    $priv = $lib.import(slib.crtsh.priv.user)
+    $util = $lib.import(slib.crtsh.util)
+
+    if (not $cmdopts.name and not $cmdopts.id) {
+        $lib.raise(BadArg, "slib.crtsh.ca requires a CA name or --id.")
+    }
+
+    $retn = $priv.cas(name=$cmdopts.name, caids=$cmdopts.id, certs=$cmdopts.certs, limit=$cmdopts.limit)
+    $cas = ([])
+    if (not $util.failed($retn, "Finding CAs")) { $cas = $retn.data }
+
+    $rows = ([])
+    $caids = ([])
+    for $ca in $cas {
+        $rows.append(($ca.id, $lib.len($ca.certs), $ca.name))
+        $caids.append($ca.id)
+    }
+    if $rows {
+        $util.table(([["ca id", 10], ["certs", 6], ["name", 100]]), $rows)
+    } else {
+        $lib.print("slib.crtsh.ca: No matching CAs.")
+    }
+}
+
+spin |
+
+if $cmdopts.certs {
+    $tagPrefix = $priv.tagPrefix()
+    for $ca in $cas {
+        for $c in $ca.certs { yield $model.cert($c, $tagPrefix) }
+    }
+}
+
+if ($cmdopts.issued and $caids) {
+    for $n in $crtsh.issued(caids=$caids, valid=$cmdopts.valid, since=$util.toTime($cmdopts.since),
+                            until=$util.toTime($cmdopts.until), precerts=(not $cmdopts.no_precerts),
+                            limit=$cmdopts.limit, chain=$cmdopts.chain) {
+        yield $n
+    }
+}
+
+| uniq

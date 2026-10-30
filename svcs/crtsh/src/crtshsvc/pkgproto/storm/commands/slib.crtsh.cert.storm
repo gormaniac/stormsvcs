@@ -1,0 +1,28 @@
+init {
+    $crtsh = $lib.import(slib.crtsh.lib)
+    $util = $lib.import(slib.crtsh.util)
+    $opts = ({"kind": $cmdopts.type, "limit": $cmdopts.limit, "chain": $cmdopts.chain})
+}
+
+if $cmdopts.valus {
+    // Values ignore inbound nodes.
+    spin |
+    for $n in $crtsh.lookup($cmdopts.valus, kind=$opts.kind, limit=$opts.limit, chain=$opts.chain) {
+        yield $n
+    }
+}
+else {
+    switch $node.form() {
+        "crypto:x509:cert": { $key = $util.certKey($node) }
+        "hash:sha256": { $key = (sha256, $node.repr()) }
+        "hash:sha1": { $key = (sha1, $node.repr()) }
+        *: { $key = $lib.null }
+    }
+    if ($key = $lib.null) {
+        $lib.warn("slib.crtsh.cert: Unable to look up {form} {repr}, it needs a SHA-256 or SHA-1.",
+                  form=$node.form(), repr=$node.repr())
+        spin
+    }
+    ($kind, $valu) = $key
+    divert $cmdopts.yield $crtsh.lookup(($valu,), kind=$kind, limit=$opts.limit, chain=$opts.chain)
+}

@@ -1,0 +1,373 @@
+name: slib.crtsh
+version: 0.1.0
+guid: 5dd9492c3e05485eb09964fa9508b23f
+
+synapse_minversion: [2, 137, 0]
+
+genopts:
+    dotstorm: true
+
+author:
+  url: https://github.com/gormaniac
+  name: John Gorman
+
+desc: A Storm Service that queries the crt.sh certificate transparency database directly to look up, search, and pivot on X.509 certificates.
+
+docs:
+  - title: README
+    path: README.md
+
+perms:
+  - perm: [ slib, crtsh, user ]
+    gate: cortex
+    desc: Look up, search, and pivot on crt.sh certificates and model the results.
+  - perm: [ slib, crtsh, admin ]
+    gate: cortex
+    desc: Manage tag settings and run raw SQL against the crt.sh database.
+
+modules:
+  # Privileged modules - the only modules that talk to the service.
+  - name: slib.crtsh.priv.user
+    asroot:perms:
+      - [ slib, crtsh, user ]
+  - name: slib.crtsh.priv.admin
+    asroot:perms:
+      - [ slib, crtsh, admin ]
+
+  # Unprivileged modules - node edits here run as the calling user.
+  - name: slib.crtsh.lib
+    perms:
+      - [ slib, crtsh, user ]
+  - name: slib.crtsh.model
+    perms:
+      - [ slib, crtsh, user ]
+  - name: slib.crtsh.util
+
+commands:
+
+  - name: slib.crtsh.cert
+    perms:
+      - [ slib, crtsh, user ]
+    descr: |
+      Look up certificates in crt.sh by a unique identifier and model their complete details.
+
+      Values are crt.sh IDs, SHA-256, or SHA-1 fingerprints unless --type says otherwise.
+      Serials, SKIs, keys, and subjects can match many certificates (up to --limit).
+
+      Examples:
+
+        slib.crtsh.cert 12337892544 --yield
+
+        slib.crtsh.cert 0a1b2c3d4e5f --type serial
+
+        crypto:x509:cert | slib.crtsh.cert --chain
+    cmdargs:
+      - - valus
+        - type: str
+          nargs: "*"
+          help: Identifiers to look up instead of using the inbound nodes.
+      - - --type
+        - type: str
+          default: null
+          choices: [ id, sha256, sha1, serial, ski, spki, spkisha1, subjectsha1 ]
+          help: The identifier type. Guessed (id, sha256, sha1) by default.
+      - - --limit
+        - type: int
+          default: 100
+          help: The max number of certificates per lookup.
+      - - --chain
+        - default: false
+          action: store_true
+          help: Also model each certificate's chain up to its root(s).
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the crypto:x509:cert nodes instead of the inbound nodes.
+    forms:
+      input:
+        - crypto:x509:cert
+        - hash:sha256
+        - hash:sha1
+      output:
+        - crypto:x509:cert
+
+  - name: slib.crtsh.search
+    perms:
+      - [ slib, crtsh, user ]
+    descr: |
+      Search crt.sh certificates by their properties and model the complete details of every match.
+      Yields the crypto:x509:cert nodes, newest first.
+
+      Every given option must match. --dns matches the domain and its subdomains, the other
+      text options match substrings. --exact requires whole values. Without options, inbound
+      inet:fqdn, inet:email, inet:ipv4/6, inet:url, ou:name, and ou:org nodes are searched for.
+
+      Examples:
+
+        slib.crtsh.search --dns vertex.link --valid
+
+        slib.crtsh.search --org "Vertex Project" --issuer "Let's Encrypt" --since 2025-01-01
+
+        inet:fqdn=vertex.link | slib.crtsh.search --no-precerts
+    cmdargs:
+      - - --dns
+        - type: str
+          default: null
+          help: A domain in the SAN or CN (includes subdomains unless --exact).
+      - - --cn
+        - type: str
+          default: null
+          help: The subject common name.
+      - - --org
+        - type: str
+          default: null
+          help: The subject organization.
+      - - --ou
+        - type: str
+          default: null
+          help: The subject organizational unit.
+      - - --email
+        - type: str
+          default: null
+          help: An email address in the SAN or subject.
+      - - --ip
+        - type: str
+          default: null
+          help: An IP address in the SAN.
+      - - --uri
+        - type: str
+          default: null
+          help: A URI in the SAN.
+      - - --subject
+        - type: str
+          default: null
+          help: The full subject DN.
+      - - --identity
+        - type: str
+          default: null
+          help: Any identity (SAN or subject attribute), like crt.sh's own search.
+      - - --issuer
+        - type: str
+          default: null
+          help: The issuing CA's name.
+      - - --caid
+        - type: int
+          action: append
+          default: []
+          help: An issuing crt.sh CA ID. May be used multiple times.
+      - - --exact
+        - default: false
+          action: store_true
+          help: Values must match whole field values.
+      - - --valid
+        - default: false
+          action: store_true
+          help: Only unexpired certificates.
+      - - --since
+        - type: str
+          default: null
+          help: Only certificates issued (notBefore) on or after this time (ex. 2025-01-01, "-30 days").
+      - - --until
+        - type: str
+          default: null
+          help: Only certificates issued (notBefore) before this time.
+      - - --no-precerts
+        - default: false
+          action: store_true
+          help: Exclude precertificates.
+      - - --limit
+        - type: int
+          default: 100
+          help: The max number of certificates to model.
+      - - --chain
+        - default: false
+          action: store_true
+          help: Also model each certificate's chain up to its root(s).
+    forms:
+      input:
+        - inet:fqdn
+        - inet:email
+        - inet:ipv4
+        - inet:ipv6
+        - inet:url
+        - ou:name
+        - ou:org
+      output:
+        - crypto:x509:cert
+
+  - name: slib.crtsh.pivot
+    perms:
+      - [ slib, crtsh, user ]
+    descr: |
+      Pivot from certificates to related certificates in crt.sh and model them.
+
+        issued    certificates issued by this (CA) certificate's CA
+        siblings  other certificates issued by the same CA
+        key       certificates with the same public key
+        subject   certificates with the same subject name
+        serial    certificates with the same serial (ex. the precert/cert pair)
+        ski       certificates with the same subject key identifier
+
+      Examples:
+
+        crypto:x509:cert#my.ca | slib.crtsh.pivot --by issued --valid --limit 500
+
+        crypto:x509:cert=* | slib.crtsh.pivot --by key
+    cmdargs:
+      - - --by
+        - type: str
+          required: true
+          choices: [ issued, siblings, key, subject, serial, ski ]
+          help: How to pivot.
+      - - --cert
+        - type: str
+          action: append
+          default: []
+          help: A crt.sh ID, SHA-256, or SHA-1 to pivot from instead of the inbound nodes.
+      - - --valid
+        - default: false
+          action: store_true
+          help: Only unexpired certificates.
+      - - --no-precerts
+        - default: false
+          action: store_true
+          help: Exclude precertificates.
+      - - --limit
+        - type: int
+          default: 100
+          help: The max number of certificates to model per inbound certificate.
+      - - --chain
+        - default: false
+          action: store_true
+          help: Also model each certificate's chain up to its root(s).
+    forms:
+      input:
+        - crypto:x509:cert
+      output:
+        - crypto:x509:cert
+
+  - name: slib.crtsh.chain
+    perms:
+      - [ slib, crtsh, user ]
+    descr: |
+      Model every chain from certificates up to their roots and yield every certificate in them.
+
+      A CA can have several certificates (cross-signs, reissues), so a certificate may have
+      several chains. Each certificate's :issuer:cert is set to its preferred parent.
+
+      Examples:
+
+        crypto:x509:cert:sha256=<sha256> | slib.crtsh.chain --print
+
+        slib.crtsh.chain --cert 12337892544
+    cmdargs:
+      - - --cert
+        - type: str
+          action: append
+          default: []
+          help: A crt.sh ID, SHA-256, or SHA-1 to build the chain of instead of the inbound nodes.
+      - - --print
+        - default: false
+          action: store_true
+          help: Print each chain.
+    forms:
+      input:
+        - crypto:x509:cert
+      output:
+        - crypto:x509:cert
+
+  - name: slib.crtsh.ca
+    perms:
+      - [ slib, crtsh, user ]
+    descr: |
+      Find crt.sh CAs by name or ID and print them. Optionally model their certificates
+      or the certificates they issued.
+
+      Examples:
+
+        slib.crtsh.ca "Let's Encrypt"
+
+        slib.crtsh.ca --id 183267 --issued --valid --limit 1000
+    cmdargs:
+      - - name
+        - type: str
+          nargs: "?"
+          default: null
+          help: A substring of the CA's name (its DN).
+      - - --id
+        - type: int
+          action: append
+          default: []
+          help: A crt.sh CA ID. May be used multiple times.
+      - - --certs
+        - default: false
+          action: store_true
+          help: Model and yield the CAs' own certificates.
+      - - --issued
+        - default: false
+          action: store_true
+          help: Model and yield the certificates the CAs issued.
+      - - --valid
+        - default: false
+          action: store_true
+          help: With --issued, only unexpired certificates.
+      - - --since
+        - type: str
+          default: null
+          help: With --issued, only certificates issued on or after this time.
+      - - --until
+        - type: str
+          default: null
+          help: With --issued, only certificates issued before this time.
+      - - --no-precerts
+        - default: false
+          action: store_true
+          help: With --issued, exclude precertificates.
+      - - --limit
+        - type: int
+          default: 100
+          help: The max number of CAs, and of issued certificates.
+      - - --chain
+        - default: false
+          action: store_true
+          help: With --issued, also model each certificate's chain.
+    forms:
+      output:
+        - crypto:x509:cert
+
+  - name: slib.crtsh.admin.tags
+    perms:
+      - [ slib, crtsh, admin ]
+    descr: |
+      Configure the tags slib.crtsh applies (precert, revoked, ca, root). Tags are
+      "<prefix>.<tag>", the default prefix is "rep.crtsh". Prints the settings without options.
+    cmdargs:
+      - - --prefix
+        - type: str
+          default: null
+          help: The tag prefix to use.
+      - - --enable
+        - default: false
+          action: store_true
+          help: Enable tagging.
+      - - --disable
+        - default: false
+          action: store_true
+          help: Disable tagging.
+
+  - name: slib.crtsh.admin.sql
+    perms:
+      - [ slib, crtsh, admin ]
+    descr: |
+      Run raw (read-only) SQL against the crt.sh database and print the rows as JSON.
+
+      Examples:
+
+        slib.crtsh.admin.sql "SELECT id, name FROM ca WHERE id = $1" --args (183267,)
+    cmdargs:
+      - - sql
+        - type: str
+          help: The SQL to run.
+      - - --args
+        - default: null
+          help: A list of positional query arguments.
