@@ -47,7 +47,18 @@ DEFAULT_DSN = "postgresql://guest@crt.sh:5432/certwatch"
 
 CERT_COLS = "c.ID AS id, c.ISSUER_CA_ID AS issuer_ca_id, c.CERTIFICATE AS der"
 
-NOTAFTER_KEY = "coalesce(x509_notAfter(c.CERTIFICATE), 'infinity'::timestamp)"
+NAME_TYPES = {
+    "dns": ["san:dNSName", "2.5.4.3"],
+    "cn": ["2.5.4.3"],
+    "org": ["2.5.4.10"],
+    "ou": ["2.5.4.11"],
+    "email": ["san:rfc822Name", "1.2.840.113549.1.9.1"],
+    "ip": ["san:iPAddress"],
+    "uri": ["san:uniformResourceIdentifier"],
+}
+"""The certificate_and_identities NAME_TYPEs (as crt.sh's web_apis uses them) of each search field."""
+
+NOTAFTER_KEY ="coalesce(x509_notAfter(c.CERTIFICATE), 'infinity'::timestamp)"
 """The expression ``certificate`` is range partitioned (by year) on."""
 
 # Unique (or near unique) certificate identifiers and the indexed expression crt.sh matches them on.
@@ -125,6 +136,12 @@ def tsquery(text: str) -> str:
     return text.replace("%", " ").replace("*", " ").strip()
 
 
+def likeEscape(text: str) -> str:
+    """Escape text so it's matched literally in a LIKE/ILIKE pattern."""
+
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 class CrtshDb:
     """A small pool of connections to the crt.sh database.
 
@@ -199,19 +216,28 @@ class CrtshDb:
         sql = f"SELECT {CERT_COLS} FROM certificate c WHERE {LOOKUPS[kind]} LIMIT $2"
         return await self.fetch(sql, list(valus), limit)
 
-    async def certsByIdentity(self, text: str, caids: list[int] | None = None, valid: bool = False,
-                              since: int | None = None, until: int | None = None,
-                              limit: int = 1000) -> list[dict]:
-        """Full text search certificate identities (subject attributes and SANs).
+    async def certsByIdentity(self, text: str, like: str | None = None,
+                              nametypes: list[str] | None = None, caids: list[int] | None = None,
+                              valid: bool = False, since: int | None = None,
+                              until: int | None = None, limit: int = 1000) -> list[dict]:
+        """Search certificate identities (subject attributes and SANs) like crt.sh does.
 
-        This is how crt.sh's own identity search works. Matches are only candidates,
-        the service filters them by the exact field and match type. Like crt.sh, the
-        candidates are an arbitrary subset (not the newest) when there are more than
-        ``limit``.
+        ``text`` is full text searched with the indexed ``identities()``. With ``like``
+        (an ILIKE pattern) and/or ``nametypes`` (see ``NAME_TYPES``), each candidate's
+        individual identities are also matched in the ``certificate_and_identities``
+        view before the limit is applied, exactly like crt.sh's own search, so the
+        limit counts real matches. Like crt.sh, the results are an arbitrary subset
+        (not the newest) when there are more than ``limit``.
         """
 
-        clauses = ["identities(c.CERTIFICATE) @@ plainto_tsquery('certwatch', $1)"]
         args: list[Any] = [tsquery(text)]
+        clauses = ["plainto_tsquery('certwatch', $1) @@ identities(c.CERTIFICATE)"]
+        if like is not None:
+            args.append(like)
+            clauses.append(f"c.NAME_VALUE ILIKE ${len(args)}")
+        if nametypes:
+            args.append(list(nametypes))
+            clauses.append(f"c.NAME_TYPE = ANY(${len(args)}::text[])")
         if caids:
             args.append(list(caids))
             clauses.append(f"c.ISSUER_CA_ID = ANY(${len(args)}::int[])")
@@ -219,9 +245,18 @@ class CrtshDb:
         clauses.extend(more)
         args.extend(margs)
         args.append(limit)
+        where = " AND ".join(clauses)
 
-        sql = (f"SELECT {CERT_COLS} FROM certificate c WHERE {' AND '.join(clauses)} "
-               f"LIMIT ${len(args)}")
+        if like is None and not nametypes:
+            # Only the full text search, no need to parse every candidate's identities.
+            sql = f"SELECT {CERT_COLS} FROM certificate c WHERE {where} LIMIT ${len(args)}"
+        else:
+            # A certificate has a row per matching identity, group them back into one.
+            sql = ("SELECT sub.CERTIFICATE_ID AS id, sub.ISSUER_CA_ID AS issuer_ca_id, "
+                   "sub.CERTIFICATE AS der FROM ("
+                   "SELECT c.CERTIFICATE_ID, c.ISSUER_CA_ID, c.CERTIFICATE "
+                   f"FROM certificate_and_identities c WHERE {where} LIMIT ${len(args)}"
+                   ") sub GROUP BY sub.CERTIFICATE_ID, sub.ISSUER_CA_ID, sub.CERTIFICATE")
         return await self.fetch(sql, *args)
 
     async def certsByIssuer(self, caids: list[int], valid: bool = False, since: int | None = None,
@@ -261,7 +296,7 @@ class CrtshDb:
     async def casByName(self, name: str, limit: int = 100) -> list[dict]:
         """CAs whose name (an issuer DN) contains ``name``, case insensitive."""
 
-        pattern = "%" + name.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        pattern = "%" + likeEscape(name) + "%"
         sql = ("SELECT ca.ID AS id, ca.NAME AS name FROM ca WHERE ca.NAME ILIKE $1 "
                "ORDER BY ca.ID LIMIT $2")
         return await self.fetch(sql, pattern, limit)

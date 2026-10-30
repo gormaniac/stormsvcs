@@ -7,6 +7,7 @@ wraps them in the standard ``TelepathRetn`` convention for Storm.
 """
 
 
+import ipaddress
 import re
 from collections.abc import AsyncIterator, Iterable
 from typing import Any
@@ -15,7 +16,7 @@ import synapse.lib.cell as s_cell
 
 from . import norm
 from .api import CrtshCellApi
-from .db import DEFAULT_DSN, LOOKUPS, CrtshDb, CrtshDbError
+from .db import DEFAULT_DSN, LOOKUPS, NAME_TYPES, CrtshDb, CrtshDbError, likeEscape
 
 
 DETAIL_BATCH = 100
@@ -42,6 +43,38 @@ def _serialVariants(serial: bytes) -> list[bytes]:
     if serial not in variants:
         variants.append(serial)
     return variants
+
+
+def identityQuery(field: str, valu: str, exact: bool = False) -> tuple[str, str | None]:
+    """The full text search text and identity ILIKE pattern for a search field.
+
+    Returns ``(text, like)``. ``like`` is None for fields that aren't a single
+    identity (``subject``, a whole DN).
+    """
+
+    valu = valu.strip()
+    if field == "subject":
+        return valu, None
+
+    if field == "ip":
+        # crt.sh renders IPv6 SANs uncompressed, as ":2001:DB8:0:0:0:0:0:1".
+        try:
+            addr = ipaddress.ip_address(valu)
+        except ValueError:
+            raise CrtshDbError(f"Invalid IP address: {valu}") from None
+        if addr.version == 6:
+            valu = ":" + ":".join(format(int(g, 16), "X") for g in addr.exploded.split(":"))
+        else:
+            valu = str(addr)
+        return valu, likeEscape(valu)
+
+    pattern = likeEscape(valu.lstrip("*").lstrip(".") if field == "dns" else valu)
+    if exact:
+        return valu, pattern
+    if field == "dns":
+        # The domain itself, its subdomains, and wildcards for it.
+        return valu, "%" + pattern
+    return valu, "%" + pattern + "%"
 
 
 def lookupValu(kind: str, valu: Any) -> list:
@@ -306,12 +339,14 @@ class CrtshSvc(s_cell.Cell):
             raise CrtshDbError("A search needs at least one certificate field or an issuer.")
 
         if fields:
-            # Full text search on the most specific field, then filter on every field.
-            text = next(fields[k] for k in ("dns", "email", "ip", "cn", "uri", "org", "ou",
-                                            "subject", "identity") if k in fields)
+            # Search crt.sh on the most specific field, then filter on every field.
+            field = next(k for k in ("dns", "email", "ip", "cn", "uri", "org", "ou",
+                                     "subject", "identity") if k in fields)
+            text, like = identityQuery(field, fields[field], exact)
             candidates = min(max(limit * 5, 500), self.conf.get("crtsh:candidates"))
-            rows = await self.db.certsByIdentity(text, caids=caids or None, valid=valid,
-                                                 since=since, until=until, limit=candidates)
+            rows = await self.db.certsByIdentity(text, like=like, nametypes=NAME_TYPES.get(field),
+                                                 caids=caids or None, valid=valid, since=since,
+                                                 until=until, limit=candidates)
         else:
             rows = await self.db.certsByIssuer(caids, valid=valid, since=since, until=until,
                                                limit=limit)
