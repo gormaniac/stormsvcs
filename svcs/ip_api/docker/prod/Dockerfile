@@ -20,4 +20,5 @@ RUN chmod +x /opt/stormsvcs/ip_api/entrypoint.sh
 ENTRYPOINT ["tini", "--", "/opt/stormsvcs/ip_api/entrypoint.sh"]
 
 HEALTHCHECK --start-period=10s --retries=1 --timeout=10s --interval=30s CMD \
+    uv run --no-sync --directory /opt/stormsvcs/ip_api \
     python -m synapse.tools.service.healthcheck -c cell:///vertex/storage/
