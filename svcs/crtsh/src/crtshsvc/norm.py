@@ -169,17 +169,16 @@ def _generalName(gname: x509.GeneralName) -> tuple[str, str] | None:
 def normPublicKey(cert: x509.Certificate) -> dict:
     """Normalize a certificate's public key, including its SPKI hashes for pivoting."""
 
-    spki = cert.public_key_info_bytes() if hasattr(cert, "public_key_info_bytes") else None
     retn: dict[str, Any] = {"algo": None, "size": None}
 
     try:
         key = cert.public_key()
     except Exception:
-        key = None
+        # A key type cryptography doesn't support, only the certificate's hashes are known.
+        return retn
 
-    if spki is None and key is not None:
-        spki = key.public_bytes(serialization.Encoding.DER,
-                                serialization.PublicFormat.SubjectPublicKeyInfo)
+    spki = key.public_bytes(serialization.Encoding.DER,
+                            serialization.PublicFormat.SubjectPublicKeyInfo)
 
     if isinstance(key, rsa.RSAPublicKey):
         nums = key.public_numbers()
@@ -193,18 +192,10 @@ def normPublicKey(cert: x509.Certificate) -> dict:
     elif isinstance(key, ed448.Ed448PublicKey):
         retn.update(algo="ed448", size=456)
 
-    if spki is not None:
-        retn["spki"] = hexBytes(spki)
-        retn["sha256"] = hashlib.sha256(spki).hexdigest()
-        retn["sha1"] = hashlib.sha1(spki).hexdigest()
+    retn["spki"] = hexBytes(spki)
+    retn["sha256"] = hashlib.sha256(spki).hexdigest()
+    retn["sha1"] = hashlib.sha1(spki).hexdigest()
     return retn
-
-
-def _ext(cert: x509.Certificate, oid: x509.ObjectIdentifier):
-    try:
-        return cert.extensions.get_extension_for_oid(oid)
-    except x509.ExtensionNotFound:
-        return None
 
 
 def _extensions(cert: x509.Certificate) -> list:
@@ -398,11 +389,11 @@ def parseCert(der: bytes) -> dict:
     }
 
 
-def certDetails(row: dict, extra: dict | None = None) -> dict:
+def certDetails(row: dict) -> dict:
     """Build the full details of a certificate from a crt.sh ``certificate`` row.
 
-    ``row`` has ``id``, ``issuer_ca_id``, and ``der``. ``extra`` holds the crt.sh
-    metadata fetched for the certificate (issuer CA, CT log entries, revocation).
+    ``row`` has ``id``, ``issuer_ca_id``, and ``der``. The crt.sh metadata (issuer CA
+    name, CT log entries, revocation, CA IDs) is filled in later by the service.
     A certificate that can't be parsed still returns its hashes and crt.sh info,
     with an ``error`` explaining why.
     """
@@ -421,14 +412,14 @@ def certDetails(row: dict, extra: dict | None = None) -> dict:
             "error": f"Unable to parse certificate: {err}",
         }
 
-    extra = extra or {}
     details["crtsh"] = {
         "id": row["id"],
         "url": f"{CRTSH_URL}?id={row['id']}",
-        "issuer": {"id": row["issuer_ca_id"], "name": extra.get("issuerName")},
-        "ctlog": extra.get("ctlog", []),
-        "revoked": extra.get("revoked"),
-        "caids": extra.get("caids", []),
+        "issuer": {"id": row["issuer_ca_id"], "name": None},
+        "ctlog": [],
+        "logged": None,
+        "revoked": None,
+        "caids": [],
     }
     return details
 
@@ -465,7 +456,7 @@ def ctlogEntry(row: dict) -> dict:
 def matches(details: dict, field: str, valu: str, mode: str = "contains") -> bool:
     """Whether a parsed certificate's ``field`` matches ``valu``.
 
-    ``field`` is one of the search fields (see ``SEARCH_FIELDS``) and ``mode`` is
+    ``field`` is one of the search fields (see ``fieldValues``) and ``mode`` is
     ``exact``, ``contains``, or ``suffix`` (for domains: the domain or any subdomain).
     """
 
@@ -510,8 +501,4 @@ def fieldValues(details: dict, field: str) -> list[str]:
         vals = [v for _, v in sans] + [v for vs in attrs.values() for v in vs]
         return vals + [subject["dn"]]
     raise ValueError(f"Unknown search field: {field}")
-
-
-SEARCH_FIELDS = ("dns", "cn", "org", "ou", "email", "ip", "uri", "subject", "identity")
-"""The certificate fields that can be searched."""
 

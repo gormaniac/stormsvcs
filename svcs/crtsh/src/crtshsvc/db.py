@@ -186,7 +186,6 @@ class CrtshDb:
         self._lock = asyncio.Lock()
         self._lastUsed = 0.0
         self._keeper: asyncio.Task | None = None
-        self._closed = False
 
     # ---- Connection management ----
 
@@ -240,7 +239,7 @@ class CrtshDb:
         """Ping the connection so PgBouncer doesn't drop it, until it's been idle too long."""
 
         loop = asyncio.get_running_loop()
-        while not self._closed:
+        while True:  # Until the connection is dropped, or close() cancels this.
             await asyncio.sleep(self.keepalive)
             if self._lock.locked():
                 continue  # A query is running, the connection isn't idle.
@@ -262,7 +261,6 @@ class CrtshDb:
     async def close(self) -> None:
         """Close the connection and stop the keepalive."""
 
-        self._closed = True
         if self._keeper is not None:
             self._keeper.cancel()
             self._keeper = None
@@ -363,15 +361,24 @@ class CrtshDb:
 
     async def certsByIssuer(self, caids: list[int], valid: bool = False, since: int | None = None,
                             until: int | None = None, limit: int = 1000) -> list[dict]:
-        """Certificates issued by any of the CAs, newest first."""
+        """The newest ``limit`` certificates issued by each of the CAs.
 
-        clauses = ["c.ISSUER_CA_ID = ANY($1::int[])"]
+        Each CA is queried on its own with ``ISSUER_CA_ID = $1``: crt.sh runs
+        PostgreSQL 12, which can only walk the ``(ISSUER_CA_ID, x509_notBefore)``
+        index newest first for a single CA. With ``= ANY(...)`` it reads and sorts
+        every certificate the CAs ever issued, which times out for big CAs.
+        """
+
+        clauses = ["c.ISSUER_CA_ID = $1"]
         more, margs = _filters(valid, since, until, argn=2)
         clauses.extend(more)
-        args = [list(caids), *margs, limit]
         sql = (f"SELECT {CERT_COLS} FROM certificate c WHERE {' AND '.join(clauses)} "
-               f"ORDER BY x509_notBefore(c.CERTIFICATE) DESC LIMIT ${len(args)}")
-        return await self.fetch(sql, *args)
+               f"ORDER BY x509_notBefore(c.CERTIFICATE) DESC LIMIT ${len(margs) + 2}")
+
+        rows: list[dict] = []
+        for caid in caids:
+            rows.extend(await self.fetch(sql, caid, *margs, limit))
+        return rows
 
     async def caCerts(self, caids: list[int]) -> list[dict]:
         """The certificates for CAs (roots, intermediates, and cross-signs). Rows include ``ca_id``."""

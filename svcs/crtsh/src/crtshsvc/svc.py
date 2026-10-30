@@ -54,7 +54,10 @@ def identityQuery(field: str, valu: str, exact: bool = False) -> tuple[str, str 
 
     valu = valu.strip()
     if field == "subject":
-        return valu, None
+        # identities() only indexes attribute values, not their names, so "O=Vertex, CN=x"
+        # is searched as "Vertex x". The service matches the whole DN afterwards.
+        text = re.sub(r"(^|[,+])\s*[A-Za-z0-9][\w.-]*\s*=", " ", valu)
+        return " ".join(text.split()), None
 
     if field == "ip":
         # crt.sh renders IPv6 SANs uncompressed, as ":2001:DB8:0:0:0:0:0:1".
@@ -211,11 +214,8 @@ class CrtshSvc(s_cell.Cell):
     async def _meta(self, items: list[tuple[dict, dict]]) -> None:
         """Fill in each certificate's crt.sh metadata (issuer CA name, CT logs, revocation, CA IDs).
 
-        ``items`` is a list of (row, details) tuples, the details are updated in place.
+        ``items`` is a non-empty list of (row, details) tuples, the details are updated in place.
         """
-
-        if not items:
-            return
 
         certids = [row["id"] for row, _ in items]
         issuerids = sorted({row["issuer_ca_id"] for row, _ in items})
@@ -240,9 +240,8 @@ class CrtshSvc(s_cell.Cell):
 
         revoked = {}
         for rev in await self.db.revoked(pairs):
-            certid = serials.get((rev["ca_id"], bytes(rev["serial_number"])))
-            if certid is not None:
-                revoked[certid] = norm.revocation(rev)
+            # The query only returns the (CA, serial) pairs it was given.
+            revoked[serials[(rev["ca_id"], bytes(rev["serial_number"]))]] = norm.revocation(rev)
 
         for row, details in items:
             info = details["crtsh"]
@@ -267,12 +266,12 @@ class CrtshSvc(s_cell.Cell):
         return [d async for d in self._detailGenr(self._parse(rows))]
 
     @staticmethod
-    def _parse(rows: Iterable[dict], unique: bool = True) -> list[tuple[dict, dict]]:
+    def _parse(rows: Iterable[dict]) -> list[tuple[dict, dict]]:
         """Parse certificate rows into (row, details) tuples, dropping duplicates."""
 
         seen, items = set(), []
         for row in rows:
-            if unique and row["id"] in seen:
+            if row["id"] in seen:
                 continue
             seen.add(row["id"])
             items.append((row, norm.certDetails(row)))
@@ -407,10 +406,12 @@ class CrtshSvc(s_cell.Cell):
         if not caids:
             raise CrtshDbError("A CA ID or certificate is required.")
 
+        limit = self._limit(limit)
+        # Most certificates have a precertificate twin, fetch enough to fill the limit without them.
         rows = await self.db.certsByIssuer(sorted(set(caids)), valid=valid, since=since,
-                                           until=until, limit=self._limit(limit))
+                                           until=until, limit=limit if precerts else limit * 2)
         items = [i for i in self._parse(rows) if precerts or not i[1].get("precert")]
-        async for details in self._detailGenr(items):
+        async for details in self._detailGenr(self._sort(items)[:limit]):
             yield details
 
     async def pivotGenr(self, valu, by: str, kind: str | None = None, valid: bool = False,
