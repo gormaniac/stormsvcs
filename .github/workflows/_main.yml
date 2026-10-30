@@ -1,11 +1,10 @@
 name: Main Merge Pipeline
 
+# Tests, builds, and publishes every service's image on each push to main
+# (a merged PR is a push to main), regardless of which service changed.
 on:
-  pull_request:
-    branches:
-      - main
-    types:
-      - closed
+  push:
+    branches: [main]
   workflow_dispatch:
 
 # Called workflows can't have more permissions than their caller, so this must
@@ -16,21 +15,13 @@ permissions:
 
 jobs:
   yarastorm:
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     uses: ./.github/workflows/yarastorm.yml
     secrets: inherit
 
-  report-ingest:
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
-    uses: ./.github/workflows/report-ingest.yml
-    secrets: inherit
-
   ip_api:
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     uses: ./.github/workflows/ip_api.yml
     secrets: inherit
 
   shodan:
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     uses: ./.github/workflows/shodan.yml
     secrets: inherit
