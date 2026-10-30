@@ -18,11 +18,14 @@ else {
         "hash:sha1": { $key = (sha1, $node.repr()) }
         *: { $key = $lib.null }
     }
+    // Statements after an if block still run for a node spun inside it, so the work is in the else.
     if ($key = $lib.null) {
         $lib.warn("slib.crtsh.cert: Unable to look up {form} {repr}, it needs a SHA-256 or SHA-1.",
                   form=$node.form(), repr=$node.repr())
         spin
+    } else {
+        ($kind, $valu) = $key
+        divert $cmdopts.yield $util.nodes($crtsh.lookup(($valu,), kind=$kind, limit=$opts.limit,
+                                                        chain=$opts.chain))
     }
-    ($kind, $valu) = $key
-    divert $cmdopts.yield $crtsh.lookup(($valu,), kind=$kind, limit=$opts.limit, chain=$opts.chain)
 }

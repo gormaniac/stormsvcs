@@ -15,7 +15,6 @@ function tagPrefix() {
 // Lookups
 
 function lookup(kind, valus, limit=(100)) { return($svc.lookup($kind, $valus, limit=$limit)) }
-function get(valu, kind=$lib.null) { return($svc.get($valu, kind=$kind)) }
 function chain(valu, kind=$lib.null) { return($svc.chain($valu, kind=$kind)) }
 
 function cas(name=$lib.null, caids=$lib.null, certs=(false), limit=(100)) {

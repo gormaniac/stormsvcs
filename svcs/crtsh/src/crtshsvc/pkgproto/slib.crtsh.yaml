@@ -363,7 +363,9 @@ commands:
 
       Examples:
 
-        slib.crtsh.admin.sql "SELECT id, name FROM ca WHERE id = $1" --args (183267,)
+        slib.crtsh.admin.sql "SELECT id, name FROM ca WHERE id = $1" --args ((183267),)
+
+        // Arguments must be the type the SQL expects, ((183267),) is an int, (183267,) a str.
     cmdargs:
       - - sql
         - type: str

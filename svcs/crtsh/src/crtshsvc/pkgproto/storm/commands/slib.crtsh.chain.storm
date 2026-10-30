@@ -36,13 +36,15 @@ if $cmdopts.cert {
 else {
     $key = $lib.null
     if ($node.form() = "crypto:x509:cert") { $key = $util.certKey($node) }
+    // Statements after an if block still run for a node spun inside it, so the work is in the else.
     if ($key = $lib.null) {
         $lib.warn("slib.crtsh.chain: Unable to build the chain of {form} {repr}, it needs a crypto:x509:cert with a SHA-256 or SHA-1.",
                   form=$node.form(), repr=$node.repr())
         spin
+    } else {
+        ($kind, $valu) = $key
+        divert (true) $util.nodes($chainNodes($valu, $kind, $cmdopts.print))
     }
-    ($kind, $valu) = $key
-    divert (true) $chainNodes($valu, $kind, $cmdopts.print)
 }
 
 | uniq

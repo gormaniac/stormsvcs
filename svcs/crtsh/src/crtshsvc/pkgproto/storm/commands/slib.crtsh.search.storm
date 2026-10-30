@@ -45,12 +45,14 @@ else {
         "ou:name": { $field = org }
         "ou:org": { $field = org $valu = :name }
     }
+    // Statements after an if block still run for a node spun inside it, so the work is in the else.
     if (not $field or not $valu) {
         $lib.warn("slib.crtsh.search: Unable to search for {form} {repr}.",
                   form=$node.form(), repr=$node.repr())
         spin
+    } else {
+        divert (true) $util.nodes($crtsh.search($util.withKey($opts, $field, $valu), chain=$cmdopts.chain))
     }
-    divert (true) $crtsh.search($util.withKey($opts, $field, $valu), chain=$cmdopts.chain)
 }
 
 | uniq

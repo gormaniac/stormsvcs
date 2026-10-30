@@ -47,3 +47,9 @@ function certKey(n) {
     if $sha1 { return((sha1, $sha1)) }
     return($lib.null)
 }
+
+// Yield the nodes a generator emits. divert needs a node generator (one that yields nodes),
+// the slib.crtsh.lib functions emit them.
+function nodes(items) {
+    for $item in $items { yield $item }
+}
