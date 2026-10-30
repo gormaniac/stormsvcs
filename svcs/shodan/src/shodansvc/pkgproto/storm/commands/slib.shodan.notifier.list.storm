@@ -1,0 +1,19 @@
+init {
+    $privalert = $lib.import(slib.shodan.priv.alert)
+    $util = $lib.import(slib.shodan.util)
+
+    if $cmdopts.id {
+        $retn = $privalert.notifierGet($cmdopts.id)
+        if (not $util.failed($retn, `Retrieving notifier {$cmdopts.id}`)) { $util.printJson($retn.data) }
+    } else {
+        $retn = $privalert.notifiers()
+        if (not $util.failed($retn, "Listing notifiers")) {
+            $lib.print("Total notifiers: {total}", total=$retn.data.total)
+            $rows = ([])
+            for $notifier in $retn.data.matches {
+                $rows.append(($notifier.id, $notifier.provider, $notifier.description))
+            }
+            $util.table(([["id", 18], ["provider", 16], ["description", 60]]), $rows)
+        }
+    }
+}

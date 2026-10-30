@@ -1,0 +1,9 @@
+init {
+    $privscan = $lib.import(slib.shodan.priv.scan)
+    $util = $lib.import(slib.shodan.util)
+
+    $retn = $privscan.scanInternet($cmdopts.port, $cmdopts.protocol)
+    if (not $util.failed($retn, "Submitting the Internet scan")) {
+        $lib.print("slib.shodan.scan.internet: Submitted scan {id}.", id=$retn.data.id)
+    }
+}

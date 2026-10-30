@@ -1,0 +1,31 @@
+function printAlert(alert) {
+    $lib.print(`Alert {$alert.id} - {$alert.name}`)
+    $lib.print(`  Created: {$alert.created}  Expires: {$alert.expires}  Expired: {$alert.expired}`)
+    $lib.print(`  IPs: {(", ").join($alert.filters.ip)}`)
+    if $alert.triggers {
+        $trigs = ([])
+        for ($name, $info) in $alert.triggers { $trigs.append($name) }
+        $lib.print(`  Triggers: {(", ").join($trigs)}`)
+    }
+    if $alert.notifiers {
+        $nids = ([])
+        for $notifier in $alert.notifiers { $nids.append($notifier.id) }
+        $lib.print(`  Notifiers: {(", ").join($nids)}`)
+    }
+}
+
+init {
+    $privalert = $lib.import(slib.shodan.priv.alert)
+    $util = $lib.import(slib.shodan.util)
+
+    if $cmdopts.id {
+        $retn = $privalert.alertInfo(aid=$cmdopts.id)
+        if (not $util.failed($retn, `Retrieving alert {$cmdopts.id}`)) { $printAlert($retn.data) }
+    } else {
+        $retn = $privalert.alertInfo(expired=(not $cmdopts.active))
+        if (not $util.failed($retn, "Listing alerts")) {
+            if (not $retn.data) { $lib.print("No network alerts.") }
+            for $alert in $retn.data { $printAlert($alert) }
+        }
+    }
+}

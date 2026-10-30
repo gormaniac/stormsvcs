@@ -1,0 +1,28 @@
+init {
+    $vault = $lib.vault.bytype(shodan, scope=user)
+
+    if $cmdopts.clear {
+        if $vault {
+            $vault.delete()
+            $lib.print("slib.shodan: Deleted your Shodan API key.")
+        } else {
+            $lib.print("slib.shodan: You don't have a Shodan API key set.")
+        }
+    }
+    elif (not $cmdopts.apikey) {
+        if $vault {
+            $lib.print("slib.shodan: Your Shodan API key is set in vault {name}.", name=$vault.name)
+        } else {
+            $lib.print("slib.shodan: You don't have a Shodan API key set.")
+        }
+    }
+    elif $vault {
+        $vault.secrets.apikey = $cmdopts.apikey
+        $lib.print("slib.shodan: Updated your Shodan API key.")
+    }
+    else {
+        $name = `shodan:{$lib.user.name()}`
+        $lib.vault.add($name, shodan, user, $lib.user.iden, ({"apikey": $cmdopts.apikey}), ({}))
+        $lib.print("slib.shodan: Saved your Shodan API key in vault {name}.", name=$name)
+    }
+}

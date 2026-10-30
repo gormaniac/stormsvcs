@@ -1,0 +1,41 @@
+init {
+    $priv = $lib.import(slib.shodan.priv.user)
+    $util = $lib.import(slib.shodan.util)
+
+    if $cmdopts.filters {
+        $retn = $priv.trendsFilters()
+        if (not $util.failed($retn, "Listing Trends filters")) {
+            $lib.print("Filters: {filters}", filters=(", ").join($retn.data))
+        }
+        $retn = $priv.trendsFacets()
+        if (not $util.failed($retn, "Listing Trends facets")) {
+            $lib.print("Facets: {facets}", facets=(", ").join($retn.data))
+        }
+    }
+    elif (not $cmdopts.query) {
+        $lib.raise(BadArg, "slib.shodan.trends requires a query (or --filters).")
+    }
+    else {
+        $retn = $priv.trendsSearch($cmdopts.query, facets=$cmdopts.facets)
+        if (not $util.failed($retn, "Trends search")) {
+            $lib.print("Total results: {total}", total=$retn.data.total)
+
+            $rows = ([])
+            for $month in $retn.data.matches {
+                $rows.append(($month.month, $month.count))
+            }
+            if $rows { $util.table(([["month", 10], ["count", 14]]), $rows) }
+
+            // Trends facets are broken down by month.
+            for ($facet, $months) in $retn.data.facets {
+                for $month in $months {
+                    $lib.print("")
+                    $lib.print(`{$facet} - {$month.key}`)
+                    $rows = ([])
+                    for $val in $month.values { $rows.append(($val.value, $val.count)) }
+                    $util.table(([["value", 40], ["count", 14]]), $rows)
+                }
+            }
+        }
+    }
+}

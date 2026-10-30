@@ -1,0 +1,65 @@
+init {
+    $priv = $lib.import(slib.shodan.priv.user)
+    $util = $lib.import(slib.shodan.util)
+
+    switch $cmdopts.name {
+        ports: {
+            $retn = $priv.ports()
+            if (not $util.failed($retn, "Listing ports")) {
+                $lib.print((", ").join($retn.data))
+            }
+        }
+        protocols: {
+            $retn = $priv.protocols()
+            if (not $util.failed($retn, "Listing protocols")) {
+                $rows = ([])
+                for ($name, $desc) in $retn.data { $rows.append(($name, $desc)) }
+                $util.table(([["protocol", 24], ["description", 80]]), $rows)
+            }
+        }
+        services: {
+            $retn = $priv.services()
+            if (not $util.failed($retn, "Listing services")) {
+                $rows = ([])
+                for ($port, $name) in $retn.data { $rows.append(($port, $name)) }
+                $util.table(([["port", 8], ["service", 40]]), $rows)
+            }
+        }
+        filters: {
+            $retn = $priv.searchFilters()
+            if (not $util.failed($retn, "Listing search filters")) {
+                $lib.print((", ").join($retn.data))
+            }
+        }
+        facets: {
+            $retn = $priv.searchFacets()
+            if (not $util.failed($retn, "Listing search facets")) {
+                $lib.print((", ").join($retn.data))
+            }
+        }
+        triggers: {
+            $retn = $priv.alertTriggers()
+            if (not $util.failed($retn, "Listing alert triggers")) {
+                $rows = ([])
+                for $trig in $retn.data { $rows.append(($trig.name, $trig.rule, $trig.description)) }
+                $util.table(([["trigger", 24], ["rule", 30], ["description", 60]]), $rows)
+            }
+        }
+        providers: {
+            $retn = $priv.notifierProviders()
+            if (not $util.failed($retn, "Listing notifier providers")) {
+                $rows = ([])
+                for ($name, $info) in $retn.data {
+                    $rows.append(($name, (", ").join($info.required)))
+                }
+                $util.table(([["provider", 20], ["required args", 60]]), $rows)
+            }
+        }
+        httpheaders: {
+            $retn = $priv.httpHeaders()
+            if (not $util.failed($retn, "Retrieving HTTP headers")) {
+                for ($name, $valu) in $retn.data { $lib.print(`{$name}: {$valu}`) }
+            }
+        }
+    }
+}

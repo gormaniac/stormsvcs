@@ -1,0 +1,63 @@
+init {
+    $privscan = $lib.import(slib.shodan.priv.scan)
+    // Ingesting results needs slib.shodan.user, only require it when waiting for results.
+    if ($cmdopts.wait > 0) { $shodan = $lib.import(slib.shodan.lib) }
+    $util = $lib.import(slib.shodan.util)
+
+    // Scan every target in one request so there is a single scan ID to track.
+    $targets = ([])
+    for $ip in $cmdopts.ip { $targets.append($ip) }
+}
+
+// Inbound nodes are collected and scanned together in the fini block.
+switch $node.form() {
+    "inet:ipv4": { $targets.append($node.repr()) }
+    "inet:ipv6": { $targets.append($node.repr()) }
+    "inet:cidr4": { $targets.append($node.repr()) }
+    "inet:cidr6": { $targets.append($node.repr()) }
+    *: { $lib.warn("slib.shodan.scan: The node form {form} is not supported.", form=$node.form()) }
+}
+
+function doScan(targets) {
+    if (not $targets) {
+        $lib.warn("slib.shodan.scan: Nothing to scan, use inbound nodes or --ip.")
+        return()
+    }
+
+    $retn = $privscan.scan($targets, force=$cmdopts.force)
+    if $util.failed($retn, "Submitting the scan") { return() }
+
+    $scanid = $retn.data.id
+    $lib.print("slib.shodan.scan: Submitted scan {id} for {count} IPs, {left} scan credits left.",
+        id=$scanid, count=$retn.data.count, left=$retn.data.credits_left)
+
+    if ($cmdopts.wait <= 0) { return() }
+
+    $status = $lib.null
+    $deadline = ($lib.time.now() + ($cmdopts.wait * 1000))
+    while ($lib.time.now() < $deadline) {
+        $sretn = $privscan.scanStatus($scanid)
+        if $util.failed($sretn, `Checking scan {$scanid}`) { return() }
+        $status = $sretn.data.status
+        if ($status = "DONE") { break }
+        $lib.time.sleep(10)
+    }
+
+    if ($status != "DONE") {
+        $lib.warn("slib.shodan.scan: Scan {id} is still {status}, check it with slib.shodan.scan.status.",
+            id=$scanid, status=$status)
+        return()
+    }
+
+    $lib.print("slib.shodan.scan: Scan {id} is done, ingesting results.", id=$scanid)
+    for $target in $targets {
+        if ($target ~= "/") {
+            $lib.warn("slib.shodan.scan: Not ingesting netblock {target}, use slib.shodan.search \"net:{target}\".",
+                target=$target)
+            continue
+        }
+        $shodan.host($target)
+    }
+}
+
+fini { $doScan($targets) }

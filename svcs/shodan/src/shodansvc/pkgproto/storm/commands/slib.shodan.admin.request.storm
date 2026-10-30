@@ -1,0 +1,8 @@
+init {
+    $privadmin = $lib.import(slib.shodan.priv.admin)
+    $util = $lib.import(slib.shodan.util)
+
+    $retn = $privadmin.rawRequest($cmdopts.path, method=$cmdopts.method, base=$cmdopts.base,
+                                  params=$cmdopts.params, json=$cmdopts.json)
+    if (not $util.failed($retn, `{$cmdopts.method} {$cmdopts.path}`)) { $util.printJson($retn.data) }
+}

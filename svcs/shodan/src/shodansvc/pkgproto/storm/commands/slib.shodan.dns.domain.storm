@@ -1,0 +1,18 @@
+init {
+    $shodan = $lib.import(slib.shodan.lib)
+    $model = $lib.import(slib.shodan.model)
+    $opts = ({"history": $cmdopts.history, "rtype": $cmdopts.type, "maxpages": $cmdopts.pages})
+}
+
+if $cmdopts.domain {
+    // --domain ignores inbound nodes.
+    spin |
+    for $domain in $cmdopts.domain {
+        $subs = $shodan.domain($domain, history=$opts.history, rtype=$opts.rtype, maxpages=$opts.maxpages)
+        if $cmdopts.yield { yield $model.nodes($subs) }
+    }
+}
+else {
+    divert $cmdopts.yield $model.nodes($shodan.domain($node.repr(), history=$opts.history,
+                                                       rtype=$opts.rtype, maxpages=$opts.maxpages))
+}

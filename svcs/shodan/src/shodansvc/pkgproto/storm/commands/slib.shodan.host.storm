@@ -1,0 +1,31 @@
+init {
+    $shodan = $lib.import(slib.shodan.lib)
+    $model = $lib.import(slib.shodan.model)
+    $opts = ({
+        "history": $cmdopts.history,
+        "minify": $cmdopts.minify,
+        "internetdb": $cmdopts.internetdb,
+    })
+}
+
+if $cmdopts.ip {
+    // --ip ignores inbound nodes.
+    spin |
+    for $ip in $cmdopts.ip {
+        $ipnode = $shodan.host($ip, history=$opts.history, minify=$opts.minify,
+                               internetdb=$opts.internetdb)
+        if ($cmdopts.yield and $ipnode) { yield $ipnode }
+    }
+}
+else {
+    switch $node.form() {
+        "inet:ipv4": { }
+        "inet:ipv6": { }
+        *: {
+            $lib.warn("slib.shodan.host: The node form {form} is not supported.", form=$node.form())
+            spin
+        }
+    }
+    divert $cmdopts.yield $model.nodes(($shodan.host($node.repr(), history=$opts.history, minify=$opts.minify,
+                                                     internetdb=$opts.internetdb),))
+}

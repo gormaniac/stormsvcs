@@ -1,0 +1,31 @@
+init {
+    $privadmin = $lib.import(slib.shodan.priv.admin)
+    $util = $lib.import(slib.shodan.util)
+
+    for $user in $cmdopts.add {
+        $retn = $privadmin.orgMemberAdd($user, notify=$cmdopts.notify)
+        if (not $util.failed($retn, `Adding {$user}`)) {
+            $lib.print("slib.shodan.admin.org: Added {user}.", user=$user)
+        }
+    }
+
+    for $user in $cmdopts.remove {
+        $retn = $privadmin.orgMemberDel($user)
+        if (not $util.failed($retn, `Removing {$user}`)) {
+            $lib.print("slib.shodan.admin.org: Removed {user}.", user=$user)
+        }
+    }
+
+    if (not ($cmdopts.add or $cmdopts.remove)) {
+        $retn = $privadmin.org()
+        if (not $util.failed($retn, "Retrieving the organization")) {
+            $org = $retn.data
+            $lib.print(`Organization: {$org.name} ({$org.id})`)
+            $lib.print(`  Upgrade type: {$org.upgrade_type}  Domains: {(", ").join($org.domains)}`)
+            $lib.print("  Admins:")
+            for $admin in $org.admins { $lib.print(`    {$admin.username} {$admin.email}`) }
+            $lib.print("  Members:")
+            for $member in $org.members { $lib.print(`    {$member.username} {$member.email}`) }
+        }
+    }
+}

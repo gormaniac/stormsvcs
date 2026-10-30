@@ -1,0 +1,11 @@
+init {
+    $privalert = $lib.import(slib.shodan.priv.alert)
+    $util = $lib.import(slib.shodan.util)
+
+    for $aid in $cmdopts.ids {
+        $retn = $privalert.alertDelete($aid)
+        if (not $util.failed($retn, `Deleting alert {$aid}`)) {
+            $lib.print("slib.shodan.alert.del: Deleted alert {aid}.", aid=$aid)
+        }
+    }
+}

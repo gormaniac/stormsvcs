@@ -1,0 +1,93 @@
+// Split a "<trigger>/<ip>:<port>" value. Returns null (and warns) if it is malformed.
+function splitService(valu) {
+    $parts = $valu.split("/", maxsplit=(1))
+    if ($lib.len($parts) != 2) {
+        $lib.warn("slib.shodan.alert.edit: {valu} is not in the format <trigger>/<ip>:<port>.", valu=$valu)
+        return($lib.null)
+    }
+    return($parts)
+}
+
+function editAlert(aid, ips) {
+    if $ips {
+        if $cmdopts.append {
+            $retn = $privalert.alertInfo(aid=$aid)
+            if $util.failed($retn, `Retrieving alert {$aid}`) { return() }
+            for $ip in $retn.data.filters.ip {
+                if (not $ips.has($ip)) { $ips.append($ip) }
+            }
+        }
+        $retn = $privalert.alertEdit($aid, $ips)
+        if (not $util.failed($retn, "Updating the alert's IPs")) {
+            $lib.print("slib.shodan.alert.edit: Alert {aid} now monitors {count} IPs/netblocks.",
+                aid=$aid, count=$lib.len($ips))
+        }
+    }
+
+    for $trigger in $cmdopts.enable {
+        $retn = $privalert.alertTriggerEnable($aid, $trigger)
+        if (not $util.failed($retn, `Enabling trigger {$trigger}`)) {
+            $lib.print("slib.shodan.alert.edit: Enabled trigger {trigger}.", trigger=$trigger)
+        }
+    }
+
+    for $trigger in $cmdopts.disable {
+        $retn = $privalert.alertTriggerDisable($aid, $trigger)
+        if (not $util.failed($retn, `Disabling trigger {$trigger}`)) {
+            $lib.print("slib.shodan.alert.edit: Disabled trigger {trigger}.", trigger=$trigger)
+        }
+    }
+
+    for $valu in $cmdopts.ignore {
+        $parts = $splitService($valu)
+        if $parts {
+            $retn = $privalert.alertTriggerIgnore($aid, $parts.0, $parts.1)
+            if (not $util.failed($retn, `Ignoring {$valu}`)) {
+                $lib.print("slib.shodan.alert.edit: Ignoring {valu}.", valu=$valu)
+            }
+        }
+    }
+
+    for $valu in $cmdopts.unignore {
+        $parts = $splitService($valu)
+        if $parts {
+            $retn = $privalert.alertTriggerUnignore($aid, $parts.0, $parts.1)
+            if (not $util.failed($retn, `Unignoring {$valu}`)) {
+                $lib.print("slib.shodan.alert.edit: No longer ignoring {valu}.", valu=$valu)
+            }
+        }
+    }
+
+    for $nid in $cmdopts.notifier {
+        $retn = $privalert.alertNotifierAdd($aid, $nid)
+        if (not $util.failed($retn, `Adding notifier {$nid}`)) {
+            $lib.print("slib.shodan.alert.edit: Added notifier {nid}.", nid=$nid)
+        }
+    }
+
+    for $nid in $cmdopts.rm_notifier {
+        $retn = $privalert.alertNotifierDel($aid, $nid)
+        if (not $util.failed($retn, `Removing notifier {$nid}`)) {
+            $lib.print("slib.shodan.alert.edit: Removed notifier {nid}.", nid=$nid)
+        }
+    }
+}
+
+init {
+    $privalert = $lib.import(slib.shodan.priv.alert)
+    $util = $lib.import(slib.shodan.util)
+
+    $ips = ([])
+    for $ip in $cmdopts.ip { $ips.append($ip) }
+}
+
+// Inbound nodes are collected and applied to the alert in the fini block.
+switch $node.form() {
+    "inet:ipv4": { $ips.append($node.repr()) }
+    "inet:ipv6": { $ips.append($node.repr()) }
+    "inet:cidr4": { $ips.append($node.repr()) }
+    "inet:cidr6": { $ips.append($node.repr()) }
+    *: { $lib.warn("slib.shodan.alert.edit: The node form {form} is not supported.", form=$node.form()) }
+}
+
+fini { $editAlert($cmdopts.id, $ips) }

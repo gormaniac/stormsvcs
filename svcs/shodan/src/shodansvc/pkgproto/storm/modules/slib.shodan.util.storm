@@ -1,0 +1,51 @@
+// Unprivileged helpers shared by the slib.shodan commands.
+
+// Whether a string looks like an IPv6 address (vs. IPv4).
+function isIpv6(ip) {
+    return(($lib.cast(str, $ip) ~= ":"))
+}
+
+// Split a "name=value" string into a (name, value) list. Returns null if there is no "=".
+function splitArg(arg) {
+    $parts = $arg.split("=", maxsplit=(1))
+    if ($lib.len($parts) != 2) { return($lib.null) }
+    return($parts)
+}
+
+// Warn about a failed service call. Returns true if the call failed.
+function failed(retn, what) {
+    if $retn.status { return((false)) }
+    $lib.warn("slib.shodan: {what} failed: {err}", what=$what, err=$retn.mesg)
+    return((true))
+}
+
+// Print a table. columns is a list of (name, width) and rows is a list of lists.
+function table(columns, rows) {
+    $cols = ([])
+    for ($name, $width) in $columns {
+        $cols.append(({"name": $name, "width": $width}))
+    }
+    $printer = $lib.tabular.printer(({"columns": $cols}))
+    $lib.print($printer.header())
+    for $row in $rows {
+        $lib.print($printer.row($row))
+    }
+}
+
+// Print a Shodan facets dict ({facet: [{"value": x, "count": n}, ...]}) as tables.
+function printFacets(facets) {
+    if (not $facets) { return() }
+    for ($facet, $vals) in $facets {
+        $rows = ([])
+        for $val in $vals {
+            $rows.append(($val.value, $val.count))
+        }
+        $lib.print("")
+        $table(([[$facet, 40], ["count", 12]]), $rows)
+    }
+}
+
+// Print any value as indented JSON.
+function printJson(valu) {
+    $lib.print($lib.json.save($valu, indent=(true)))
+}

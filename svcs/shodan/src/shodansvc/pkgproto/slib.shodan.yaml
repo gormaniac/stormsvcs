@@ -1,0 +1,994 @@
+name: slib.shodan
+version: 0.1.0
+guid: 0f6c1d0f1d8a4c3bb7a1e3d5c9b2a864
+
+synapse_minversion: [2, 137, 0]
+
+genopts:
+    dotstorm: true
+
+author:
+  url: https://github.com/gormaniac
+  name: John Gorman
+
+desc: A Storm Service that integrates every Shodan API (search, scanning, alerts, DNS, streaming, InternetDB, CVEDB, and trends) into Synapse.
+
+docs:
+  - title: README
+    path: README.md
+
+perms:
+  - perm: [ slib, shodan, user ]
+    gate: cortex
+    desc: Query Shodan (host lookups, search, DNS, CVEs, trends, streams) and model the results.
+  - perm: [ slib, shodan, scan ]
+    gate: cortex
+    desc: Submit on-demand Shodan scans (consumes scan credits).
+  - perm: [ slib, shodan, alert ]
+    gate: cortex
+    desc: Manage Shodan network alerts and notifiers.
+  - perm: [ slib, shodan, admin ]
+    gate: cortex
+    desc: Manage the service-wide API key, tag settings, the Shodan organization, bulk data, and raw API requests.
+
+modules:
+  # Privileged modules - these are the only modules that talk to the service.
+  # They run asroot so users don't need the service.get permission, and so the
+  # service's stored API key is never readable from Storm.
+  - name: slib.shodan.priv.user
+    asroot:perms:
+      - [ slib, shodan, user ]
+  - name: slib.shodan.priv.scan
+    asroot:perms:
+      - [ slib, shodan, scan ]
+  - name: slib.shodan.priv.alert
+    asroot:perms:
+      - [ slib, shodan, alert ]
+  - name: slib.shodan.priv.admin
+    asroot:perms:
+      - [ slib, shodan, admin ]
+
+  # Unprivileged modules - node edits here run as the calling user.
+  - name: slib.shodan.lib
+    perms:
+      - [ slib, shodan, user ]
+  - name: slib.shodan.model
+    perms:
+      - [ slib, shodan, user ]
+  - name: slib.shodan.util
+
+commands:
+
+  # ---- User commands ----
+
+  - name: slib.shodan.host
+    perms:
+      - [ slib, shodan, user ]
+    descr: |
+      Look up IP addresses in Shodan and model everything Shodan knows about them.
+
+      Models the IP's ASN, owner, location, hostnames (inet:dns:a/aaaa), tags, and
+      vulnerabilities (risk:vulnerable), plus every service banner Shodan has seen
+      (inet:server, inet:banner, it:prod:softver, crypto:x509:cert, inet:tls:servercert).
+
+      Uses the free InternetDB API when --internetdb is used, or automatically when
+      no Shodan API key is available to the current user.
+
+      Examples:
+
+        // Look up some IPs already in the Cortex.
+        inet:ipv4#my.tag | slib.shodan.host
+
+        // Look up a single IP and yield the inet:ipv4 node.
+        slib.shodan.host --ip 8.8.8.8 --yield
+
+        // Include historical banners.
+        inet:ipv4=1.2.3.4 | slib.shodan.host --history
+
+        // Use the free (but less detailed) InternetDB API.
+        inet:ipv4=1.2.3.4 | slib.shodan.host --internetdb
+    cmdargs:
+      - - --ip
+        - type: str
+          action: append
+          default: []
+          help: An IP address to look up instead of using the inbound nodes. May be used multiple times.
+      - - --history
+        - default: false
+          action: store_true
+          help: Include historical banners.
+      - - --minify
+        - default: false
+          action: store_true
+          help: Only retrieve the list of ports and general host information, no banners.
+      - - --internetdb
+        - default: false
+          action: store_true
+          help: Use the free InternetDB API instead of the Shodan host API.
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the inet:ipv4/inet:ipv6 nodes instead of the inbound nodes.
+    forms:
+      input:
+        - inet:ipv4
+        - inet:ipv6
+      output:
+        - inet:ipv4
+        - inet:ipv6
+
+  - name: slib.shodan.enrich
+    perms:
+      - [ slib, shodan, user ]
+    descr: |
+      Enrich any supported node with the best matching Shodan API.
+
+        inet:ipv4/inet:ipv6   -> Shodan host lookup (or InternetDB without an API key)
+        inet:fqdn             -> Shodan DNS domain records and subdomains
+        risk:vuln/it:sec:cve  -> CVEDB CVE details
+        it:sec:cpe            -> CVEDB CVEs that affect the CPE
+
+      Examples:
+
+        // Enrich a mixed set of nodes.
+        #my.tag | slib.shodan.enrich
+
+        // Enrich and yield the resulting nodes.
+        inet:fqdn=vertex.link | slib.shodan.enrich --yield
+    cmdargs:
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the enriched/created nodes instead of the inbound nodes.
+    forms:
+      input:
+        - inet:ipv4
+        - inet:ipv6
+        - inet:fqdn
+        - risk:vuln
+        - it:sec:cve
+        - it:sec:cpe
+      output:
+        - inet:ipv4
+        - inet:ipv6
+        - inet:fqdn
+        - risk:vuln
+
+  - name: slib.shodan.search
+    perms:
+      - [ slib, shodan, user ]
+    descr: |
+      Search Shodan and model every matching banner. Yields the matching inet:ipv4/inet:ipv6 nodes.
+
+      Each page of 100 results consumes one Shodan query credit. Use --count to get
+      the total (and any --facets) for free without ingesting anything.
+
+      Examples:
+
+        // Ingest the first 100 results.
+        slib.shodan.search "product:nginx country:US"
+
+        // Free: print the total and the top countries/ports.
+        slib.shodan.search "ssl.cert.subject.cn:vertex.link" --count --facets country,port:5
+
+        // Explain how Shodan parses a query.
+        slib.shodan.search "apache port:8080" --tokens
+
+        // List the available search filters and facets.
+        slib.shodan.search --filters
+    cmdargs:
+      - - query
+        - type: str
+          nargs: "?"
+          default: ""
+          help: The Shodan search query.
+      - - --limit
+        - type: int
+          default: 100
+          help: The max number of results to ingest. 0 ingests all of them (may use many query credits).
+      - - --page
+        - type: int
+          default: 1
+          help: The page of results to start from.
+      - - --minify
+        - default: false
+          action: store_true
+          help: Request minified banners (less detail, faster).
+      - - --facets
+        - type: str
+          default: null
+          help: Comma separated facets to summarize (ex. "country,port:5"). Printed as tables.
+      - - --count
+        - default: false
+          action: store_true
+          help: Only print the total number of results (and any facets). Free, ingests nothing.
+      - - --tokens
+        - default: false
+          action: store_true
+          help: Print how Shodan parses the query and stop.
+      - - --filters
+        - default: false
+          action: store_true
+          help: Print the available search filters and facets and stop.
+    forms:
+      output:
+        - inet:ipv4
+        - inet:ipv6
+
+  - name: slib.shodan.dns.domain
+    perms:
+      - [ slib, shodan, user ]
+    descr: |
+      Retrieve every DNS record and subdomain Shodan knows about for a domain.
+
+      Models inet:dns:a/aaaa/cname/mx/ns/txt/soa records and the subdomains' inet:fqdn nodes.
+
+      Examples:
+
+        inet:fqdn=vertex.link | slib.shodan.dns.domain
+
+        // Only A records, including historical ones, yielding the subdomains.
+        slib.shodan.dns.domain --domain vertex.link --type A --history --yield
+    cmdargs:
+      - - --domain
+        - type: str
+          action: append
+          default: []
+          help: A domain to query instead of using the inbound nodes. May be used multiple times.
+      - - --history
+        - default: false
+          action: store_true
+          help: Include historical DNS records.
+      - - --type
+        - type: str
+          default: null
+          help: Only return records of this type (A, AAAA, CNAME, NS, SOA, MX, TXT).
+      - - --pages
+        - type: int
+          default: 10
+          help: The max number of result pages to retrieve (0 for all of them).
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the subdomain inet:fqdn nodes instead of the inbound nodes.
+    forms:
+      input:
+        - inet:fqdn
+      output:
+        - inet:fqdn
+
+  - name: slib.shodan.dns.lookup
+    perms:
+      - [ slib, shodan, user ]
+    descr: |
+      Resolve inet:fqdn nodes to IPs, and reverse resolve inet:ipv4/inet:ipv6 nodes to hostnames, using Shodan's DNS API.
+
+      Examples:
+
+        inet:fqdn=vertex.link | slib.shodan.dns.lookup --yield
+
+        inet:ipv4=8.8.8.8 | slib.shodan.dns.lookup
+    cmdargs:
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the resolved IP/hostname nodes instead of the inbound nodes.
+    forms:
+      input:
+        - inet:fqdn
+        - inet:ipv4
+        - inet:ipv6
+      output:
+        - inet:fqdn
+        - inet:ipv4
+        - inet:ipv6
+
+  - name: slib.shodan.cve
+    perms:
+      - [ slib, shodan, user ]
+    descr: |
+      Retrieve vulnerability details from Shodan's free CVEDB and model them on risk:vuln and it:sec:cve nodes.
+
+      Includes CVSS scores, CISA KEV status, references, the publish date, and any linked
+      GitHub Security Advisory (GHSA) or EU Vulnerability Database (EUVD) IDs (as :names).
+      Use --cpe or --product to search CVEDB for every CVE affecting a product.
+
+      Examples:
+
+        // Enrich existing vulns.
+        risk:vuln:cve | slib.shodan.cve
+
+        // Look up a CVE, a GitHub advisory, and an EUVD entry.
+        slib.shodan.cve --cve CVE-2021-44228 --cve GHSA-jfh8-c2jp-5v3q --cve EUVD-2021-1252 --yield
+
+        // All known exploited vulns for a product, sorted by EPSS.
+        slib.shodan.cve --product "log4j" --kev --epss --yield
+
+        // Just count them.
+        slib.shodan.cve --product "log4j" --kev --count
+    cmdargs:
+      - - --cve
+        - type: str
+          action: append
+          default: []
+          help: A CVE, GHSA, or EUVD ID to look up instead of using the inbound nodes. May be used multiple times.
+      - - --cpe
+        - type: str
+          default: null
+          help: Search for CVEs affecting this CPE 2.3 string.
+      - - --product
+        - type: str
+          default: null
+          help: Search for CVEs affecting this product name.
+      - - --kev
+        - default: false
+          action: store_true
+          help: When searching, only return CVEs in the CISA KEV catalog.
+      - - --epss
+        - default: false
+          action: store_true
+          help: When searching, sort results by EPSS score.
+      - - --start
+        - type: str
+          default: null
+          help: When searching, only return CVEs published on/after this date (YYYY-MM-DD).
+      - - --end
+        - type: str
+          default: null
+          help: When searching, only return CVEs published on/before this date (YYYY-MM-DD).
+      - - --limit
+        - type: int
+          default: 100
+          help: When searching, the max number of CVEs to return.
+      - - --count
+        - default: false
+          action: store_true
+          help: When searching, only print the number of matching CVEs.
+      - - --cpes
+        - default: false
+          action: store_true
+          help: Also model the CPEs affected by each CVE (it:prod:softver:cves). Can create many nodes.
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the risk:vuln nodes instead of the inbound nodes.
+    forms:
+      input:
+        - risk:vuln
+        - it:sec:cve
+        - it:sec:cpe
+      output:
+        - risk:vuln
+
+  - name: slib.shodan.cpe
+    perms:
+      - [ slib, shodan, user ]
+    descr: |
+      Search Shodan's free CVEDB for the CPEs of a product.
+
+      Examples:
+
+        slib.shodan.cpe nginx
+
+        slib.shodan.cpe "exchange_server" --yield
+    cmdargs:
+      - - product
+        - type: str
+          help: The product name to search for.
+      - - --limit
+        - type: int
+          default: 100
+          help: The max number of CPEs to return.
+      - - --count
+        - default: false
+          action: store_true
+          help: Only print the number of matching CPEs.
+      - - --yield
+        - default: false
+          action: store_true
+          help: Create and yield it:sec:cpe nodes.
+    forms:
+      output:
+        - it:sec:cpe
+
+  - name: slib.shodan.trends
+    perms:
+      - [ slib, shodan, user ]
+    descr: |
+      Search Shodan's historical Trends database, printing a monthly breakdown.
+
+      Examples:
+
+        slib.shodan.trends "product:openssh" --facets version:5
+
+        slib.shodan.trends --filters
+    cmdargs:
+      - - query
+        - type: str
+          nargs: "?"
+          default: ""
+          help: The Shodan search query.
+      - - --facets
+        - type: str
+          default: null
+          help: Comma separated facets to break the results down by.
+      - - --filters
+        - default: false
+          action: store_true
+          help: Print the available Trends filters and facets and stop.
+
+  - name: slib.shodan.queries
+    perms:
+      - [ slib, shodan, user ]
+    descr: |
+      Browse the directory of saved Shodan search queries.
+
+      Examples:
+
+        // The most recently shared queries.
+        slib.shodan.queries
+
+        // Search the directory, and list the popular tags.
+        slib.shodan.queries --search webcam
+        slib.shodan.queries --tags
+    cmdargs:
+      - - --search
+        - type: str
+          default: null
+          help: Search the saved queries for this text.
+      - - --tags
+        - default: false
+          action: store_true
+          help: List the most popular tags for saved queries.
+      - - --page
+        - type: int
+          default: 1
+          help: The page of results.
+      - - --sort
+        - type: str
+          default: timestamp
+          choices: [ timestamp, votes ]
+          help: How to sort the directory listing.
+      - - --order
+        - type: str
+          default: desc
+          choices: [ asc, desc ]
+          help: The sort order of the directory listing.
+      - - --size
+        - type: int
+          default: 10
+          help: The number of tags to list with --tags.
+
+  - name: slib.shodan.info
+    perms:
+      - [ slib, shodan, user ]
+    descr: |
+      Print the Shodan account, plan, and remaining credits for the API key in use, and the service's public IP.
+    cmdargs: []
+
+  - name: slib.shodan.ref
+    perms:
+      - [ slib, shodan, user ]
+    descr: |
+      Print Shodan reference data.
+
+        ports        - The ports Shodan crawls
+        protocols    - The protocols that can be used with on-demand scans
+        services     - The services Shodan crawls (port -> name)
+        filters      - Search filters
+        facets       - Search facets
+        triggers     - Network alert triggers
+        providers    - Notifier providers and their required arguments
+        httpheaders  - The HTTP headers the service sends to Shodan
+
+      Examples:
+
+        slib.shodan.ref triggers
+    cmdargs:
+      - - name
+        - type: str
+          choices: [ ports, protocols, services, filters, facets, triggers, providers, httpheaders ]
+          help: The reference data to print.
+
+  - name: slib.shodan.stream
+    perms:
+      - [ slib, shodan, user ]
+    descr: |
+      Read banners from the Shodan Streaming API and model them. Yields the inet:ipv4/inet:ipv6 nodes.
+
+      Streams never end on their own, so this stops after --limit banners or --timeout seconds.
+
+      Examples:
+
+        // Banners for 2 ASNs.
+        slib.shodan.stream asn --value AS15169 --value 13335 --limit 50
+
+        // Banners matching a custom query.
+        slib.shodan.stream custom --query "port:22" --timeout 30
+
+        // Banners from your network alerts.
+        slib.shodan.stream alert --alert ABCDEFG
+    cmdargs:
+      - - type
+        - type: str
+          default: banners
+          nargs: "?"
+          choices: [ banners, asn, countries, ports, tags, vulns, custom, alert ]
+          help: The type of stream to read.
+      - - --value
+        - type: str
+          action: append
+          default: []
+          help: An ASN, country code, port, tag, or CVE to filter the stream by. May be used multiple times.
+      - - --query
+        - type: str
+          default: null
+          help: The query for a custom stream.
+      - - --alert
+        - type: str
+          default: null
+          help: A network alert ID, to limit an alert stream to a single alert.
+      - - --limit
+        - type: int
+          default: 100
+          help: Stop after this many banners (0 for no limit).
+      - - --timeout
+        - type: int
+          default: 60
+          help: Stop after this many seconds (0 for no timeout).
+    forms:
+      output:
+        - inet:ipv4
+        - inet:ipv6
+
+  - name: slib.shodan.apikey
+    perms:
+      - [ slib, shodan, user ]
+    descr: |
+      Set your own Shodan API key, stored in a user scoped Synapse vault of type "shodan".
+
+      Your key takes precedence over the service-wide key set by slib.shodan.admin.apikey.
+
+      Examples:
+
+        slib.shodan.apikey ABCDEFG
+
+        slib.shodan.apikey --clear
+    cmdargs:
+      - - apikey
+        - type: str
+          nargs: "?"
+          default: null
+          help: Your Shodan API key.
+      - - --clear
+        - default: false
+          action: store_true
+          help: Delete your stored API key.
+
+  # ---- Scan commands ----
+
+  - name: slib.shodan.scan
+    perms:
+      - [ slib, shodan, scan ]
+    descr: |
+      Request Shodan scan IPs or netblocks. Uses one scan credit per IP.
+
+      All inbound nodes are submitted as a single scan. With --wait, waits for the
+      scan to finish and then ingests the results for each scanned IP.
+
+      Examples:
+
+        inet:ipv4=1.2.3.4 | slib.shodan.scan --wait 300
+
+        slib.shodan.scan --ip 1.2.3.0/24
+    cmdargs:
+      - - --ip
+        - type: str
+          action: append
+          default: []
+          help: An IP or CIDR to scan instead of using the inbound nodes. May be used multiple times.
+      - - --force
+        - default: false
+          action: store_true
+          help: Force Shodan to re-scan IPs it scanned recently (enterprise only).
+      - - --wait
+        - type: int
+          default: 0
+          help: |
+            Seconds to wait for the scan to finish before ingesting the results (0 to not wait).
+            Ingesting requires the slib.shodan.user permission.
+    forms:
+      input:
+        - inet:ipv4
+        - inet:ipv6
+        - inet:cidr4
+        - inet:cidr6
+
+  - name: slib.shodan.scan.status
+    perms:
+      - [ slib, shodan, scan ]
+    descr: |
+      Print the status of a scan, or list all of your scans.
+
+      Examples:
+
+        slib.shodan.scan.status
+
+        slib.shodan.scan.status ABCDEFG
+    cmdargs:
+      - - id
+        - type: str
+          nargs: "?"
+          default: null
+          help: The scan ID. Lists all scans when omitted.
+      - - --page
+        - type: int
+          default: 1
+          help: The page of scans to list.
+
+  - name: slib.shodan.scan.internet
+    perms:
+      - [ slib, shodan, scan ]
+    descr: |
+      Request Shodan crawl the entire Internet for a port and protocol (enterprise only).
+
+      Use "slib.shodan.ref protocols" to list the protocols.
+
+      Examples:
+
+        slib.shodan.scan.internet 8443 https
+    cmdargs:
+      - - port
+        - type: int
+          help: The port to scan.
+      - - protocol
+        - type: str
+          help: The protocol to scan the port with.
+
+  # ---- Alert commands ----
+
+  - name: slib.shodan.alert.list
+    perms:
+      - [ slib, shodan, alert ]
+    descr: |
+      List your Shodan network alerts, or print the details of one.
+
+      Examples:
+
+        slib.shodan.alert.list
+
+        slib.shodan.alert.list --id ABCDEFG
+    cmdargs:
+      - - --id
+        - type: str
+          default: null
+          help: An alert ID to print the details of.
+      - - --active
+        - default: false
+          action: store_true
+          help: Only list alerts that have not expired.
+
+  - name: slib.shodan.alert.add
+    perms:
+      - [ slib, shodan, alert ]
+    descr: |
+      Create a Shodan network alert monitoring the inbound IPs/netblocks, optionally enabling triggers and notifiers in one step.
+
+      All inbound nodes are added to a single alert.
+
+      Examples:
+
+        inet:cidr4=1.2.3.0/24 | slib.shodan.alert.add "corp-network" --trigger new_service --trigger vulnerable --notifier default
+
+        slib.shodan.alert.add "single-host" --ip 1.2.3.4 --expires 86400
+    cmdargs:
+      - - name
+        - type: str
+          help: The name of the alert.
+      - - --ip
+        - type: str
+          action: append
+          default: []
+          help: An IP or CIDR to monitor (in addition to the inbound nodes). May be used multiple times.
+      - - --expires
+        - type: int
+          default: 0
+          help: Seconds until the alert expires (0 for never).
+      - - --trigger
+        - type: str
+          action: append
+          default: []
+          help: A trigger to enable on the alert. May be used multiple times.
+      - - --notifier
+        - type: str
+          action: append
+          default: []
+          help: A notifier ID to attach to the alert ("default" is your account email). May be used multiple times.
+    forms:
+      input:
+        - inet:ipv4
+        - inet:ipv6
+        - inet:cidr4
+        - inet:cidr6
+
+  - name: slib.shodan.alert.edit
+    perms:
+      - [ slib, shodan, alert ]
+    descr: |
+      Edit a Shodan network alert: its monitored IPs, triggers, ignored services, and notifiers - all in one command.
+
+      Inbound nodes and --ip values replace the monitored IPs (or are added to them with --append).
+
+      Examples:
+
+        // Add a netblock to an existing alert and enable a trigger.
+        inet:cidr4=5.6.7.0/24 | slib.shodan.alert.edit ABCDEFG --append --enable malware
+
+        // Stop alerting on a known-good service.
+        slib.shodan.alert.edit ABCDEFG --ignore open_database/1.2.3.4:9200
+    cmdargs:
+      - - id
+        - type: str
+          help: The alert ID.
+      - - --ip
+        - type: str
+          action: append
+          default: []
+          help: An IP or CIDR to monitor. May be used multiple times.
+      - - --append
+        - default: false
+          action: store_true
+          help: Add the IPs to the alert instead of replacing its IPs.
+      - - --enable
+        - type: str
+          action: append
+          default: []
+          help: A trigger to enable. May be used multiple times.
+      - - --disable
+        - type: str
+          action: append
+          default: []
+          help: A trigger to disable. May be used multiple times.
+      - - --ignore
+        - type: str
+          action: append
+          default: []
+          help: A "<trigger>/<ip>:<port>" service to stop notifying about. May be used multiple times.
+      - - --unignore
+        - type: str
+          action: append
+          default: []
+          help: A "<trigger>/<ip>:<port>" service to resume notifying about. May be used multiple times.
+      - - --notifier
+        - type: str
+          action: append
+          default: []
+          help: A notifier ID to attach. May be used multiple times.
+      - - --rm-notifier
+        - type: str
+          action: append
+          default: []
+          help: A notifier ID to detach. May be used multiple times.
+    forms:
+      input:
+        - inet:ipv4
+        - inet:ipv6
+        - inet:cidr4
+        - inet:cidr6
+
+  - name: slib.shodan.alert.del
+    perms:
+      - [ slib, shodan, alert ]
+    descr: |
+      Delete Shodan network alerts.
+
+      Examples:
+
+        slib.shodan.alert.del ABCDEFG
+    cmdargs:
+      - - ids
+        - type: str
+          nargs: "+"
+          help: The alert IDs to delete.
+
+  - name: slib.shodan.notifier.list
+    perms:
+      - [ slib, shodan, alert ]
+    descr: |
+      List your Shodan notifiers, or print the details of one.
+
+      Use "slib.shodan.ref providers" to list notifier providers and their arguments.
+    cmdargs:
+      - - --id
+        - type: str
+          default: null
+          help: A notifier ID to print the details of.
+
+  - name: slib.shodan.notifier.add
+    perms:
+      - [ slib, shodan, alert ]
+    descr: |
+      Create a Shodan notifier.
+
+      Use "slib.shodan.ref providers" to list notifier providers and their required arguments.
+
+      Examples:
+
+        slib.shodan.notifier.add slack --desc "SOC channel" --arg webhook_url=https://hooks.slack.com/...
+    cmdargs:
+      - - provider
+        - type: str
+          help: The notifier provider.
+      - - --desc
+        - type: str
+          default: null
+          help: A description of the notifier.
+      - - --arg
+        - type: str
+          action: append
+          default: []
+          help: A "<name>=<value>" provider argument. May be used multiple times.
+
+  - name: slib.shodan.notifier.edit
+    perms:
+      - [ slib, shodan, alert ]
+    descr: |
+      Edit a Shodan notifier's provider arguments.
+
+      Examples:
+
+        slib.shodan.notifier.edit ABCDEFG --arg to=soc@example.com
+    cmdargs:
+      - - id
+        - type: str
+          help: The notifier ID.
+      - - --arg
+        - type: str
+          action: append
+          default: []
+          help: A "<name>=<value>" provider argument. May be used multiple times.
+
+  - name: slib.shodan.notifier.del
+    perms:
+      - [ slib, shodan, alert ]
+    descr: |
+      Delete Shodan notifiers.
+    cmdargs:
+      - - ids
+        - type: str
+          nargs: "+"
+          help: The notifier IDs to delete.
+
+  # ---- Admin commands ----
+
+  - name: slib.shodan.admin.apikey
+    perms:
+      - [ slib, shodan, admin ]
+    descr: |
+      Set, clear, or check the service-wide Shodan API key.
+
+      The key is stored by the slib.shodan service, not in the Cortex. It is used by
+      any user that hasn't set their own key with slib.shodan.apikey.
+
+      Examples:
+
+        slib.shodan.admin.apikey ABCDEFG
+
+        slib.shodan.admin.apikey --clear
+    cmdargs:
+      - - apikey
+        - type: str
+          nargs: "?"
+          default: null
+          help: The Shodan API key. Prints whether a key is set when omitted.
+      - - --clear
+        - default: false
+          action: store_true
+          help: Clear the stored API key.
+
+  - name: slib.shodan.admin.tags
+    perms:
+      - [ slib, shodan, admin ]
+    descr: |
+      Configure the tags slib.shodan applies for Shodan's own tags (cloud, vpn, honeypot, etc.)
+      and CISA KEV vulns. Tags are "<prefix>.<shodan tag>", the default prefix is "rep.shodan".
+
+      Prints the current settings when run without options.
+
+      Examples:
+
+        slib.shodan.admin.tags --prefix rep.shodan.tag
+
+        slib.shodan.admin.tags --disable
+    cmdargs:
+      - - --prefix
+        - type: str
+          default: null
+          help: The tag prefix to use.
+      - - --enable
+        - default: false
+          action: store_true
+          help: Enable tagging.
+      - - --disable
+        - default: false
+          action: store_true
+          help: Disable tagging.
+
+  - name: slib.shodan.admin.org
+    perms:
+      - [ slib, shodan, admin ]
+    descr: |
+      Print the Shodan organization (enterprise) the API key belongs to, or manage its members.
+
+      Examples:
+
+        slib.shodan.admin.org
+
+        slib.shodan.admin.org --add analyst@example.com --notify
+    cmdargs:
+      - - --add
+        - type: str
+          action: append
+          default: []
+          help: A username or email to add to the organization. May be used multiple times.
+      - - --remove
+        - type: str
+          action: append
+          default: []
+          help: A username or email to remove from the organization. May be used multiple times.
+      - - --notify
+        - default: false
+          action: store_true
+          help: Email added users a notification.
+
+  - name: slib.shodan.admin.data
+    perms:
+      - [ slib, shodan, admin ]
+    descr: |
+      List the Shodan bulk datasets, or the files in a dataset (enterprise only).
+
+      Examples:
+
+        slib.shodan.admin.data
+
+        slib.shodan.admin.data raw-daily
+    cmdargs:
+      - - dataset
+        - type: str
+          nargs: "?"
+          default: null
+          help: The dataset to list the files of.
+
+  - name: slib.shodan.admin.request
+    perms:
+      - [ slib, shodan, admin ]
+    descr: |
+      Send a raw request to any Shodan API and print the JSON response.
+
+      An escape hatch for endpoints/options not covered by other commands.
+
+      Examples:
+
+        slib.shodan.admin.request /shodan/host/8.8.8.8 --params ({"minify": true})
+
+        slib.shodan.admin.request /api/v1/search/facets --base trends
+    cmdargs:
+      - - path
+        - type: str
+          help: The endpoint path (ex. /shodan/host/count).
+      - - --method
+        - type: str
+          default: get
+          choices: [ get, post, put, delete ]
+          help: The HTTP method.
+      - - --base
+        - type: str
+          default: api
+          choices: [ api, trends, internetdb, cvedb ]
+          help: The Shodan API to send the request to.
+      - - --params
+        - default: null
+          help: A dict of query params.
+      - - --json
+        - default: null
+          help: A dict to send as the JSON body.

@@ -1,0 +1,46 @@
+function addAlert(name, ips) {
+    if (not $ips) {
+        $lib.warn("slib.shodan.alert.add: No IPs to monitor, use inbound nodes or --ip.")
+        return()
+    }
+
+    $retn = $privalert.alertCreate($name, $ips, expires=$cmdopts.expires)
+    if $util.failed($retn, "Creating the alert") { return() }
+
+    $aid = $retn.data.id
+    $lib.print("slib.shodan.alert.add: Created alert {id} monitoring {count} IPs/netblocks.",
+        id=$aid, count=$lib.len($ips))
+
+    for $trigger in $cmdopts.trigger {
+        $tretn = $privalert.alertTriggerEnable($aid, $trigger)
+        if (not $util.failed($tretn, `Enabling trigger {$trigger}`)) {
+            $lib.print("slib.shodan.alert.add: Enabled trigger {trigger}.", trigger=$trigger)
+        }
+    }
+
+    for $nid in $cmdopts.notifier {
+        $nretn = $privalert.alertNotifierAdd($aid, $nid)
+        if (not $util.failed($nretn, `Adding notifier {$nid}`)) {
+            $lib.print("slib.shodan.alert.add: Added notifier {nid}.", nid=$nid)
+        }
+    }
+}
+
+init {
+    $privalert = $lib.import(slib.shodan.priv.alert)
+    $util = $lib.import(slib.shodan.util)
+
+    $ips = ([])
+    for $ip in $cmdopts.ip { $ips.append($ip) }
+}
+
+// Inbound nodes are collected and added to a single alert in the fini block.
+switch $node.form() {
+    "inet:ipv4": { $ips.append($node.repr()) }
+    "inet:ipv6": { $ips.append($node.repr()) }
+    "inet:cidr4": { $ips.append($node.repr()) }
+    "inet:cidr6": { $ips.append($node.repr()) }
+    *: { $lib.warn("slib.shodan.alert.add: The node form {form} is not supported.", form=$node.form()) }
+}
+
+fini { $addAlert($cmdopts.name, $ips) }
