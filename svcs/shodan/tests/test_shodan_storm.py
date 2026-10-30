@@ -33,7 +33,7 @@ class TestShodanStormPkg(s_tests.SynTest):
         assert PKGDEFS[0]["version"] == __version__
 
     async def test_pkg(self):
-        assert len(CMDS) == 30
+        assert len(CMDS) == 29
 
         async with shodanSvc(self) as (core, svc, fake):
             msgs = await core.stormlist("service.list")
@@ -56,9 +56,8 @@ class TestShodanStormHost(s_tests.SynTest):
 
     async def test_host(self):
         async with shodanSvc(self) as (core, svc, fake):
-            msgs = await core.stormlist("slib.shodan.host --ip 8.8.8.8 --yield --honeyscore")
+            msgs = await core.stormlist("slib.shodan.host --ip 8.8.8.8 --yield")
             self.stormHasNoErr(msgs)
-            self.stormIsInPrint("8.8.8.8 honeyscore: 0.8", msgs)
 
             nodes = await core.nodes("inet:ipv4=8.8.8.8")
             assert len(nodes) == 1
@@ -293,24 +292,44 @@ class TestShodanStormVulns(s_tests.SynTest):
     async def test_cpe(self):
         async with shodanSvc(self) as (core, svc, fake):
             msgs = await core.stormlist("slib.shodan.cpe nginx --yield")
+            self.stormHasNoErr(msgs)
             self.stormIsInPrint("cpe:2.3:a:f5:nginx:1.25.3", msgs)
-            assert len([m for m in msgs if m[0] == "node"]) == 1
+            nodes = [m[1][0] for m in msgs if m[0] == "node"]
+            assert nodes == [("it:sec:cpe", "cpe:2.3:a:f5:nginx:1.25.3:*:*:*:*:*:*:*")]
 
             fake.routes[("GET", "/cvedb/cpes")] = (200, {"total": 42})
             msgs = await core.stormlist("slib.shodan.cpe nginx --count")
             self.stormIsInPrint("Total CPEs: 42", msgs)
 
-    async def test_exploits(self):
+    async def test_cve_advisories(self):
         async with shodanSvc(self) as (core, svc, fake):
-            await core.nodes("[ it:sec:cve=cve-2021-44228 ]")
-            msgs = await core.stormlist("it:sec:cve | slib.shodan.exploits")
+            msgs = await core.stormlist("slib.shodan.cve --cve ghsa-jfh8-c2jp-5v3q --cve EUVD-2099-0001 --yield")
             self.stormHasNoErr(msgs)
-            self.stormIsInPrint("Log4j RCE", msgs)
-            assert fake.last()["query"]["query"] == "cve:cve-2021-44228"
+            assert len([m for m in msgs if m[0] == "node"]) == 2
 
-            msgs = await core.stormlist('slib.shodan.exploits --query "type:remote" --count --facets source')
-            self.stormIsInPrint("Exploits matching \"type:remote\": 7", msgs)
-            self.stormIsInPrint("ExploitDB", msgs)
+            # The GHSA resolves to its CVE, with the advisory IDs and CWEs added.
+            vuln = (await core.nodes("risk:vuln:cve=cve-2021-44228"))[0]
+            assert vuln.get("names") == ("euvd-2021-34768", "ghsa-jfh8-c2jp-5v3q")
+            assert vuln.get("cwes") == ("CWE-20", "CWE-502")
+            assert "https://nvd.nist.gov/vuln/detail/CVE-2021-44228" in vuln.get("cve:references")
+
+            # An advisory without a CVE is deconflicted by its ID.
+            nodes = await core.nodes("risk:vuln:id=EUVD-2099-0001")
+            assert len(nodes) == 1
+            assert nodes[0].get("desc") == "A made up advisory without a CVE."
+            assert nodes[0].get("cvss:v3_1:score") == 7.5
+
+            await core.nodes("slib.shodan.cve --cve EUVD-2099-0001")
+            assert len(await core.nodes("risk:vuln:id=EUVD-2099-0001")) == 1
+
+    async def test_cve_count(self):
+        async with shodanSvc(self) as (core, svc, fake):
+            fake.routes[("GET", "/cvedb/cves")] = (200, {"total": 20})
+            msgs = await core.stormlist("slib.shodan.cve --product log4j --kev --count")
+            self.stormHasNoErr(msgs)
+            self.stormIsInPrint("20 matching CVEs", msgs)
+            assert fake.last()["query"]["count"] == "true"
+            assert not await core.nodes("risk:vuln")
 
     async def test_enrich(self):
         async with shodanSvc(self) as (core, svc, fake):

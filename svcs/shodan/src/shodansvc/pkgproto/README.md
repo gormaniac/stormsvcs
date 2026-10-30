@@ -2,7 +2,7 @@
 
 A Storm Service that integrates every Shodan API into Synapse: host lookups, search,
 on-demand scanning, network alerts and notifiers, DNS, streaming, saved queries, bulk data,
-organization management, Exploits, Trends, and the free InternetDB and CVEDB APIs.
+organization management, Trends, and the free InternetDB and CVEDB APIs.
 
 Run any `slib.shodan.*` command with `--help` for its options and examples.
 
@@ -18,7 +18,7 @@ Without a key, `slib.shodan.host` falls back to the free InternetDB API.
 
 ## Permissions
 
-- `slib.shodan.user` - Lookups, search, DNS, CVEs, exploits, trends, and streams.
+- `slib.shodan.user` - Lookups, search, DNS, CVEs, trends, and streams.
 - `slib.shodan.scan` - On-demand scans.
 - `slib.shodan.alert` - Network alerts and notifiers.
 - `slib.shodan.admin` - The service-wide key, tag settings, organization, bulk data, and raw requests.
@@ -26,8 +26,8 @@ Without a key, `slib.shodan.host` falls back to the free InternetDB API.
 ## Examples
 
 ```
-// Everything Shodan knows about some IPs, tagging likely honeypots.
-inet:ipv4#my.tag | slib.shodan.host --honeyscore
+// Everything Shodan knows about some IPs. Likely honeypots get Shodan's honeypot tag (#rep.shodan.honeypot).
+inet:ipv4#my.tag | slib.shodan.host
 
 // Free: count results and summarize by country.
 slib.shodan.search "product:nginx" --count --facets country:10

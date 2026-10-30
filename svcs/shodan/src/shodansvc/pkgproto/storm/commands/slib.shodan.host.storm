@@ -5,7 +5,6 @@ init {
         "history": $cmdopts.history,
         "minify": $cmdopts.minify,
         "internetdb": $cmdopts.internetdb,
-        "honeyscore": $cmdopts.honeyscore,
     })
 }
 
@@ -14,7 +13,7 @@ if $cmdopts.ip {
     spin |
     for $ip in $cmdopts.ip {
         $ipnode = $shodan.host($ip, history=$opts.history, minify=$opts.minify,
-                               internetdb=$opts.internetdb, honeyscore=$opts.honeyscore)
+                               internetdb=$opts.internetdb)
         if ($cmdopts.yield and $ipnode) { yield $ipnode }
     }
 }
@@ -28,5 +27,5 @@ else {
         }
     }
     divert $cmdopts.yield $model.nodes(($shodan.host($node.repr(), history=$opts.history, minify=$opts.minify,
-                                                     internetdb=$opts.internetdb, honeyscore=$opts.honeyscore),))
+                                                     internetdb=$opts.internetdb),))
 }

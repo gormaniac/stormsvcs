@@ -16,7 +16,16 @@ from shodansvc.client import (
     normParams,
 )
 
-from .fakeshodan import CVE_LOG4SHELL, DNS_DOMAIN, HOST_8888, INTERNETDB_1111, FakeShodan, shodanSvc
+from .fakeshodan import (
+    CVE_LOG4SHELL,
+    DNS_DOMAIN,
+    EUVD_NO_CVE,
+    GHSA_LOG4SHELL,
+    HOST_8888,
+    INTERNETDB_1111,
+    FakeShodan,
+    shodanSvc,
+)
 
 
 # (ShodanSvc method, args, kwargs, HTTP method, path, expected query params)
@@ -65,12 +74,9 @@ ENDPOINTS = (
     ("apiInfo", (), {}, "GET", "/api/api-info", {}),
     ("myip", (), {}, "GET", "/api/tools/myip", {}),
     ("httpHeaders", (), {}, "GET", "/api/tools/httpheaders", {}),
-    ("honeyscore", ("8.8.8.8",), {}, "GET", "/api/labs/honeyscore/8.8.8.8", {}),
     ("dnsDomain", ("vertex.link",), {"history": True, "rtype": "A"}, "GET", "/api/dns/domain/vertex.link", {"history": "true", "type": "A", "page": "1"}),
     ("dnsResolve", (["vertex.link", "google.com"],), {}, "GET", "/api/dns/resolve", {"hostnames": "vertex.link,google.com"}),
     ("dnsReverse", (["8.8.8.8"],), {}, "GET", "/api/dns/reverse", {"ips": "8.8.8.8"}),
-    ("exploitsSearch", ("cve:CVE-2021-44228",), {"facets": "source"}, "GET", "/exploits/api/search", {"query": "cve:CVE-2021-44228", "facets": "source", "page": "1"}),
-    ("exploitsCount", ("type:remote",), {}, "GET", "/exploits/api/count", {"query": "type:remote"}),
     ("trendsSearch", ("product:openssh",), {"facets": "version"}, "GET", "/trends/api/v1/search", {"query": "product:openssh", "facets": "version"}),
     ("trendsFacets", (), {}, "GET", "/trends/api/v1/search/facets", {}),
     ("trendsFilters", (), {}, "GET", "/trends/api/v1/search/filters", {}),
@@ -78,6 +84,9 @@ ENDPOINTS = (
     ("cve", ("cve-2021-44228",), {}, "GET", "/cvedb/cve/CVE-2021-44228", {}),
     ("cves", (), {"product": "log4j", "is_kev": True, "sort_by_epss": True}, "GET", "/cvedb/cves", {"product": "log4j", "is_kev": "true", "sort_by_epss": "true"}),
     ("cpes", ("nginx",), {"limit": 5}, "GET", "/cvedb/cpes", {"product": "nginx", "limit": "5"}),
+    ("cves", (), {"product": "log4j", "count": True}, "GET", "/cvedb/cves", {"product": "log4j", "count": "true"}),
+    ("ghsa", ("GHSA-JFH8-C2JP-5V3Q",), {}, "GET", "/cvedb/ghsa/GHSA-JFH8-C2JP-5V3Q", {}),
+    ("euvd", ("euvd-2099-0001",), {}, "GET", "/cvedb/euvd/EUVD-2099-0001", {}),
     ("rawRequest", ("get", "shodan/ports"), {}, "GET", "/api/shodan/ports", {}),
 )
 
@@ -144,6 +153,22 @@ class TestNorm(s_tests.SynTest):
         assert cve["cve"] == "CVE-2021-44228"
         assert cve["kev"] is True
         assert cve["cpes"] == ["cpe:2.3:a:apache:log4j:2.0:-:*:*:*:*:*:*"]
+        assert cve["aliases"] == []
+
+    def test_norm_advisory(self):
+        ghsa = norm.normAdvisory(GHSA_LOG4SHELL)
+        assert ghsa["cve"] == "CVE-2021-44228"
+        assert ghsa["aliases"] == ["EUVD-2021-34768", "GHSA-JFH8-C2JP-5V3Q"]
+        assert ghsa["cwes"] == ["CWE-20", "CWE-502"]
+        assert ghsa["cvss_v3"] == 10.0
+        # GHSA references are {"type", "url"} dicts.
+        assert "https://nvd.nist.gov/vuln/detail/CVE-2021-44228" in ghsa["references"]
+
+        euvd = norm.normAdvisory(EUVD_NO_CVE)
+        assert euvd["cve"] == ""
+        assert euvd["aliases"] == ["EUVD-2099-0001"]
+        assert euvd["summary"] == "A made up advisory without a CVE."
+        assert euvd["cvss"] == 7.5
 
 
 class TestClient(s_tests.SynTest):
@@ -163,6 +188,8 @@ class TestClient(s_tests.SynTest):
         assert errMesg(401, None, "<html>") == "Invalid Shodan API key"
         assert errMesg(500, None, "") == "HTTP 500"
         assert errMesg(500, None, "plain error") == "plain error"
+        # The Streaming API wraps an HTML error page in JSON.
+        assert errMesg(401, {"error": "<html><title>401 Unauthorized</title></html>"}, "") == "Invalid Shodan API key"
 
     async def test_rate_limiter(self):
         limiter = RateLimiter(20)
@@ -260,6 +287,17 @@ class TestShodanSvc(s_tests.SynTest):
 
             assert fake.last("/api/shodan/alert")["json"] == {"name": "corp", "filters": {"ip": ["1.2.3.0/24"]}, "expires": 60}
             assert fake.last("/api/shodan/alert/ALERT1", "POST")["json"] == {"filters": {"ip": ["1.2.3.0/24"]}}
+
+    async def test_cvedb(self):
+        async with shodanSvc(self) as (core, svc, fake):
+            # CVEDB's short CPEs are padded.
+            assert (await svc.cpes("nginx"))["cpes"] == ["cpe:2.3:a:f5:nginx:1.25.3:*:*:*:*:*:*:*"]
+
+            # normVuln dispatches on the ID's prefix.
+            assert (await svc.normVuln("cve-2021-44228"))["cve"] == "CVE-2021-44228"
+            assert fake.last()["path"] == "/cvedb/cve/CVE-2021-44228"
+            assert (await svc.normVuln("GHSA-jfh8-c2jp-5v3q"))["cve"] == "CVE-2021-44228"
+            assert (await svc.normVuln("euvd-2099-0001"))["aliases"] == ["EUVD-2099-0001"]
 
     async def test_apikey_precedence(self):
         async with shodanSvc(self, apikey="confkey") as (core, svc, fake):

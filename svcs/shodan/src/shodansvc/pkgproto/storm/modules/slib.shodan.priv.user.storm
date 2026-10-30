@@ -67,7 +67,6 @@ function profile() { return($svc.profile(apikey=$userKey())) }
 function apiInfo() { return($svc.apiInfo(apikey=$userKey())) }
 function myip() { return($svc.myip(apikey=$userKey())) }
 function httpHeaders() { return($svc.httpHeaders(apikey=$userKey())) }
-function honeyscore(ip) { return($svc.honeyscore($ip, apikey=$userKey())) }
 
 // DNS
 
@@ -86,15 +85,6 @@ function queries(page=(1), sort=timestamp, order=desc) {
 function queriesSearch(query, page=(1)) { return($svc.queriesSearch($query, page=$page, apikey=$userKey())) }
 function queriesTags(size=(10)) { return($svc.queriesTags(size=$size, apikey=$userKey())) }
 
-// Exploits
-
-function exploitsSearch(query, facets=$lib.null, page=(1)) {
-    return($svc.exploitsSearch($query, facets=$facets, page=$page, apikey=$userKey()))
-}
-function exploitsCount(query, facets=$lib.null) {
-    return($svc.exploitsCount($query, facets=$facets, apikey=$userKey()))
-}
-
 // Trends
 
 function trendsSearch(query, facets=$lib.null) {
@@ -107,11 +97,13 @@ function trendsFilters() { return($svc.trendsFilters(apikey=$userKey())) }
 
 function internetdb(ip) { return($svc.normInternetDb($ip)) }
 
-function cve(cveid) { return($svc.normCve($cveid)) }
+// Look up a CVE, GHSA, or EUVD ID.
+function vuln(vulnid) { return($svc.normVuln($vulnid)) }
 
-function cves(cpe23=$lib.null, product=$lib.null, kev=(false), epss=(false), limit=(100), start=$lib.null, end=$lib.null) {
+function cves(cpe23=$lib.null, product=$lib.null, kev=(false), epss=(false), limit=(100), start=$lib.null,
+              end=$lib.null, count=(false)) {
     return($svc.cves(cpe23=$cpe23, product=$product, is_kev=$kev, sort_by_epss=$epss,
-        limit=$limit, start_date=$start, end_date=$end))
+        limit=$limit, start_date=$start, end_date=$end, count=$count))
 }
 
 function cpes(product, limit=(100), count=(false)) {

@@ -270,22 +270,78 @@ def normDnsRecords(data: dict) -> list[dict]:
     return retn
 
 
+def _refs(refs: Any) -> list[str]:
+    """Reference URLs, which are strings in CVEs and ``{"type": ..., "url": ...}`` dicts in GHSAs."""
+
+    urls = [r.get("url") if isinstance(r, dict) else r for r in _list(refs)]
+    return [u for u in urls if isinstance(u, str) and "://" in u]
+
+
 def normCve(data: dict) -> dict:
-    """Normalize a CVEDB ``/cve/{id}`` response."""
+    """Normalize a CVEDB CVE (``/cve/{id}`` or an item from ``/cves``).
+
+    Also accepts the ``cve`` object nested in GHSA/EUVD responses, which uses
+    ``id`` instead of ``cve_id``.
+    """
+
+    # GHSA/EUVD IDs that CVEDB has linked to this CVE.
+    aliases = []
+    for key in ("ghsa", "euvd"):
+        info = data.get(key) or {}
+        if info.get("id"):
+            aliases.append(info["id"].upper())
 
     return {
-        "cve": (data.get("cve_id") or "").upper(),
+        "cve": (data.get("cve_id") or data.get("id") or "").upper(),
+        "aliases": aliases,
         "summary": data.get("summary"),
         "cvss": data.get("cvss"),
         "cvss_version": data.get("cvss_version"),
         "cvss_v2": data.get("cvss_v2"),
         "cvss_v3": data.get("cvss_v3"),
+        "cvss_v4": data.get("cvss_v4"),
         "epss": data.get("epss"),
         "ranking_epss": data.get("ranking_epss"),
         "kev": bool(data.get("kev")),
         "propose_action": data.get("propose_action"),
         "ransomware_campaign": data.get("ransomware_campaign"),
-        "references": [r for r in _list(data.get("references")) if isinstance(r, str) and "://" in r],
+        "references": _refs(data.get("references")),
         "published": _ts(data.get("published_time")),
         "cpes": normCpes(data.get("cpes")),
+        "cwes": [],
     }
+
+
+def normAdvisory(data: dict) -> dict:
+    """Normalize a CVEDB ``/ghsa/{id}`` or ``/euvd/{id}`` response into the ``normCve`` shape.
+
+    When CVEDB links the advisory to a CVE the CVE's details are used, with the
+    advisory's ID(s) as aliases. Otherwise ``cve`` is empty and the advisory's own
+    details are used.
+    """
+
+    advid = (data.get("euvd_id") or data.get("id") or "").upper()
+
+    if data.get("cve"):
+        retn = normCve(data["cve"])
+    else:
+        retn = normCve({
+            "summary": data.get("summary") or data.get("description"),
+            "cvss": data.get("cvss"),
+            "epss": data.get("epss"),
+            "published_time": data.get("published_time"),
+        })
+
+    aliases = [advid]
+    for key in ("ghsa", "euvd"):
+        info = data.get(key) or {}
+        if info.get("id"):
+            aliases.append(info["id"].upper())
+    retn["aliases"] = sorted(set(retn["aliases"] + aliases))
+
+    retn["references"] = sorted(set(retn["references"] + _refs(data.get("references"))))
+    retn["cwes"] = [c.upper() for c in _list(data.get("cwe_ids")) if isinstance(c, str)]
+    if not retn["summary"]:
+        retn["summary"] = data.get("summary") or data.get("description")
+
+    return retn

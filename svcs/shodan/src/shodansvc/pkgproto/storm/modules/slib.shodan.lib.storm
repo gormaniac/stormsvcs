@@ -11,11 +11,8 @@ init {
     $util = $lib.import(slib.shodan.util)
 }
 
-// The minimum honeyscore at which an IP is tagged as a honeypot.
-function honeyThreshold() { return((0.5)) }
-
 // Look up an IP in Shodan (or InternetDB) and model it. Returns the IP node, or null.
-function host(ip, history=(false), minify=(false), internetdb=(false), honeyscore=(false)) {
+function host(ip, history=(false), minify=(false), internetdb=(false)) {
     $ip = $lib.cast(str, $ip)
     $tagPrefix = $priv.tagPrefix()
 
@@ -33,19 +30,7 @@ function host(ip, history=(false), minify=(false), internetdb=(false), honeyscor
     }
     if $util.failed($retn, $what) { return($lib.null) }
 
-    $ipnode = $model.host($retn.data, $tagPrefix)
-
-    if ($honeyscore and $ipnode) {
-        $hretn = $priv.honeyscore($ip)
-        if (not $util.failed($hretn, `Honeyscore of {$ip}`)) {
-            $lib.print("slib.shodan: {ip} honeyscore: {score}", ip=$ip, score=$hretn.data)
-            if ($hretn.data >= $honeyThreshold()) {
-                $model.applyTags($ipnode, $tagPrefix, (honeypot,))
-            }
-        }
-    }
-
-    return($ipnode)
+    return($model.host($retn.data, $tagPrefix))
 }
 
 // Retrieve and model the DNS records for a domain. Returns a list of the subdomain inet:fqdn nodes.
@@ -110,11 +95,11 @@ function reverse(ip) {
     return($nodes)
 }
 
-// Retrieve and model a CVE from CVEDB. Returns the risk:vuln node, or null.
-function cve(cveid, cpes=(false)) {
-    $cveid = $lib.cast(str, $cveid).upper()
-    $retn = $priv.cve($cveid)
-    if $util.failed($retn, `CVEDB lookup of {$cveid}`) { return($lib.null) }
+// Retrieve and model a CVE, GHSA, or EUVD ID from CVEDB. Returns the risk:vuln node, or null.
+function cve(vulnid, cpes=(false)) {
+    $vulnid = $lib.cast(str, $vulnid).upper()
+    $retn = $priv.vuln($vulnid)
+    if $util.failed($retn, `CVEDB lookup of {$vulnid}`) { return($lib.null) }
     return($model.cve($retn.data, $priv.tagPrefix(), $cpes))
 }
 
@@ -133,6 +118,13 @@ function cves(cpe23=$lib.null, product=$lib.null, kev=(false), epss=(false), lim
         if $vuln { $nodes.append($vuln) }
     }
     return($nodes)
+}
+
+// Count the CVEDB CVEs affecting a CPE or product. Returns the count, or null on error.
+function countCves(cpe23=$lib.null, product=$lib.null, kev=(false), start=$lib.null, end=$lib.null) {
+    $retn = $priv.cves(cpe23=$cpe23, product=$product, kev=$kev, start=$start, end=$end, count=(true))
+    if $util.failed($retn, "CVEDB count") { return($lib.null) }
+    return($retn.data.total)
 }
 
 // Enrich any supported node with the best matching Shodan API. Returns a list of the resulting nodes.

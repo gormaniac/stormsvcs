@@ -70,8 +70,8 @@ class ShodanSvc(s_cell.Cell):
             "type": "object",
             "default": {},
             "description": (
-                "Overrides for Shodan API base URLs, keyed by api, stream, exploits, "
-                "trends, internetdb, or cvedb."
+                "Overrides for Shodan API base URLs, keyed by api, stream, trends, "
+                "internetdb, or cvedb."
             ),
         },
     }
@@ -355,10 +355,6 @@ class ShodanSvc(s_cell.Cell):
         """GET /tools/httpheaders"""
         return await self._api("get", "/tools/httpheaders", apikey)
 
-    async def honeyscore(self, ip: str, apikey=None) -> float:
-        """GET /labs/honeyscore/{ip}"""
-        return await self._api("get", f"/labs/honeyscore/{_seg(ip)}", apikey)
-
     # ---- DNS ----
 
     async def dnsDomain(self, domain: str, history: bool = False, rtype: str | None = None,
@@ -396,18 +392,6 @@ class ShodanSvc(s_cell.Cell):
         """GET /dns/reverse"""
         return await self._api("get", "/dns/reverse", apikey, params={"ips": list(ips)})
 
-    # ---- Exploits ----
-
-    async def exploitsSearch(self, query: str, facets=None, page: int = 1, apikey=None) -> dict:
-        """GET exploits.shodan.io/api/search"""
-        return await self._api("get", "/api/search", apikey, base="exploits",
-                               params={"query": query, "facets": facets, "page": page})
-
-    async def exploitsCount(self, query: str, facets=None, apikey=None) -> dict:
-        """GET exploits.shodan.io/api/count"""
-        return await self._api("get", "/api/count", apikey, base="exploits",
-                               params={"query": query, "facets": facets})
-
     # ---- Trends ----
 
     async def trendsSearch(self, query: str, facets=None, apikey=None) -> dict:
@@ -442,24 +426,54 @@ class ShodanSvc(s_cell.Cell):
     async def normCve(self, cveid: str) -> dict:
         return norm.normCve(await self.cve(cveid))
 
+    async def ghsa(self, ghsaid: str) -> dict:
+        """GET cvedb.shodan.io/ghsa/{ghsa_id}"""
+        return await self.client.request("get", f"/ghsa/{_seg(ghsaid.upper())}", base="cvedb")
+
+    async def euvd(self, euvdid: str) -> dict:
+        """GET cvedb.shodan.io/euvd/{euvd_id}"""
+        return await self.client.request("get", f"/euvd/{_seg(euvdid.upper())}", base="cvedb")
+
+    async def normVuln(self, vulnid: str) -> dict:
+        """Look up a CVE, GHSA, or EUVD ID in CVEDB, normalized to the ``normCve`` shape."""
+
+        vulnid = vulnid.strip()
+        prefix = vulnid.upper().split("-", 1)[0]
+        if prefix == "GHSA":
+            return norm.normAdvisory(await self.ghsa(vulnid))
+        if prefix == "EUVD":
+            return norm.normAdvisory(await self.euvd(vulnid))
+        return norm.normCve(await self.cve(vulnid))
+
     async def cves(self, cpe23: str | None = None, product: str | None = None, is_kev: bool = False,
                    sort_by_epss: bool = False, skip: int = 0, limit: int = 1000,
-                   start_date: str | None = None, end_date: str | None = None) -> dict:
-        """GET cvedb.shodan.io/cves"""
+                   start_date: str | None = None, end_date: str | None = None,
+                   count: bool = False) -> dict:
+        """GET cvedb.shodan.io/cves
+
+        Returns ``{"cves": [...]}`` with each CVE normalized, or ``{"total": n}`` with ``count``.
+        """
         params = {
             "cpe23": cpe23, "product": product, "skip": skip, "limit": limit,
             "start_date": start_date, "end_date": end_date,
-            "is_kev": is_kev or None, "sort_by_epss": sort_by_epss or None,
+            "is_kev": is_kev or None, "sort_by_epss": sort_by_epss or None, "count": count or None,
         }
         data = await self.client.request("get", "/cves", base="cvedb", params=params)
-        data["cves"] = [norm.normCve(c) for c in data.get("cves") or []]
+        if "cves" in data:
+            data["cves"] = [norm.normCve(c) for c in data["cves"] or []]
         return data
 
     async def cpes(self, product: str, skip: int = 0, limit: int = 1000, count: bool = False) -> dict:
-        """GET cvedb.shodan.io/cpes"""
-        return await self.client.request("get", "/cpes", base="cvedb", params={
+        """GET cvedb.shodan.io/cpes
+
+        CVEDB returns shortened CPE 2.3 strings, they're padded so Synapse accepts them.
+        """
+        data = await self.client.request("get", "/cpes", base="cvedb", params={
             "product": product, "skip": skip, "limit": limit, "count": count or None,
         })
+        if "cpes" in data:
+            data["cpes"] = norm.normCpes(data["cpes"])
+        return data
 
     # ---- Streaming ----
 

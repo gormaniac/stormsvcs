@@ -11,7 +11,12 @@ if ($cmdopts.cve or $search) {
         $vuln = $shodan.cve($cveid, cpes=$cmdopts.cpes)
         if ($cmdopts.yield and $vuln) { yield $vuln }
     }
-    if $search {
+    if ($search and $cmdopts.count) {
+        $total = $shodan.countCves(cpe23=$cmdopts.cpe, product=$cmdopts.product, kev=$cmdopts.kev,
+                                   start=$cmdopts.start, end=$cmdopts.end)
+        if ($total != $lib.null) { $lib.print("slib.shodan.cve: {total} matching CVEs.", total=$total) }
+    }
+    elif $search {
         $vulns = $shodan.cves(cpe23=$cmdopts.cpe, product=$cmdopts.product, kev=$cmdopts.kev,
                               epss=$cmdopts.epss, limit=$cmdopts.limit, start=$cmdopts.start,
                               end=$cmdopts.end, cpes=$cmdopts.cpes)

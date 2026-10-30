@@ -33,17 +33,15 @@ RETN_METHS = (
     # Organization
     "org", "orgMemberAdd", "orgMemberDel",
     # Account, API status, and utility
-    "profile", "apiInfo", "myip", "httpHeaders", "honeyscore",
+    "profile", "apiInfo", "myip", "httpHeaders",
     # DNS
     "dnsDomain", "dnsDomainAll", "dnsResolve", "dnsReverse",
-    # Exploits
-    "exploitsSearch", "exploitsCount",
     # Trends
     "trendsSearch", "trendsFacets", "trendsFilters",
     # InternetDB
     "internetdb", "normInternetDb",
     # CVEDB
-    "cve", "normCve", "cves", "cpes",
+    "cve", "normCve", "ghsa", "euvd", "normVuln", "cves", "cpes",
 )
 
 

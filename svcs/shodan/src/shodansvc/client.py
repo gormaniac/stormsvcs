@@ -19,17 +19,16 @@ import aiohttp
 BASE_URLS = {
     "api": "https://api.shodan.io",
     "stream": "https://stream.shodan.io",
-    "exploits": "https://exploits.shodan.io",
     "trends": "https://trends.shodan.io",
     "internetdb": "https://internetdb.shodan.io",
     "cvedb": "https://cvedb.shodan.io",
 }
 
 # APIs that require the "key" query param.
-KEYED_APIS = frozenset(("api", "stream", "exploits", "trends"))
+KEYED_APIS = frozenset(("api", "stream", "trends"))
 
 # APIs that share Shodan's 1 request/second API key rate limit.
-RATE_LIMITED_APIS = frozenset(("api", "exploits", "trends"))
+RATE_LIMITED_APIS = frozenset(("api", "trends"))
 
 # How many times to retry a request that receives an HTTP 429.
 MAX_RETRIES = 3
@@ -75,10 +74,12 @@ def errMesg(code: int, data: Any, text: str) -> str:
 
     if isinstance(data, dict):
         for key in ("error", "detail", "message"):
-            if data.get(key):
-                return str(data[key])
+            valu = data.get(key)
+            # Some endpoints (ex. the Streaming API) wrap an HTML error page in the JSON.
+            if valu and not str(valu).lstrip().startswith("<"):
+                return str(valu)
 
-    if text and not text.lstrip().startswith("<"):
+    if text and not text.lstrip().startswith(("<", "{")):
         return text.strip()[:500]
 
     if code == 401:

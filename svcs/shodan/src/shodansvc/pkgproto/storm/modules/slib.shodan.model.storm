@@ -223,13 +223,22 @@ function host(h, tagPrefix=$lib.null) {
     return($ipnode)
 }
 
-// Model a normalized CVE (from CVEDB). Returns the risk:vuln node.
+// Model a normalized CVE/advisory (from CVEDB). Returns the risk:vuln node.
 function cve(c, tagPrefix=$lib.null, cpes=(false)) {
-    $vulnnode = $vulnNode($c.cve)
+    if $c.cve {
+        $vulnnode = $vulnNode($c.cve)
+        if $vulnnode { $cveNode($c) }
+    } elif $c.aliases {
+        // A GHSA/EUVD advisory without a CVE.
+        $vulnnode = $advisoryNode($c.aliases.0)
+    } else {
+        return($lib.null)
+    }
     if ($vulnnode = $lib.null) { return($lib.null) }
 
-    $cveNode($c)
     $setVulnProps($vulnnode, $c)
+    for $alias in $c.aliases { $addArrayValu($vulnnode, names, $alias) }
+    for $cwe in $c.cwes { $addArrayValu($vulnnode, cwes, $cwe) }
     if $c.kev { $applyTags($vulnnode, $tagPrefix, (kev,)) }
     $seen($vulnnode, $c.published)
 
@@ -253,6 +262,8 @@ function setVulnProps(n, c) {
     if $c.published { [ :timeline:published ?= $c.published ] }
     if ($c.cvss_v3 != $lib.null) { [ :cvss:v3_1:score ?= $c.cvss_v3 ] }
     if ($c.cvss_v2 != $lib.null) { [ :cvss:v2_0:score ?= $c.cvss_v2 ] }
+    // Advisories without a CVE only have an unversioned score.
+    if ($c.cve = "" and $c.cvss != $lib.null) { [ :cvss:v3_1:score ?= $c.cvss ] }
     return($n)
 }
 
@@ -260,6 +271,18 @@ function setLocation(n, loc) {
     yield $n
     if $loc.latlong { [ :latlong ?= $loc.latlong ] }
     if $loc.country_code { [ :loc ?= $loc.country_code ] }
+    return($n)
+}
+
+function advisoryNode(advid) {
+    [ risk:vuln=({"id": $advid}) ]
+    return($node)
+}
+
+// Add a value to an array property, if it is valid.
+function addArrayValu(n, prop, valu) {
+    yield $n
+    [ :$prop ?+= $valu ]
     return($n)
 }
 

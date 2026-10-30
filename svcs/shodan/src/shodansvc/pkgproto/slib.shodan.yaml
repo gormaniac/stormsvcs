@@ -11,7 +11,7 @@ author:
   url: https://github.com/gormaniac
   name: John Gorman
 
-desc: A Storm Service that integrates every Shodan API (search, scanning, alerts, DNS, streaming, InternetDB, CVEDB, exploits, and trends) into Synapse.
+desc: A Storm Service that integrates every Shodan API (search, scanning, alerts, DNS, streaming, InternetDB, CVEDB, and trends) into Synapse.
 
 docs:
   - title: README
@@ -20,7 +20,7 @@ docs:
 perms:
   - perm: [ slib, shodan, user ]
     gate: cortex
-    desc: Query Shodan (host lookups, search, DNS, CVEs, exploits, trends, streams) and model the results.
+    desc: Query Shodan (host lookups, search, DNS, CVEs, trends, streams) and model the results.
   - perm: [ slib, shodan, scan ]
     gate: cortex
     desc: Submit on-demand Shodan scans (consumes scan credits).
@@ -82,8 +82,8 @@ commands:
         // Look up a single IP and yield the inet:ipv4 node.
         slib.shodan.host --ip 8.8.8.8 --yield
 
-        // Include historical banners and the Shodan honeypot score.
-        inet:ipv4=1.2.3.4 | slib.shodan.host --history --honeyscore
+        // Include historical banners.
+        inet:ipv4=1.2.3.4 | slib.shodan.host --history
 
         // Use the free (but less detailed) InternetDB API.
         inet:ipv4=1.2.3.4 | slib.shodan.host --internetdb
@@ -105,10 +105,6 @@ commands:
         - default: false
           action: store_true
           help: Use the free InternetDB API instead of the Shodan host API.
-      - - --honeyscore
-        - default: false
-          action: store_true
-          help: Also retrieve the Shodan honeypot score, tagging the IP if it is likely a honeypot.
       - - --yield
         - default: false
           action: store_true
@@ -291,9 +287,10 @@ commands:
     perms:
       - [ slib, shodan, user ]
     descr: |
-      Retrieve CVE details from Shodan's free CVEDB and model them on risk:vuln and it:sec:cve nodes.
+      Retrieve vulnerability details from Shodan's free CVEDB and model them on risk:vuln and it:sec:cve nodes.
 
-      Includes CVSS scores, EPSS, CISA KEV status, references, and the publish date.
+      Includes CVSS scores, CISA KEV status, references, the publish date, and any linked
+      GitHub Security Advisory (GHSA) or EU Vulnerability Database (EUVD) IDs (as :names).
       Use --cpe or --product to search CVEDB for every CVE affecting a product.
 
       Examples:
@@ -301,17 +298,20 @@ commands:
         // Enrich existing vulns.
         risk:vuln:cve | slib.shodan.cve
 
-        // Look up a single CVE.
-        slib.shodan.cve --cve CVE-2021-44228 --yield
+        // Look up a CVE, a GitHub advisory, and an EUVD entry.
+        slib.shodan.cve --cve CVE-2021-44228 --cve GHSA-jfh8-c2jp-5v3q --cve EUVD-2021-1252 --yield
 
         // All known exploited vulns for a product, sorted by EPSS.
         slib.shodan.cve --product "log4j" --kev --epss --yield
+
+        // Just count them.
+        slib.shodan.cve --product "log4j" --kev --count
     cmdargs:
       - - --cve
         - type: str
           action: append
           default: []
-          help: A CVE ID to look up instead of using the inbound nodes. May be used multiple times.
+          help: A CVE, GHSA, or EUVD ID to look up instead of using the inbound nodes. May be used multiple times.
       - - --cpe
         - type: str
           default: null
@@ -340,6 +340,10 @@ commands:
         - type: int
           default: 100
           help: When searching, the max number of CVEs to return.
+      - - --count
+        - default: false
+          action: store_true
+          help: When searching, only print the number of matching CVEs.
       - - --cpes
         - default: false
           action: store_true
@@ -386,41 +390,6 @@ commands:
     forms:
       output:
         - it:sec:cpe
-
-  - name: slib.shodan.exploits
-    perms:
-      - [ slib, shodan, user ]
-    descr: |
-      Search the Shodan Exploits API, printing the results.
-
-      Inbound risk:vuln/it:sec:cve nodes are searched by their CVE.
-
-      Examples:
-
-        risk:vuln:cve=cve-2021-44228 | slib.shodan.exploits
-
-        slib.shodan.exploits --query "type:remote platform:linux" --facets source --count
-    cmdargs:
-      - - --query
-        - type: str
-          default: null
-          help: The exploit search query to use instead of the inbound nodes.
-      - - --facets
-        - type: str
-          default: null
-          help: Comma separated facets to summarize (author, platform, port, source, type).
-      - - --page
-        - type: int
-          default: 1
-          help: The page of results to print.
-      - - --count
-        - default: false
-          action: store_true
-          help: Only print the total number of results (and any facets).
-    forms:
-      input:
-        - risk:vuln
-        - it:sec:cve
 
   - name: slib.shodan.trends
     perms:
@@ -1015,7 +984,7 @@ commands:
       - - --base
         - type: str
           default: api
-          choices: [ api, exploits, trends, internetdb, cvedb ]
+          choices: [ api, trends, internetdb, cvedb ]
           help: The Shodan API to send the request to.
       - - --params
         - default: null
