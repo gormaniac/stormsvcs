@@ -84,10 +84,10 @@ SELECT ca.ID AS id, ca.NAME AS name FROM ca WHERE ca.NAME ILIKE '%Sectigo%' ORDE
 SELECT ca.ID AS id, ca.NAME AS name FROM ca WHERE ca.ID = ANY(ARRAY[:issuer]::int[]);
 
 \echo '-- 23. Certificates a CA issued (pivot --by issued/siblings, ca --issued)'
-SELECT count(*) AS certs, sum(length(q.der)) AS der_bytes FROM (SELECT c.ID AS id, c.ISSUER_CA_ID AS issuer_ca_id, c.CERTIFICATE AS der FROM certificate c WHERE c.ISSUER_CA_ID = ANY(ARRAY[:issuer]::int[]) ORDER BY x509_notBefore(c.CERTIFICATE) DESC LIMIT 100) q;
+SELECT count(*) AS certs, sum(length(q.der)) AS der_bytes FROM (SELECT c.ID AS id, c.ISSUER_CA_ID AS issuer_ca_id, c.CERTIFICATE AS der FROM certificate c WHERE c.ISSUER_CA_ID = :issuer ORDER BY x509_notBefore(c.CERTIFICATE) DESC LIMIT 100) q;
 
 \echo '-- 24. Certificates a CA issued, --valid --since'
-SELECT count(*) AS certs, sum(length(q.der)) AS der_bytes FROM (SELECT c.ID AS id, c.ISSUER_CA_ID AS issuer_ca_id, c.CERTIFICATE AS der FROM certificate c WHERE c.ISSUER_CA_ID = ANY(ARRAY[:issuer]::int[]) AND coalesce(x509_notAfter(c.CERTIFICATE), 'infinity'::timestamp) >= date_trunc('year', now() AT TIME ZONE 'UTC') AND x509_notAfter(c.CERTIFICATE) >= now() AT TIME ZONE 'UTC' AND x509_notBefore(c.CERTIFICATE) >= to_timestamp(1735689600.0) AT TIME ZONE 'UTC' AND coalesce(x509_notAfter(c.CERTIFICATE), 'infinity'::timestamp) >= to_timestamp(1735689600.0) AT TIME ZONE 'UTC' ORDER BY x509_notBefore(c.CERTIFICATE) DESC LIMIT 100) q;
+SELECT count(*) AS certs, sum(length(q.der)) AS der_bytes FROM (SELECT c.ID AS id, c.ISSUER_CA_ID AS issuer_ca_id, c.CERTIFICATE AS der FROM certificate c WHERE c.ISSUER_CA_ID = :issuer AND coalesce(x509_notAfter(c.CERTIFICATE), 'infinity'::timestamp) >= date_trunc('year', now() AT TIME ZONE 'UTC') AND x509_notAfter(c.CERTIFICATE) >= now() AT TIME ZONE 'UTC' AND x509_notBefore(c.CERTIFICATE) >= to_timestamp(1735689600.0) AT TIME ZONE 'UTC' AND coalesce(x509_notAfter(c.CERTIFICATE), 'infinity'::timestamp) >= to_timestamp(1735689600.0) AT TIME ZONE 'UTC' ORDER BY x509_notBefore(c.CERTIFICATE) DESC LIMIT 100) q;
 
 \echo '-- 25. Certificates belonging to a CA (chain building, ca --certs)'
 SELECT count(*) AS certs, sum(length(q.der)) AS der_bytes FROM (SELECT c.ID AS id, c.ISSUER_CA_ID AS issuer_ca_id, c.CERTIFICATE AS der, cac.CA_ID AS ca_id FROM ca_certificate cac JOIN certificate c ON c.ID = cac.CERTIFICATE_ID WHERE cac.CA_ID = ANY(ARRAY[:issuer]::int[])) q;

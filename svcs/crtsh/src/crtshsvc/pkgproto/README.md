@@ -15,9 +15,10 @@ and CRL revocation.
 
 The service registers the `slib.crtsh` Storm package.
 
-> **Status:** work in progress. The SQL in `src/crtshsvc/db.py` was checked against the certwatch
-> schema (https://github.com/crtsh/certwatch_db) and libx509pq sources, every lookup uses one of
-> crt.sh's indexes, but it hasn't been run against the live database yet.
+> **Status:** the SQL in `src/crtshsvc/db.py` was checked against the certwatch schema
+> (https://github.com/crtsh/certwatch_db) and libx509pq sources, every query uses one of crt.sh's
+> indexes, and the lookup, search, chain, and metadata queries were run by hand against crt.sh.
+> The full service hasn't been run against crt.sh yet, see [Testing](#testing).
 
 ## Deploying
 
@@ -78,3 +79,28 @@ Each certificate is a `crypto:x509:cert` (deconflicted by `:sha256`) with every 
 supports, `:rsa:key`, a `-(refs)>` edge to its `crypto:key`, `crypto:x509:revoked` when it's on
 a CRL, `.seen` covering its CT log entries, and a `-(seen)>` edge from the `slib.crtsh`
 `meta:source`. The complete details are stored in the node's `slib:crtsh` node data.
+
+## Testing
+
+```bash
+uv run pytest tests
+```
+
+The tests never touch crt.sh. `tests/fakecrtsh.py` is an in-memory crt.sh: a small PKI (two
+roots, an intermediate cross-signed by both, a leaf and its precertificate, plus revoked,
+expired, reissued, and unparsable certificates) answering every query `CrtshDb` makes. The
+tests cover 100% of the Python (lines and branches, `uv run pytest tests --cov`) and every Storm
+command, option, inbound form, and error path.
+
+Against the real crt.sh (one connection per IP, so close psql first; takes a few minutes):
+
+```bash
+SLIB_CRTSH_LIVE=1 uv run pytest tests/test_live.py -v
+```
+
+Every query the service runs, as a psql script, generated from `CrtshDb` by `tests/sqlgen.py`:
+
+```bash
+uv run python -m tests.sqlgen > tests/live_queries.sql
+psql -h crt.sh -p 5432 -U guest certwatch -f tests/live_queries.sql
+```

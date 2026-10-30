@@ -5,6 +5,7 @@ Every command option, inbound form, and error path is exercised against a FakeCr
 
 import hashlib
 
+import synapse.common as s_common
 import synapse.tests.utils as s_tests
 
 from crtshsvc.defs import SVC_GUID
@@ -138,7 +139,7 @@ class TestCrtshStormCert(s_tests.SynTest):
                 $lib.print($crl.value())'''
             msgs = await core.stormlist(q)
             self.stormHasNoErr(msgs)
-            self.stormIsInPrint(__import__("synapse.common", fromlist=["guid"]).guid(("slib.crtsh", "crl", 2)), msgs)
+            self.stormIsInPrint(s_common.guid(("slib.crtsh", "crl", 2)), msgs)
 
     async def test_cert(self):
         async with crtshSvc(self) as (core, svc, fake):
@@ -166,7 +167,7 @@ class TestCrtshStormCert(s_tests.SynTest):
             # crypto:x509:cert nodes are looked up by :sha256, or :sha1.
             assert await certIds(core, f"{CERT[2]} | slib.crtsh.cert --yield") == [2]
             await core.nodes(f"[ crypto:x509:cert=* :sha1={hashlib.sha1(PKI.row(4)['der']).hexdigest()} ]")
-            assert await certIds(core, f"crypto:x509:cert:sha1 -:sha256 | slib.crtsh.cert --yield") == [4]
+            assert await certIds(core, "crypto:x509:cert:sha1 -:sha256 | slib.crtsh.cert --yield") == [4]
             await core.nodes("[ crypto:x509:cert=* :serial=00 ]")
             msgs = await core.stormlist("crypto:x509:cert:serial=00 | slib.crtsh.cert")
             self.stormIsInWarn("it needs a SHA-256 or SHA-1", msgs)
