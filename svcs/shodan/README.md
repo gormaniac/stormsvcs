@@ -198,7 +198,8 @@ The tests run a real Cortex with the service added, pointed at a fake Shodan HTT
 # Keyless APIs only (InternetDB and CVEDB), no account needed.
 SLIB_SHODAN_LIVE=1 uv run pytest tests/test_live.py
 
-# Also the keyed APIs. Only uses free endpoints and one host lookup, never scan credits.
+# Also the keyed APIs. Uses free endpoints and a couple of host lookups, never scan credits.
+# POST /shodan/scan, /shodan/scan/internet, and /notifier are only sent invalid arguments.
 SLIB_SHODAN_LIVE=1 SHODAN_API_KEY=<key> uv run pytest tests/test_live.py
 ```
 
@@ -215,8 +216,21 @@ Notes from verifying the service against the live APIs (2026-10):
   endpoint is a GET that requires `?key=` in the URL, so with that secret configured every GET to
   `api.shodan.io` fails at the proxy (`502 injection failed`), even with an explicit key. Use an
   environment variable (`SHODAN_API_KEY`) for live tests instead.
+- **Form bodies.** `POST /shodan/scan`, `POST /shodan/scan/internet`, and `POST /notifier` only
+  read their arguments from a form-encoded body and silently ignore query params (a scan then
+  fails with `Private IPs not allowed: `). The alert endpoints take JSON, and `PUT`/`DELETE`
+  endpoints take query params.
 - **Errors.** Most endpoints return `{"error": ...}` JSON, a bad key returns a 401 HTML page, and
-  the Streaming API wraps that HTML page in JSON. `client.errMesg()` handles all three.
+  the Streaming API wraps that HTML page in JSON. `client.errMesg()` handles all three. A valid
+  key whose plan lacks an API gets a 401 with an empty body (Streaming API) or a 403 HTML page
+  (`/org`, `/shodan/data`), so a 401 doesn't always mean the key is wrong.
+- **Banner CPEs.** Banners list every CPE Shodan detected (ex. OpenSSH's and Ubuntu's), often
+  without a version, but `product`/`version` describe only one of them. `norm.normSoftvers()`
+  pairs them.
+- **Host history.** `GET /shodan/host/{ip}?history=true` returned a 404 ("No information
+  available for that IP.") for `8.8.8.8` and `1.1.1.1`, which have data without `history`.
+- **Unavailable endpoints.** `/shodan/query/search` and `/shodan/query/tags` returned a 503
+  ("unavailable at the moment").
 - **InternetDB** returns a 404 for IPs it hasn't seen, but some private IPs (ex. `10.0.0.1`) do
   have data.
 - **CVEDB** returns shortened CPE 2.3 strings, IDs are case-insensitive, and GHSA references

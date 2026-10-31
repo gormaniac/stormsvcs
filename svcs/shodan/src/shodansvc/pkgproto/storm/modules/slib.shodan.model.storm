@@ -178,12 +178,8 @@ function banner(b, tagPrefix=$lib.null) {
 
     if $b.data { $bannerNode($srv.repr(), $b.data, $b.timestamp) }
 
-    if $b.cpes {
-        for $cpe in $b.cpes { $softverNode($srv, $cpe, $b.product, $b.version) }
-    }
-    elif $b.product {
-        $softverNode($srv, $lib.null, $b.product, $b.version)
-    }
+    // See shodansvc.norm.normSoftvers for how CPEs are paired with the product/version.
+    for $sv in $b.softvers { $softverNode($srv, $sv.cpe, $sv.product, $sv.version) }
 
     for $vuln in $b.vulns { $vulnerableNode($srv, $vuln, $b.timestamp) }
 

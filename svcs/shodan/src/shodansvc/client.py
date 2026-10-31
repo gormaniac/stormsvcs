@@ -82,8 +82,12 @@ def errMesg(code: int, data: Any, text: str) -> str:
     if text and not text.lstrip().startswith(("<", "{")):
         return text.strip()[:500]
 
+    # Shodan returns an empty body or an HTML page for these, both for bad keys and
+    # for valid keys whose plan doesn't include the API (ex. the Streaming API).
     if code == 401:
-        return "Invalid Shodan API key"
+        return "Shodan rejected the API key: it is invalid, or its plan doesn't include this API (HTTP 401)"
+    if code == 403:
+        return "Access denied: the API key's plan doesn't include this API (HTTP 403)"
 
     return f"HTTP {code}"
 
@@ -162,8 +166,12 @@ class ShodanClient:
         apikey: str | None = None,
         params: Mapping[str, Any] | None = None,
         json_data: Any = None,
+        form: Mapping[str, Any] | None = None,
     ) -> Any:
         """Send a request to a Shodan API and return the parsed JSON body.
+
+        ``form`` is sent as a form encoded body. Some endpoints (ex. ``POST /shodan/scan``)
+        only read their arguments from the body and silently ignore query params.
 
         Raises
         ------
@@ -172,6 +180,7 @@ class ShodanClient:
         """
 
         url, params = self._prep(base, path, apikey, params)
+        data = normParams(form) if form is not None else None
 
         for attempt in range(MAX_RETRIES + 1):
             if base in RATE_LIMITED_APIS:
@@ -179,7 +188,7 @@ class ShodanClient:
 
             try:
                 async with self.session.request(
-                    method.upper(), url, params=params, json=json_data, timeout=self.timeout
+                    method.upper(), url, params=params, json=json_data, data=data, timeout=self.timeout
                 ) as resp:
                     text = await resp.text()
                     code = resp.status

@@ -54,6 +54,49 @@ def normCpes(cpes: Any) -> list[str]:
     return [normCpe(c) for c in _list(cpes) if isinstance(c, str)]
 
 
+def _cpeInfo(cpe: str) -> tuple[str | None, str | None]:
+    """Return the (part, version) of a CPE 2.3 or 2.2 string. Wildcard versions are None."""
+
+    parts = cpe.split(":")
+    if cpe.lower().startswith("cpe:2.3:"):
+        part = parts[2] if len(parts) > 2 else None
+        vers = parts[5] if len(parts) > 5 else None
+    else:
+        part = parts[1].lstrip("/") if len(parts) > 1 else None
+        vers = parts[4] if len(parts) > 4 else None
+    if vers in ("", "*", "-"):
+        vers = None
+    return part, vers
+
+
+def normSoftvers(cpes: list[str], product: str | None, version: str | None) -> list[dict]:
+    """Pair a banner's CPEs with its product/version, for modeling it:prod:softver nodes.
+
+    Banners list every CPE Shodan detected, ex. ``["cpe:2.3:a:openbsd:openssh:6.6.1p1",
+    "cpe:2.3:o:canonical:ubuntu_linux"]``, but the product/version only describe one of
+    them. They're only paired with the application CPE whose version matches, so OS CPEs
+    and version-less CPEs (shared by every version) don't get another product's name and
+    version. When no CPE matches, the product/version get their own entry without a CPE.
+    """
+
+    retn = []
+    matched = False
+    for cpe in cpes:
+        item = {"cpe": cpe, "product": None, "version": None}
+        part, vers = _cpeInfo(cpe)
+        if (product and version and not matched and part == "a" and vers
+                and str(version).lower().startswith(vers.lower())):
+            item["product"] = product
+            item["version"] = version
+            matched = True
+        retn.append(item)
+
+    if product and not matched:
+        retn.append({"cpe": None, "product": product, "version": version})
+
+    return retn
+
+
 def normVulns(vulns: Any) -> list[dict]:
     """Normalize the ``vulns`` field into a list of dicts.
 
@@ -177,6 +220,7 @@ def normBanner(banner: dict) -> dict:
         "info": banner.get("info"),
         "os": banner.get("os"),
         "cpes": cpes,
+        "softvers": normSoftvers(cpes, banner.get("product"), banner.get("version")),
         "data": text,
         "hostnames": [h.lower() for h in _list(banner.get("hostnames"))],
         "domains": [d.lower() for d in _list(banner.get("domains"))],

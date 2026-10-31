@@ -5,8 +5,11 @@ init {
     if $cmdopts.id {
         $retn = $privscan.scanStatus($cmdopts.id)
         if (not $util.failed($retn, `Checking scan {$cmdopts.id}`)) {
+            // A single scan's status reports "count", the list of scans reports "size".
+            $count = $retn.data.count
+            if ($count = $lib.null) { $count = $retn.data.size }
             $lib.print("Scan {id}: {status} ({count} IPs, created {created})", id=$retn.data.id,
-                status=$retn.data.status, count=$retn.data.size, created=$retn.data.created)
+                status=$retn.data.status, count=$count, created=$retn.data.created)
         }
     } else {
         $retn = $privscan.scans(page=$cmdopts.page)

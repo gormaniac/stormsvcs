@@ -992,3 +992,6 @@ commands:
       - - --json
         - default: null
           help: A dict to send as the JSON body.
+      - - --form
+        - default: null
+          help: A dict to send as a form encoded body (ex. for POST /shodan/scan, which ignores query params).
