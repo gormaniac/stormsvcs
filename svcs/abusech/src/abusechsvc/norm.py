@@ -19,6 +19,7 @@ code short, and lets it be unit tested without a Cortex. The shapes are:
 import csv
 import io
 import re
+from collections.abc import Iterable, Iterator
 from typing import Any
 
 
@@ -172,17 +173,20 @@ def verdict(valu: Any) -> int | None:
 def parseCsv(text: str, fields: tuple[str, ...]) -> list[dict]:
     """Parse an abuse.ch CSV export, skipping its ``#`` comment/header lines."""
 
-    lines = [line for line in text.splitlines() if line.strip() and not line.lstrip().startswith("#")]
-    rows = []
-    for row in csv.reader(io.StringIO("\n".join(lines)), skipinitialspace=True):
+    return list(parseCsvLines(text.splitlines(), fields))
+
+
+def parseCsvLines(lines: Iterable[str], fields: tuple[str, ...]) -> Iterator[dict]:
+    """Like ``parseCsv`` but streaming, over an iterable of lines (ex. a file too large to load)."""
+
+    data = (line for line in lines if line.strip() and not line.lstrip().startswith("#"))
+    for row in csv.reader(data, skipinitialspace=True):
         if not row:
             continue
         # The URLhaus/MalwareBazaar exports sometimes include an un-commented header.
         if row[0].strip().lower() == fields[0]:
             continue
-        rows.append({k: (v.strip() if v.strip() not in ("", "n/a", "None") else None)
-                     for k, v in zip(fields, row)})
-    return rows
+        yield {k: (v.strip() if v.strip() not in ("", "n/a", "None") else None) for k, v in zip(fields, row)}
 
 
 def parseLines(text: str) -> list[str]:

@@ -323,7 +323,7 @@ commands:
       Model the samples in a MalwareBazaar CSV export.
 
         recent - The samples added in the last 48 hours
-        full   - Every sample (large, zipped)
+        full   - Every sample (a ~230 MB download, streamed)
         yara   - The YARA rule statistics: every rule MalwareBazaar matches samples with (it:app:yara:rule)
 
       Examples:
@@ -514,7 +514,7 @@ commands:
         recent - URLs added in the last 30 days
         online - URLs that are currently online
         full     - URLs that are online or were added in the last 90 days (large)
-        payloads - Every payload URLhaus collected, with the URL that served it (large)
+        payloads - Every payload URLhaus collected, with the URL that served it (a ~800 MB download, streamed)
 
       Examples:
 

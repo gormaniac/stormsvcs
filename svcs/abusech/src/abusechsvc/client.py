@@ -379,6 +379,42 @@ class AbuseChClient:
             return None
         return data
 
+    async def download(self, base: str, path: str, fd: Any, *, apikey: str | None = None,
+                       chunk: int = 1024 * 1024) -> str:
+        """Stream a (large) dataset into a writable binary file object, returning its content type.
+
+        Exports can be hundreds of MB, so the body is written in chunks with only a read timeout
+        (no total timeout). Error responses (JSON statuses or HTTP errors) are raised.
+        """
+
+        headers = self.headers(base, apikey)
+        if base in EXPORT_APIS:
+            path = f"{quote(apikey, safe='')}/{path.lstrip('/')}"
+        url = self.url(base, path)
+        timeout = aiohttp.ClientTimeout(total=None, sock_connect=self.timeout.total, sock_read=self.timeout.total)
+
+        await self.limiter.wait()
+        try:
+            async with self.session.get(url, headers=headers, timeout=timeout) as resp:
+                ctype = resp.headers.get("Content-Type", "")
+                if resp.status >= 400 or "json" in ctype:
+                    # Errors are small, read them and raise like any other response.
+                    body = await resp.read()
+                    data = None
+                    try:
+                        data = json.loads(body) if body.strip() else None
+                    except ValueError:
+                        pass
+                    checkStatus(base, resp.status, data, body.decode("utf-8", "replace"), notfound=False)
+                    fd.write(body)
+                    return ctype
+                async for byts in resp.content.iter_chunked(chunk):
+                    fd.write(byts)
+                return ctype
+        except (TimeoutError, aiohttp.ClientError) as err:
+            mesg = str(err).replace(apikey, "<auth-key>") if apikey else str(err)
+            raise AbuseChApiError(f"Unable to download from abuse.ch ({base}): {mesg}") from err
+
     async def fetch(
         self,
         base: str,

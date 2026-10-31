@@ -18,9 +18,13 @@ The platforms, and the base URL names (see ``abusechsvc.client.BASE_URLS``) they
 """
 
 
+import asyncio
 import hashlib
+import io
 import json
 import re
+import tempfile
+import zipfile
 from collections.abc import AsyncIterator, Iterable
 from typing import Any
 from urllib.parse import quote
@@ -235,6 +239,50 @@ class AbuseChSvc(s_cell.Cell):
             raise AbuseChApiError(f"abuse.ch {base}: {path} {match.group(0).strip('# ').strip()}")
         return text
 
+    async def _iterLines(self, base: str, path: str, apikey=None) -> AsyncIterator[str]:
+        """Stream a (possibly huge, possibly zipped) dataset's lines.
+
+        The dataset is downloaded into a temporary file, then read line by line (from inside the
+        zip, when it's zipped) so exports of several GB never have to fit in memory.
+        """
+
+        with tempfile.TemporaryFile() as fd:
+            await self.client.download(base, path, fd, apikey=self.getApiKey(apikey))
+            fd.seek(0)
+            if fd.read(2) == b"PK":
+                fd.seek(0)
+                try:
+                    zfd = zipfile.ZipFile(fd)
+                except zipfile.BadZipFile as err:
+                    raise AbuseChApiError(f"Unable to unzip {path}: {err}") from err
+                names = [i.filename for i in zfd.infolist() if not i.is_dir()]
+                streams = (io.TextIOWrapper(zfd.open(n), encoding="utf-8", errors="replace") for n in names)
+            else:
+                fd.seek(0)
+                streams = iter([io.TextIOWrapper(fd, encoding="utf-8", errors="replace")])
+
+            for stream in streams:
+                for num, line in enumerate(stream):
+                    # Retired datasets are replaced with a comment saying so (ex. SSLBL's IP lists).
+                    if num < 20 and line.startswith("#") and re.search(r"\bhas been deprecated\b", line, re.I):
+                        raise AbuseChApiError(f"abuse.ch {base}: {path} {line.strip('#').strip()}")
+                    yield line.rstrip("\r\n")
+                    if num % 1000 == 999:
+                        await asyncio.sleep(0)
+
+    async def _csvRows(self, base: str, path: str, fields: tuple[str, ...], apikey=None) -> AsyncIterator[dict]:
+        """Stream the rows of a CSV dataset (see ``_iterLines``)."""
+
+        batch = []
+        async for line in self._iterLines(base, path, apikey=apikey):
+            batch.append(line)
+            if len(batch) >= 1000:
+                for row in norm.parseCsvLines(batch, fields):
+                    yield row
+                batch = []
+        for row in norm.parseCsvLines(batch, fields):
+            yield row
+
     def _sample(self, files: list[tuple[str, bytes]]) -> dict | None:
         """Describe a downloaded sample (the first file in its zip) for Storm."""
 
@@ -408,16 +456,22 @@ class AbuseChSvc(s_cell.Cell):
 
         if kind not in BAZAAR_EXPORTS:
             raise AbuseChApiError(f"Unknown MalwareBazaar export: {kind}")
-        text = await self._fetchText("bazaar:export", BAZAAR_EXPORTS[kind], apikey=apikey)
         if kind == "yara":
+            text = await self._fetchText("bazaar:export", BAZAAR_EXPORTS[kind], apikey=apikey)
             try:
                 items = norm.normYaraStats(json.loads(text) if text.strip() else {})
             except ValueError as err:
                 raise AbuseChApiError(f"Unable to parse the MalwareBazaar YARA rule statistics: {err}") from err
-        else:
-            items = (norm.normSample(row) for row in norm.parseCsv(text, BAZAAR_CSV))
+            for count, rule in enumerate(items, start=1):
+                yield rule
+                if limit and count >= limit:
+                    return
+            return
+
+        # The full export is hundreds of MB, so it's streamed.
         count = 0
-        for sample in items:
+        async for row in self._csvRows("bazaar:export", BAZAAR_EXPORTS[kind], BAZAAR_CSV, apikey=apikey):
+            sample = norm.normSample(row)
             if sample:
                 yield sample
                 count += 1
@@ -556,13 +610,12 @@ class AbuseChSvc(s_cell.Cell):
 
         if kind not in URLHAUS_EXPORTS:
             raise AbuseChApiError(f"Unknown URLhaus export: {kind}")
-        text = await self._fetchText("urlhaus:export", URLHAUS_EXPORTS[kind], apikey=apikey)
-        if kind == "payloads":
-            items = (norm.normUrlhausPayloadRow(r) for r in norm.parseCsv(text, norm.URLHAUS_PAYLOAD_CSV))
-        else:
-            items = (norm.normUrl(r) for r in norm.parseCsv(text, URLHAUS_CSV))
+        # The payloads export is GBs, so the exports are streamed.
+        payloads = kind == "payloads"
+        fields = norm.URLHAUS_PAYLOAD_CSV if payloads else URLHAUS_CSV
         count = 0
-        for url in items:
+        async for row in self._csvRows("urlhaus:export", URLHAUS_EXPORTS[kind], fields, apikey=apikey):
+            url = norm.normUrlhausPayloadRow(row) if payloads else norm.normUrl(row)
             if url:
                 yield url
                 count += 1
