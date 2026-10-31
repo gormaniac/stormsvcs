@@ -20,7 +20,7 @@ from typing import Any
 import capa.rules
 import capa.rules.cache
 
-from .rules import CapaRules, contact, nsTag, ruleDoc, ruleMeta, techniques
+from .rules import CapaRules, ruleRecord
 
 
 CUSTOM_RULE_TYPE = "capa.custom"
@@ -97,26 +97,10 @@ class CustomRules:
             })
             return
 
-        meta = rule.meta
-        namespace = meta.get("namespace") or None
-        lib = bool(meta.get("lib", False))
         self.texts[guid] = text
-        self.records[name] = {
-            "guid": guid,
-            "name": name,
-            "namespace": namespace,
-            "tag": None if lib else nsTag(namespace),
-            "lib": lib,
-            "type": CUSTOM_RULE_TYPE,
-            "custom": True,
-            "desc": ruleDoc(meta),
-            "text": text,
-            "path": None,
-            "url": None,
-            "authors": [contact(str(a)) for a in meta.get("authors") or ()],
-            "techniques": techniques(meta.get("att&ck") or ()),
-            "meta": ruleMeta(meta),
-        }
+        self.records[name] = ruleRecord(
+            rule.meta, text, guid=guid, type=CUSTOM_RULE_TYPE, custom=True,
+        )
 
     def _save(self) -> None:
         """Write the rules to this set's directory, one file per rule (named for its guid)."""

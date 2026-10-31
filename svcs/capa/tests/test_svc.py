@@ -269,10 +269,14 @@ class TestCapaSvc(s_tests.SynTest):
                         await svc.scan(SAMPLE_SHA256, fmt="sc64")
                     sha.assert_not_called()
 
-                    # A touched (but unchanged) rule is read and hashed, and still matches.
+                    # A touched (but unchanged) rule is read and hashed, and still matches. The
+                    # new stat is kept, so the next scans only stat the rules again.
                     extra = os.path.join(rules, "testing", "never.yml")
                     os.utime(extra, ns=(1, 1))
                     await svc.scan(SAMPLE_SHA256, fmt="sc64")
+                    with mock.patch.object(s_svc, "rulesSha256") as sha:
+                        await svc.scan(SAMPLE_SHA256, fmt="sc64")
+                    sha.assert_not_called()
 
                     # The check runs after any wait for a worker, right before capa runs.
                     async def change(*args):
@@ -371,8 +375,21 @@ class TestCapaSvc(s_tests.SynTest):
             assert res["sha256"] == SAMPLE_SHA256
             rule = res["matches"][0]["rule"]
             assert rule["guid"] == ruleGuid("a new rule")
-            assert (rule["tag"], rule["desc"], rule["text"]) == ("new.ns", "New.", "rule: ...")
+            assert (rule["tag"], rule["text"]) == ("new.ns", "rule: ...")
+            assert rule["desc"].startswith("New.\n\nNamespace: new/ns")
             assert res["matches"][0]["addrs"] == ["0x10"]
+
+            # With valid YAML, the record is built like any other rule's.
+            source = (
+                "rule:\n  meta:\n    name: a new rule\n    namespace: new/ns\n"
+                "    authors:\n      - a@b.c\n    att&ck:\n      - Execution [T1059]\n"
+                "    scopes:\n      static: file\n      dynamic: file\n"
+                "  features:\n    - string: x\n"
+            )
+            doc["rules"]["a new rule"]["source"] = source
+            rule = svc._summarize(svc.capaRules, SAMPLE_SHA256, doc)["matches"][0]["rule"]
+            assert rule["techniques"] == ["T1059"] and rule["authors"] == [{"email": "a@b.c"}]
+            assert rule["type"] == "capa" and rule["custom"] is False and rule["text"] == source
 
 
 class TestCapaApi(s_tests.SynTest):

@@ -1,5 +1,5 @@
 name: slib.capa
-version: 0.2.0
+version: 0.2.1
 guid: debecd104d154eed9c8bec53a6b2531f
 
 synapse_minversion: [2, 137, 0]
@@ -65,8 +65,8 @@ commands:
       Custom capa rules (meta:rule nodes with :type=capa.custom and the rule's YAML in :text)
       in the view are used too. An official rule with the same name wins.
 
-      Files already scanned with the same capa rules (and custom rules) are skipped unless
-      --force is used.
+      Files already scanned with the same capa rules, custom rules, --format, and --os are
+      skipped unless --force is used.
 
       Examples:
 

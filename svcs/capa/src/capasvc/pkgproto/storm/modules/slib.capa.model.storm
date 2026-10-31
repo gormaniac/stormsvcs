@@ -221,6 +221,7 @@ function results(file, result, prefix=$lib.null) {
         "arch": $result.arch,
         "os": $result.os,
         "extractor": $result.extractor,
+        "options": $result.options,
         "matches": $summary,
         // The tags this scan applied, for the next scan to remove.
         "prefix": $prefix,

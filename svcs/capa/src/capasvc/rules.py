@@ -26,7 +26,6 @@ LIB_RULE_TYPE = "capa.lib"
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 TECHNIQUE_RE = re.compile(r"\[(T\d{4}(?:\.\d{3})?)\]\s*$")
-BEHAVIOR_RE = re.compile(r"\[([A-Z]\d{4}(?:\.[A-Z]?\d{3})?)\]\s*$")
 
 
 class CapaRulesError(Exception):
@@ -143,6 +142,52 @@ def ruleMeta(meta: dict[str, Any]) -> dict[str, Any]:
         return str(valu)
 
     return norm(meta)
+
+
+def ruleRecord(
+    meta: dict[str, Any], text: str | None, guid: str | None = None, type: str | None = None,
+    path: str | None = None, url: str | None = None, custom: bool = False,
+) -> dict[str, Any]:
+    """The record slib.capa models a capa rule's ``meta:rule`` node from.
+
+    Parameters
+    ----------
+    meta : dict
+        The rule's meta (``capa.rules.Rule.meta``).
+    text : str | None
+        The rule's YAML.
+    guid : str | None
+        The ``meta:rule`` guid, ``ruleGuid`` of the rule's name by default.
+    type : str | None
+        The ``meta:rule:type``, ``RULE_TYPE`` (or ``LIB_RULE_TYPE``) by default.
+    path : str | None
+        The rule's path in its rules directory.
+    url : str | None
+        The URL that documents the rule.
+    custom : bool
+        Whether it's a custom rule (see ``capasvc.custom``).
+    """
+
+    namespace = meta.get("namespace") or None
+    lib = bool(meta.get("lib", False))
+    if type is None:
+        type = LIB_RULE_TYPE if lib else RULE_TYPE
+    return {
+        "guid": guid or ruleGuid(meta["name"]),
+        "name": meta["name"],
+        "namespace": namespace,
+        "tag": None if lib else nsTag(namespace),
+        "lib": lib,
+        "type": type,
+        "custom": custom,
+        "desc": ruleDoc(meta),
+        "text": text,
+        "path": path,
+        "url": url,
+        "authors": [contact(str(a)) for a in meta.get("authors") or ()],
+        "techniques": techniques(meta.get("att&ck") or ()),
+        "meta": ruleMeta(meta),
+    }
 
 
 def readRules(path: str) -> list[tuple[str, str]]:
@@ -313,25 +358,9 @@ class CapaRules:
         return self.urlfmt.format(version=self.version, path=relpath)
 
     def ruleRecord(self, meta: dict[str, Any], text: str, relpath: str) -> dict[str, Any]:
-        """The record slib.capa models a capa rule's ``meta:rule`` node from."""
+        """The record of an official rule in this directory, see ``ruleRecord``."""
 
-        namespace = meta.get("namespace") or None
-        lib = bool(meta.get("lib", False))
-        return {
-            "guid": ruleGuid(meta["name"]),
-            "name": meta["name"],
-            "namespace": namespace,
-            "tag": None if lib else nsTag(namespace),
-            "lib": lib,
-            "type": LIB_RULE_TYPE if lib else RULE_TYPE,
-            "desc": ruleDoc(meta),
-            "text": text,
-            "path": relpath,
-            "url": self.url(relpath),
-            "authors": [contact(str(a)) for a in meta.get("authors") or ()],
-            "techniques": techniques(meta.get("att&ck") or ()),
-            "meta": ruleMeta(meta),
-        }
+        return ruleRecord(meta, text, path=relpath, url=self.url(relpath))
 
     def info(self) -> dict[str, Any]:
         """A summary of the loaded rules."""

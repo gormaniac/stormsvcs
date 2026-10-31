@@ -1,13 +1,16 @@
 """Pytests for custom capa rules (capasvc.custom, and CapaSvc.custom/scan with them)."""
 
+import asyncio
 import os
+import sys
+import time
 from unittest import mock
 
 import pytest
 import synapse.common as s_common
 import synapse.tests.utils as s_tests
 
-from capasvc import CapaSvc
+from capasvc import CapaSvc, svc as s_svc
 from capasvc.api import CapaSvcError
 from capasvc.custom import CUSTOM_RULE_TYPE, CustomRules
 from capasvc.rules import CapaRules
@@ -226,3 +229,99 @@ class TestCapaSvcCustom(s_tests.SynTest):
                 assert retn["status"] and retn["data"]["key"]
                 retn = await prox.custom("newp")
                 assert not retn["status"] and "must be a list" in retn["mesg"]
+
+
+class TestCapaSvcCustomCache(s_tests.SynTest):
+
+    async def test_reload_while_waiting(self):
+        # A custom rule scan that waited on the cache lock through a reload fails, and doesn't
+        # touch the new rules' cache.
+        async with self.getTestAxon() as axon:
+            await axon.put(SAMPLE)
+            async with self.getTestCell(CapaSvc, svcConf(axon)) as svc:
+                await asyncio.wait_for(svc.cacheReady.wait(), timeout=60)
+                info = await svc.custom([{"guid": s_common.guid(), "text": MARKER}])
+
+                async with svc.cacheLock:
+                    task = svc.schedCoro(svc.scan(SAMPLE_SHA256, fmt="sc64", custom=info["key"]))
+                    await asyncio.sleep(0.2)
+                    old = svc.capaRules
+                    await svc.reload()
+
+                with self.raises(CapaSvcError) as cm:
+                    await task
+                assert "Unknown custom capa rules" in cm.exception.mesg
+                assert not svc.customUse
+
+                await asyncio.wait_for(svc.cacheReady.wait(), timeout=60)
+                new = svc.capaRules.cacheName(svc.cachedir)
+                assert new in os.listdir(svc.cachedir)
+
+                # A warm-up for rules that were reloaded since doesn't build or clean.
+                ready = asyncio.Event()
+                with mock.patch.object(svc, "_runCacheBuild") as build:
+                    await svc._warmCache(old, ready)
+                build.assert_not_called()
+                assert ready.is_set() and new in os.listdir(svc.cachedir)
+                svc._cleanCache(old)
+                assert new in os.listdir(svc.cachedir)
+
+    async def test_retry(self):
+        # A custom rule set capa couldn't load is tried again after a while.
+        async with self.getTestAxon() as axon:
+            await axon.put(SAMPLE)
+            async with self.getTestCell(CapaSvc, svcConf(axon)) as svc:
+                info = await svc.custom([{"guid": s_common.guid(), "text": MARKER}])
+                key = info["key"]
+
+                svc.customBuilt[key] = ("boom", time.monotonic())
+                with self.raises(CapaSvcError) as cm:
+                    await svc.scan(SAMPLE_SHA256, fmt="sc64", custom=key)
+                assert cm.exception.mesg == "capa can't use the custom rules: boom"
+
+                svc.customBuilt[key] = ("boom", time.monotonic() - s_svc.CUSTOM_RETRY - 1)
+                res = await svc.scan(SAMPLE_SHA256, fmt="sc64", custom=key)
+                assert res["rules"]["custom"] == key
+                assert svc.customBuilt[key][0] is None
+
+    async def test_build_timeout(self):
+        conf = svcConf(**{"capa:timeout": 1})
+        async with self.getTestCell(CapaSvc, conf) as svc:
+            await asyncio.wait_for(svc.cacheReady.wait(), timeout=60)
+            svc._cacheCmd = lambda paths: [sys.executable, "-c", "import time; time.sleep(30)"]
+            mesg = await svc._runCacheBuild([svc.capaRules.path])
+            assert mesg == "capa took longer than 1 seconds (capa:timeout) to load the rules"
+            assert not svc.procs
+
+    async def test_prune(self):
+        # Only the most recently used custom rule sets are kept, sets in use aren't deleted.
+        async with self.getTestAxon() as axon:
+            await axon.put(SAMPLE)
+            async with self.getTestCell(CapaSvc, svcConf(axon)) as svc:
+                with mock.patch.object(s_svc, "MAX_CUSTOM_SETS", 2):
+                    keys = []
+                    for i in range(2):
+                        rule = customRule(f"rule {i}")
+                        info = await svc.custom([{"guid": s_common.guid(), "text": rule}])
+                        keys.append(info["key"])
+                    await svc.scan(SAMPLE_SHA256, fmt="sc64", custom=keys[0])
+                    cache = svc.customSets[keys[0]].cacheName(svc.cachedir)
+                    assert cache in os.listdir(svc.cachedir)
+
+                    # keys[0] was used last, so keys[1] would go, but it's in use: keys[0] goes.
+                    assert list(svc.customSets) == [keys[1], keys[0]]
+                    svc.customUse[keys[1]] = 1
+                    info = await svc.custom([{"guid": s_common.guid(), "text": customRule("2")}])
+                    keys.append(info["key"])
+                    assert list(svc.customSets) == [keys[1], keys[2]]
+                    assert cache not in os.listdir(svc.cachedir)
+                    del svc.customUse[keys[1]]
+
+                    info = await svc.custom([{"guid": s_common.guid(), "text": customRule("3")}])
+                    keys.append(info["key"])
+                    assert list(svc.customSets) == [keys[2], keys[3]]
+                    assert sorted(os.listdir(svc.customdir)) == sorted(keys[2:])
+
+                    with self.raises(CapaSvcError) as cm:
+                        await svc.scan(SAMPLE_SHA256, fmt="sc64", custom=keys[0])
+                    assert "deleted the set" in cm.exception.mesg

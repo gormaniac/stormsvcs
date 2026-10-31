@@ -8,15 +8,18 @@ on failure, ``CapaCellApi`` wraps them in the standard ``TelepathRetn`` conventi
 
 
 import asyncio
+import collections
 import json
 import logging
 import os
 import re
 import shutil
 import sys
+import time
 from collections.abc import AsyncIterator
 from typing import Any
 
+import capa.rules
 import synapse.common as s_common
 import synapse.exc as s_exc
 import synapse.lib.cell as s_cell
@@ -26,7 +29,7 @@ import synapse.telepath as s_telepath
 from .api import CapaCellApi, CapaSvcError
 from .custom import CustomRules
 from .defs import RULES_URL, RULES_VERSION
-from .rules import CapaRules, CapaRulesError, nsTag, ruleGuid, rulesSha256, rulesStat
+from .rules import CapaRules, CapaRulesError, ruleRecord, rulesSha256, rulesStat
 
 
 logger = logging.getLogger(__name__)
@@ -44,6 +47,12 @@ OSES = ("auto", "windows", "linux", "macos")
 
 AXON_TIMEOUT = 30
 """Seconds to wait for the Axon connection before a scan fails."""
+
+MAX_CUSTOM_SETS = 16
+"""The max number of custom rule sets the service keeps (the least recently used go first)."""
+
+CUSTOM_RETRY = 60
+"""Seconds before capa tries a custom rule set it couldn't load again (ex. it ran out of memory)."""
 
 MAX_ADDRS = 100
 """The max number of match addresses kept per rule."""
@@ -164,9 +173,11 @@ class CapaSvc(s_cell.Cell):
         # Custom rule sets are sent again by Storm before it scans, so they don't outlive a run.
         shutil.rmtree(s_common.genpath(self.dirn, "capa", "custom"), ignore_errors=True)
         self.customdir = s_common.gendir(self.dirn, "capa", "custom")
-        # Custom rule sets by key, and the error (or None) from building capa's cache for each.
-        self.customSets: dict[str, CustomRules] = {}
-        self.customBuilt: dict[str, str | None] = {}
+        # Custom rule sets by key (least recently used first), the error (or None) and time of
+        # building capa's cache for each, and how many scans are using each.
+        self.customSets: collections.OrderedDict[str, CustomRules] = collections.OrderedDict()
+        self.customBuilt: dict[str, tuple[str | None, float]] = {}
+        self.customUse: collections.Counter[str] = collections.Counter()
 
         # Leftovers from a run that was killed with the service.
         for name in os.listdir(self.workdir):
@@ -252,7 +263,9 @@ class CapaSvc(s_cell.Cell):
 
         try:
             async with self.cacheLock:
-                await self._buildCache(rules)
+                # A reload since this was scheduled has its own build.
+                if self.capaRules is rules:
+                    await self._buildCache(rules)
         finally:
             ready.set()
 
@@ -273,20 +286,19 @@ class CapaSvc(s_cell.Cell):
             capa's error if it couldn't load the rules (ex. a rule needs a missing rule).
         """
 
-        code = (
-            "import pathlib, sys, capa.rules; "
-            "capa.rules.get_rules([pathlib.Path(p) for p in sys.argv[2:]], "
-            "cache_dir=pathlib.Path(sys.argv[1]))"
-        )
         try:
             proc = await asyncio.create_subprocess_exec(
-                sys.executable, "-c", code, self.cachedir, *paths,
+                *self._cacheCmd(paths),
                 stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
             )
             self.procs.add(proc)
+            timeout = self.conf.get("capa:timeout")
             try:
-                _, stderr = await proc.communicate()
+                _, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+            except TimeoutError:
+                return f"capa took longer than {timeout} seconds (capa:timeout) to load the rules"
             finally:
+                # Kills it if it timed out.
                 self._endProc(proc)
         except Exception as err:  # pragma: no cover - the cache is only an optimization
             return str(err)
@@ -295,11 +307,25 @@ class CapaSvc(s_cell.Cell):
             return stderrMesg(stderr.decode("utf-8", "replace")) or f"exit code {proc.returncode}"
         return None
 
+    def _cacheCmd(self, paths: list[str]) -> list[str]:
+        """The command line that has capa load (and cache) the rules in these directories."""
+
+        code = (
+            "import pathlib, sys, capa.rules; "
+            "capa.rules.get_rules([pathlib.Path(p) for p in sys.argv[2:]], "
+            "cache_dir=pathlib.Path(sys.argv[1]))"
+        )
+        return [sys.executable, "-c", code, self.cachedir, *paths]
+
     def _cleanCache(self, rules: CapaRules) -> None:
         """Delete capa's caches of rules other than these (ex. an older version of the rules).
 
-        The caches of the custom rule sets in use with these rules are kept.
+        The caches of the custom rule sets in use with these rules are kept. Nothing is deleted
+        if these aren't the loaded rules anymore (they were reloaded), the reload cleans up.
         """
+
+        if self.capaRules is not rules:
+            return
 
         keep = {rules.cacheName(self.cachedir)}
         keep.update(
@@ -371,7 +397,29 @@ class CapaSvc(s_cell.Cell):
             known = self.customSets.get(cset.key)
             if known is None or known.official is not official:
                 self.customSets[cset.key] = cset
+            self.customSets.move_to_end(cset.key)
+            self._pruneCustom()
         return cset.info()
+
+    def _pruneCustom(self) -> None:
+        """Delete the least recently used custom rule sets, past ``MAX_CUSTOM_SETS``.
+
+        Sets in use by a scan are kept. A deleted set is sent again by the next scan with it.
+        """
+
+        for key in list(self.customSets):
+            if len(self.customSets) <= MAX_CUSTOM_SETS:
+                return
+            if self.customUse[key]:
+                continue
+
+            cset = self.customSets.pop(key)
+            self.customBuilt.pop(key, None)
+            shutil.rmtree(cset.path, ignore_errors=True)
+            cache = os.path.join(self.cachedir, cset.cacheName(self.cachedir))
+            if os.path.exists(cache):
+                os.unlink(cache)
+            logger.info(f"Deleted the least recently used custom capa rules {key}")
 
     async def _prepCustom(self, rules: CapaRules, key: str) -> CustomRules:
         """The custom rule set for a scan, with capa's cache of it built (once).
@@ -382,22 +430,36 @@ class CapaSvc(s_cell.Cell):
             If the set is unknown, or capa can't load it with the official rules.
         """
 
-        cset = self.customSets.get(key)
-        if cset is None or cset.official is not rules:
-            raise CapaSvcError(
-                "Unknown custom capa rules (the service restarted or reloaded its rules), "
-                "send them again with custom()."
+        def current() -> CustomRules:
+            cset = self.customSets.get(key)
+            if cset is None or cset.official is not rules or self.capaRules is not rules:
+                raise CapaSvcError(
+                    "Unknown custom capa rules (the service restarted, reloaded its rules, or "
+                    "deleted the set), send them again with custom()."
+                )
+            return cset
+
+        def needsBuild() -> bool:
+            built = self.customBuilt.get(key)
+            # Failures are tried again after a while, they may not happen again.
+            return built is None or (
+                built[0] is not None and time.monotonic() - built[1] > CUSTOM_RETRY
             )
 
-        if key not in self.customBuilt:
+        cset = current()
+        self.customSets.move_to_end(key)
+
+        if needsBuild():
             async with self.cacheLock:
-                if key not in self.customBuilt:
+                # A reload (or prune) while this waited makes the set unknown.
+                cset = current()
+                if needsBuild():
                     mesg = await self._runCacheBuild([rules.path, cset.path])
-                    self.customBuilt[key] = mesg
+                    self.customBuilt[key] = (mesg, time.monotonic())
                     if mesg is None:
                         self._cleanCache(rules)
 
-        if (mesg := self.customBuilt[key]) is not None:
+        if (mesg := self.customBuilt[key][0]) is not None:
             raise CapaSvcError(f"capa can't use the custom rules: {mesg}")
         return cset
 
@@ -442,7 +504,25 @@ class CapaSvc(s_cell.Cell):
 
         rules = self._getRules()
         await self.cacheReady.wait()
-        cset = await self._prepCustom(rules, custom) if custom else None
+
+        if not custom:
+            return await self._scan(rules, sha256, fmt, osname)
+
+        # A set in use isn't pruned.
+        self.customUse[custom] += 1
+        try:
+            cset = await self._prepCustom(rules, custom)
+            return await self._scan(rules, sha256, fmt, osname, cset)
+        finally:
+            self.customUse[custom] -= 1
+            if not self.customUse[custom]:
+                del self.customUse[custom]
+
+    async def _scan(
+        self, rules: CapaRules, sha256: str, fmt: str, osname: str,
+        cset: CustomRules | None = None,
+    ) -> dict[str, Any]:
+        """Fetch a file and run capa against it, see ``scan``."""
 
         async with self.sema:
             path = s_common.genpath(self.workdir, f"{sha256}.{s_common.guid()}")
@@ -455,7 +535,10 @@ class CapaSvc(s_cell.Cell):
                 if os.path.exists(path):
                     os.unlink(path)
 
-        return self._summarize(rules, sha256, doc, cset)
+        res = self._summarize(rules, sha256, doc, cset)
+        # What the scan asked for, capa's detected format and OS are "format" and "os".
+        res["options"] = {"format": fmt, "os": osname}
+        return res
 
     async def _checkRules(self, rules: CapaRules) -> None:
         """Make sure the rules on disk (that capa reads) are still the loaded rules.
@@ -468,9 +551,12 @@ class CapaSvc(s_cell.Cell):
 
         try:
             # Only stat the files, unless something about them changed.
-            if await s_coro.executor(rulesStat, rules.path) == rules.stat:
+            stat = await s_coro.executor(rulesStat, rules.path)
+            if stat == rules.stat:
                 return
             if await s_coro.executor(rulesSha256, rules.path) == rules.sha256:
+                # Touched but unchanged, so the next scans only stat them again.
+                rules.stat = stat
                 return
         except CapaRulesError as err:
             raise CapaSvcError(f"The capa rules on disk can't be read: {err.mesg}") from None
@@ -574,6 +660,18 @@ class CapaSvc(s_cell.Cell):
         except ValueError:
             raise CapaSvcError(f"capa returned invalid JSON: {errmesg}") from None
 
+    def _unknownRecord(self, name: str, result: dict[str, Any]) -> dict[str, Any]:
+        """The record of a rule capa reported that isn't a loaded rule, see ``ruleRecord``."""
+
+        source = result.get("source")
+        try:
+            meta = capa.rules.Rule.from_yaml(source).meta
+        except Exception:
+            rmeta = result.get("meta", {})
+            meta = {k: rmeta.get(k) for k in ("namespace", "description", "authors")}
+        meta = dict(meta, name=name)
+        return ruleRecord(meta, source)
+
     def _summarize(
         self, rules: CapaRules, sha256: str, doc: dict[str, Any],
         cset: CustomRules | None = None,
@@ -595,23 +693,9 @@ class CapaSvc(s_cell.Cell):
             if record is None and cset is not None:
                 record = cset.records.get(name)
             if record is None:
-                # The rules on disk changed since they were loaded, model what capa reported.
-                namespace = rmeta.get("namespace") or None
-                record = {
-                    "guid": ruleGuid(name),
-                    "name": name,
-                    "namespace": namespace,
-                    "tag": nsTag(namespace),
-                    "lib": False,
-                    "type": "capa",
-                    "desc": rmeta.get("description") or None,
-                    "text": result.get("source"),
-                    "path": None,
-                    "url": None,
-                    "authors": [],
-                    "techniques": [],
-                    "meta": rmeta,
-                }
+                # Not a loaded rule (a safety net, scans check the rules on disk first), model
+                # it from the source capa reported.
+                record = self._unknownRecord(name, result)
 
             addrs = []
             for match in result.get("matches", ()):

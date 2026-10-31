@@ -282,11 +282,32 @@ class TestCapaStormScan(s_tests.SynTest):
             # The module API.
             msgs = await core.stormlist(
                 f"{FILE} $capa = $lib.import(slib.capa.lib) "
-                "$lib.print($capa.scanned($node)) "
+                "$lib.print(`sc64={$capa.scanned($node, fmt=sc64)}`) "
+                "$lib.print(`auto={$capa.scanned($node)}`) "
                 "for $r in $capa.scan($node, fmt=sc64, force=(true)) { $lib.print($r.props.name) }"
             )
-            self.stormIsInPrint("true", msgs)
+            self.stormIsInPrint("sc64=true", msgs)
+            self.stormIsInPrint("auto=false", msgs)
             self.stormIsInPrint("contain xor", msgs)
+
+            # A different --format or --os is scanned again, without --force.
+            file = (await core.nodes(FILE))[0]
+            assert (await file.getData("slib:capa"))["options"] == {"format": "sc64", "os": "auto"}
+            msgs = await core.stormlist(SCAN)
+            self.stormIsInPrint("already scanned", msgs)
+            msgs = await core.stormlist(SCAN + " --os windows")
+            self.stormNotInPrint("already scanned", msgs)
+            file = (await core.nodes(FILE))[0]
+            data = await file.getData("slib:capa")
+            assert data["options"] == {"format": "sc64", "os": "windows"}
+
+            # Results from before the options were saved count as the defaults.
+            data = dict(data)
+            data.pop("options")
+            await file.setData("slib:capa", data)
+            query = f"{FILE} $lib.print($lib.import(slib.capa.lib).scanned($node))"
+            msgs = await core.stormlist(query)
+            self.stormIsInPrint("true", msgs)
 
     async def test_scan_tags(self):
         async with capaSvc(self) as (core, svc, axon):
@@ -537,6 +558,28 @@ class TestCapaStormCustom(s_tests.SynTest):
             await self.addCustom(core, customRule("needs", "match: newp rule"))
             msgs = await core.stormlist(SCAN + " --force")
             self.stormIsInWarn("capa can't use the custom rules", msgs)
+
+    async def test_custom_module_once(self):
+        # The module's scan() sends the view's custom rules once per runtime, not per file.
+        async with capaSvc(self) as (core, svc, axon):
+            await putSample(core, axon)
+            await putSample(core, axon, b"another file")
+            await self.addCustom(core, MARKER)
+
+            custom = svc.custom
+            calls = []
+
+            async def counted(rules):
+                calls.append(rules)
+                return await custom(rules)
+
+            svc.custom = counted
+            msgs = await core.stormlist(
+                "$capa = $lib.import(slib.capa.lib) "
+                "file:bytes for $r in $capa.scan($node, fmt=sc64) { $lib.print($r.props.name) }"
+            )
+            self.stormIsInPrint("mine", msgs)  # The custom rule node's own :name.
+            assert len(calls) == 1
 
     async def test_custom_perms(self):
         async with capaSvc(self) as (core, svc, axon):

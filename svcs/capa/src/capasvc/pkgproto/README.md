@@ -76,7 +76,8 @@ YAML in its `:text`:
 - Custom rules can use official rules (ex. `match: contain loop`) and each other. A custom rule capa can't
   load with the others (ex. it needs a rule that doesn't exist) fails the scans until it's fixed.
 - A file's results record the custom rules it was scanned with, so a file is scanned again (without
-  `--force`) when the custom rules change.
+  `--force`) when the custom rules change. The service keeps the 16 most recently used sets of custom
+  rules, an older set is sent again by the next scan that uses it.
 
 ## Model
 
@@ -119,8 +120,8 @@ Scanning a `file:bytes`:
 - Adds a `-(matches)>` edge to it from every matched rule's `meta:rule`.
 - Tags it with each matched rule's namespace, unless tagging is disabled.
 - Saves the results in its `slib:capa` node data: the capa and rules versions, the format, arch, and OS
-  capa detected, every matched rule with its match count and (up to 100) match addresses, and the tags
-  it applied (with their prefix).
+  capa detected (and the `--format`/`--os` the scan asked for), every matched rule with its match count
+  and (up to 100) match addresses, and the tags it applied (with their prefix).
 
 Like capa's own output, library rules and rules that only match parts of other rules aren't reported.
 Rules matched in internal namespaces are, ex. `#rep.capa.internal.limitation.file` means capa found the

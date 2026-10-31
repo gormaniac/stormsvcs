@@ -8,6 +8,8 @@ init {
     $priv = $lib.import(slib.capa.priv.user)
     $model = $lib.import(slib.capa.model)
     $util = $lib.import(slib.capa.util)
+    // The custom rules key scan() looked up, once per import of this module (see scan).
+    $cache = ({})
 }
 
 // The service's rules info (see CapaSvc.rulesInfo), or null if they aren't loaded.
@@ -61,15 +63,21 @@ function customKey() {
 
 // ---- Scanning ----
 
-// Whether a file:bytes was already scanned with the service's rules and these custom rules
-// (a key from customKey(), or false for none). rinfo is the service's rules info, it's looked
-// up if not given.
-function scanned(file, rinfo=$lib.null, custom=(false)) {
+// Whether a file:bytes was already scanned with the service's rules, these custom rules
+// (a key from customKey(), or false for none), and the same format and OS options. rinfo is
+// the service's rules info, it's looked up if not given.
+function scanned(file, rinfo=$lib.null, custom=(false), fmt=auto, osname=auto) {
     $data = $file.data.get("slib:capa")
     if ($data = $lib.null) { return((false)) }
     if ($rinfo = $lib.null) { $rinfo = $info() }
     if ($rinfo = $lib.null) { return((false)) }
     if ($data.rules.sha256 != $rinfo.sha256) { return((false)) }
+
+    // Scans from before the options were saved used the defaults.
+    $options = $data.options
+    if ($options = $lib.null) { $options = ({"format": "auto", "os": "auto"}) }
+    if ($options.format != $fmt or $options.os != $osname) { return((false)) }
+
     if $custom { return(($data.rules.custom = $custom)) }
     return(($data.rules.custom = $lib.null))
 }
@@ -79,11 +87,17 @@ function scanned(file, rinfo=$lib.null, custom=(false)) {
 //
 // Files already scanned with the same rules are skipped unless force is true. rinfo is the
 // service's rules info, it's looked up if not given. custom is the key of the custom rules to
-// use (see customKey), null to send the view's custom rules first, or false for none.
+// use (see customKey), null to send the view's custom rules first (once per import of this
+// module, so import it before lifting the files, and edits to them during a query aren't used
+// until the next one), or false for none.
 //
 // NOTE: return() in a function that emits raises an error, so this uses elif/else instead.
 function scan(file, fmt=auto, osname=auto, force=(false), rinfo=$lib.null, custom=$lib.null) {
-    if ($custom = $lib.null) { $custom = $customKey() }
+    if ($custom = $lib.null) {
+        // customKey() never returns null, so null means it wasn't looked up yet.
+        if ($cache.custom = $lib.null) { $cache.custom = $customKey() }
+        $custom = $cache.custom
+    }
     $ckey = $lib.null
     if $custom { $ckey = $custom }
 
@@ -92,7 +106,7 @@ function scan(file, fmt=auto, osname=auto, force=(false), rinfo=$lib.null, custo
         $lib.warn("slib.capa: Unable to scan file:bytes={valu}, it has no :sha256.",
                   valu=$file.repr())
     }
-    elif ((not $force) and $scanned($file, $rinfo, $custom)) {
+    elif ((not $force) and $scanned($file, $rinfo, $custom, $fmt, $osname)) {
         $lib.print("slib.capa: Skipping {sha256}, it was already scanned with these rules (see --force).",
                    sha256=$sha256)
     }
