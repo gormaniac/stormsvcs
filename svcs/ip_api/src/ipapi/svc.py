@@ -76,6 +76,11 @@ class IpApiSvc(s_cell.Cell):
     async def __anit__(self, dirn, *args, **kwargs):
         await s_cell.Cell.__anit__(self, dirn, *args, **kwargs)
 
+        # One session for the cell's lifetime - queries all go to the same
+        # host, so reuse its connection instead of building a session each time.
+        self.sess = aiohttp.ClientSession()
+        self.onfini(self.sess.close)
+
         # Queries are queued here and worked FIFO by _workQueue() so that we
         # never exceed the ip-api.com rate limit of 45 requests/minute.
         self.queue: asyncio.Queue[_QueueItem] = asyncio.Queue()
@@ -104,17 +109,23 @@ class IpApiSvc(s_cell.Cell):
             "regionName,city,zip,lat,lon,timezone,isp,org,as,asname,mobile,proxy,hosting,query"
         )
 
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as resp:
-                if resp.status == 429:
-                    raise _RateLimited(ttl=resp.headers.get(RL_TTL_HEADER))
+        async with self.sess.get(url) as resp:
+            if resp.status == 429:
+                raise _RateLimited(ttl=resp.headers.get(RL_TTL_HEADER))
 
-                if resp.status != 200:
-                    resp.raise_for_status()
+            if resp.status != 200:
+                resp.raise_for_status()
 
-                data = await resp.json()
+            data = await resp.json()
 
-                return IpData(as_=data.pop('as'), **data), resp.headers
+            if data.get("status") != "success":
+                # Failure responses only carry status/message/query - no "as"
+                # key to rename. Return as-is for _processQuery() to handle.
+                return data, resp.headers
+
+            # ip-api.com uses "" for IPs with no ASN, so default to that
+            # rather than crashing if the field is ever absent entirely.
+            return IpData(as_=data.pop("as", ""), **data), resp.headers
 
     async def _sleepTtl(self, ttl_raw: str | None):
         """Sleep for the duration given by an X-Ttl header value, falling back

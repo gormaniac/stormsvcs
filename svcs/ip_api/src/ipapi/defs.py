@@ -11,12 +11,16 @@ SVC_VER = __version__
 SVC_GUID = "c177b2a9c0eff5c2984946d439de23ea"
 SVC_SYN_MIN_VER = (2, 137, 0)
 
+# The tag globals are only set when missing, so re-adding the service never
+# wipes out custom settings made with the slib.ipapi.admin.* commands.
 SVC_EVTS = {
     "add": {
         "storm": (
             f'[(meta:source={SVC_GUID} :name={SVC_NAME})] | spin | '
-            '$lib.globals.set("slib:ipapi:tag:enabled", (true)) '
-            '$lib.globals.set("slib:ipapi:tag:prefix", "rep.ipapi.infra")'
+            'if ($lib.globals.get("slib:ipapi:tag:enabled") = (null)) '
+            '{ $lib.globals.set("slib:ipapi:tag:enabled", (true)) } '
+            'if ($lib.globals.get("slib:ipapi:tag:prefix") = (null)) '
+            '{ $lib.globals.set("slib:ipapi:tag:prefix", "rep.ipapi.infra") }'
         )
     }
 }
