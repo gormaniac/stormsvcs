@@ -1,0 +1,74 @@
+// The slib.crtsh user API. Each function queries crt.sh, models the results,
+// and emits (or returns) the resulting crypto:x509:cert node(s). Errors are reported as warnings.
+//
+// Usable directly from Storm, ex:
+//     $crtsh = $lib.import(slib.crtsh.lib)
+//     for $cert in $crtsh.lookup((1234567,)) { $lib.print($cert) }
+
+init {
+    $priv = $lib.import(slib.crtsh.priv.user)
+    $model = $lib.import(slib.crtsh.model)
+    $util = $lib.import(slib.crtsh.util)
+}
+
+// Model a certificate's details and, with chain, its chain up to the root(s). Returns the cert node.
+function ingest(c, chain=(false), tagPrefix=$lib.null) {
+    $n = $model.cert($c, $tagPrefix)
+    if ($chain and not $c.error) { $chainOf($c.sha256, sha256, $tagPrefix) }
+    return($n)
+}
+
+// Model every chain from a certificate up to its root(s).
+// Returns ({"data": <the chain>, "nodes": <sha256 -> node>}), or null.
+function chainOf(valu, kind=$lib.null, tagPrefix=$lib.null) {
+    $retn = $priv.chain($valu, kind=$kind)
+    if $util.failed($retn, `Building the chain of {$valu}`) { return($lib.null) }
+    return(({"data": $retn.data, "nodes": $model.chain($retn.data, $tagPrefix)}))
+}
+
+// Look up certificates by crt.sh ID, SHA-256, SHA-1, or any lookup kind. Emits cert nodes.
+function lookup(valus, kind=$lib.null, limit=(100), chain=(false)) {
+    $tagPrefix = $priv.tagPrefix()
+    $retn = $priv.lookup($kind, $valus, limit=$limit)
+    if $util.failed($retn, "Lookup") { return() }
+    if (not $retn.data) {
+        $lib.warn("slib.crtsh: crt.sh has no certificates for: {valus}", valus=(", ").join($valus))
+    }
+    for $c in $retn.data { emit $ingest($c, $chain, $tagPrefix) }
+}
+
+// Search certificates by their properties (see slib.crtsh.search). Emits cert nodes.
+function search(opts, chain=(false)) {
+    $tagPrefix = $priv.tagPrefix()
+    for $retn in $priv.search($opts) {
+        if $util.failed($retn, "Search") { break }
+        emit $ingest($retn.data, $chain, $tagPrefix)
+    }
+}
+
+// Emit the certificates related to a certificate (see slib.crtsh.pivot).
+function pivot(valu, by, kind=$lib.null, valid=(false), precerts=(true), limit=(100), chain=(false)) {
+    $tagPrefix = $priv.tagPrefix()
+    for $retn in $priv.pivot($valu, $by, kind=$kind, valid=$valid, precerts=$precerts, limit=$limit) {
+        if $util.failed($retn, `Pivot by {$by} from {$valu}`) { break }
+        emit $ingest($retn.data, $chain, $tagPrefix)
+    }
+}
+
+// Emit the certificates issued by crt.sh CAs, or the CA of a certificate.
+function issued(caids=$lib.null, valu=$lib.null, kind=$lib.null, valid=(false), since=$lib.null,
+                until=$lib.null, precerts=(true), limit=(100), chain=(false)) {
+    $tagPrefix = $priv.tagPrefix()
+    for $retn in $priv.issued(caids=$caids, valu=$valu, kind=$kind, valid=$valid, since=$since,
+                              until=$until, precerts=$precerts, limit=$limit) {
+        if $util.failed($retn, "Listing issued certificates") { break }
+        emit $ingest($retn.data, $chain, $tagPrefix)
+    }
+}
+
+// Emit the nodes of every certificate in a certificate's chain(s), the certificate first.
+function chain(valu, kind=$lib.null) {
+    $chain = $chainOf($valu, $kind, $priv.tagPrefix())
+    if ($chain = $lib.null) { return() }
+    for ($sha, $n) in $chain.nodes { emit $n }
+}

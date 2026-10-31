@@ -1,0 +1,49 @@
+// Privileged (asroot) wrappers around the slib.crtsh service for slib.crtsh.user.
+// Every function returns the service's {status, mesg, data} dict, or emits them for generators.
+
+init {
+    $svc = $lib.service.get("slib.crtsh")
+}
+
+function tagPrefix() {
+    if $lib.globals.get("slib:crtsh:tag:enabled") {
+        return($lib.globals.get("slib:crtsh:tag:prefix"))
+    }
+    return($lib.null)
+}
+
+// Lookups
+
+function lookup(kind, valus, limit=(100)) { return($svc.lookup($kind, $valus, limit=$limit)) }
+function chain(valu, kind=$lib.null) { return($svc.chain($valu, kind=$kind)) }
+
+function cas(name=$lib.null, caids=$lib.null, certs=(false), limit=(100)) {
+    return($svc.cas(name=$name, caids=$caids, certs=$certs, limit=$limit))
+}
+
+// Search and pivots
+
+function search(opts) {
+    for $retn in $svc.searchGenr(dns=$opts.dns, cn=$opts.cn, org=$opts.org, ou=$opts.ou,
+                                 email=$opts.email, ip=$opts.ip, uri=$opts.uri,
+                                 subject=$opts.subject, identity=$opts.identity,
+                                 issuer=$opts.issuer, caids=$opts.caids, exact=$opts.exact,
+                                 valid=$opts.valid, since=$opts.since, until=$opts.until,
+                                 precerts=$opts.precerts, limit=$opts.limit) {
+        emit $retn
+    }
+}
+
+function issued(caids=$lib.null, valu=$lib.null, kind=$lib.null, valid=(false), since=$lib.null,
+                until=$lib.null, precerts=(true), limit=(100)) {
+    for $retn in $svc.issuedGenr(caids=$caids, valu=$valu, kind=$kind, valid=$valid, since=$since,
+                                 until=$until, precerts=$precerts, limit=$limit) {
+        emit $retn
+    }
+}
+
+function pivot(valu, by, kind=$lib.null, valid=(false), precerts=(true), limit=(100)) {
+    for $retn in $svc.pivotGenr($valu, $by, kind=$kind, valid=$valid, precerts=$precerts, limit=$limit) {
+        emit $retn
+    }
+}

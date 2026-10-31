@@ -1,0 +1,16 @@
+// Privileged (asroot) wrappers around the slib.crtsh service for slib.crtsh.admin.
+
+init {
+    $svc = $lib.service.get("slib.crtsh")
+}
+
+function tagSettings() {
+    return(({
+        "enabled": $lib.globals.get("slib:crtsh:tag:enabled"),
+        "prefix": $lib.globals.get("slib:crtsh:tag:prefix"),
+    }))
+}
+function setTagPrefix(prefix) { $lib.globals.set("slib:crtsh:tag:prefix", $prefix) }
+function setTagsEnabled(enabled) { $lib.globals.set("slib:crtsh:tag:enabled", $enabled) }
+
+function rawQuery(sql, args=$lib.null) { return($svc.rawQuery($sql, args=$args)) }

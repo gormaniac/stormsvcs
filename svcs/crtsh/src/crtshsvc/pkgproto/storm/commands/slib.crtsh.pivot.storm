@@ -1,0 +1,38 @@
+init {
+    $crtsh = $lib.import(slib.crtsh.lib)
+    $util = $lib.import(slib.crtsh.util)
+    $opts = ({
+        "by": $cmdopts.by,
+        "valid": $cmdopts.valid,
+        "precerts": (not $cmdopts.no_precerts),
+        "limit": $cmdopts.limit,
+        "chain": $cmdopts.chain,
+    })
+}
+
+if $cmdopts.cert {
+    spin |
+    for $valu in $cmdopts.cert {
+        for $n in $crtsh.pivot($valu, $opts.by, valid=$opts.valid, precerts=$opts.precerts,
+                               limit=$opts.limit, chain=$opts.chain) {
+            yield $n
+        }
+    }
+}
+else {
+    $key = $lib.null
+    if ($node.form() = "crypto:x509:cert") { $key = $util.certKey($node) }
+    // Statements after an if block still run for a node spun inside it, so the work is in the else.
+    if ($key = $lib.null) {
+        $lib.warn("slib.crtsh.pivot: Unable to pivot from {form} {repr}, it needs a crypto:x509:cert with a SHA-256 or SHA-1.",
+                  form=$node.form(), repr=$node.repr())
+        spin
+    } else {
+        ($kind, $valu) = $key
+        divert (true) $util.nodes($crtsh.pivot($valu, $opts.by, kind=$kind, valid=$opts.valid,
+                                               precerts=$opts.precerts, limit=$opts.limit,
+                                               chain=$opts.chain))
+    }
+}
+
+| uniq

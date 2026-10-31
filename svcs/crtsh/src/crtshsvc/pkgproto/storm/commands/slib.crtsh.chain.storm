@@ -1,0 +1,50 @@
+init {
+    $crtsh = $lib.import(slib.crtsh.lib)
+    $util = $lib.import(slib.crtsh.util)
+    $priv = $lib.import(slib.crtsh.priv.user)
+}
+
+// Print each path from the certificate to a root, preferred parents first.
+function printPaths(chain) {
+    $names = ({})
+    for $c in $chain.data.certs {
+        $sha = $c.sha256
+        $names.$sha = `crt.sh ID {$c.crtsh.id}: {$c.subject.dn}`
+    }
+    $num = (0)
+    for $path in $chain.data.paths {
+        $num = ($num + 1)
+        $lib.print("Chain {num}:", num=$num)
+        for $sha in $path { $lib.print("    {name}", name=$names.$sha) }
+    }
+}
+
+// Model the chain(s) of a certificate and emit every certificate in them.
+function chainNodes(valu, kind, print) {
+    $chain = $crtsh.chainOf($valu, $kind, $priv.tagPrefix())
+    if ($chain = $lib.null) { return() }
+    if $print { $printPaths($chain) }
+    for ($sha, $n) in $chain.nodes { emit $n }
+}
+
+if $cmdopts.cert {
+    spin |
+    for $valu in $cmdopts.cert {
+        for $n in $chainNodes($valu, $lib.null, $cmdopts.print) { yield $n }
+    }
+}
+else {
+    $key = $lib.null
+    if ($node.form() = "crypto:x509:cert") { $key = $util.certKey($node) }
+    // Statements after an if block still run for a node spun inside it, so the work is in the else.
+    if ($key = $lib.null) {
+        $lib.warn("slib.crtsh.chain: Unable to build the chain of {form} {repr}, it needs a crypto:x509:cert with a SHA-256 or SHA-1.",
+                  form=$node.form(), repr=$node.repr())
+        spin
+    } else {
+        ($kind, $valu) = $key
+        divert (true) $util.nodes($chainNodes($valu, $kind, $cmdopts.print))
+    }
+}
+
+| uniq

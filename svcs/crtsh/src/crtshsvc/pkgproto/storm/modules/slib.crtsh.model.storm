@@ -1,0 +1,178 @@
+// Model the complete details of crt.sh certificates (see crtshsvc.norm) in Synapse.
+//
+// Node edits here run as the calling user. Every node created is linked to the
+// slib.crtsh meta:source node with a -(seen)> edge.
+
+init {
+    $sourceGuid = "c7357722661f45a4b81c91ccfbbb37c0"
+}
+
+// ---- Helpers ----
+//
+// NOTE: A for loop that runs while a node is in a function's pipeline sends the
+// node downstream after its first iteration, reaching return() and ending the
+// function early. So functions here only yield a node when they don't loop, and
+// loops call helpers that yield/edit the node in their own runtime instead.
+
+// Link the node to the slib.crtsh meta:source and extend its .seen to cover the times.
+function seen(n, times=$lib.null) {
+    if $times { for $time in $times { $seenAt($n, $time) } }
+    yield $n
+    [ <(seen)+ { [ meta:source=$sourceGuid :name="crt.sh" ] } ]
+    return($n)
+}
+
+function seenAt(n, time) {
+    yield $n
+    [ .seen ?= $time ]
+    return($n)
+}
+
+function addTag(n, tag) {
+    yield $n
+    [ +#$tag ]
+    return($n)
+}
+
+// Add a value to an array prop, skipping values that don't norm.
+function addValu(n, prop, valu) {
+    yield $n
+    [ :$prop ?+= $valu ]
+    return($n)
+}
+
+function addValus(n, prop, valus) {
+    for $valu in $valus { $addValu($n, $prop, $valu) }
+    return($n)
+}
+
+function refs(n, other) {
+    yield $n
+    [ +(refs)> { yield $other } ]
+    return($n)
+}
+
+// ---- Nodes ----
+
+// The crypto:key node for a certificate's public key, deconflicted by its SPKI SHA-256.
+function keyNode(key) {
+    if (not $key.sha256) { return($lib.null) }
+    [ crypto:key=({"public:sha256": $key.sha256}) ]
+    [
+        :public ?= $key.spki
+        :public:sha1 ?= $key.sha1
+        :algorithm ?= $key.algo
+    ]
+    return($seen($node))
+}
+
+// The CRL a revoked certificate is listed on: its first CRL distribution point, or its issuer CA's.
+function crlNode(c) {
+    $url = $lib.null
+    for $crl in $c.crls { if (not $url) { $url = $crl } }
+    if $url {
+        [ crypto:x509:crl=({"url": $url}) ]
+    } else {
+        [ crypto:x509:crl=$lib.guid(slib.crtsh, crl, $c.crtsh.issuer.id) ]
+    }
+    return($seen($node))
+}
+
+// Create the crypto:x509:cert node and set every scalar prop. Returns the node.
+function certNode(c) {
+    [ crypto:x509:cert=({"sha256": $c.sha256}) ]
+    [
+        :sha1 = $c.sha1
+        :md5 = $c.md5
+        :file = `sha256:{$c.sha256}`
+    ]
+    $node.data.set("slib:crtsh", $c)
+    if (not $c.error) {
+        [
+            :serial ?= $c.serial
+            :version ?= $c.version
+            :subject ?= $c.subject.dn
+            :issuer ?= $c.issuer.dn
+            :validity:notbefore ?= $c.notbefore
+            :validity:notafter ?= $c.notafter
+            :algo ?= $c.sigalgo.oid
+            :signature ?= $c.signature
+            :selfsigned = $c.selfsigned
+        ]
+        if $c.pubkey.rsa { [ :rsa:key ?= ($c.pubkey.rsa.mod, $c.pubkey.rsa.exp) ] }
+    }
+    return($node)
+}
+
+// Model that a certificate is revoked, on its CRL.
+function revokedNode(c, n) {
+    $crl = $crlNode($c)
+    [ crypto:x509:revoked=($crl.value(), $n.value()) ]
+    return($seen($node))
+}
+
+// ---- Modeling for full results, each returns the primary node ----
+
+// Model the complete details of a certificate. Returns the crypto:x509:cert node.
+//
+// Everything the Synapse model has a place for is set as props, the full details
+// (extensions, key usage, SCTs, CT log entries, revocation, crt.sh IDs, PEM, etc.)
+// are stored in the node's "slib:crtsh" node data.
+function cert(c, tagPrefix=$lib.null) {
+    $n = $certNode($c)
+
+    // .seen covers when the certificate was first and last logged to CT.
+    if $c.crtsh.logged { $seen($n, $c.crtsh.logged) } else { $seen($n) }
+
+    if $c.error { return($n) }
+
+    $addValus($n, "ext:sans", $c.sans)
+    $addValus($n, "crl:urls", $c.crls)
+    for $url in $c.crls { $addValu($n, "ext:crls", (uri, $url)) }
+    $addValus($n, "identities:fqdns", $c.identities.fqdns)
+    $addValus($n, "identities:emails", $c.identities.emails)
+    $addValus($n, "identities:ipv4s", $c.identities.ipv4s)
+    $addValus($n, "identities:ipv6s", $c.identities.ipv6s)
+    $addValus($n, "identities:urls", $c.identities.urls)
+
+    $key = $keyNode($c.pubkey)
+    if $key { $refs($n, $key) }
+
+    if $c.crtsh.revoked { $revokedNode($c, $n) }
+
+    if ($tagPrefix != $lib.null) {
+        if $c.precert { $addTag($n, `{$tagPrefix}.precert`) }
+        if $c.crtsh.revoked { $addTag($n, `{$tagPrefix}.revoked`) }
+        if $c.ca { $addTag($n, `{$tagPrefix}.ca`) }
+        if ($c.ca and $c.selfsigned) { $addTag($n, `{$tagPrefix}.root`) }
+    }
+
+    return($n)
+}
+
+// Set a certificate's :issuer:cert.
+function setIssuer(child, parent) {
+    yield $child
+    [ :issuer:cert = $parent.value() ]
+    return($child)
+}
+
+// Model a certificate chain (see CrtshSvc.chain). Returns a dict of sha256 -> crypto:x509:cert node.
+//
+// Each certificate's :issuer:cert is set to its preferred parent. Every possible
+// parent (cross-signs, reissues) is in the chain's "links".
+function chain(data, tagPrefix=$lib.null) {
+    $nodes = ({})
+    for $c in $data.certs {
+        $sha = $c.sha256
+        $nodes.$sha = $cert($c, $tagPrefix)
+    }
+    for $link in $data.links {
+        if $link.preferred {
+            $child = $link.child
+            $parent = $link.parent
+            $setIssuer($nodes.$child, $nodes.$parent)
+        }
+    }
+    return($nodes)
+}
