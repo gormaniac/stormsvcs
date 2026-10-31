@@ -1,0 +1,24 @@
+init {
+    $abusech = $lib.import(slib.abusech.lib)
+    if ($cmdopts.bulk and $cmdopts.kind = "yara") {
+        $lib.raise(BadArg, "slib.abusech.bazaar.export: The yara export can't be bulk imported.")
+    }
+    if $cmdopts.bulk {
+        $bulk = $lib.import(slib.abusech.priv.bulk)
+        $bulk.run(bazaar, $cmdopts.kind, reuse=$cmdopts.reuse, repull=$cmdopts.repull)
+    }
+    elif ($cmdopts.reuse or $cmdopts.repull) {
+        $lib.raise(BadArg, "slib.abusech.bazaar.export: --reuse and --repull are only used with --bulk.")
+    }
+    elif ($cmdopts.kind = "full") {
+        $lib.warn("slib.abusech.bazaar.export: The full export has every MalwareBazaar sample, this may take a while.")
+    }
+}
+
+spin |
+
+if (not $cmdopts.bulk) {
+    for $file in $abusech.bazaarExport(kind=$cmdopts.kind, limit=$cmdopts.limit) {
+        if $cmdopts.yield { yield $file }
+    }
+}

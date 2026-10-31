@@ -1,0 +1,35 @@
+init {
+    $abusech = $lib.import(slib.abusech.lib)
+    $model = $lib.import(slib.abusech.model)
+    $util = $lib.import(slib.abusech.util)
+    $exact = (not $cmdopts.fuzzy)
+    $usecli = ($cmdopts.ioc or $cmdopts.id or $cmdopts.hash)
+}
+
+if $usecli {
+    // --ioc/--id/--hash ignore inbound nodes.
+    spin |
+    $results = ([])
+    for $ioc in $cmdopts.ioc { $results.extend($abusech.threatfox(search, $ioc, limit=$cmdopts.limit, exact=$exact)) }
+    for $iocid in $cmdopts.id { $results.extend($abusech.threatfox(id, $iocid)) }
+    for $sha in $cmdopts.hash { $results.extend($abusech.threatfox(file, $sha, limit=$cmdopts.limit)) }
+    $lib.print("slib.abusech.threatfox.lookup: Found {count} IOCs.", count=$lib.len($results))
+    if $cmdopts.yield { yield $model.nodes($results) }
+}
+else {
+    switch $node.form() {
+        ("file:bytes", "hash:md5", "hash:sha256", "hash:sha1"): {
+            $sha = $util.nodeHash($node)
+            $results = ([])
+            if $sha { $results = $abusech.threatfox(file, $sha, limit=$cmdopts.limit) }
+        }
+        ("inet:url", "inet:fqdn", "inet:ipv4", "inet:ipv6", "inet:server"): {
+            $results = $abusech.enrich($node, platforms=(threatfox,))
+        }
+        *: {
+            $results = ([])
+            $lib.warn("slib.abusech.threatfox.lookup: The node form {form} is not supported.", form=$node.form())
+        }
+    }
+    divert $cmdopts.yield $model.nodes($results)
+}

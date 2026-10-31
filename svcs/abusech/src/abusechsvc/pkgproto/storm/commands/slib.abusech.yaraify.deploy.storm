@@ -1,0 +1,23 @@
+init {
+    $privsub = $lib.import(slib.abusech.priv.submit)
+    $util = $lib.import(slib.abusech.util)
+
+    if $cmdopts.text {
+        $util.printSubmission("Deploying a YARA rule to YARAify", $privsub.yaraifyDeploy($cmdopts.text))
+    }
+    for $uuid in $cmdopts.delete {
+        $util.printSubmission(`Deleting YARA rule {$uuid} from YARAify`, $privsub.yaraifyDeleteRule($uuid))
+    }
+}
+
+if ($node.form() != "it:app:yara:rule") {
+    $lib.warn("slib.abusech.yaraify.deploy: Only it:app:yara:rule nodes can be deployed, not {form}.", form=$node.form())
+}
+elif (not :text) {
+    $lib.warn("slib.abusech.yaraify.deploy: {name} has no :text to deploy.", name=:name)
+}
+else {
+    $name = :name
+    if (not $name) { $name = "rule" }
+    $util.printSubmission(`Deploying {$name} to YARAify`, $privsub.yaraifyDeploy(:text, name=`{$name}.yar`))
+}

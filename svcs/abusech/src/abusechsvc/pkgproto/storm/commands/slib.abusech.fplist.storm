@@ -1,0 +1,10 @@
+init {
+    $abusech = $lib.import(slib.abusech.lib)
+    $model = $lib.import(slib.abusech.model)
+    $fps = $abusech.fplist(platform=$cmdopts.platform)
+    $lib.print("slib.abusech.fplist: {count} false positive entries.", count=$lib.len($fps))
+}
+
+spin |
+
+if $cmdopts.yield { yield $model.nodes($fps) }

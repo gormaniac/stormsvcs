@@ -1,0 +1,18 @@
+init {
+    $privsub = $lib.import(slib.abusech.priv.submit)
+    $util = $lib.import(slib.abusech.util)
+    $urls = ([])
+    $urls.extend($cmdopts.url)
+
+    function submit(urls) {
+        if (not $urls) { return() }
+        $retn = $privsub.urlhausSubmit($urls, threat=$cmdopts.threat, tags=$cmdopts.tag, anonymous=$cmdopts.anonymous)
+        $util.printSubmission(`Submitting {$lib.len($urls)} URLs to URLhaus`, $retn)
+    }
+}
+
+// All the URLs are submitted at once, after the inbound nodes are consumed.
+if ($node.form() = "inet:url") { $urls.append($node.repr()) }
+else { $lib.warn("slib.abusech.urlhaus.submit: Only inet:url nodes can be submitted, not {form}.", form=$node.form()) }
+
+fini { $submit($urls) }

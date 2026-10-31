@@ -1,0 +1,10 @@
+init {
+    $abusech = $lib.import(slib.abusech.lib)
+    $model = $lib.import(slib.abusech.model)
+    $certs = $abusech.bazaarCscb()
+    $lib.print("slib.abusech.bazaar.cscb: {count} blocklisted code signing certificates.", count=$lib.len($certs))
+}
+
+spin |
+
+if $cmdopts.yield { yield $model.nodes($certs) }

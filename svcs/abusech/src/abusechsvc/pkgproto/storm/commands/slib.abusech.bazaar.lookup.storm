@@ -1,0 +1,23 @@
+init {
+    $abusech = $lib.import(slib.abusech.lib)
+    $model = $lib.import(slib.abusech.model)
+    $util = $lib.import(slib.abusech.util)
+}
+
+if $cmdopts.hash {
+    // --hash ignores inbound nodes.
+    spin |
+    for $sha in $cmdopts.hash {
+        $file = $abusech.bazaarLookup($sha)
+        if ($cmdopts.yield and $file) { yield $file }
+    }
+}
+else {
+    $sha = $util.nodeHash($node)
+    if $sha { $results = ($abusech.bazaarLookup($sha),) }
+    else {
+        $results = ([])
+        $lib.warn("slib.abusech.bazaar.lookup: {form} {repr} has no hash to look up.", form=$node.form(), repr=$node.repr())
+    }
+    divert $cmdopts.yield $model.nodes($results)
+}

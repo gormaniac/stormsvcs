@@ -1,0 +1,705 @@
+// Model normalized abuse.ch data (see abusechsvc.norm) in Synapse.
+//
+// Node edits here run as the calling user. Every node created is linked to the
+// meta:source of the abuse.ch platform it came from with a -(seen)> edge, and
+// abuse.ch's tags/families/statuses are applied as "<prefix>.<platform>.<tag>"
+// tags (see slib.abusech.admin.tags), with the time abuse.ch saw them.
+//
+// NOTE: A for loop that runs while a node is in a function's pipeline sends the
+// node downstream after its first iteration, reaching return() and ending the
+// function early. So functions here only yield a node when they don't loop, and
+// loops call helpers that yield/edit the node in their own runtime instead.
+
+init {
+    $sources = ({
+        "bazaar": "0880c1df548847f591cc4d25071e8ec7",
+        "urlhaus": "30f3e2d0445842dc998e5d84667730d5",
+        "threatfox": "72093b870fba45978e5a725ccf5d4af7",
+        "yaraify": "dfe12ed859bf4bbea106c0f9cec44fa8",
+        "feodo": "a4449303c07f41f782aa730f8d449033",
+        "sslbl": "af7571ed96af44cba0ceab4b6bf44c5b",
+        "hunting": "2f9357321acd42188845ba7c95bf6471",
+    })
+    $platnames = ({
+        "bazaar": ["malwarebazaar", "https://bazaar.abuse.ch"],
+        "urlhaus": ["urlhaus", "https://urlhaus.abuse.ch"],
+        "threatfox": ["threatfox", "https://threatfox.abuse.ch"],
+        "yaraify": ["yaraify", "https://yaraify.abuse.ch"],
+        "feodo": ["feodo tracker", "https://feodotracker.abuse.ch"],
+        "sslbl": ["ssl blacklist", "https://sslbl.abuse.ch"],
+        "hunting": ["abuse.ch hunting", "https://hunting.abuse.ch"],
+    })
+    // The tag prefix (null when tagging is disabled), set by slib.abusech.lib with setPrefix().
+    $state = ({"prefix": $lib.null})
+    $util = $lib.import(slib.abusech.util)
+}
+
+function setPrefix(prefix) {
+    $state.prefix = $prefix
+    return($prefix)
+}
+
+// ---- Generic helpers, each returns a single node ----
+
+// Link the node to the platform's meta:source and update its .seen.
+function seen(n, plat, first=$lib.null, last=$lib.null) {
+    yield $n
+    $guid = $sources.$plat
+    [ <(seen)+ { meta:source=$guid } ]
+    if $first { [ .seen ?= $first ] }
+    if $last { [ .seen ?= $last ] }
+    return($n)
+}
+
+// Apply abuse.ch tags to a node as "<prefix>.<plat>.<tag>", with an optional time interval.
+function tagNode(n, plat, tags, first=$lib.null, last=$lib.null) {
+    if ($state.prefix = $lib.null or not $tags or $n = $lib.null) { return($n) }
+    for $t in $tags {
+        if $t { $addTag($n, `{$state.prefix}.{$plat}.{$t}`, $first, $last) }
+    }
+    return($n)
+}
+
+function addTag(n, tagname, first, last) {
+    if ($first and $last) { $ival = ($first, $last) }
+    elif $first { $ival = $first }
+    elif $last { $ival = $last }
+    else { $ival = $lib.null }
+
+    yield $n
+    if $ival { [ +?#$tagname=$ival ] }
+    else { [ +?#$tagname ] }
+    return($n)
+}
+
+// Replace a node's "<prefix>.<plat>.status.*" tag with the current status.
+function setStatus(n, plat, status, first=$lib.null, last=$lib.null) {
+    if ($state.prefix = $lib.null or not $status or $n = $lib.null) { return($n) }
+    $base = `{$state.prefix}.{$plat}.status`
+    $delTags($n, $base)
+    return($tagNode($n, $plat, (`status.{$status}`,), $first, $last))
+}
+
+function delTags(n, base) {
+    for $t in $n.tags(`{$base}.*`) { $delTag($n, $t) }
+    return($n)
+}
+
+function delTag(n, tagname) {
+    yield $n
+    [ -#$tagname ]
+    return($n)
+}
+
+// Link two nodes with a light edge, n1 -(verb)> n2.
+function edge(n1, verb, n2) {
+    if ($n1 = $lib.null or $n2 = $lib.null) { return($n1) }
+    yield $n1
+    [ +($verb)> { yield $n2 } ]
+    return($n1)
+}
+
+// Add a value to an array property, if it is valid.
+function addArrayValu(n, prop, valu) {
+    if ($valu = $lib.null) { return($n) }
+    yield $n
+    [ :$prop ?+= $valu ]
+    return($n)
+}
+
+// Set a property, if the value is valid and the property exists (ex. an extended prop).
+function setProp(n, prop, valu) {
+    if ($valu = $lib.null or $n = $lib.null) { return($n) }
+    if (not $lib.model.prop(`{$n.form()}:{$prop}`)) { return($n) }
+    yield $n
+    [ :$prop ?= $valu ]
+    return($n)
+}
+
+// ---- Observables ----
+
+function ipNode(ip, plat, first=$lib.null, last=$lib.null) {
+    if $util.isIpv6($ip) { [ inet:ipv6?=$ip ] }
+    else { [ inet:ipv4?=$ip ] }
+    return($seen($node, $plat, $first, $last))
+}
+
+function fqdnNode(fqdn, plat, first=$lib.null, last=$lib.null) {
+    [ inet:fqdn?=$fqdn ]
+    return($seen($node, $plat, $first, $last))
+}
+
+function urlNode(url, plat, first=$lib.null, last=$lib.null) {
+    [ inet:url?=$url ]
+    return($seen($node, $plat, $first, $last))
+}
+
+function serverNode(ip, port, plat, first=$lib.null, last=$lib.null, proto=tcp) {
+    if $util.isIpv6($ip) { $server = `{$proto}://[{$ip}]:{$port}` }
+    else { $server = `{$proto}://{$ip}:{$port}` }
+    [ inet:server?=$server ]
+    return($seen($node, $plat, $first, $last))
+}
+
+// A link to a report/reference about a node: inet:url -(refs)> node.
+function refNode(url, n, plat) {
+    if ((not $url) or $n = $lib.null) { return($lib.null) }
+    [ inet:url?=$url ]
+    if ($node = $lib.null) { return($lib.null) }
+    $refnode = $seen($node, $plat)
+    $edge($refnode, refs, $n)
+    return($refnode)
+}
+
+// A normalized observable ({"form", "valu", ...}, see norm.normObservable). Returns the node.
+function obsNode(obs, plat, first=$lib.null, last=$lib.null) {
+    if ($obs = $lib.null) { return($lib.null) }
+    switch $obs.form {
+        "file:bytes": { return($fileNode($obs.hashes, $plat, $first, $last)) }
+        "inet:server": {
+            $ipNode($obs.ip, $plat, $first, $last)
+            return($serverNode($obs.ip, $obs.port, $plat, $first, $last))
+        }
+        "inet:url": { return($urlNode($obs.valu, $plat, $first, $last)) }
+        "inet:fqdn": { return($fqdnNode($obs.valu, $plat, $first, $last)) }
+        "inet:ipv4": { return($ipNode($obs.valu, $plat, $first, $last)) }
+        "inet:ipv6": { return($ipNode($obs.valu, $plat, $first, $last)) }
+        *: {
+            $form = $obs.form
+            [ *$form?=$obs.valu ]
+            if ($node = $lib.null) { return($lib.null) }
+            return($seen($node, $plat, $first, $last))
+        }
+    }
+}
+
+// ---- Files ----
+
+// Find or create a file:bytes by its hashes ({"sha256", "sha1", "md5"}).
+// Files are keyed by SHA256, files only known by an MD5/SHA1 reuse an existing node with that hash.
+function fileNode(hashes, plat, first=$lib.null, last=$lib.null) {
+    if $hashes.sha256 {
+        [ file:bytes=$hashes.sha256 ]
+    }
+    else {
+        $existing = $lib.null
+        $sha1 = $hashes.sha1
+        $md5 = $hashes.md5
+        $sha3 = $hashes.sha3_384
+        if $sha1 {
+            for $n in ${ file:bytes:sha1=$sha1 } { $existing = $n break }
+        }
+        if ($existing = $lib.null and $md5) {
+            for $n in ${ file:bytes:md5=$md5 } { $existing = $n break }
+        }
+        if ($existing = $lib.null and $sha3 and $lib.model.prop("file:bytes:_sha3_384")) {
+            for $n in ${ file:bytes:_sha3_384=$sha3 } { $existing = $n break }
+        }
+        if $existing { yield $existing }
+        elif $sha1 { [ file:bytes=`guid:{$lib.guid(sha1, $sha1)}` ] }
+        elif $md5 { [ file:bytes=`guid:{$lib.guid(md5, $md5)}` ] }
+        elif $sha3 { [ file:bytes=`guid:{$lib.guid(sha3_384, $sha3)}` ] }
+        else { return($lib.null) }
+    }
+    [ :md5 ?= $hashes.md5 :sha1 ?= $hashes.sha1 :sha256 ?= $hashes.sha256 ]
+    $file = $seen($node, $plat, $first, $last)
+    return($setProp($file, "_sha3_384", $hashes.sha3_384))
+}
+
+function fileProps(n, s) {
+    yield $n
+    [
+        :size ?= $s.size
+        :mime ?= $s.mime
+        :mime:pe:imphash ?= $s.imphash
+    ]
+    if (not :name) { [ :name ?= $s.name ] }
+    if $s.ssdeep { [ :ssdeeps ?+= $s.ssdeep ] }
+    return($n)
+}
+
+// Set the fuzzy hash extended props (added when the service is added to the Cortex).
+function fileExtProps(n, s) {
+    $setProp($n, "_sha3_384", $s.sha3_384)
+    $setProp($n, "_tlsh", $s.tlsh)
+    $setProp($n, "_telfhash", $s.telfhash)
+    $setProp($n, "_gimphash", $s.gimphash)
+    $setProp($n, "_dhash_icon", $s.dhash_icon)
+    return($n)
+}
+
+// A malware family, as a risk:tool:software that owns the family's tag.
+function family(plat, name, tagname=$lib.null, aliases=$lib.null, id=$lib.null, url=$lib.null) {
+    if (not $name) { return($lib.null) }
+    $tool = $familyNode($plat, $name, $tagname, $id)
+    for $alias in $aliases { $addArrayValu($tool, "soft:names", $alias) }
+    $addArrayValu($tool, "soft:names", $name)
+    $refNode($url, $tool, $plat)
+    return($tool)
+}
+
+function familyNode(plat, name, tagname, id) {
+    if ($tagname and $state.prefix) {
+        $famtag = `{$state.prefix}.{$plat}.{$tagname}`
+        [ risk:tool:software=({"tag": $famtag}) ]
+    } else {
+        [ risk:tool:software=({"soft:name": $name, "reporter:name": "abuse.ch"}) ]
+    }
+    [
+        :soft:name ?= $name
+        :reporter:name = "abuse.ch"
+        :type = "malware"
+        :id ?= $id
+    ]
+    return($seen($node, $plat))
+}
+
+// An abuse.ch user that reported something, as an inet:service:account -(seen)> the node.
+function reporter(name, n, plat) {
+    if ((not $name) or $n = $lib.null) { return($lib.null) }
+    ($pname, $purl) = $platnames.$plat
+    [ inet:service:platform=({"name": $pname}) :url ?= $purl ]
+    $platform = $node
+    [ inet:service:account=({"platform": $platform.value(), "user": $name}) ]
+    $account = $node
+    $edge($account, seen, $n)
+    return($account)
+}
+
+// A YARA rule ({name, uuid, author, desc, url, date, tlp, license, family, text}).
+function rule(r, plat) {
+    if ($r = $lib.null) { return($lib.null) }
+    if $r.uuid { [ it:app:yara:rule=({"ext:id": $r.uuid, "name": $r.name}) ] }
+    else { [ it:app:yara:rule=({"name": $r.name}) ] }
+    [
+        :name ?= $r.name
+        :ext:id ?= $r.uuid
+        :url ?= $r.url
+        :created ?= $r.date
+        :family ?= $r.family
+    ]
+    // Authors can update a rule in place, so the latest text wins.
+    [ :text ?= $r.text ]
+    if $r.author { [ :author ?= {[ ps:contact=({"name": $r.author}) ]} ] }
+    $rulenode = $seen($node, $plat, $r.time)
+
+    if $r.tlp { $tagNode($rulenode, $plat, (`tlp.{$r.tlp}`,)) }
+    if $r.sharing_tlp { $tagNode($rulenode, $plat, (`sharing.{$r.sharing_tlp}`,)) }
+    // The sample the author wrote the rule for.
+    if $r.refmd5 { $yaraMatch($rulenode, $fileNode(({"md5": $r.refmd5}), $plat), $plat) }
+    $desc = $r.desc
+    if $r.license {
+        if $desc { $desc = `{$desc}
+
+License: {$r.license}` }
+        else { $desc = `License: {$r.license}` }
+    }
+    $noteAbout($rulenode, `slib.abusech.{$plat}.rule.desc`, $desc)
+    return($rulenode)
+}
+
+// A meta:note -(about)> a node. Notes are deduplicated by their type, text, and author.
+function noteAbout(n, type, text, author=$lib.null, time=$lib.null) {
+    if ($n = $lib.null or not $text) { return($lib.null) }
+    $props = ({"type": $type, "text": $text})
+    if $author { $props.author = $contactNode($author).value() }
+    [ meta:note=$props :created ?= $time +(about)> { yield $n } ]
+    return($node)
+}
+
+function contactNode(name) {
+    [ ps:contact=({"name": $name}) ]
+    return($node)
+}
+
+function yaraMatch(rulenode, file, plat, time=$lib.null) {
+    if ($rulenode = $lib.null or $file = $lib.null) { return($lib.null) }
+    [ it:app:yara:match=($rulenode, $file) ]
+    return($seen($node, $plat, $time))
+}
+
+// An AV/sandbox/vendor scan of a file (see norm.normVendors), or a ClamAV signature.
+function scan(file, sc, plat) {
+    if ($file = $lib.null or $sc = $lib.null) { return($lib.null) }
+    $scannode = $scanNode($file, $sc, $plat)
+    for $cat in $sc.categories { $addArrayValu($scannode, categories, $lib.cast(str, $cat).lower()) }
+    $refNode($sc.link, $file, $plat)
+
+    // Files the vendor unpacked from this one.
+    for $child in $sc.children {
+        $childnode = $fileNode($child, $plat)
+        if $childnode {
+            $subfile($file, $childnode, $plat)
+            $tagNode($childnode, $plat, $child.families)
+        }
+    }
+
+    // C2s from the malware config the vendor extracted, and URLs it found in the file.
+    for $c2 in $sc.c2s { $c2config($file, $c2, $plat) }
+    for $u in $sc.urls { $edge($file, refs, $urlNode($u, $plat)) }
+    return($scannode)
+}
+
+// A C2 from an extracted malware config (see norm.normC2Config), as an it:sec:c2:config for the
+// file with the C2 in :servers, and the C2 host/server tagged c2 and with the family.
+function c2config(file, c, plat) {
+    $srv = $obsNode($c.obs, $plat)
+    if $srv {
+        $tagNode($srv, $plat, (c2, $c.family_tag))
+        $edge($file, refs, $srv)
+    }
+    $cfg = $c2ConfigNode($file, $c, $plat)
+    if $c.url { $addArrayValu($cfg, servers, $c.url) }
+    if $c.family { $family($plat, $c.family, $c.family_tag) }
+    return($cfg)
+}
+
+function c2ConfigNode(file, c, plat) {
+    $props = ({"file": $file.value()})
+    if $c.family { $props.family = $c.family }
+    [ it:sec:c2:config=$props ]
+    return($seen($node, $plat))
+}
+
+function scanNode(file, sc, plat) {
+    $props = ({"target:file": $file.value(), "scanner:name": $sc.vendor})
+    if $sc.signame { $props.signame = $sc.signame }
+    [ it:av:scan:result=$props ]
+    [
+        :signame ?= $sc.signame
+        :verdict ?= $sc.verdict
+        :time ?= $sc.time
+        :multi:count ?= $sc.count
+        :multi:count:malicious ?= $sc.malicious
+    ]
+    return($seen($node, $plat))
+}
+
+function clamav(file, sig, plat) {
+    return($scan($file, ({"vendor": "clamav", "signame": $sig, "verdict": (40), "categories": ([]),
+                          "children": ([])}), $plat))
+}
+
+function subfile(parent, child, plat, name=$lib.null) {
+    if ($parent = $lib.null or $child = $lib.null) { return($lib.null) }
+    [ file:subfile=($parent, $child) :name ?= $name ]
+    return($seen($node, $plat))
+}
+
+// An X.509 certificate (see norm.normCert). Returns the crypto:x509:cert node.
+function cert(c, plat, file=$lib.null) {
+    if ($c = $lib.null) { return($lib.null) }
+    if $c.sha256 { [ crypto:x509:cert=({"sha256": $c.sha256}) ] }
+    elif $c.sha1 { [ crypto:x509:cert=({"sha1": $c.sha1}) ] }
+    elif $c.md5 { [ crypto:x509:cert=({"md5": $c.md5}) ] }
+    else {
+        $props = ({"serial": $c.serial})
+        if $c.issuer { $props.issuer = $c.issuer }
+        [ crypto:x509:cert=$props ]
+    }
+    if ($node = $lib.null) { return($lib.null) }
+    [
+        :sha256 ?= $c.sha256
+        :sha1 ?= $c.sha1
+        :md5 ?= $c.md5
+        :serial ?= $c.serial
+        :subject ?= $c.subject
+        :issuer ?= $c.issuer
+        :validity:notbefore ?= $c.notbefore
+        :validity:notafter ?= $c.notafter
+    ]
+    $certnode = $seen($node, $plat, $c.time)
+
+    if $c.blocklisted {
+        $tagNode($certnode, $plat, (cscb,), $c.time)
+        $noteAbout($certnode, `slib.abusech.{$plat}.cscb`, $c.reason)
+    }
+
+    if $file {
+        [ crypto:x509:signedfile=($certnode, $file) ]
+        $seen($node, $plat)
+    }
+    return($certnode)
+}
+
+// ---- Full records, each returns the primary node ----
+
+// Model a normalized sample (see norm.normSample). Returns the file:bytes node.
+function sample(s, plat) {
+    if ($s = $lib.null) { return($lib.null) }
+    $file = $fileNode($s, $plat, $s.first_seen, $s.last_seen)
+    if ($file = $lib.null) { return($lib.null) }
+
+    $fileProps($file, $s)
+    $fileExtProps($file, $s)
+
+    $first = $s.first_seen
+    $last = $s.last_seen
+    $tagNode($file, $plat, $s.tags, $first, $last)
+    $tagNode($file, $plat, $s.families, $first, $last)
+    if $s.type { $tagNode($file, $plat, (`type.{$s.type}`,)) }
+    if $s.delivery_method { $tagNode($file, $plat, (`delivery.{$s.delivery_method}`,), $first) }
+    if $s.origin_country { $tagNode($file, $plat, (`origin.{$s.origin_country}`,), $first) }
+    $tagNode($file, $plat, $s.attrs)
+
+    if $s.signature { $family($plat, $s.signature, $s.families.0) }
+    $reporter($s.reporter, $file, $plat)
+
+    for $sig in $s.clamav { $clamav($file, $sig, $plat) }
+    for $sc in $s.scans { $scan($file, $sc, $plat) }
+
+    for $r in $s.rules {
+        $rulenode = $rule($r, $plat)
+        $yaraMatch($rulenode, $file, $plat, $first)
+    }
+
+    for $c in $s.certs { $cert($c, $plat, $file) }
+
+    for $link in $s.links { $refNode($link.url, $file, $plat) }
+
+    for $rel in $s.related {
+        $other = $fileNode($rel, $plat)
+        if ($rel.rel = "dropped_by") { $edge($other, refs, $file) }
+        else { $edge($file, refs, $other) }
+    }
+
+    for $n in $s.notes { $noteAbout($file, `slib.abusech.{$plat}.info`, $n) }
+    for $cmt in $s.comments {
+        $noteAbout($file, `slib.abusech.{$plat}.comment`, $cmt.text, $cmt.author, $cmt.time)
+    }
+
+    if $s.archive_pw { $edge($file, refs, $passwdNode($s.archive_pw)) }
+
+    // YARAify unpacked files.
+    for $unp in $s.unpacked {
+        $child = $fileNode($unp, $plat, $first)
+        if $child {
+            $subfile($file, $child, $plat, $unp.name)
+            for $r in $unp.rules { $yaraMatch($rule($r, $plat), $child, $plat, $first) }
+        }
+    }
+
+    // URLhaus payload lookups include the URLs that served the payload.
+    for $u in $s.urls {
+        $urlnode = $url($u, $plat)
+        $urlfile($urlnode, $file, $plat, $u.seen, $u.last_seen)
+    }
+
+    return($file)
+}
+
+function passwdNode(passwd) {
+    [ inet:passwd?=$passwd ]
+    return($node)
+}
+
+function urlfile(urlnode, file, plat, time=$lib.null, last=$lib.null) {
+    if ($urlnode = $lib.null or $file = $lib.null) { return($lib.null) }
+    [ inet:urlfile=($urlnode, $file) ]
+    return($seen($node, $plat, $time, $last))
+}
+
+// The host of a URLhaus URL or host lookup, tagged with its blacklist listings.
+function host(obs, plat, blacklists=$lib.null, first=$lib.null) {
+    $hostnode = $obsNode($obs, $plat, $first)
+    if ($hostnode and $blacklists) { $tagNode($hostnode, $plat, $blacklists) }
+    return($hostnode)
+}
+
+// Model a normalized URLhaus URL (see norm.normUrl). Returns the inet:url node.
+function url(u, plat=urlhaus) {
+    if ($u = $lib.null) { return($lib.null) }
+    $first = $u.added
+    $last = $u.last_online
+    $urlnode = $urlNode($u.url, $plat, $first, $last)
+    if ($urlnode = $lib.null) { return($lib.null) }
+
+    if $u.threat { $tagNode($urlnode, $plat, ($u.threat,), $first, $last) }
+    $tagNode($urlnode, $plat, $u.tags, $first, $last)
+    $setStatus($urlnode, $plat, $u.status, $first, $last)
+    if $u.larted { $tagNode($urlnode, $plat, (larted,)) }
+
+    if $u.host { $host($u.host, $plat, $u.blacklists, $first) }
+
+    $refNode($u.reference, $urlnode, $plat)
+    $reporter($u.reporter, $urlnode, $plat)
+
+    for $p in $u.payloads {
+        $file = $sample($p, $plat)
+        $urlfile($urlnode, $file, $plat, $p.seen, $p.last)
+    }
+    return($urlnode)
+}
+
+// Model a normalized URLhaus host (see norm.normUrlhausHost). Returns the host node.
+function urlhausHost(h) {
+    if ($h = $lib.null) { return($lib.null) }
+    $hostnode = $host($h.host, urlhaus, $h.blacklists, $h.first_seen)
+    $refNode($h.reference, $hostnode, urlhaus)
+    for $u in $h.urls { $url($u) }
+    return($hostnode)
+}
+
+// Model a normalized ThreatFox IOC (see norm.normIoc). Returns the observable node.
+function ioc(i, plat=threatfox) {
+    if ($i = $lib.null) { return($lib.null) }
+    $first = $i.first_seen
+    $last = $i.last_seen
+
+    $obsnode = $obsNode($i.obs, $plat, $first, $last)
+    if ($obsnode = $lib.null) {
+        $lib.warn("slib.abusech: Unable to model ThreatFox IOC {id} ({type}: {ioc}).", id=$i.id,
+                  type=$i.ioc_type, ioc=$i.ioc)
+        return($lib.null)
+    }
+
+    $tags = ([])
+    if $i.threat_type { $tags.append($i.threat_type) }
+    if $i.family_tag { $tags.append($i.family_tag) }
+    $tags.extend($i.tags)
+    if $i.compromised { $tags.append(compromised) }
+    $tagNode($obsnode, $plat, $tags, $first, $last)
+
+    $indicator($i, $obsnode, $plat)
+
+    if $i.family { $family($plat, $i.family, $i.family_tag, $i.aliases, $i.malware, $i.malpedia) }
+    $reporter($i.reporter, $obsnode, $plat)
+
+    for $s in $i.samples {
+        $file = $sample($s, $plat)
+        $edge($file, refs, $obsnode)
+        if $i.family_tag { $tagNode($file, $plat, ($i.family_tag,), $s.seen) }
+    }
+    return($obsnode)
+}
+
+// The IOC record itself, as an it:sec:stix:indicator -(refs)> the observable.
+function indicator(i, obsnode, plat) {
+    if (not $i.id) { return($lib.null) }
+    $desc = $i.threat_type_desc
+    if $i.comment {
+        if $desc { $desc = `{$desc}
+
+{$i.comment}` }
+        else { $desc = $i.comment }
+    }
+    $labels = ([])
+    if $i.threat_type { $labels.append($i.threat_type) }
+    if $i.family_tag { $labels.append($i.family_tag) }
+    $labels.extend($i.tags)
+
+    [ it:sec:stix:indicator=({"id": `{$plat}--{$i.id}`}) ]
+    [
+        :name = `{$plat} IOC {$i.id}: {$i.ioc}`
+        :confidence ?= $i.confidence
+        :description ?= $desc
+        :pattern ?= $i.pattern
+        :pattern_type = "stix"
+        :created ?= $i.first_seen
+        :updated ?= $i.last_seen
+        :valid_from ?= $i.first_seen
+        :labels ?= $labels
+    ]
+    $ind = $seen($node, $plat, $i.first_seen, $i.last_seen)
+    $edge($ind, refs, $obsnode)
+    $refNode($i.reference, $ind, $plat)
+    return($ind)
+}
+
+// Model a botnet C2 server from a blocklist (see norm.normC2). Returns the inet:server (or IP) node.
+function c2(c, plat) {
+    if ($c = $lib.null) { return($lib.null) }
+    $first = $c.first_seen
+    $last = $c.last_online
+
+    $ipnode = $ipNode($c.ip, $plat, $first, $last)
+    if ($ipnode = $lib.null) { return($lib.null) }
+    $setIpInfo($ipnode, $c)
+
+    $tags = (c2,)
+    if $c.family_tag { $tags = (c2, $c.family_tag) }
+    $tagNode($ipnode, $plat, $tags, $first, $last)
+    $setStatus($ipnode, $plat, $c.status, $first, $last)
+
+    if $c.hostname {
+        $fqdnNode($c.hostname, $plat, $first, $last)
+        $dnsNode($c.hostname, $c.ip, $plat, $first, $last)
+    }
+
+    if $c.family { $family($plat, $c.family, $c.family_tag) }
+
+    if ($c.port = $lib.null) { return($ipnode) }
+
+    $srv = $serverNode($c.ip, $c.port, $plat, $first, $last)
+    $tagNode($srv, $plat, $tags, $first, $last)
+    $setStatus($srv, $plat, $c.status, $first, $last)
+    return($srv)
+}
+
+function setIpInfo(n, c) {
+    if $c.asn {
+        [ inet:asn=$c.asn :name ?= $c.as_name ]
+        $asnnode = $node
+        yield $n
+        [ :asn = $asnnode.value() ]
+    } else {
+        yield $n
+    }
+    [ :loc ?= $c.country ]
+    return($n)
+}
+
+function dnsNode(fqdn, ip, plat, first=$lib.null, last=$lib.null) {
+    if $util.isIpv6($ip) { [ inet:dns:aaaa?=($fqdn, $ip) ] }
+    else { [ inet:dns:a?=($fqdn, $ip) ] }
+    return($seen($node, $plat, $first, $last))
+}
+
+// Model an SSL Blacklist certificate (see norm.normSslblCert). Returns the crypto:x509:cert node.
+function sslblCert(c) {
+    if ($c = $lib.null) { return($lib.null) }
+    $certnode = $cert(({"sha1": $c.sha1, "time": $c.time}), sslbl)
+    $tags = (c2,)
+    if $c.family_tag { $tags = (c2, $c.family_tag) }
+    $tagNode($certnode, sslbl, $tags, $c.time)
+    $noteAbout($certnode, "slib.abusech.sslbl.reason", $c.reason)
+    if $c.family { $family(sslbl, $c.family, $c.family_tag) }
+    return($certnode)
+}
+
+// Model an SSL Blacklist JA3 fingerprint (see norm.normJa3). Returns the hash:md5 node.
+function ja3(j) {
+    if ($j = $lib.null) { return($lib.null) }
+    [ hash:md5=$j.ja3 ]
+    $ja3node = $seen($node, sslbl, $j.first_seen, $j.last_seen)
+    $tags = (ja3,)
+    if $j.family_tag { $tags = (ja3, $j.family_tag) }
+    $tagNode($ja3node, sslbl, $tags, $j.first_seen, $j.last_seen)
+    $noteAbout($ja3node, "slib.abusech.sslbl.reason", $j.reason)
+    if $j.family { $family(sslbl, $j.family, $j.family_tag) }
+    return($ja3node)
+}
+
+// Model an entry on the abuse.ch false positive list (see norm.normFp). Returns the observable node.
+function fp(f) {
+    if ($f = $lib.null) { return($lib.null) }
+    $obsnode = $obsNode($f.obs, hunting, $f.time)
+    if ($obsnode = $lib.null) { return($lib.null) }
+    $tags = (fp,)
+    if $f.platform { $tags = (fp, `fp.{$f.platform}`) }
+    $tagNode($obsnode, hunting, $tags, $f.time)
+    $note = $f.notes
+    if $f.removed_by {
+        if $note { $note = `{$note} (removed by {$f.removed_by})` }
+        else { $note = `Removed by {$f.removed_by}` }
+    }
+    $noteAbout($obsnode, "slib.abusech.hunting.fp", $note, $lib.null, $f.time)
+    return($obsnode)
+}
+
+// Yield the given non-null nodes. Lets commands divert to nodes returned by the functions above.
+function nodes(items) {
+    for $item in $items {
+        if $item { yield $item }
+    }
+}

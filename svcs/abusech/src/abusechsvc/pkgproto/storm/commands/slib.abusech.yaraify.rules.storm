@@ -1,0 +1,21 @@
+init {
+    $abusech = $lib.import(slib.abusech.lib)
+    $model = $lib.import(slib.abusech.model)
+    $rules = ([])
+    for $uuid in $cmdopts.uuid { $rules.extend($abusech.yaraifyRule($uuid)) }
+    if $cmdopts.recent { $rules.extend($abusech.yaraifyRecentRules()) }
+    if $cmdopts.deployed { $rules.extend($abusech.yaraifyDeployedRules()) }
+    if ((not $cmdopts.uuid) and (not $cmdopts.recent) and (not $cmdopts.deployed) and (not $cmdopts.all)) {
+        $lib.raise(BadArg, "slib.abusech.yaraify.rules requires --uuid, --recent, --deployed, or --all.")
+    }
+}
+
+spin |
+
+if $cmdopts.yield { yield $model.nodes($rules) }
+
+if $cmdopts.all {
+    for $rule in $abusech.yaraifyRulesExport(limit=$cmdopts.limit) {
+        if $cmdopts.yield { yield $rule }
+    }
+}

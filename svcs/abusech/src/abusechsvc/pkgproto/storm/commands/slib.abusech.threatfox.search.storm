@@ -1,0 +1,21 @@
+init {
+    $abusech = $lib.import(slib.abusech.lib)
+    $model = $lib.import(slib.abusech.model)
+
+    if ($cmdopts.by = "recent") {
+        $days = (1)
+        if $cmdopts.value { $days = $lib.cast(int, $cmdopts.value) }
+        $iocs = $abusech.threatfox(recent, $days, limit=$cmdopts.limit)
+    }
+    elif (not $cmdopts.value) {
+        $lib.raise(BadArg, `slib.abusech.threatfox.search {$cmdopts.by} requires a value.`)
+    }
+    else {
+        $iocs = $abusech.threatfox($cmdopts.by, $cmdopts.value, limit=$cmdopts.limit)
+    }
+    $lib.print("slib.abusech.threatfox.search: Found {count} IOCs.", count=$lib.len($iocs))
+}
+
+spin |
+
+yield $model.nodes($iocs)

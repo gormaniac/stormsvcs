@@ -1,0 +1,27 @@
+init {
+    $abusech = $lib.import(slib.abusech.lib)
+    $model = $lib.import(slib.abusech.model)
+    $util = $lib.import(slib.abusech.util)
+}
+
+if ($cmdopts.hash or $cmdopts.task) {
+    // --hash/--task ignore inbound nodes.
+    spin |
+    $results = ([])
+    for $sha in $cmdopts.hash { $results.append($abusech.yaraifyLookup($sha, malpedia=$cmdopts.malpedia)) }
+    for $taskid in $cmdopts.task {
+        ($status, $file) = $abusech.yaraifyTask($taskid, malpedia=$cmdopts.malpedia)
+        if ($status = "done") { $results.append($file) }
+        elif $status { $lib.print("slib.abusech.yaraify.lookup: Task {task} is {status}.", task=$taskid, status=$status) }
+    }
+    if $cmdopts.yield { yield $model.nodes($results) }
+}
+else {
+    $sha = $util.nodeHash($node)
+    $results = ([])
+    if $sha { $results = ($abusech.yaraifyLookup($sha, malpedia=$cmdopts.malpedia),) }
+    else {
+        $lib.warn("slib.abusech.yaraify.lookup: {form} {repr} has no hash to look up.", form=$node.form(), repr=$node.repr())
+    }
+    divert $cmdopts.yield $model.nodes($results)
+}

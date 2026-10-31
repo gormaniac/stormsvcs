@@ -1,0 +1,36 @@
+init {
+    $privsub = $lib.import(slib.abusech.priv.submit)
+    $util = $lib.import(slib.abusech.util)
+
+    if ((not $cmdopts.comment) and (not $cmdopts.add)) {
+        $lib.raise(BadArg, "slib.abusech.bazaar.update requires --comment and/or --add.")
+    }
+
+    function update(sha256) {
+        if ($util.hashType($sha256) != "sha256") {
+            $lib.warn("slib.abusech.bazaar.update: {sha} is not a SHA256 hash.", sha=$sha256)
+            return()
+        }
+        if $cmdopts.comment {
+            $util.printSubmission(`Commenting on {$sha256}`, $privsub.bazaarComment($sha256, $cmdopts.comment))
+        }
+        for $add in $cmdopts.add {
+            $parts = $add.split("=", maxsplit=(1))
+            if ($lib.len($parts) != 2) {
+                $lib.warn("slib.abusech.bazaar.update: --add must be <key>=<value>, not {add}.", add=$add)
+                continue
+            }
+            ($key, $valu) = $parts
+            $util.printSubmission(`Updating {$key} on {$sha256}`, $privsub.bazaarUpdate($sha256, $key, $valu))
+        }
+    }
+}
+
+if $cmdopts.hash {
+    spin |
+    for $sha in $cmdopts.hash { $update($lib.cast(str, $sha).lower()) }
+}
+else {
+    $sha = $util.nodeHash($node)
+    if $sha { $update($sha) }
+}

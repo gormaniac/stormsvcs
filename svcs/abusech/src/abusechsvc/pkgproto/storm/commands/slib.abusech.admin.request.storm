@@ -1,0 +1,8 @@
+init {
+    $privadmin = $lib.import(slib.abusech.priv.admin)
+    $util = $lib.import(slib.abusech.util)
+
+    $retn = $privadmin.rawRequest($cmdopts.base, path=$cmdopts.path, method=$cmdopts.method,
+                                  form=$cmdopts.form, json=$cmdopts.json, params=$cmdopts.params)
+    if (not $util.failed($retn, `{$cmdopts.method} {$cmdopts.base} {$cmdopts.path}`)) { $util.printJson($retn.data) }
+}

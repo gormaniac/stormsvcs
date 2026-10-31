@@ -1,0 +1,28 @@
+init {
+    $vault = $lib.vault.bytype(abusech, scope=user)
+
+    if $cmdopts.clear {
+        if $vault {
+            $vault.delete()
+            $lib.print("slib.abusech: Deleted your abuse.ch Auth-Key.")
+        } else {
+            $lib.print("slib.abusech: You don't have an abuse.ch Auth-Key set.")
+        }
+    }
+    elif (not $cmdopts.apikey) {
+        if $vault {
+            $lib.print("slib.abusech: Your abuse.ch Auth-Key is set in vault {name}.", name=$vault.name)
+        } else {
+            $lib.print("slib.abusech: You don't have an abuse.ch Auth-Key set.")
+        }
+    }
+    elif $vault {
+        $vault.secrets.apikey = $cmdopts.apikey
+        $lib.print("slib.abusech: Updated your abuse.ch Auth-Key.")
+    }
+    else {
+        $name = `abusech:{$lib.user.name()}`
+        $lib.vault.add($name, abusech, user, $lib.user.iden, ({"apikey": $cmdopts.apikey}), ({}))
+        $lib.print("slib.abusech: Saved your abuse.ch Auth-Key in vault {name}.", name=$name)
+    }
+}

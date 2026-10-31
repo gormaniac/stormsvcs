@@ -1,0 +1,50 @@
+init {
+    $priv = $lib.import(slib.abusech.priv.user)
+    $util = $lib.import(slib.abusech.util)
+
+    switch $cmdopts.name {
+        "types": {
+            $retn = $priv.threatfoxTypes()
+            if (not $util.failed($retn, "Listing the ThreatFox IOC types")) {
+                $rows = ([])
+                for ($id, $info) in $retn.data {
+                    $rows.append(($id, $info.ioc_type, $info.fk_threat_type, $info.description))
+                }
+                $util.table(([["id", 6], ["ioc_type", 16], ["threat_type", 16], ["description", 60]]), $rows)
+            }
+        }
+        "tags": {
+            $retn = $priv.threatfoxTagList()
+            if (not $util.failed($retn, "Listing the ThreatFox tags")) {
+                $rows = ([])
+                for ($tag, $info) in $retn.data {
+                    $rows.append(($tag, $info.first_seen, $info.last_seen, $info.color))
+                }
+                $util.table(([["tag", 40], ["first_seen", 22], ["last_seen", 22], ["color", 10]]), $rows)
+            }
+        }
+        "malware": {
+            $retn = $priv.threatfoxMalwareList()
+            if (not $util.failed($retn, "Listing the ThreatFox malware families")) {
+                $rows = ([])
+                for ($malware, $info) in $retn.data {
+                    $rows.append(($malware, $info.malware_printable, $info.malware_alias))
+                }
+                $util.table(([["malware", 40], ["printable", 30], ["aliases", 50]]), $rows)
+            }
+        }
+        "label": {
+            if (not $cmdopts.malware) {
+                $lib.raise(BadArg, "slib.abusech.threatfox.ref label requires --malware.")
+            }
+            $retn = $priv.threatfoxLabel($cmdopts.malware, platform=$cmdopts.platform)
+            if (not $util.failed($retn, `Finding the ThreatFox label for {$cmdopts.malware}`)) {
+                $rows = ([])
+                for $info in $retn.data {
+                    $rows.append(($info.malware, $info.malware_printable, $info.malware_alias))
+                }
+                $util.table(([["malware", 40], ["printable", 30], ["aliases", 50]]), $rows)
+            }
+        }
+    }
+}

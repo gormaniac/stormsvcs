@@ -13,6 +13,11 @@ name = "Shodan"
 src = "svcs/shodan/"
 workflow = ".github/workflows/shodan.yml"
 
+[stormsvcs.abusech]
+name = "abuse.ch"
+src = "svcs/abusech/"
+workflow = ".github/workflows/abusech.yml"
+
 [stormsvcs.crtsh]
 name = "crt.sh"
 src = "svcs/crtsh/"

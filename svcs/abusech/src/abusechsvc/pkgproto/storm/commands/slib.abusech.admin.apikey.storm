@@ -1,0 +1,18 @@
+init {
+    $privadmin = $lib.import(slib.abusech.priv.admin)
+    $util = $lib.import(slib.abusech.util)
+
+    if $cmdopts.clear {
+        $retn = $privadmin.setApiKey($lib.null)
+        if (not $util.failed($retn, "Clearing the Auth-Key")) { $lib.print($retn.mesg) }
+    }
+    elif $cmdopts.apikey {
+        $retn = $privadmin.setApiKey($cmdopts.apikey)
+        if (not $util.failed($retn, "Setting the Auth-Key")) { $lib.print($retn.mesg) }
+    }
+    else {
+        $retn = $privadmin.hasApiKey()
+        if $retn.data { $lib.print("slib.abusech: A service-wide Auth-Key is set.") }
+        else { $lib.print("slib.abusech: No service-wide Auth-Key is set.") }
+    }
+}

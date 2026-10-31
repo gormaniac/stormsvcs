@@ -1,0 +1,36 @@
+init {
+    $abusech = $lib.import(slib.abusech.lib)
+    $model = $lib.import(slib.abusech.model)
+    $util = $lib.import(slib.abusech.util)
+    $usecli = ($cmdopts.url or $cmdopts.id or $cmdopts.host or $cmdopts.hash)
+}
+
+if $usecli {
+    // --url/--id/--host/--hash ignore inbound nodes.
+    spin |
+    $results = ([])
+    for $url in $cmdopts.url { $results.append($abusech.urlhausUrl(url=$url)) }
+    for $urlid in $cmdopts.id { $results.append($abusech.urlhausUrl(urlid=$urlid)) }
+    for $host in $cmdopts.host { $results.append($abusech.urlhausHost($host)) }
+    for $sha in $cmdopts.hash { $results.append($abusech.urlhausPayload($sha)) }
+    if $cmdopts.yield { yield $model.nodes($results) }
+}
+else {
+    switch $node.form() {
+        "inet:url": { $results = ($abusech.urlhausUrl(url=$node.repr()),) }
+        ("inet:fqdn", "inet:ipv4", "inet:ipv6"): { $results = ($abusech.urlhausHost($node.repr()),) }
+        ("file:bytes", "hash:md5", "hash:sha256"): {
+            $results = ([])
+            $sha = $node.props.sha256
+            if ($sha = $lib.null) { $sha = $node.props.md5 }
+            if ($node.form() != "file:bytes") { $sha = $node.repr() }
+            if $sha { $results = ($abusech.urlhausPayload($sha),) }
+            else { $lib.warn("slib.abusech.urlhaus.lookup: {repr} has no MD5 or SHA256.", repr=$node.repr()) }
+        }
+        *: {
+            $results = ([])
+            $lib.warn("slib.abusech.urlhaus.lookup: The node form {form} is not supported.", form=$node.form())
+        }
+    }
+    divert $cmdopts.yield $model.nodes($results)
+}

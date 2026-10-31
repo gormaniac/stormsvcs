@@ -1,0 +1,43 @@
+// Download malware samples into the Axon and model them, shared by the slib.abusech.*.download commands.
+// Unprivileged: the downloads go through slib.abusech.priv.download, which requires slib.abusech.download.
+
+init {
+    $privdl = $lib.import(slib.abusech.priv.download)
+    $model = $lib.import(slib.abusech.model)
+    $util = $lib.import(slib.abusech.util)
+    $names = ({"bazaar": "MalwareBazaar", "urlhaus": "URLhaus", "yaraify": "YARAify"})
+}
+
+// Download a sample (by SHA256) from a platform (bazaar, urlhaus, or yaraify) into the Axon and model it.
+// unpacked downloads a file YARAify unpacked. Returns the file:bytes node, or null.
+function download(plat, sha256, unpacked=(false)) {
+    $cmd = `slib.abusech.{$plat}.download`
+    $name = $names.$plat
+    $sha256 = $lib.cast(str, $sha256).lower()
+    if ($util.hashType($sha256) != "sha256") {
+        $lib.warn("{cmd}: {sha} is not a SHA256 hash.", cmd=$cmd, sha=$sha256)
+        return($lib.null)
+    }
+
+    switch $plat {
+        "bazaar": { $retn = $privdl.bazaar($sha256) }
+        "urlhaus": { $retn = $privdl.urlhaus($sha256) }
+        "yaraify": {
+            if $unpacked { $retn = $privdl.yaraifyUnpacked($sha256) }
+            else { $retn = $privdl.yaraify($sha256) }
+        }
+    }
+    if $util.failed($retn, `Downloading {$sha256} from {$name}`) { return($lib.null) }
+    if ($retn.data = $lib.null) {
+        $lib.warn("{cmd}: {name} does not have {sha} available.", cmd=$cmd, name=$name, sha=$sha256)
+        return($lib.null)
+    }
+
+    $info = $retn.data
+    if ($info.sha256 != $sha256) {
+        $lib.warn("{cmd}: Downloaded {got} but expected {sha}.", cmd=$cmd, got=$info.sha256, sha=$sha256)
+    }
+    $lib.print("{cmd}: Saved {sha} ({size} bytes) to the Axon.", cmd=$cmd, sha=$info.sha256, size=$info.size)
+    return($model.sample(({"sha256": $info.sha256, "size": $info.size, "name": $info.name, "clamav": ([]),
+                           "scans": ([]), "rules": ([]), "certs": ([]), "tags": ([]), "families": ([])}), $plat))
+}

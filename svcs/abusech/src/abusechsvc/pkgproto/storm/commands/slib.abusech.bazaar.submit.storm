@@ -1,0 +1,33 @@
+init {
+    $privsub = $lib.import(slib.abusech.priv.submit)
+    $util = $lib.import(slib.abusech.util)
+
+    $references = ({})
+    if $cmdopts.link { $references.links = $cmdopts.link }
+    for $ref in $cmdopts.ref {
+        $parts = $ref.split("=", maxsplit=(1))
+        if ($lib.len($parts) != 2) {
+            $lib.raise(BadArg, `slib.abusech.bazaar.submit: --ref must be <type>=<url>, not {$ref}.`)
+        }
+        ($rtype, $rurl) = $parts
+        if ($references.$rtype = $lib.null) { $references.$rtype = ([]) }
+        $references.$rtype.append($rurl)
+    }
+    $context = ({})
+    if $cmdopts.comment { $context.comment = $cmdopts.comment }
+    if $cmdopts.dropped_by { $context.dropped_by_sha256 = $cmdopts.dropped_by }
+}
+
+if ($node.form() != "file:bytes") {
+    $lib.warn("slib.abusech.bazaar.submit: Only file:bytes nodes can be submitted, not {form}.", form=$node.form())
+}
+elif ((not :sha256) or (not :size) or (not $privsub.hasFile(:sha256))) {
+    $lib.warn("slib.abusech.bazaar.submit: {repr} is not in the Axon.", repr=$node.repr())
+}
+else {
+    $name = :name
+    if (not $name) { $name = :sha256 }
+    $retn = $privsub.bazaarUpload(:sha256, :size, $name, anonymous=$cmdopts.anonymous, tags=$cmdopts.tag,
+                                  delivery=$cmdopts.delivery, references=$references, context=$context)
+    $util.printSubmission(`Submitting {$node.repr()} to MalwareBazaar`, $retn)
+}

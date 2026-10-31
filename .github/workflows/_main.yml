@@ -65,6 +65,12 @@ jobs:
     uses: ./.github/workflows/shodan.yml
     secrets: inherit
 
+  abusech:
+    needs: base
+    if: ${{ !failure() && !cancelled() }}
+    uses: ./.github/workflows/abusech.yml
+    secrets: inherit
+
   crtsh:
     needs: base
     if: ${{ !failure() && !cancelled() }}

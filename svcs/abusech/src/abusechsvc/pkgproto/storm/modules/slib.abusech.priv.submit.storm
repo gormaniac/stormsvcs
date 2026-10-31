@@ -1,0 +1,76 @@
+// Privileged (asroot) wrappers around the slib.abusech service for slib.abusech.submit.
+// These send data to abuse.ch: samples, URLs, IOCs, comments, and YARA rules.
+
+init {
+    $svc = $lib.service.get("slib.abusech")
+    $util = $lib.import(slib.abusech.util)
+}
+
+
+// Whether a file is too large to submit, checked before it's read out of the Axon. Returns a failed
+// {status, mesg} if it is (or its size is unknown), otherwise null.
+function tooLarge(size) {
+    $max = $svc.maxSize().data
+    if ($size = $lib.null) { return(({"status": (false), "mesg": "The file's size is unknown.", "data": $lib.null})) }
+    if ($size > $max) {
+        return(({"status": (false), "mesg": `The file is {$size} bytes, larger than the max of {$max}.`, "data": $lib.null}))
+    }
+    return($lib.null)
+}
+
+// Read a file from the Axon as a list of (up to 1MiB) chunks for the service.
+function chunks(sha256, size) {
+    $retn = ([])
+    $offs = (0)
+    while ($offs < $size) {
+        $byts = $lib.axon.read($sha256, offs=$offs, size=(1048576))
+        if (not $byts) { break }
+        $retn.append($byts)
+        $offs = ($offs + $lib.len($byts))
+    }
+    return($retn)
+}
+
+function hasFile(sha256) { return($lib.axon.has($sha256)) }
+
+// MalwareBazaar
+
+function bazaarUpload(sha256, size, name, anonymous=(false), tags=$lib.null, delivery=$lib.null,
+                      references=$lib.null, context=$lib.null) {
+    $err = $tooLarge($size)
+    if $err { return($err) }
+    return($svc.bazaarUpload($chunks($sha256, $size), $name, anonymous=$anonymous, tags=$tags,
+                             delivery_method=$delivery, references=$references, context=$context,
+                             apikey=$util.userKey()))
+}
+function bazaarUpdate(sha256, key, valu) { return($svc.bazaarUpdate($sha256, $key, $valu, apikey=$util.userKey())) }
+function bazaarComment(sha256, comment) { return($svc.bazaarComment($sha256, $comment, apikey=$util.userKey())) }
+
+// URLhaus
+
+function urlhausSubmit(urls, threat=malware_download, tags=$lib.null, anonymous=(false)) {
+    return($svc.urlhausSubmit($urls, threat=$threat, tags=$tags, anonymous=$anonymous, apikey=$util.userKey()))
+}
+
+// ThreatFox
+
+function threatfoxSubmit(threat, ioctype, malware, iocs, confidence=(50), reference=$lib.null,
+                         comment=$lib.null, tags=$lib.null, anonymous=(false), compromised=(false)) {
+    return($svc.threatfoxSubmit($threat, $ioctype, $malware, $iocs, confidence=$confidence,
+                                reference=$reference, comment=$comment, tags=$tags, anonymous=$anonymous,
+                                compromised=$compromised, apikey=$util.userKey()))
+}
+
+// YARAify
+
+function yaraifyScan(sha256, size, name, identifier=$lib.null, clamav=(true), unpack=(false),
+                     share=(false), skipknown=(false), skipnoisy=(false)) {
+    $err = $tooLarge($size)
+    if $err { return($err) }
+    return($svc.yaraifyScan($chunks($sha256, $size), $name, identifier=$identifier, clamav_scan=$clamav,
+                            unpack=$unpack, share_file=$share, skip_known=$skipknown, skip_noisy=$skipnoisy,
+                            apikey=$util.userKey()))
+}
+function yaraifyRescan(sha) { return($svc.yaraifyRescan($sha, apikey=$util.userKey())) }
+function yaraifyDeploy(text, name=rule.yar) { return($svc.yaraifyDeploy($text, name=$name, apikey=$util.userKey())) }
+function yaraifyDeleteRule(uuid) { return($svc.yaraifyDeleteRule($uuid, apikey=$util.userKey())) }

@@ -1,0 +1,23 @@
+init {
+    $dl = $lib.import(slib.abusech.download)
+    $model = $lib.import(slib.abusech.model)
+    $util = $lib.import(slib.abusech.util)
+}
+
+if $cmdopts.hash {
+    // --hash ignores inbound nodes.
+    spin |
+    for $sha in $cmdopts.hash {
+        $file = $dl.download(urlhaus, $sha, unpacked=(false))
+        if ($cmdopts.yield and $file) { yield $file }
+    }
+}
+else {
+    $sha = $util.nodeHash($node)
+    $results = ([])
+    if ($sha and $util.hashType($sha) = "sha256") { $results = ($dl.download(urlhaus, $sha, unpacked=(false)),) }
+    else {
+        $lib.warn("slib.abusech.urlhaus.download: {form} {repr} has no SHA256 to download.", form=$node.form(), repr=$node.repr())
+    }
+    divert $cmdopts.yield $model.nodes($results)
+}

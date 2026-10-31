@@ -1,0 +1,38 @@
+[project]
+name = "abusechsvc"
+version = "0.1.0"
+description = "An abuse.ch Storm Service (MalwareBazaar, URLhaus, ThreatFox, YARAify, Feodo Tracker, and SSL Blacklist)"
+readme = "README.md"
+license-files = ["LICENSE"]
+authors = [
+    { name = "John Gorman", email = "83027042+gormaniac@users.noreply.github.com" }
+]
+
+# Stick with 3.11 until Synapse's base image changes
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "pyzipper>=0.3.6",
+    "stormlibpp>=0.10.1",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.32,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+source-include = [
+    "pkgproto/*.yaml",
+    "pkgproto/storm/*/*.storm",
+]
+
+[tool.pytest]
+testpaths = [
+    "tests",
+]
+asyncio_mode = "auto"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+]

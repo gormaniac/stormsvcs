@@ -1,0 +1,28 @@
+// Privileged (asroot) wrappers around the slib.abusech service for slib.abusech.admin.
+
+init {
+    $svc = $lib.service.get("slib.abusech")
+    $util = $lib.import(slib.abusech.util)
+}
+
+
+// Auth-Key and tag settings
+
+function setApiKey(apikey) { return($svc.setApiKey($apikey)) }
+function hasApiKey() { return($svc.hasApiKey()) }
+
+function tagSettings() {
+    return(({
+        "enabled": $lib.globals.get("slib:abusech:tag:enabled"),
+        "prefix": $lib.globals.get("slib:abusech:tag:prefix"),
+    }))
+}
+function setTagPrefix(prefix) { $lib.globals.set("slib:abusech:tag:prefix", $prefix) }
+function setTagsEnabled(enabled) { $lib.globals.set("slib:abusech:tag:enabled", $enabled) }
+
+// Raw requests
+
+function rawRequest(base, path="", method=post, form=$lib.null, json=$lib.null, params=$lib.null) {
+    return($svc.rawRequest($base, path=$path, method=$method, form=$form, json_data=$json, params=$params,
+                           apikey=$util.userKey()))
+}

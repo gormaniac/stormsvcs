@@ -1,0 +1,85 @@
+// Privileged (asroot) wrappers around the slib.abusech service for slib.abusech.user.
+// Every function returns the service's {status, mesg, data} dict, or emits them for generators.
+//
+// The calling user's own Auth-Key (see slib.abusech.util.userKey) is passed to the service,
+// otherwise the service falls back to its stored/configured key.
+
+init {
+    $svc = $lib.service.get("slib.abusech")
+    $util = $lib.import(slib.abusech.util)
+}
+
+
+function hasKey() {
+    if $util.userKey() { return((true)) }
+    return($svc.hasApiKey().data)
+}
+
+function tagPrefix() {
+    if $lib.globals.get("slib:abusech:tag:enabled") {
+        return($lib.globals.get("slib:abusech:tag:prefix"))
+    }
+    return($lib.null)
+}
+
+// MalwareBazaar
+
+function bazaarInfo(sha) { return($svc.normBazaarInfo($sha, apikey=$util.userKey())) }
+function bazaarSearch(by, valu, limit=(100)) { return($svc.normBazaarSearch($by, $valu, limit=$limit, apikey=$util.userKey())) }
+function bazaarRecent(selector=time) { return($svc.normBazaarRecent($selector, apikey=$util.userKey())) }
+function bazaarDetections(hours=(48)) { return($svc.normBazaarDetections($hours, apikey=$util.userKey())) }
+function bazaarCscb() { return($svc.normBazaarCscb(apikey=$util.userKey())) }
+function bazaarExport(kind=recent, limit=(0)) {
+    for $retn in $svc.bazaarExport(kind=$kind, limit=$limit, apikey=$util.userKey()) { emit $retn }
+}
+
+// URLhaus
+
+function urlhausUrl(url=$lib.null, urlid=$lib.null) { return($svc.normUrlhausUrl(url=$url, urlid=$urlid, apikey=$util.userKey())) }
+function urlhausHost(host) { return($svc.normUrlhausHost($host, apikey=$util.userKey())) }
+function urlhausPayload(sha) { return($svc.normUrlhausPayload($sha, apikey=$util.userKey())) }
+function urlhausSearch(by, valu, limit=(0)) { return($svc.normUrlhausSearch($by, $valu, limit=$limit, apikey=$util.userKey())) }
+function urlhausRecent(kind=urls, limit=$lib.null) { return($svc.normUrlhausRecent(kind=$kind, limit=$limit, apikey=$util.userKey())) }
+function urlhausExport(kind=recent, limit=(0)) {
+    for $retn in $svc.urlhausExport(kind=$kind, limit=$limit, apikey=$util.userKey()) { emit $retn }
+}
+
+// ThreatFox
+
+function threatfox(by, valu=$lib.null, limit=(100), exact=(false)) {
+    return($svc.normThreatfox($by, valu=$valu, limit=$limit, exact=$exact, apikey=$util.userKey()))
+}
+function threatfoxTypes() { return($svc.threatfoxTypes(apikey=$util.userKey())) }
+function threatfoxTagList() { return($svc.threatfoxTagList(apikey=$util.userKey())) }
+function threatfoxMalwareList() { return($svc.threatfoxMalwareList(apikey=$util.userKey())) }
+function threatfoxLabel(malware, platform=$lib.null) { return($svc.threatfoxLabel($malware, platform=$platform, apikey=$util.userKey())) }
+function threatfoxExport(kind=recent, limit=(0)) {
+    for $retn in $svc.threatfoxExport(kind=$kind, limit=$limit, apikey=$util.userKey()) { emit $retn }
+}
+
+// YARAify
+
+function yaraifyHash(sha, malpedia=$lib.null) { return($svc.normYaraifyHash($sha, malpedia=$malpedia, apikey=$util.userKey())) }
+function yaraifySearch(by, valu, limit=(25)) { return($svc.normYaraifySearch($by, $valu, limit=$limit, apikey=$util.userKey())) }
+function yaraifyResults(taskid, malpedia=$lib.null) { return($svc.normYaraifyResults($taskid, malpedia=$malpedia, apikey=$util.userKey())) }
+function yaraifyTasks(identifier, status=processed) { return($svc.normYaraifyTasks($identifier, status=$status, apikey=$util.userKey())) }
+function yaraifyIdentifier() { return($svc.yaraifyIdentifier(apikey=$util.userKey())) }
+function yaraifyRecentRules() { return($svc.normYaraifyRecentRules(apikey=$util.userKey())) }
+function yaraifyDeployedRules() { return($svc.normYaraifyDeployedRules(apikey=$util.userKey())) }
+function yaraifyRule(uuid) { return($svc.yaraifyRule($uuid, apikey=$util.userKey())) }
+function yaraifyRulesExport(limit=(0)) {
+    for $retn in $svc.yaraifyRulesExport(limit=$limit, apikey=$util.userKey()) { emit $retn }
+}
+
+// Feodo Tracker and SSL Blacklist
+
+function feodoBlocklist(kind=all, limit=(0)) {
+    for $retn in $svc.feodoBlocklist(kind=$kind, limit=$limit, apikey=$util.userKey()) { emit $retn }
+}
+function sslblBlocklist(kind=certs, limit=(0)) {
+    for $retn in $svc.sslblBlocklist(kind=$kind, limit=$limit, apikey=$util.userKey()) { emit $retn }
+}
+
+// Hunting
+
+function fplist(platform=$lib.null) { return($svc.normFplist(platform=$platform, apikey=$util.userKey())) }

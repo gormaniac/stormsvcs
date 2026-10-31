@@ -1,0 +1,333 @@
+// The slib.abusech user API. Each function queries an abuse.ch platform, models the
+// results, and returns the resulting node(s) (or emits them, for large datasets).
+// Errors are reported as warnings.
+//
+// Usable directly from Storm, ex:
+//     $abusech = $lib.import(slib.abusech.lib)
+//     $file = $abusech.bazaarLookup(<sha256>)
+
+init {
+    $priv = $lib.import(slib.abusech.priv.user)
+    $model = $lib.import(slib.abusech.model)
+    $util = $lib.import(slib.abusech.util)
+    $model.setPrefix($priv.tagPrefix())
+}
+
+// Model a list of samples from a service call. Returns a list of file:bytes nodes.
+function _samples(retn, what, plat) {
+    if $util.failed($retn, $what) { return(([])) }
+    $nodes = ([])
+    for $s in $retn.data {
+        $file = $model.sample($s, $plat)
+        if $file { $nodes.append($file) }
+    }
+    return($nodes)
+}
+
+// ---- MalwareBazaar ----
+
+// Look up a sample (MD5, SHA1, SHA256, or SHA3-384). Returns the file:bytes node, or null.
+function bazaarLookup(sha) {
+    $sha = $lib.cast(str, $sha).lower()
+    $retn = $priv.bazaarInfo($sha)
+    if $util.failed($retn, `MalwareBazaar lookup of {$sha}`) { return($lib.null) }
+    if ($retn.data = $lib.null) {
+        $lib.print("slib.abusech: {sha} is not in MalwareBazaar.", sha=$sha)
+        return($lib.null)
+    }
+    return($model.sample($retn.data, bazaar))
+}
+
+// Search samples by tag, signature, filetype, clamav, imphash, tlsh, telfhash, gimphash,
+// dhash, yara, issuer, or subject. Returns a list of file:bytes nodes.
+function bazaarSearch(by, valu, limit=(100)) {
+    return($_samples($priv.bazaarSearch($by, $valu, limit=$limit), `MalwareBazaar {$by} search for {$valu}`, bazaar))
+}
+
+// The samples added in the last hour (selector=time) or the latest 100 (selector=100).
+function bazaarRecent(selector=time) {
+    return($_samples($priv.bazaarRecent($selector), "MalwareBazaar recent samples", bazaar))
+}
+
+// Samples with new detections (ex. new vendor intel) in the last hours (1-168). Returns a list of file:bytes nodes.
+function bazaarDetections(hours=(48)) {
+    return($_samples($priv.bazaarDetections($hours), "MalwareBazaar recent detections", bazaar))
+}
+
+// The Code Signing Certificate Blocklist. Returns a list of crypto:x509:cert nodes.
+function bazaarCscb() {
+    $retn = $priv.bazaarCscb()
+    if $util.failed($retn, "Retrieving the Code Signing Certificate Blocklist") { return(([])) }
+    $nodes = ([])
+    for $c in $retn.data {
+        $certnode = $model.cert($c, bazaar)
+        if $certnode { $nodes.append($certnode) }
+    }
+    return($nodes)
+}
+
+// Emit file:bytes nodes from a MalwareBazaar CSV export (recent or full).
+function bazaarExport(kind=recent, limit=(0)) {
+    for $retn in $priv.bazaarExport(kind=$kind, limit=$limit) {
+        if $util.failed($retn, `MalwareBazaar {$kind} export`) { break }
+        // The yara export is MalwareBazaar's YARA rule statistics.
+        if ($kind = "yara") { $n = $model.rule($retn.data, bazaar) }
+        else { $n = $model.sample($retn.data, bazaar) }
+        if $n { emit $n }
+    }
+}
+
+// ---- URLhaus ----
+
+// Look up a URL (or a URLhaus URL ID). Returns the inet:url node, or null.
+function urlhausUrl(url=$lib.null, urlid=$lib.null) {
+    $retn = $priv.urlhausUrl(url=$url, urlid=$urlid)
+    $what = `URLhaus lookup of {$url}`
+    if $urlid { $what = `URLhaus lookup of URL ID {$urlid}` }
+    if $util.failed($retn, $what) { return($lib.null) }
+    if ($retn.data = $lib.null) { return($lib.null) }
+    return($model.url($retn.data))
+}
+
+// Look up a host (FQDN or IP) and every URL URLhaus has seen on it. Returns the host node, or null.
+function urlhausHost(host) {
+    $host = $lib.cast(str, $host)
+    $retn = $priv.urlhausHost($host)
+    if $util.failed($retn, `URLhaus lookup of {$host}`) { return($lib.null) }
+    if ($retn.data = $lib.null) { return($lib.null) }
+    return($model.urlhausHost($retn.data))
+}
+
+// Look up a payload (MD5 or SHA256) and the URLs that served it. Returns the file:bytes node, or null.
+function urlhausPayload(sha) {
+    $sha = $lib.cast(str, $sha).lower()
+    $retn = $priv.urlhausPayload($sha)
+    if $util.failed($retn, `URLhaus lookup of {$sha}`) { return($lib.null) }
+    if ($retn.data = $lib.null) { return($lib.null) }
+    return($model.sample($retn.data, urlhaus))
+}
+
+// The URLs with a tag (by=tag) or for a malware signature (by=signature). Returns a list of inet:url nodes.
+function urlhausSearch(by, valu, limit=(0)) {
+    $retn = $priv.urlhausSearch($by, $valu, limit=$limit)
+    if $util.failed($retn, `URLhaus {$by} search for {$valu}`) { return(([])) }
+    if $retn.data.url_count {
+        $lib.print("slib.abusech: URLhaus has {count} URLs for {by} {valu} (first seen {first}, last seen {last}).",
+                   count=$retn.data.url_count, by=$by, valu=$valu, first=$retn.data.first_seen,
+                   last=$retn.data.last_seen)
+    }
+    $nodes = ([])
+    for $u in $retn.data.urls {
+        $urlnode = $model.url($u)
+        if $urlnode { $nodes.append($urlnode) }
+    }
+    return($nodes)
+}
+
+// Recently added URLs (kind=urls, inet:url nodes) or payloads (kind=payloads, file:bytes nodes).
+function urlhausRecent(kind=urls, limit=$lib.null) {
+    $retn = $priv.urlhausRecent(kind=$kind, limit=$limit)
+    if $util.failed($retn, `URLhaus recent {$kind}`) { return(([])) }
+    $nodes = ([])
+    for $item in $retn.data {
+        if ($kind = "urls") { $n = $model.url($item) }
+        else { $n = $model.sample($item, urlhaus) }
+        if $n { $nodes.append($n) }
+    }
+    return($nodes)
+}
+
+// Emit inet:url nodes from a URLhaus CSV export (recent, online, or full).
+function urlhausExport(kind=recent, limit=(0)) {
+    for $retn in $priv.urlhausExport(kind=$kind, limit=$limit) {
+        if $util.failed($retn, `URLhaus {$kind} export`) { break }
+        $n = $model.url($retn.data)
+        if $n { emit $n }
+    }
+}
+
+// ---- ThreatFox ----
+
+// Query ThreatFox IOCs. by is recent (valu is days), id, search, hash, tag, or malware.
+// Returns a list of the IOC (observable) nodes.
+function threatfox(by, valu=$lib.null, limit=(100), exact=(false)) {
+    $retn = $priv.threatfox($by, valu=$valu, limit=$limit, exact=$exact)
+    if $util.failed($retn, `ThreatFox {$by} query for {$valu}`) { return(([])) }
+    $nodes = ([])
+    for $i in $retn.data {
+        $n = $model.ioc($i)
+        if $n { $nodes.append($n) }
+    }
+    return($nodes)
+}
+
+// Emit IOC nodes from a ThreatFox JSON export (recent or full).
+function threatfoxExport(kind=recent, limit=(0)) {
+    for $retn in $priv.threatfoxExport(kind=$kind, limit=$limit) {
+        if $util.failed($retn, `ThreatFox {$kind} export`) { break }
+        $n = $model.ioc($retn.data)
+        if $n { emit $n }
+    }
+}
+
+// ---- YARAify ----
+
+// Look up a file (MD5, SHA1, SHA256, or SHA3-384) and its YARA/ClamAV/unpacker results.
+// Returns the file:bytes node, or null.
+function yaraifyLookup(sha, malpedia=$lib.null) {
+    $sha = $lib.cast(str, $sha).lower()
+    $retn = $priv.yaraifyHash($sha, malpedia=$malpedia)
+    if $util.failed($retn, `YARAify lookup of {$sha}`) { return($lib.null) }
+    if ($retn.data = $lib.null) { return($lib.null) }
+    return($model.sample($retn.data, yaraify))
+}
+
+// Search files by yara, clamav, imphash, gimphash, dhash, tlsh, or telfhash. Returns a list of file:bytes nodes.
+function yaraifySearch(by, valu, limit=(25)) {
+    return($_samples($priv.yaraifySearch($by, $valu, limit=$limit), `YARAify {$by} search for {$valu}`, yaraify))
+}
+
+// The results of a scan task. Returns ($status, $filenode) - status is "done" (with the file node)
+// or YARAify's status (ex. "queued"), or null on error.
+function yaraifyTask(taskid, malpedia=$lib.null) {
+    $retn = $priv.yaraifyResults($taskid, malpedia=$malpedia)
+    if $util.failed($retn, `Retrieving YARAify task {$taskid}`) { return(($lib.null, $lib.null)) }
+    if ($retn.data = $lib.null) { return((unknown, $lib.null)) }
+    if ($retn.data.status != "done") { return(($retn.data.status, $lib.null)) }
+    return((done, $model.sample($retn.data.file, yaraify)))
+}
+
+// Model a list of normalized YARA rules. Returns a list of it:app:yara:rule nodes.
+function _rules(rules) {
+    $nodes = ([])
+    for $r in $rules {
+        $n = $model.rule($r, yaraify)
+        if $n { $nodes.append($n) }
+    }
+    return($nodes)
+}
+
+// Recently deployed YARA rules, with their text when the author shares it.
+// Returns a list of it:app:yara:rule nodes.
+function yaraifyRecentRules() {
+    $retn = $priv.yaraifyRecentRules()
+    if $util.failed($retn, "Retrieving recent YARAify rules") { return(([])) }
+    return($_rules($retn.data))
+}
+
+// The YARA rules you've deployed for live hunting, with their text when shared.
+// Returns a list of it:app:yara:rule nodes.
+function yaraifyDeployedRules() {
+    $retn = $priv.yaraifyDeployedRules()
+    if $util.failed($retn, "Retrieving your deployed YARAify rules") { return(([])) }
+    return($_rules($retn.data))
+}
+
+// Download a YARAhub rule by UUID. Returns a list of it:app:yara:rule nodes.
+function yaraifyRule(uuid) {
+    $retn = $priv.yaraifyRule($uuid)
+    if $util.failed($retn, `Downloading YARA rule {$uuid}`) { return(([])) }
+    return($_rules($retn.data))
+}
+
+// Emit it:app:yara:rule nodes for every TLP:CLEAR YARAhub rule.
+function yaraifyRulesExport(limit=(0)) {
+    for $retn in $priv.yaraifyRulesExport(limit=$limit) {
+        if $util.failed($retn, "YARAify rule export") { break }
+        $n = $model.rule($retn.data, yaraify)
+        if $n { emit $n }
+    }
+}
+
+// ---- Feodo Tracker and SSL Blacklist ----
+
+// Emit inet:server (or IP) nodes for the C2s on a Feodo Tracker blocklist (all, recommended, aggressive).
+function feodoBlocklist(kind=all, limit=(0)) {
+    for $retn in $priv.feodoBlocklist(kind=$kind, limit=$limit) {
+        if $util.failed($retn, `Feodo Tracker {$kind} blocklist`) { break }
+        $n = $model.c2($retn.data, feodo)
+        if $n { emit $n }
+    }
+}
+
+// Emit nodes for an SSL Blacklist blocklist: certs (crypto:x509:cert) or ja3 (hash:md5).
+function sslblBlocklist(kind=certs, limit=(0)) {
+    for $retn in $priv.sslblBlocklist(kind=$kind, limit=$limit) {
+        if $util.failed($retn, `SSL Blacklist {$kind} blocklist`) { break }
+        switch $kind {
+            "certs": { $n = $model.sslblCert($retn.data) }
+            *: { $n = $model.ja3($retn.data) }
+        }
+        if $n { emit $n }
+    }
+}
+
+// ---- Hunting ----
+
+// The abuse.ch false positive list (optionally for one platform). Returns a list of the entries' nodes.
+function fplist(platform=$lib.null) {
+    $retn = $priv.fplist(platform=$platform)
+    if $util.failed($retn, "Retrieving the false positive list") { return(([])) }
+    $nodes = ([])
+    for $f in $retn.data {
+        $n = $model.fp($f)
+        if $n { $nodes.append($n) }
+    }
+    return($nodes)
+}
+
+// ---- Enrichment ----
+
+// Enrich a node from every abuse.ch platform that knows about its form. Returns a list of the resulting nodes.
+//
+//   file:bytes/hash:md5/hash:sha1/hash:sha256 -> MalwareBazaar, YARAify, URLhaus (MD5/SHA256), ThreatFox
+//   inet:url                                  -> URLhaus, ThreatFox
+//   inet:fqdn/inet:ipv4                       -> URLhaus (host), ThreatFox
+//   inet:ipv6                                 -> ThreatFox
+//   inet:server                               -> ThreatFox (ip:port)
+function enrich(node, platforms=$lib.null) {
+    if ($platforms = $lib.null) { $platforms = (bazaar, urlhaus, threatfox, yaraify) }
+    $nodes = ([])
+    $form = $node.form()
+    $repr = $node.repr()
+
+    switch $form {
+        ("file:bytes", "hash:md5", "hash:sha1", "hash:sha256"): {
+            $sha = $util.nodeHash($node)
+            if (not $sha) {
+                $lib.warn("slib.abusech: {form} {repr} has no hash to enrich.", form=$form, repr=$repr)
+                return($nodes)
+            }
+            $htype = $util.hashType($sha)
+            if ($platforms.has(bazaar)) { $nodes.append($bazaarLookup($sha)) }
+            if ($platforms.has(yaraify)) { $nodes.append($yaraifyLookup($sha)) }
+            if ($platforms.has(urlhaus) and ($htype = "md5" or $htype = "sha256")) { $nodes.append($urlhausPayload($sha)) }
+            if ($platforms.has(threatfox)) { $nodes.extend($threatfox(file, $sha, limit=(0))) }
+        }
+        "inet:url": {
+            if ($platforms.has(urlhaus)) { $nodes.append($urlhausUrl(url=$repr)) }
+            if ($platforms.has(threatfox)) { $nodes.extend($threatfox(search, $repr, exact=(true))) }
+        }
+        "inet:fqdn": {
+            if ($platforms.has(urlhaus)) { $nodes.append($urlhausHost($repr)) }
+            if ($platforms.has(threatfox)) { $nodes.extend($threatfox(search, $repr, exact=(true))) }
+        }
+        ("inet:ipv4", "inet:ipv6"): {
+            // URLhaus host lookups don't support IPv6.
+            if ($platforms.has(urlhaus) and $form = "inet:ipv4") { $nodes.append($urlhausHost($repr)) }
+            if ($platforms.has(threatfox)) { $nodes.extend($threatfox(ip, $repr, limit=(0))) }
+        }
+        "inet:server": {
+            $port = $node.props.port
+            if ($platforms.has(threatfox) and $port) {
+                if $node.props.ipv4 { $ipport = `{$lib.repr(inet:ipv4, $node.props.ipv4)}:{$port}` }
+                else { $ipport = `{$node.props.ipv6}:{$port}` }
+                $nodes.extend($threatfox(search, $ipport, exact=(true)))
+            }
+        }
+        *: {
+            $lib.warn("slib.abusech: The node form {form} is not supported.", form=$form)
+        }
+    }
+    return($nodes)
+}
