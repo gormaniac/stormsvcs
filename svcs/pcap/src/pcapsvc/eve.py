@@ -149,8 +149,13 @@ def applyEve(enr: Any, flow: dict, events: list[dict], filestore: str | None) ->
                 enr._uniq(enr.tls["sni"], str(body["sni"]).lower())
             if body.get("ja4"):
                 enr._uniq(enr.tls["ja4"], body["ja4"])
-            if isinstance(body.get("ja3"), dict) and body["ja3"].get("hash"):
-                enr._uniq(enr.tls["ja3"], body["ja3"]["hash"])
+            for key in ("ja3", "ja3s"):
+                if isinstance(body.get(key), dict) and body[key].get("hash"):
+                    enr._uniq(enr.tls[key], body[key]["hash"])
+            for ext in body.get("extensions") or ():
+                if isinstance(ext, dict) and ext.get("name") == "alpn":
+                    for alpn in ext.get("values") or ():
+                        enr._uniq(enr.tls.setdefault("alpn", []), str(alpn))
             enr._soft(client, body.get("ua"))
             enr.extra.setdefault("quic", [])
             _append(
@@ -212,7 +217,8 @@ def applyEve(enr: Any, flow: dict, events: list[dict], filestore: str | None) ->
                         "ticket_encryption",
                         "ticket_weak_encryption",
                     )
-                    if body.get(k) is not None
+                    # Suricata fills missing names with placeholders.
+                    if body.get(k) not in (None, "", "<empty>", "<none>")
                 },
             )
 
@@ -339,7 +345,8 @@ def dnsQueries(events: list[dict] | None) -> list[dict] | None:
             )
             if ev.get("time") is not None and (item["time"] is None or ev["time"] < item["time"]):
                 item["time"] = ev["time"]
-            if ev.get("type") == "response" or ev.get("rcode") is not None:
+            # Requests have an rcode too (NOERROR), only a response's counts.
+            if ev.get("type") in ("response", "answer"):
                 if ev.get("rcode") is not None:
                     item["rcode"] = rcodes.get(str(ev["rcode"]).upper(), item["rcode"])
                 for ans in ev.get("answers") or []:

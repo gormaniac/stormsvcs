@@ -366,6 +366,216 @@ def scenario_rdp(tmp: pathlib.Path) -> None:
     srv.close()
 
 
+def scenario_dns(tmp: pathlib.Path) -> None:
+    """DNS queries over UDP and TCP: A, AAAA, MX, TXT, a CNAME chain, and an NXDOMAIN."""
+
+    from dnslib import AAAA, CNAME, MX, QTYPE, RCODE, RR, TXT, A, DNSRecord
+    from dnslib.server import BaseResolver, DNSServer
+
+    records = {
+        ("vertex.link.", "A"): [RR("vertex.link.", QTYPE.A, rdata=A("93.184.216.34"), ttl=300)],
+        ("vertex.link.", "AAAA"): [
+            RR("vertex.link.", QTYPE.AAAA, rdata=AAAA("2001:db8::34"), ttl=300)
+        ],
+        ("vertex.link.", "MX"): [
+            RR("vertex.link.", QTYPE.MX, rdata=MX("mail.vertex.link.", 10), ttl=300)
+        ],
+        ("vertex.link.", "TXT"): [
+            RR("vertex.link.", QTYPE.TXT, rdata=TXT("v=spf1 -all"), ttl=300)
+        ],
+        ("www.vertex.link.", "A"): [
+            RR("www.vertex.link.", QTYPE.CNAME, rdata=CNAME("vertex.link."), ttl=60),
+            RR("vertex.link.", QTYPE.A, rdata=A("93.184.216.34"), ttl=300),
+        ],
+    }
+
+    class Resolver(BaseResolver):
+        def resolve(self, request, handler):
+            reply = request.reply()
+            name, qtype = str(request.q.qname), QTYPE[request.q.qtype]
+            answers = records.get((name, qtype))
+            if answers is None:
+                reply.header.rcode = RCODE.NXDOMAIN
+            for rr in answers or ():
+                reply.add_answer(rr)
+            return reply
+
+    udp = DNSServer(Resolver(), address="127.0.0.1", port=53)
+    tcp = DNSServer(Resolver(), address="127.0.0.1", port=53, tcp=True)
+    udp.start_thread()
+    tcp.start_thread()
+    waitPort(53)
+    with Capture("dns", "port 53"):
+        for name, qtype in (("vertex.link", "A"), ("vertex.link", "AAAA"),
+                            ("vertex.link", "MX"), ("www.vertex.link", "A"),
+                            ("nope.vertex.link", "A")):
+            DNSRecord.question(name, qtype).send("127.0.0.1", 53, timeout=5)
+            time.sleep(0.1)
+        DNSRecord.question("vertex.link", "TXT").send("127.0.0.1", 53, tcp=True, timeout=5)
+    udp.stop()
+    tcp.stop()
+
+
+def scenario_quic(tmp: pathlib.Path) -> None:
+    """An HTTP/3 (QUIC v1) request with aioquic, the SNI and ALPN are in the Initial packets."""
+
+    import asyncio
+
+    from aioquic.asyncio import serve
+    from aioquic.asyncio.protocol import QuicConnectionProtocol
+    from aioquic.quic.configuration import QuicConfiguration
+    from aioquic.quic.connection import QuicConnection
+
+    key, cert = tmp / "key.pem", tmp / "cert.pem"
+    subprocess.run(
+        ["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256",
+         "-nodes", "-keyout", str(key), "-out", str(cert), "-days", "3650",
+         "-subj", "/O=Test/CN=quic.vertex.link", "-addext", "subjectAltName=DNS:quic.vertex.link"],
+        check=True, capture_output=True,
+    )
+
+    async def run() -> None:
+        sconf = QuicConfiguration(is_client=False, alpn_protocols=["h3"])
+        sconf.load_cert_chain(str(cert), str(key))
+
+        def onStream(reader, writer):
+            async def echo():
+                writer.write(await reader.read())
+                writer.write_eof()
+            asyncio.ensure_future(echo())
+
+        server = await serve("127.0.0.1", 443, configuration=sconf, stream_handler=onStream)
+        cconf = QuicConfiguration(is_client=True, alpn_protocols=["h3"],
+                                  server_name="quic.vertex.link", verify_mode=0)
+        # aioquic's connect() needs IPv6 (a dual stack socket), so the client is set up here.
+        loop = asyncio.get_running_loop()
+        _, client = await loop.create_datagram_endpoint(
+            lambda: QuicConnectionProtocol(QuicConnection(configuration=cconf)),
+            remote_addr=("127.0.0.1", 443),
+        )
+        client.connect(("127.0.0.1", 443))
+        await client.wait_connected()
+        reader, writer = await client.create_stream()
+        writer.write(b"hello over quic")
+        writer.write_eof()
+        await reader.read()
+        client.close()
+        await client.wait_closed()
+        server.close()
+
+    with Capture("quic", "udp port 443"):
+        asyncio.run(run())
+
+
+def scenario_smb(tmp: pathlib.Path) -> None:
+    """An SMB2 session with impacket: a guest login, a file download, and an upload."""
+
+    from impacket import smbserver
+    from impacket.smbconnection import SMBConnection
+
+    share = tmp / "share"
+    share.mkdir()
+    (share / "sample.bin").write_bytes(DOWNLOAD)
+    srv = smbserver.SimpleSMBServer(listenAddress="127.0.0.1", listenPort=445)
+    srv.addShare("DATA", str(share), "test", readOnly="no")
+    srv.setSMB2Support(True)
+    threading.Thread(target=srv.start, daemon=True).start()
+    waitPort(445)
+    with Capture("smb", "tcp port 445"):
+        conn = SMBConnection("FILESRV", "127.0.0.1", myName="WORKSTATION-7")
+        conn.login("guest", "")
+        chunks = []
+        conn.getFile("DATA", "sample.bin", chunks.append)
+        assert b"".join(chunks) == DOWNLOAD
+        upload = tmp / "upload.bin"
+        upload.write_bytes(UPLOAD)
+        with open(upload, "rb") as fd:
+            conn.putFile("DATA", "report.txt", fd.read)
+        conn.logoff()
+    # The server thread is a daemon, SimpleSMBServer.stop() doesn't return.
+
+
+def scenario_krb5(tmp: pathlib.Path) -> None:
+    """A Kerberos AS-REQ (impacket) to a KDC that answers KRB-ERROR PREAUTH_REQUIRED, over
+    UDP and TCP."""
+
+    from impacket.krb5 import constants
+    from impacket.krb5.asn1 import KRB_ERROR, seq_set
+    from impacket.krb5.kerberosv5 import getKerberosTGT
+    from impacket.krb5.types import Principal, KerberosTime
+    from pyasn1.codec.der import decoder, encoder
+    import datetime
+
+    requests = []
+
+    def krbError(req: bytes) -> bytes:
+        from impacket.krb5.asn1 import AS_REQ
+
+        requests.append(req)
+        asreq = decoder.decode(req, asn1Spec=AS_REQ())[0]
+        err = KRB_ERROR()
+        err["pvno"] = 5
+        err["msg-type"] = constants.ApplicationTagNumbers.KRB_ERROR.value
+        now = datetime.datetime.now(datetime.timezone.utc)
+        err["stime"] = KerberosTime.to_asn1(now)
+        err["susec"] = now.microsecond
+        err["error-code"] = constants.ErrorCodes.KDC_ERR_PREAUTH_REQUIRED.value
+        realm = str(asreq["req-body"]["realm"])
+        err["realm"] = realm
+        seq_set(err, "sname", Principal(f"krbtgt/{realm}", type=2).components_to_asn1)
+        return encoder.encode(err)
+
+    def udpKdc(sock):
+        while True:
+            try:
+                data, addr = sock.recvfrom(65535)
+            except OSError:
+                return
+            sock.sendto(krbError(data), addr)
+
+    def tcpKdc(sock):
+        while True:
+            try:
+                conn, _ = sock.accept()
+            except OSError:
+                return
+            with conn:
+                import traceback
+                try:
+                    size = struct.unpack(">I", conn.recv(4))[0]
+                    data = b""
+                    while len(data) < size:
+                        data += conn.recv(size - len(data))
+                    resp = krbError(data)
+                    conn.sendall(struct.pack(">I", len(resp)) + resp)
+                except Exception:
+                    traceback.print_exc()
+
+    usock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    usock.bind(("127.0.0.1", 88))
+    tsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    tsock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    tsock.bind(("127.0.0.1", 88))
+    tsock.listen()
+    threading.Thread(target=udpKdc, args=(usock,), daemon=True).start()
+    threading.Thread(target=tcpKdc, args=(tsock,), daemon=True).start()
+    with Capture("krb5", "port 88"):
+        # impacket sends over TCP.
+        user = Principal("alice", type=constants.PrincipalNameType.NT_PRINCIPAL.value)
+        try:
+            getKerberosTGT(user, "password", "VERTEX.LINK", "", "", kdcHost="127.0.0.1")
+        except Exception:  # noqa: BLE001 - the error has no e-data, impacket fails reading it
+            pass
+        # The same AS-REQ again over UDP.
+        client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        client.settimeout(5)
+        client.sendto(requests[0], ("127.0.0.1", 88))
+        client.recvfrom(65535)
+        client.close()
+    usock.close()
+    tsock.close()
+
+
 SCENARIOS = {
     name.removeprefix("scenario_"): func
     for name, func in globals().copy().items() if name.startswith("scenario_")
@@ -379,6 +589,9 @@ def main(names: list[str]) -> None:
             SCENARIOS[name](tmp)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
+    # impacket's SMB server leaves non-daemon threads running.
+    sys.stdout.flush()
+    os._exit(0)
 
 
 if __name__ == "__main__":

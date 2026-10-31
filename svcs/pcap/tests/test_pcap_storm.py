@@ -411,3 +411,86 @@ class TestPcapStormDecrypt(s_tests.SynTest):
                 f"inet:flow :src:txfiles -> file:attachment +:name=report.txt "
                 f"+:file=sha256:{upload}"))
             self.len(2, await core.nodes("inet:flow +:src:softnames*[=curl/8.5.0]"))
+
+
+@needs("suricata")
+class TestPcapStormSuricata(s_tests.SynTest):
+    """The protocols only Suricata parses: DNS, QUIC, SMB, and Kerberos."""
+
+    async def test_protocols(self):
+        names = ("dns", "quic", "smb", "krb5")
+        blobs = [(DATA / f"{name}.pcapng").read_bytes() for name in names]
+        async with pcapCore(self, *blobs) as (core, _, shas):
+            sha = dict(zip(names, shas))
+            msgs = await core.stormlist("slib.pcap.flows " + " ".join(shas))
+            self.stormHasNoWarnErr(msgs)
+
+            # DNS: every query, its answers, and the response code.
+            reqs = await core.nodes("inet:dns:request")
+            assert sorted((n.get("query:name"), n.get("query:type")) for n in reqs) == [
+                ("nope.vertex.link", 1), ("vertex.link", 1), ("vertex.link", 15),
+                ("vertex.link", 16), ("vertex.link", 28), ("www.vertex.link", 1),
+            ]
+            nope = (await core.nodes("inet:dns:request:query:name=nope.vertex.link"))[0]
+            assert nope.get("reply:code") == 3
+            assert nope.get("server") == "udp://127.0.0.1:53"
+            client, name, qtype = nope.get("query")
+            assert client.startswith("udp://127.0.0.1:") and (name, qtype) == ("nope.vertex.link", 1)
+            self.len(0, await core.nodes("inet:dns:request:query:name=nope.vertex.link "
+                                         "-> inet:dns:answer"))
+            q = "inet:dns:request:query:name=vertex.link +:query:type=1 -> inet:dns:answer"
+            ans = (await core.nodes(q))[0]
+            assert ans.get("a") == ("vertex.link", 0x5DB8D822) and ans.get("ttl") == 300
+            q = "inet:dns:request:query:name=www.vertex.link -> inet:dns:answer"
+            assert {n.get("cname") or n.get("a") for n in await core.nodes(q)} == {
+                ("www.vertex.link", "vertex.link"), ("vertex.link", 0x5DB8D822),
+            }
+            q = "inet:dns:request:query:type=28 -> inet:dns:answer"
+            assert (await core.nodes(q))[0].get("aaaa") == ("vertex.link", "2001:db8::34")
+            q = "inet:dns:request:query:type=15 -> inet:dns:answer"
+            assert (await core.nodes(q))[0].get("mx") == ("vertex.link", "mail.vertex.link")
+            # The TXT query was over TCP.
+            q = "inet:dns:request:query:type=16 <(refs)- inet:flow"
+            assert (await core.nodes(q))[0].get("ip:proto") == 6
+            self.len(6, await core.nodes(f"file:bytes={sha['dns']} -(refs)> inet:flow "
+                                         "-(refs)> inet:dns:request"))
+
+            # QUIC: the SNI and fingerprints.
+            quic = (await core.nodes("inet:flow:dst:port=443 +:ip:proto=17"))[0]
+            raw = quic.get("raw")
+            assert raw["app_proto"] == ("quic",)
+            assert raw["quic"][0]["sni"] == "quic.vertex.link"
+            assert raw["tls"]["ja4"] and raw["tls"]["ja3s"] and raw["tls"]["alpn"] == ("h3",)
+            self.len(1, await core.nodes("inet:flow:dst:port=443 +:ip:proto=17 "
+                                         "-(refs)> inet:fqdn=quic.vertex.link"))
+
+            # SMB: the files read and written.
+            download = hashlib.sha256(bytes(range(256)) * 64).hexdigest()
+            upload = hashlib.sha256(b"uploaded file contents\n" * 100).hexdigest()
+            smb = (await core.nodes("inet:flow:dst:port=445"))[0]
+            assert smb.get("raw")["app_proto"] == ("smb",)
+            assert {"share": "\\\\127.0.0.1\\DATA", "share_type": "FILE"}.items() <= \
+                [e for e in smb.get("raw")["smb"] if e.get("share")][0].items()
+            att = (await core.nodes("inet:flow:dst:port=445 :dst:txfiles -> file:attachment"))[0]
+            assert att.get("file") == f"sha256:{download}" and att.get("name") == "sample.bin"
+            att = (await core.nodes("inet:flow:dst:port=445 :src:txfiles -> file:attachment"))[0]
+            assert att.get("file") == f"sha256:{upload}" and att.get("name") == "report.txt"
+
+            # Kerberos: the AS-REQ and the KDC's error, over TCP and UDP.
+            krbs = await core.nodes("inet:flow:dst:port=88")
+            self.len(2, krbs)
+            for krb in krbs:
+                msgs = krb.get("raw")["krb5"]
+                assert msgs[0] == {"msg_type": "KRB_AS_REQ", "cname": "alice",
+                                   "realm": "VERTEX.LINK", "sname": "krbtgt/VERTEX.LINK",
+                                   "weak_encryption": False}
+                assert msgs[1]["error_code"] == "KDC_ERR_PREAUTH_REQUIRED"
+                assert "cname" not in msgs[1]
+
+            # Running again doesn't duplicate anything.
+            counts = {f: len(await core.nodes(f)) for f in
+                      ("inet:flow", "inet:dns:request", "inet:dns:answer", "file:attachment")}
+            msgs = await core.stormlist("slib.pcap.flows " + " ".join(shas))
+            self.stormHasNoWarnErr(msgs)
+            for form, count in counts.items():
+                self.len(count, await core.nodes(form))

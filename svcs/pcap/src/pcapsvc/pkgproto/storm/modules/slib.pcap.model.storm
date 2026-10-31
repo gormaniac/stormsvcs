@@ -282,7 +282,7 @@ function _dnsRequest(flownode, f, q, opts) {
         [ :query?=($f.src.addr, $q.rrname, $qtype) ]
     }
     if ($q.rcode != $lib.null) { [ :reply:code?=$q.rcode ] }
-    [ <(refs)- { yield $flownode } ]
+    [ <(refs)+ { yield $flownode } ]
     return($node)
 }
 
