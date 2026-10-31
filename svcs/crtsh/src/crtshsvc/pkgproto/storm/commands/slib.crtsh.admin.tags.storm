@@ -1,0 +1,15 @@
+init {
+    $privadmin = $lib.import(slib.crtsh.priv.admin)
+
+    if ($cmdopts.enable and $cmdopts.disable) {
+        $lib.raise(BadArg, "slib.crtsh.admin.tags: Use --enable or --disable, not both.")
+    }
+
+    if ($cmdopts.prefix != $lib.null) { $privadmin.setTagPrefix($cmdopts.prefix) }
+    if $cmdopts.enable { $privadmin.setTagsEnabled((true)) }
+    if $cmdopts.disable { $privadmin.setTagsEnabled((false)) }
+
+    $settings = $privadmin.tagSettings()
+    $lib.print("slib.crtsh tags: enabled={enabled} prefix={prefix}",
+        enabled=$settings.enabled, prefix=$settings.prefix)
+}

@@ -49,6 +49,8 @@ Each service must have the following:
   - Support for matching `it:prod:yara:rule` nodes to `file:bytes` nodes.
 - `ip_api`
   - Enrich IPs from ip-api.com.
+- `crtsh`
+  - Look up, search, and pivot on certificates straight from the crt.sh certwatch database.
 - `shodan`
   - Every Shodan API: host lookups, search, scanning, alerts, DNS, streaming, InternetDB, CVEDB, exploits, and trends.
 - `abusech`

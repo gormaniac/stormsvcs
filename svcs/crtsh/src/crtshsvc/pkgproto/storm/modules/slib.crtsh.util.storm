@@ -1,0 +1,55 @@
+// Unprivileged helpers shared by the slib.crtsh commands.
+
+// Warn about a failed service call. Returns true if the call failed.
+function failed(retn, what) {
+    if $retn.status { return((false)) }
+    $lib.warn("slib.crtsh: {what} failed: {err}", what=$what, err=$retn.mesg)
+    return((true))
+}
+
+// Print a table. columns is a list of (name, width) and rows is a list of lists.
+function table(columns, rows) {
+    $cols = ([])
+    for ($name, $width) in $columns {
+        $cols.append(({"name": $name, "width": $width}))
+    }
+    $printer = $lib.tabular.printer(({"columns": $cols}))
+    $lib.print($printer.header())
+    for $row in $rows {
+        $lib.print($printer.row($row))
+    }
+}
+
+// Print any value as indented JSON.
+function printJson(valu) {
+    $lib.print($lib.json.save($valu, indent=(true)))
+}
+
+// Convert a time string (ex. 2024-01-01, "-30 days") to epoch millis, or null.
+function toTime(valu) {
+    if ($valu = $lib.null or $valu = "") { return($lib.null) }
+    return($lib.cast(time, $valu))
+}
+
+// A copy of a dict with one key changed.
+function withKey(dict, key, valu) {
+    $copy = ({})
+    for ($k, $v) in $dict { $copy.$k = $v }
+    $copy.$key = $valu
+    return($copy)
+}
+
+// The (kind, value) the service can look a crypto:x509:cert node up by, or null.
+function certKey(n) {
+    $sha256 = $n.props."sha256"
+    if $sha256 { return((sha256, $sha256)) }
+    $sha1 = $n.props."sha1"
+    if $sha1 { return((sha1, $sha1)) }
+    return($lib.null)
+}
+
+// Yield the nodes a generator emits. divert needs a node generator (one that yields nodes),
+// the slib.crtsh.lib functions emit them.
+function nodes(items) {
+    for $item in $items { yield $item }
+}

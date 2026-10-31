@@ -18,6 +18,11 @@ name = "abuse.ch"
 src = "svcs/abusech/"
 workflow = ".github/workflows/abusech.yml"
 
+[stormsvcs.crtsh]
+name = "crt.sh"
+src = "svcs/crtsh/"
+workflow = ".github/workflows/crtsh.yml"
+
 # [stormsvcs.report-ingest]
 # name = "Report Ingest"
 # src = "svcs/report-ingest/"

@@ -13,6 +13,15 @@ if $cmdopts.domain {
     }
 }
 else {
-    divert $cmdopts.yield $model.nodes($shodan.domain($node.repr(), history=$opts.history,
-                                                       rtype=$opts.rtype, maxpages=$opts.maxpages))
+    switch $node.form() {
+        "inet:fqdn": {
+            $results = $shodan.domain($node.repr(), history=$opts.history, rtype=$opts.rtype,
+                                      maxpages=$opts.maxpages)
+        }
+        *: {
+            $results = ([])
+            $lib.warn("slib.shodan.dns.domain: The node form {form} is not supported.", form=$node.form())
+        }
+    }
+    divert $cmdopts.yield $model.nodes($results)
 }
