@@ -9,8 +9,8 @@ import asyncio
 import asyncpg
 import pytest
 
-from crtshsvc.db import (CERT_COLS, LOOKUPS, NAME_TYPES, NOTAFTER_KEY, CrtshDb, CrtshDbError,
-                         likeEscape, tsquery)
+from crtshsvc.db import (LOOKUPS, NAME_TYPES, NOTAFTER_KEY, CrtshDb, CrtshDbError, likeEscape,
+                         tsquery)
 
 
 class FakeConn:
@@ -264,17 +264,44 @@ class Recorder(CrtshDb):
         self.queries.append((sql, args))
         return self.rows
 
+    @property
+    def sql(self) -> str:
+        return self.queries[-1][0]
+
+    @property
+    def args(self) -> tuple:
+        return self.queries[-1][1]
+
+
+def assertMeta(sql: str, extra: str = ""):
+    """The query returns its certificates with their metadata, in one round trip."""
+
+    assert " m AS MATERIALIZED (" in sql
+    assert f"SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der{extra}," in sql
+    assert "ca.NAME AS issuer_name" in sql
+    assert "ARRAY(SELECT cac.CA_ID FROM ca_certificate cac WHERE cac.CERTIFICATE_ID = m.ID) AS caids" in sql
+    assert "FROM ct_log_entry ctle JOIN ct_log ctl ON ctl.ID = ctle.CT_LOG_ID" in sql
+    assert "cr.SERIAL_NUMBER = x509_serialNumber(m.CERTIFICATE)" in sql
+    assert sql.endswith("FROM m LEFT JOIN ca ON ca.ID = m.ISSUER_CA_ID")
+
 
 async def test_sql_certs():
     db = Recorder()
-    for kind, clause in LOOKUPS.items():
-        await db.certs(kind, [b"\x01"], limit=5)
-        sql, args = db.queries[-1]
-        assert sql == f"SELECT {CERT_COLS} FROM certificate c WHERE {clause} LIMIT $2"
-        assert args == ([b"\x01"], 5)
+    for kind, cond in LOOKUPS.items():
+        await db.certs({kind: [b"\x01"]}, limit=5)
+        assertMeta(db.sql)
+        assert (f"SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate c WHERE "
+                f"({cond.format(c='c', p='$1')}) LIMIT $2") in db.sql
+        assert db.args == ([b"\x01"], 5)
+
+    # Several kinds are one query.
+    await db.certs({"id": [1], "sha256": [b"\x02"]}, limit=3)
+    assert len(db.queries) == len(LOOKUPS) + 1
+    assert "WHERE (c.ID = ANY($1::bigint[]) OR digest(c.CERTIFICATE, 'sha256') = ANY($2::bytea[])) LIMIT $3" in db.sql
+    assert db.args == ([1], [b"\x02"], 3)
 
     with pytest.raises(CrtshDbError, match="Unknown lookup type"):
-        await db.certs("nope", [1])
+        await db.certs({"nope": [1]})
 
 
 async def test_sql_identity():
@@ -282,68 +309,119 @@ async def test_sql_identity():
 
     # Full text search alone queries the certificate table.
     await db.certsByIdentity("*.vertex.link", limit=10)
-    sql, args = db.queries[-1]
-    assert sql == (f"SELECT {CERT_COLS} FROM certificate c WHERE "
-                   "plainto_tsquery('certwatch', $1) @@ identities(c.CERTIFICATE) LIMIT $2")
-    assert args == ("vertex.link", 10)
+    assertMeta(db.sql)
+    assert ("(SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate c WHERE "
+            "plainto_tsquery('certwatch', $1) @@ identities(c.CERTIFICATE) LIMIT $2)") in db.sql
+    assert db.args == ("vertex.link", 10)
 
     # Identity matching goes through certificate_and_identities, like crt.sh's own search.
     await db.certsByIdentity("vertex.link", like="%vertex.link", nametypes=NAME_TYPES["dns"],
-                             caids=[2, 3], valid=True, since=1000, until=2000, limit=50)
-    sql, args = db.queries[-1]
+                             caids=[2, 3], issuer="Let's_Encrypt", valid=True, since=1000,
+                             until=2000, limit=50)
+    sql = db.sql
+    assertMeta(sql)
     assert "FROM certificate_and_identities c WHERE" in sql
     assert "c.NAME_VALUE ILIKE $2 AND c.NAME_TYPE = ANY($3::text[])" in sql
     assert "c.ISSUER_CA_ID = ANY($4::int[])" in sql
+    # The issuer's name is a subquery, not another round trip.
+    assert "c.ISSUER_CA_ID IN (SELECT ca.ID FROM ca WHERE ca.NAME ILIKE $5 LIMIT 1000)" in sql
     assert f"{NOTAFTER_KEY} >= date_trunc('year', now() AT TIME ZONE 'UTC')" in sql
-    assert "x509_notBefore(c.CERTIFICATE) >= to_timestamp($5) AT TIME ZONE 'UTC'" in sql
-    assert f"{NOTAFTER_KEY} >= to_timestamp($5) AT TIME ZONE 'UTC'" in sql
-    assert "x509_notBefore(c.CERTIFICATE) < to_timestamp($6) AT TIME ZONE 'UTC'" in sql
-    assert "LIMIT $7) sub GROUP BY sub.CERTIFICATE_ID, sub.ISSUER_CA_ID, sub.CERTIFICATE" in sql
-    assert args == ("vertex.link", "%vertex.link", ["san:dNSName", "2.5.4.3"], [2, 3], 1.0, 2.0, 50)
+    assert "x509_notBefore(c.CERTIFICATE) >= to_timestamp($6) AT TIME ZONE 'UTC'" in sql
+    assert f"{NOTAFTER_KEY} >= to_timestamp($6) AT TIME ZONE 'UTC'" in sql
+    assert "x509_notBefore(c.CERTIFICATE) < to_timestamp($7) AT TIME ZONE 'UTC'" in sql
+    assert "LIMIT $8) sub GROUP BY sub.CERTIFICATE_ID, sub.ISSUER_CA_ID, sub.CERTIFICATE" in sql
+    assert db.args == ("vertex.link", "%vertex.link", ["san:dNSName", "2.5.4.3"], [2, 3],
+                       "%Let's\\_Encrypt%", 1.0, 2.0, 50)
 
     # Name types alone still check each identity.
     await db.certsByIdentity("Sectigo", nametypes=["2.5.4.10"])
-    assert "certificate_and_identities" in db.queries[-1][0]
+    assert "certificate_and_identities" in db.sql
 
 
 async def test_sql_issuer():
-    db = Recorder(rows=[{"id": 1}])
-    rows = await db.certsByIssuer([2, 3], valid=True, until=2000, limit=10)
-    # One query per CA, so PostgreSQL 12 can walk the index newest first.
-    assert len(db.queries) == 2 and len(rows) == 2
-    sql, args = db.queries[0]
-    assert sql.startswith(f"SELECT {CERT_COLS} FROM certificate c WHERE c.ISSUER_CA_ID = $1 AND ")
-    assert "ANY" not in sql
-    assert sql.endswith("ORDER BY x509_notBefore(c.CERTIFICATE) DESC LIMIT $3")
-    assert args == (2, 2.0, 10)
-    assert db.queries[1][1] == (3, 2.0, 10)
-
-
-async def test_sql_meta():
     db = Recorder()
-    await db.caCerts([2])
-    assert "FROM ca_certificate cac JOIN certificate c ON c.ID = cac.CERTIFICATE_ID" in db.queries[-1][0]
-    assert db.queries[-1][1] == ([2],)
+    await db.certsByIssuer(caids=[2, 3], issuer="Sectigo", cert={"sha256": [b"\x01"]},
+                           valid=True, until=2000, limit=10)
+    sql = db.sql
+    assert len(db.queries) == 1
+    assertMeta(sql)
+    # Every CA source in one query, each CA is LATERAL joined so its index is walked newest first.
+    assert "FROM (SELECT unnest($1::int[]) AS CA_ID UNION " in sql
+    assert "SELECT ID AS CA_ID FROM (SELECT ca.ID FROM ca WHERE ca.NAME ILIKE $2 LIMIT 1000) named UNION " in sql
+    assert ("SELECT cac.CA_ID FROM ca_certificate cac WHERE cac.CERTIFICATE_ID = "
+            "(SELECT s.ID FROM certificate s WHERE (digest(s.CERTIFICATE, 'sha256') = ANY($3::bytea[])) LIMIT 1)") in sql
+    assert ") cas CROSS JOIN LATERAL (SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate c " in sql
+    assert "WHERE c.ISSUER_CA_ID = cas.CA_ID AND " in sql
+    assert "ANY($1::int[])" not in sql.split("LATERAL")[1]
+    assert "ORDER BY x509_notBefore(c.CERTIFICATE) DESC LIMIT $5) c" in sql
+    assert db.args == ([2, 3], "%Sectigo%", [b"\x01"], 2.0, 10)
 
-    await db.certCas([10])
-    assert "WHERE cac.CERTIFICATE_ID = ANY($1::bigint[])" in db.queries[-1][0]
+    with pytest.raises(CrtshDbError, match="CA ID, CA name, or CA certificate"):
+        await db.certsByIssuer()
 
-    await db.cas([1])
-    assert db.queries[-1] == ("SELECT ca.ID AS id, ca.NAME AS name FROM ca WHERE ca.ID = ANY($1::int[])", ([1],))
 
-    await db.casByName("Let's 100%_\\", limit=5)
-    assert db.queries[-1][1] == ("%Let's 100\\%\\_\\\\%", 5)
+async def test_sql_related():
+    db = Recorder()
+    await db.related("key", {"id": [10]}, valid=True, limit=5)
+    sql = db.sql
+    assertMeta(sql)
+    # The source certificate's key is a subquery, and the source itself is excluded.
+    assert ("WHERE digest(x509_publicKey(c.CERTIFICATE), 'sha256') = (SELECT digest(x509_publicKey(s.CERTIFICATE), "
+            "'sha256') FROM certificate s WHERE (s.ID = ANY($1::bigint[])) LIMIT 1) "
+            "AND NOT (c.ID = ANY($1::bigint[])) AND ") in sql
+    assert "x509_notAfter(c.CERTIFICATE) >= now() AT TIME ZONE 'UTC'" in sql
+    assert "ORDER BY" not in sql.split("MATERIALIZED")[1].split("SELECT m.ID")[0]
+    assert db.args == ([10], 5)
 
-    await db.ctlog([10])
-    assert "JOIN ct_log ctl ON ctl.ID = ctle.CT_LOG_ID" in db.queries[-1][0]
+    await db.related("siblings", {"sha1": [b"\x01"]})
+    assert "WHERE c.ISSUER_CA_ID = (SELECT s.ISSUER_CA_ID FROM certificate s" in db.sql
+    assert "ORDER BY x509_notBefore(c.CERTIFICATE) DESC LIMIT $2" in db.sql
 
-    count = len(db.queries)
-    assert await db.revoked([]) == []
-    assert len(db.queries) == count
-    await db.revoked([(2, b"\x01"), (3, b"\x02")])
-    assert "JOIN unnest($1::int[], $2::bytea[]) AS p(ca_id, serial)" in db.queries[-1][0]
-    assert db.queries[-1][1] == ([2, 3], [b"\x01", b"\x02"])
+    for by, expr in (("subject", "digest(x509_name(c.CERTIFICATE), 'sha1')"),
+                     ("serial", "x509_serialNumber(c.CERTIFICATE)"),
+                     ("ski", "x509_subjectKeyIdentifier(c.CERTIFICATE)")):
+        await db.related(by, {"id": [1]})
+        assert f"WHERE {expr} = (SELECT " in db.sql
 
+    with pytest.raises(CrtshDbError, match="Unknown pivot"):
+        await db.related("nope", {"id": [1]})
+
+
+async def test_sql_chain():
+    db = Recorder()
+    await db.chain({"sha256": [b"\x01"]}, maxdepth=4)
+    sql = db.sql
+    assertMeta(sql, extra=", m.CHILD_ID AS child_id, m.DEPTH AS depth")
+    assert sql.startswith("WITH RECURSIVE chain AS ((SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE, "
+                          "NULL::bigint AS CHILD_ID, 0 AS DEPTH FROM certificate c WHERE "
+                          "(digest(c.CERTIFICATE, 'sha256') = ANY($1::bytea[])) LIMIT 1) UNION ALL ")
+    assert "JOIN ca_certificate cac ON cac.CA_ID = ch.ISSUER_CA_ID JOIN certificate p ON p.ID = cac.CERTIFICATE_ID" in sql
+    # Self-issued roots end the chain.
+    assert ("WHERE ch.DEPTH < $2 AND NOT EXISTS (SELECT 1 FROM ca_certificate r WHERE "
+            "r.CERTIFICATE_ID = ch.ID AND r.CA_ID = ch.ISSUER_CA_ID))") in sql
+    assert ", m AS MATERIALIZED (SELECT ID, ISSUER_CA_ID, CERTIFICATE, CHILD_ID, DEPTH FROM chain)" in sql
+    assert db.args == ([b"\x01"], 4)
+
+
+async def test_sql_cas():
+    db = Recorder()
+    await db.cas(caids=[2], name="Let's 100%", limit=5)
+    assert db.sql == ("WITH cas AS MATERIALIZED (SELECT ca.ID, ca.NAME FROM ca WHERE ca.ID = ANY($1::int[]) "
+                      "OR ca.NAME ILIKE $2 ORDER BY ca.ID LIMIT $3) SELECT cas.ID AS ca_id, cas.NAME AS "
+                      "ca_name, cac.CERTIFICATE_ID AS id FROM cas LEFT JOIN ca_certificate cac ON cac.CA_ID = cas.ID")
+    assert db.args == ([2], "%Let's 100\\%%", 5)
+
+    await db.cas(name="x", certs=True)
+    assertMeta(db.sql, extra=", m.CA_ID AS ca_id, m.CA_NAME AS ca_name")
+    assert db.sql.startswith("WITH cas AS MATERIALIZED (SELECT ca.ID, ca.NAME FROM ca WHERE ca.NAME ILIKE $1 ")
+    assert "LEFT JOIN certificate c ON c.ID = cac.CERTIFICATE_ID" in db.sql
+
+    with pytest.raises(CrtshDbError, match="name or ID"):
+        await db.cas()
+
+
+async def test_sql_raw():
+    db = Recorder()
     await db.raw("SELECT $1", [1])
     assert db.queries[-1] == ("SELECT $1", (1,))
     await db.raw("SELECT 1")

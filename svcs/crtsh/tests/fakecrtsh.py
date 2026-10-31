@@ -26,6 +26,7 @@ import contextlib
 import datetime
 import hashlib
 import ipaddress
+import json
 import re
 import struct
 
@@ -202,19 +203,20 @@ class Pki:
                 sans=[x509.DNSName("www.vertex.link")], aki=i1key)},
         ]
         self.cacerts = {1: 1, 3: 3, 2: 2, 4: 2}
-        self.ctlog = [
-            {"certificate_id": 9, "entry_id": 100, "entry_timestamp": (NOW - 10 * DAY).replace(tzinfo=None),
-             "log_name": "Test Log A", "log_url": "https://a.ct.test.example", "log_operator": "Test"},
-            {"certificate_id": 10, "entry_id": 200, "entry_timestamp": (NOW - 9 * DAY).replace(tzinfo=None),
-             "log_name": "Test Log A", "log_url": "https://a.ct.test.example", "log_operator": "Test"},
-            {"certificate_id": 10, "entry_id": 300, "entry_timestamp": (NOW - 8 * DAY).replace(tzinfo=None),
-             "log_name": "Test Log B", "log_url": "https://b.ct.test.example", "log_operator": "Test"},
-        ]
+        def ms(when):
+            return int(when.timestamp() * 1000)
+
+        # CT log entries and CRL revocations, as the certificate queries return them.
+        self.ctlog = {
+            9: [{"log": "Test Log A", "url": "https://a.ct.test.example", "operator": "Test",
+                 "index": 100, "time": ms(NOW - 10 * DAY)}],
+            10: [{"log": "Test Log A", "url": "https://a.ct.test.example", "operator": "Test",
+                  "index": 200, "time": ms(NOW - 9 * DAY)},
+                 {"log": "Test Log B", "url": "https://b.ct.test.example", "operator": "Test",
+                  "index": 300, "time": ms(NOW - 8 * DAY)}],
+        }
         # crt.sh stores serials as the DER INTEGER body, with the sign byte.
-        self.revoked = [
-            {"ca_id": 2, "serial_number": b"\x00\xf0\x0d", "reason_code": 1,
-             "revocation_date": (NOW - 50 * DAY).replace(tzinfo=None)},
-        ]
+        self.revoked = {(2, b"\x00\xf0\x0d"): {"code": 1, "time": ms(NOW - 50 * DAY)}}
 
         self.certs = {}
         for row in self.rows:
@@ -285,7 +287,11 @@ def _likeRegex(pattern: str) -> re.Pattern:
 
 
 class FakeCrtshDb:
-    """Answers CrtshDb's queries from ``PKI``, recording every call in ``calls``."""
+    """Answers CrtshDb's queries from ``PKI``, recording every call in ``calls``.
+
+    Every certificate row carries the metadata CrtshDb's queries return (``issuer_name``,
+    ``caids``, and ``ctlog``/``revoked`` as JSON text).
+    """
 
     def __init__(self, pki: Pki = PKI):
         self.pki = pki
@@ -306,6 +312,9 @@ class FakeCrtshDb:
         return sum(1 for m, _ in self.calls if m == meth)
 
     def _valid(self, cert, valid=False, since=None, until=None) -> bool:
+        if cert is None:
+            # The x509_* functions return null for unparsable certificates, so any filter drops them.
+            return not valid and since is None and until is None
         if valid and cert.not_valid_after_utc < datetime.datetime.now(datetime.timezone.utc):
             return False
         nb = int(cert.not_valid_before_utc.timestamp() * 1000)
@@ -315,15 +324,20 @@ class FakeCrtshDb:
             return False
         return True
 
-    def _rows(self, ids) -> list[dict]:
-        return [dict(r) for r in self.pki.rows if r["id"] in ids]
+    def _row(self, row: dict, **extra) -> dict:
+        """A certificate row with its metadata."""
 
-    async def close(self):
-        self.closed = True
+        cert = self.pki.certs.get(row["id"])
+        revoked = self.pki.revoked.get((row["issuer_ca_id"], _derSerial(cert))) if cert else None
+        ctlog = self.pki.ctlog.get(row["id"])
+        return dict(row, **extra,
+                    issuer_name=CA_NAMES.get(row["issuer_ca_id"]),
+                    caids=[a for c, a in self.pki.cacerts.items() if c == row["id"]],
+                    ctlog=json.dumps(ctlog) if ctlog else None,
+                    revoked=json.dumps(revoked) if revoked else None)
 
-    async def certs(self, kind, valus, limit=100):
-        self._call("certs", kind=kind, valus=list(valus), limit=limit)
-        valus = list(valus)
+    def _match(self, row: dict, lookups: dict) -> bool:
+        cert = self.pki.certs.get(row["id"])
         keys = {
             "id": lambda c, r: r["id"],
             "sha256": lambda c, r: hashlib.sha256(r["der"]).digest(),
@@ -334,21 +348,51 @@ class FakeCrtshDb:
             "spkisha1": lambda c, r: hashlib.sha1(_spki(c)).digest(),
             "subjectsha1": lambda c, r: hashlib.sha1(c.subject.public_bytes()).digest(),
         }
-        found = []
-        for row in self.pki.rows:
-            cert = self.pki.certs.get(row["id"])
+        for kind, valus in lookups.items():
+            if kind not in keys:
+                raise CrtshDbError(f"Unknown lookup type {kind}")
+            # Like the x509_* functions, unparsable certificates only match on their ID and hashes.
             if cert is None and kind not in ("id", "sha256", "sha1"):
                 continue
             if keys[kind](cert, row) in valus:
-                found.append(dict(row))
-        return found[:limit]
+                return True
+        return False
 
-    async def certsByIdentity(self, text, like=None, nametypes=None, caids=None, valid=False,
-                              since=None, until=None, limit=1000):
+    def _related(self, by: str, cert: x509.Certificate | None, row: dict):
+        if by == "siblings":
+            return row["issuer_ca_id"]
+        if cert is None:
+            return None  # The x509_* functions return null for unparsable certificates.
+        return {
+            "key": lambda: hashlib.sha256(_spki(cert)).digest(),
+            "subject": lambda: hashlib.sha1(cert.subject.public_bytes()).digest(),
+            "serial": lambda: _derSerial(cert),
+            "ski": lambda: _ski(cert),
+        }[by]()
+
+    def _newest(self, rows: list[dict]) -> list[dict]:
+        """ORDER BY x509_notBefore(...) DESC, which puts nulls (unparsable certificates) first."""
+
+        def key(row):
+            cert = self.pki.certs.get(row["id"])
+            return (cert is None, cert.not_valid_before_utc if cert else NOW)
+
+        return sorted(rows, key=key, reverse=True)
+
+    async def close(self):
+        self.closed = True
+
+    async def certs(self, lookups, limit=100):
+        self._call("certs", lookups=lookups, limit=limit)
+        return [self._row(r) for r in self.pki.rows if self._match(r, lookups)][:limit]
+
+    async def certsByIdentity(self, text, like=None, nametypes=None, caids=None, issuer=None,
+                              valid=False, since=None, until=None, limit=1000):
         self._call("certsByIdentity", text=text, like=like, nametypes=nametypes, caids=caids,
-                   valid=valid, since=since, until=until, limit=limit)
+                   issuer=issuer, valid=valid, since=since, until=until, limit=limit)
         words = text.lower().split()
         regex = _likeRegex(like) if like is not None else None
+        issuers = {i for i, n in CA_NAMES.items() if issuer.lower() in n.lower()} if issuer else None
         found = []
         for row in self.pki.rows:
             cert = self.pki.certs.get(row["id"])
@@ -364,51 +408,77 @@ class FakeCrtshDb:
                     continue
             if caids and row["issuer_ca_id"] not in caids:
                 continue
-            if not self._valid(cert, valid, since, until):
+            if issuers is not None and row["issuer_ca_id"] not in issuers:
                 continue
-            found.append(dict(row))
+            if self._valid(cert, valid, since, until):
+                found.append(self._row(row))
         return found[:limit]
 
-    async def certsByIssuer(self, caids, valid=False, since=None, until=None, limit=1000):
-        self._call("certsByIssuer", caids=list(caids), valid=valid, since=since, until=until,
-                   limit=limit)
+    async def certsByIssuer(self, caids=None, issuer=None, cert=None, valid=False, since=None,
+                            until=None, limit=1000):
+        self._call("certsByIssuer", caids=caids, issuer=issuer, cert=cert, valid=valid,
+                   since=since, until=until, limit=limit)
+        sources = set(caids or [])
+        if issuer:
+            sources |= {i for i, n in CA_NAMES.items() if issuer.lower() in n.lower()}
+        if cert:
+            source = next((r for r in self.pki.rows if self._match(r, cert)), None)
+            if source is not None and source["id"] in self.pki.cacerts:
+                sources.add(self.pki.cacerts[source["id"]])
         found = []
-        for caid in caids:
-            rows = []
-            for row in self.pki.rows:
-                cert = self.pki.certs.get(row["id"])
-                if row["issuer_ca_id"] != caid or cert is None:
-                    continue
-                if self._valid(cert, valid, since, until):
-                    rows.append((cert.not_valid_before_utc, row))
-            rows.sort(key=lambda x: x[0], reverse=True)
-            found.extend(dict(r) for _, r in rows[:limit])
+        for caid in sorted(sources):
+            rows = [r for r in self.pki.rows if r["issuer_ca_id"] == caid
+                    and self._valid(self.pki.certs.get(r["id"]), valid, since, until)]
+            found.extend(self._row(r) for r in self._newest(rows)[:limit])
         return found
 
-    async def caCerts(self, caids):
-        self._call("caCerts", caids=list(caids))
-        return [dict(r, ca_id=self.pki.cacerts[r["id"]]) for r in self.pki.rows
-                if self.pki.cacerts.get(r["id"]) in caids]
+    async def related(self, by, cert, valid=False, limit=100):
+        self._call("related", by=by, cert=cert, valid=valid, limit=limit)
+        source = next((r for r in self.pki.rows if self._match(r, cert)), None)
+        if source is None:
+            return []
+        valu = self._related(by, self.pki.certs.get(source["id"]), source)
+        if valu is None:
+            return []
+        rows = [r for r in self.pki.rows if not self._match(r, cert)
+                and self._related(by, self.pki.certs.get(r["id"]), r) == valu
+                and self._valid(self.pki.certs.get(r["id"]), valid)]
+        if by == "siblings":
+            rows = self._newest(rows)
+        return [self._row(r) for r in rows[:limit]]
 
-    async def certCas(self, certids):
-        self._call("certCas", certids=list(certids))
-        return [{"certificate_id": c, "ca_id": a} for c, a in self.pki.cacerts.items() if c in certids]
+    async def chain(self, cert, maxdepth=10):
+        self._call("chain", cert=cert, maxdepth=maxdepth)
+        leaf = next((r for r in self.pki.rows if self._match(r, cert)), None)
+        if leaf is None:
+            return []
+        out = [self._row(leaf, child_id=None, depth=0)]
+        frontier = [(leaf, 0)]
+        while frontier:
+            child, depth = frontier.pop(0)
+            if depth >= maxdepth or self.pki.cacerts.get(child["id"]) == child["issuer_ca_id"]:
+                continue  # Too deep, or a self-issued root.
+            for row in self.pki.rows:
+                if self.pki.cacerts.get(row["id"]) == child["issuer_ca_id"]:
+                    out.append(self._row(row, child_id=child["id"], depth=depth + 1))
+                    frontier.append((row, depth + 1))
+        return out
 
-    async def cas(self, caids):
-        self._call("cas", caids=list(caids))
-        return [{"id": i, "name": n} for i, n in CA_NAMES.items() if i in caids]
-
-    async def casByName(self, name, limit=100):
-        self._call("casByName", name=name, limit=limit)
-        return [{"id": i, "name": n} for i, n in CA_NAMES.items() if name.lower() in n.lower()][:limit]
-
-    async def ctlog(self, certids):
-        self._call("ctlog", certids=list(certids))
-        return [dict(e) for e in self.pki.ctlog if e["certificate_id"] in certids]
-
-    async def revoked(self, pairs):
-        self._call("revoked", pairs=list(pairs))
-        return [dict(r) for r in self.pki.revoked if (r["ca_id"], r["serial_number"]) in pairs]
+    async def cas(self, caids=None, name=None, certs=False, limit=100):
+        self._call("cas", caids=caids, name=name, certs=certs, limit=limit)
+        ids = [i for i, n in CA_NAMES.items()
+               if (caids and i in [int(c) for c in caids]) or (name and name.lower() in n.lower())]
+        out = []
+        for caid in sorted(ids)[:limit]:
+            members = [r for r in self.pki.rows if self.pki.cacerts.get(r["id"]) == caid]
+            for row in members or [None]:
+                if not certs:
+                    out.append({"ca_id": caid, "ca_name": CA_NAMES[caid], "id": row and row["id"]})
+                elif row is None:
+                    out.append({"ca_id": caid, "ca_name": CA_NAMES[caid], "id": None})
+                else:
+                    out.append(self._row(row, ca_id=caid, ca_name=CA_NAMES[caid]))
+        return out
 
     async def raw(self, sql, args=None):
         self._call("raw", sql=sql, args=args)

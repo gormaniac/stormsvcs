@@ -15,10 +15,15 @@ and CRL revocation.
 
 The service registers the `slib.crtsh` Storm package.
 
-> **Status:** the SQL in `src/crtshsvc/db.py` was checked against the certwatch schema
+> **Status:** the SQL in `src/crtshsvc/db.py` follows the certwatch schema
 > (https://github.com/crtsh/certwatch_db) and libx509pq sources, every query uses one of crt.sh's
-> indexes, and the lookup, search, chain, and metadata queries were run by hand against crt.sh.
-> The full service hasn't been run against crt.sh yet, see [Testing](#testing).
+> indexes, and every query runs against a PostgreSQL stub of crt.sh (see [Testing](#testing)).
+
+crt.sh's database is slow per round trip (often 20s+ even for trivial queries) rather than per
+row, so every operation is a single query: lookups, searches, and pivots return each certificate
+with its crt.sh metadata (issuer CA, CA membership, CT log entries, CRL revocation) in the same
+query, a chain is one recursive query, and an issuer's name or a pivot's source certificate are
+subqueries.
 
 ## Deploying
 
@@ -92,6 +97,14 @@ expired, reissued, and unparsable certificates) answering every query `CrtshDb` 
 tests cover 100% of the Python (lines and branches, `uv run pytest tests --cov`) and every Storm
 command, option, inbound form, and error path.
 
+Every query against a real PostgreSQL (16 is fine), using a stub of crt.sh's schema (the same
+tables, partitions, indexes, and view, with SQL stubs for libx509pq's functions) loaded with the
+same test certificates. The database's public schema is replaced:
+
+```bash
+SLIB_CRTSH_PGDSN=postgresql://postgres@127.0.0.1:5432/certwatch uv run pytest tests/test_pg.py
+```
+
 Against the real crt.sh (one connection per IP, so close psql first; takes a few minutes):
 
 ```bash
@@ -104,3 +117,5 @@ Every query the service runs, as a psql script, generated from `CrtshDb` by `tes
 uv run python -m tests.sqlgen > tests/live_queries.sql
 psql -h crt.sh -p 5432 -U guest certwatch -f tests/live_queries.sql
 ```
+
+`--stub` generates the same queries with values from the test certificates, for the stub database.

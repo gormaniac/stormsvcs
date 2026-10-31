@@ -15,6 +15,7 @@ import binascii
 import datetime
 import hashlib
 import ipaddress
+import json
 from typing import Any
 
 from cryptography import x509
@@ -390,12 +391,12 @@ def parseCert(der: bytes) -> dict:
 
 
 def certDetails(row: dict) -> dict:
-    """Build the full details of a certificate from a crt.sh ``certificate`` row.
+    """Build the full details of a certificate from a crt.sh certificate row.
 
-    ``row`` has ``id``, ``issuer_ca_id``, and ``der``. The crt.sh metadata (issuer CA
-    name, CT log entries, revocation, CA IDs) is filled in later by the service.
-    A certificate that can't be parsed still returns its hashes and crt.sh info,
-    with an ``error`` explaining why.
+    ``row`` has ``id``, ``issuer_ca_id``, and ``der``, plus the crt.sh metadata every
+    certificate query returns (see ``crtshsvc.db._withMeta``): ``issuer_name``,
+    ``caids``, and ``ctlog``/``revoked`` as JSON text. A certificate that can't be
+    parsed still returns its hashes and crt.sh info, with an ``error`` explaining why.
     """
 
     der = bytes(row["der"])
@@ -412,14 +413,17 @@ def certDetails(row: dict) -> dict:
             "error": f"Unable to parse certificate: {err}",
         }
 
+    ctlog = [ctlogEntry(entry) for entry in json.loads(row.get("ctlog") or "[]")]
+    times = [entry["time"] for entry in ctlog if entry["time"] is not None]
+    revoked = row.get("revoked")
     details["crtsh"] = {
         "id": row["id"],
         "url": f"{CRTSH_URL}?id={row['id']}",
-        "issuer": {"id": row["issuer_ca_id"], "name": None},
-        "ctlog": [],
-        "logged": None,
-        "revoked": None,
-        "caids": [],
+        "issuer": {"id": row["issuer_ca_id"], "name": row.get("issuer_name")},
+        "ctlog": ctlog,
+        "logged": [min(times), max(times)] if times else None,
+        "revoked": revocation(json.loads(revoked)) if revoked else None,
+        "caids": sorted(row.get("caids") or []),
     }
     return details
 
@@ -430,26 +434,26 @@ def certTime(details: dict) -> int:
     return -(details.get("notbefore") or 0)
 
 
-def revocation(row: dict) -> dict:
-    """Normalize a crt.sh ``crl_revoked`` row."""
+def revocation(info: dict) -> dict:
+    """Normalize a certificate's CRL revocation (``code``, ``time`` in epoch millis)."""
 
-    code = row.get("reason_code")
+    code = info.get("code")
     return {
-        "time": toMillis(row.get("revocation_date")),
+        "time": info.get("time"),
         "reason": REVOCATION_REASONS.get(code, None if code is None else str(code)),
         "code": code,
     }
 
 
-def ctlogEntry(row: dict) -> dict:
-    """Normalize a crt.sh ``ct_log_entry`` row joined with its ``ct_log``."""
+def ctlogEntry(info: dict) -> dict:
+    """Normalize one of a certificate's CT log entries."""
 
     return {
-        "log": row.get("log_name"),
-        "url": row.get("log_url"),
-        "operator": row.get("log_operator"),
-        "index": row.get("entry_id"),
-        "time": toMillis(row.get("entry_timestamp")),
+        "log": info.get("log"),
+        "url": info.get("url"),
+        "operator": info.get("operator"),
+        "index": info.get("index"),
+        "time": info.get("time"),
     }
 
 

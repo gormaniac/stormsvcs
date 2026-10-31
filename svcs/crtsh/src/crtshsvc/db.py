@@ -9,11 +9,12 @@ depend on these parts of the certwatch schema (https://github.com/crtsh/certwatc
 
 - ``certificate (id, issuer_ca_id, certificate)`` - every cert and precert, as DER.
   Range partitioned by year on notAfter, see ``NOTAFTER_KEY``.
-- ``ca (id, name, public_key)`` - every issuing CA (a name + key pair).
+- ``ca (id, name)`` - every issuing CA (a name + key pair).
 - ``ca_certificate (certificate_id, ca_id)`` - which certificates belong to a CA (one CA each).
 - ``ct_log (id, name, url, operator)`` and ``ct_log_entry (certificate_id, ct_log_id,
   entry_id, entry_timestamp)`` - where and when each cert was logged.
 - ``crl_revoked (ca_id, serial_number, reason_code, revocation_date)`` - CRL revocations.
+- ``certificate_and_identities`` - a view of each certificate's identities (name type, value).
 - The indexed functions crt.sh's own web UI searches with: ``digest()`` (pgcrypto),
   ``identities()`` (full text search), and ``x509_serialNumber``,
   ``x509_subjectKeyIdentifier``, ``x509_publicKey``, ``x509_name``, ``x509_notBefore``,
@@ -21,9 +22,12 @@ depend on these parts of the certwatch schema (https://github.com/crtsh/certwatc
 
 Everything else about a certificate is parsed from its DER by ``crtshsvc.norm``.
 
-``certificate_identity`` is a stub view that only raises an error, and the
-``certificate_and_identities`` view parses every certificate it touches, so
-searches use the indexed ``identities()`` full text search on ``certificate``.
+crt.sh is slow per round trip (often 20s+ for a trivial query, PgBouncer queues
+clients), much more than per row. So each operation is one query: every query that
+returns certificates is wrapped by ``_withMeta``, which adds the crt.sh metadata
+(issuer CA name, CA membership, CT log entries, CRL revocation) with correlated
+subqueries, like crt.sh's own ``certificate_lifecycle`` view. Lookups a query
+depends on (an issuer's name, a pivot's source certificate) are subqueries too.
 
 ``CrtshDb`` is the only class that talks to PostgreSQL, over a single queued
 connection (crt.sh allows one per client, see its docstring). Tests swap it for a
@@ -35,7 +39,6 @@ import asyncio
 import logging
 import random
 import re
-from collections.abc import Iterable
 from typing import Any
 
 import asyncpg
@@ -46,8 +49,6 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_DSN = "postgresql://guest@crt.sh:5432/certwatch"
 """crt.sh's public, read-only, password-less database."""
-
-CERT_COLS = "c.ID AS id, c.ISSUER_CA_ID AS issuer_ca_id, c.CERTIFICATE AS der"
 
 NAME_TYPES = {
     "dns": ["san:dNSName", "2.5.4.3"],
@@ -63,18 +64,44 @@ NAME_TYPES = {
 NOTAFTER_KEY = "coalesce(x509_notAfter(c.CERTIFICATE), 'infinity'::timestamp)"
 """The expression ``certificate`` is range partitioned (by year) on."""
 
-# Unique (or near unique) certificate identifiers and the indexed expression crt.sh matches them on.
 LOOKUPS = {
-    "id": "c.ID = ANY($1::bigint[])",
-    "sha256": "digest(c.CERTIFICATE, 'sha256') = ANY($1::bytea[])",
-    "sha1": "digest(c.CERTIFICATE, 'sha1') = ANY($1::bytea[])",
-    "serial": "x509_serialNumber(c.CERTIFICATE) = ANY($1::bytea[])",
-    "ski": "x509_subjectKeyIdentifier(c.CERTIFICATE) = ANY($1::bytea[])",
-    "spki": "digest(x509_publicKey(c.CERTIFICATE), 'sha256') = ANY($1::bytea[])",
-    "spkisha1": "digest(x509_publicKey(c.CERTIFICATE), 'sha1') = ANY($1::bytea[])",
-    "subjectsha1": "digest(x509_name(c.CERTIFICATE), 'sha1') = ANY($1::bytea[])",
+    "id": "{c}.ID = ANY({p}::bigint[])",
+    "sha256": "digest({c}.CERTIFICATE, 'sha256') = ANY({p}::bytea[])",
+    "sha1": "digest({c}.CERTIFICATE, 'sha1') = ANY({p}::bytea[])",
+    "serial": "x509_serialNumber({c}.CERTIFICATE) = ANY({p}::bytea[])",
+    "ski": "x509_subjectKeyIdentifier({c}.CERTIFICATE) = ANY({p}::bytea[])",
+    "spki": "digest(x509_publicKey({c}.CERTIFICATE), 'sha256') = ANY({p}::bytea[])",
+    "spkisha1": "digest(x509_publicKey({c}.CERTIFICATE), 'sha1') = ANY({p}::bytea[])",
+    "subjectsha1": "digest(x509_name({c}.CERTIFICATE), 'sha1') = ANY({p}::bytea[])",
 }
-"""Certificate lookup kinds, mapped to the WHERE clause that finds them."""
+"""Certificate lookup kinds, mapped to the (indexed) condition that finds them in table ``{c}``."""
+
+RELATED = {
+    "key": "digest(x509_publicKey({c}.CERTIFICATE), 'sha256')",
+    "subject": "digest(x509_name({c}.CERTIFICATE), 'sha1')",
+    "serial": "x509_serialNumber({c}.CERTIFICATE)",
+    "ski": "x509_subjectKeyIdentifier({c}.CERTIFICATE)",
+    "siblings": "{c}.ISSUER_CA_ID",
+}
+"""Pivots, mapped to the indexed expression related certificates share."""
+
+META = """SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der{extra},
+       ca.NAME AS issuer_name,
+       ARRAY(SELECT cac.CA_ID FROM ca_certificate cac WHERE cac.CERTIFICATE_ID = m.ID) AS caids,
+       (SELECT json_agg(json_build_object(
+                    'log', ctl.NAME, 'url', ctl.URL, 'operator', ctl.OPERATOR, 'index', ctle.ENTRY_ID,
+                    'time', (extract(epoch FROM ctle.ENTRY_TIMESTAMP) * 1000)::bigint)
+                ORDER BY ctle.ENTRY_TIMESTAMP)
+            FROM ct_log_entry ctle JOIN ct_log ctl ON ctl.ID = ctle.CT_LOG_ID
+            WHERE ctle.CERTIFICATE_ID = m.ID)::text AS ctlog,
+       (SELECT json_build_object(
+                    'code', cr.REASON_CODE,
+                    'time', (extract(epoch FROM cr.REVOCATION_DATE) * 1000)::bigint)
+            FROM crl_revoked cr
+            WHERE cr.CA_ID = m.ISSUER_CA_ID AND cr.SERIAL_NUMBER = x509_serialNumber(m.CERTIFICATE)
+            LIMIT 1)::text AS revoked
+    FROM m LEFT JOIN ca ON ca.ID = m.ISSUER_CA_ID"""
+"""The crt.sh metadata of the certificates in ``m``, see ``_withMeta``."""
 
 # Errors that mean the connection is gone (crt.sh's PgBouncer drops idle clients with
 # "client_idle_timeout"), the query is retried on a new connection.
@@ -105,33 +132,74 @@ def _mesgIn(err: BaseException, mesgs: tuple[str, ...]) -> bool:
     return any(mesg in text for mesg in mesgs)
 
 
-def _filters(valid: bool = False, since: int | None = None, until: int | None = None,
-             argn: int = 1) -> tuple[list[str], list[Any]]:
-    """Build the validity WHERE clauses shared by searches. Returns (clauses, args).
+class Params:
+    """Collects a query's positional arguments, handing out their ``$n`` placeholders."""
 
-    ``since``/``until`` are epoch millis bounds on notBefore. ``argn`` is the
-    number of the first positional argument to use.
+    def __init__(self):
+        self.args: list[Any] = []
+
+    def add(self, valu: Any) -> str:
+        self.args.append(valu)
+        return f"${len(self.args)}"
+
+
+def _lookup(params: Params, lookups: dict[str, list]) -> str:
+    """The condition matching any of ``lookups`` ({kind: [values]}), on the table alias ``{c}``."""
+
+    conds = []
+    for kind, valus in lookups.items():
+        if kind not in LOOKUPS:
+            raise CrtshDbError(f"Unknown lookup type {kind}, expected one of: {', '.join(LOOKUPS)}")
+        conds.append(LOOKUPS[kind].replace("{p}", params.add(list(valus))))
+    return "(" + " OR ".join(conds) + ")"
+
+
+def _alias(cond: str, alias: str = "c") -> str:
+    return cond.replace("{c}", alias)
+
+
+def _filters(params: Params, valid: bool = False, since: int | None = None,
+             until: int | None = None) -> list[str]:
+    """The validity conditions shared by searches, on ``certificate c``.
+
+    ``since``/``until`` are epoch millis bounds on notBefore.
 
     ``certificate`` is partitioned by year on ``NOTAFTER_KEY``, so every bound that
     implies a minimum notAfter is also applied to that expression, which lets
     PostgreSQL skip whole partitions (crt.sh's own expiry filter does the same).
     """
 
-    clauses, args = [], []
+    clauses = []
     if valid:
         clauses.append(f"{NOTAFTER_KEY} >= date_trunc('year', now() AT TIME ZONE 'UTC')")
         clauses.append("x509_notAfter(c.CERTIFICATE) >= now() AT TIME ZONE 'UTC'")
     if since is not None:
-        args.append(since / 1000)
-        argnum = argn + len(args) - 1
-        clauses.append(f"x509_notBefore(c.CERTIFICATE) >= to_timestamp(${argnum}) AT TIME ZONE 'UTC'")
+        param = params.add(since / 1000)
+        clauses.append(f"x509_notBefore(c.CERTIFICATE) >= to_timestamp({param}) AT TIME ZONE 'UTC'")
         # A certificate can't expire before it was issued.
-        clauses.append(f"{NOTAFTER_KEY} >= to_timestamp(${argnum}) AT TIME ZONE 'UTC'")
+        clauses.append(f"{NOTAFTER_KEY} >= to_timestamp({param}) AT TIME ZONE 'UTC'")
     if until is not None:
-        args.append(until / 1000)
-        clauses.append(f"x509_notBefore(c.CERTIFICATE) < to_timestamp(${argn + len(args) - 1}) "
-                       "AT TIME ZONE 'UTC'")
-    return clauses, args
+        param = params.add(until / 1000)
+        clauses.append(f"x509_notBefore(c.CERTIFICATE) < to_timestamp({param}) AT TIME ZONE 'UTC'")
+    return clauses
+
+
+def _withMeta(inner: str, extra: tuple[str, ...] = (), ctes: str = "") -> str:
+    """Wrap a query of certificates (``ID``, ``ISSUER_CA_ID``, ``CERTIFICATE``, and any ``extra``
+    columns) to return them with their crt.sh metadata, in one round trip.
+
+    The certificates are materialized first, so the metadata is only looked up for the
+    rows the query returns (after its LIMIT). ``ctes`` are more CTEs ``inner`` uses.
+    """
+
+    cols = "".join(f", m.{col} AS {col.lower()}" for col in extra)
+    prefix = f"{ctes}, " if ctes else ""
+    return f"WITH {prefix}m AS MATERIALIZED ({inner})\n{META.format(extra=cols)}"
+
+
+def _issuerName(params: Params, name: str) -> str:
+    """The IDs of the CAs whose name contains ``name``."""
+    return f"SELECT ca.ID FROM ca WHERE ca.NAME ILIKE {params.add('%' + likeEscape(name) + '%')} LIMIT 1000"
 
 
 def tsquery(text: str) -> str:
@@ -305,132 +373,169 @@ class CrtshDb:
                 logger.warning("crt.sh query failed (attempt %d), retrying: %s", attempt + 1, retry)
         raise CrtshDbError("crt.sh query failed.")  # pragma: no cover
 
+    # ---- Certificates, each returned with its metadata (see _withMeta) ----
 
-    # ---- Certificates ----
+    async def certs(self, lookups: dict[str, list], limit: int = 100) -> list[dict]:
+        """Certificates matching any of ``lookups`` ({kind: [values]}, see ``LOOKUPS``)."""
 
-    async def certs(self, kind: str, valus: Iterable, limit: int = 100) -> list[dict]:
-        """Find certificates by a unique identifier (see ``LOOKUPS``)."""
-
-        if kind not in LOOKUPS:
-            raise CrtshDbError(f"Unknown lookup type {kind}, expected one of: {', '.join(LOOKUPS)}")
-        sql = f"SELECT {CERT_COLS} FROM certificate c WHERE {LOOKUPS[kind]} LIMIT $2"
-        return await self.fetch(sql, list(valus), limit)
+        params = Params()
+        cond = _alias(_lookup(params, lookups))
+        inner = (f"SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate c WHERE {cond} "
+                 f"LIMIT {params.add(limit)}")
+        return await self.fetch(_withMeta(inner), *params.args)
 
     async def certsByIdentity(self, text: str, like: str | None = None,
                               nametypes: list[str] | None = None, caids: list[int] | None = None,
-                              valid: bool = False, since: int | None = None,
-                              until: int | None = None, limit: int = 1000) -> list[dict]:
+                              issuer: str | None = None, valid: bool = False,
+                              since: int | None = None, until: int | None = None,
+                              limit: int = 1000) -> list[dict]:
         """Search certificate identities (subject attributes and SANs) like crt.sh does.
 
         ``text`` is full text searched with the indexed ``identities()``. With ``like``
         (an ILIKE pattern) and/or ``nametypes`` (see ``NAME_TYPES``), each candidate's
         individual identities are also matched in the ``certificate_and_identities``
         view before the limit is applied, exactly like crt.sh's own search, so the
-        limit counts real matches. Like crt.sh, the results are an arbitrary subset
-        (not the newest) when there are more than ``limit``.
+        limit counts real matches. ``caids`` and ``issuer`` (a CA name) narrow the
+        issuer. Like crt.sh, the results are an arbitrary subset (not the newest)
+        when there are more than ``limit``.
         """
 
-        args: list[Any] = [tsquery(text)]
-        clauses = ["plainto_tsquery('certwatch', $1) @@ identities(c.CERTIFICATE)"]
+        params = Params()
+        clauses = [f"plainto_tsquery('certwatch', {params.add(tsquery(text))}) @@ identities(c.CERTIFICATE)"]
         if like is not None:
-            args.append(like)
-            clauses.append(f"c.NAME_VALUE ILIKE ${len(args)}")
+            clauses.append(f"c.NAME_VALUE ILIKE {params.add(like)}")
         if nametypes:
-            args.append(list(nametypes))
-            clauses.append(f"c.NAME_TYPE = ANY(${len(args)}::text[])")
+            clauses.append(f"c.NAME_TYPE = ANY({params.add(list(nametypes))}::text[])")
         if caids:
-            args.append(list(caids))
-            clauses.append(f"c.ISSUER_CA_ID = ANY(${len(args)}::int[])")
-        more, margs = _filters(valid, since, until, argn=len(args) + 1)
-        clauses.extend(more)
-        args.extend(margs)
-        args.append(limit)
+            clauses.append(f"c.ISSUER_CA_ID = ANY({params.add(list(caids))}::int[])")
+        if issuer:
+            clauses.append(f"c.ISSUER_CA_ID IN ({_issuerName(params, issuer)})")
+        clauses.extend(_filters(params, valid, since, until))
         where = " AND ".join(clauses)
+        limit = params.add(limit)
 
         if like is None and not nametypes:
             # Only the full text search, no need to parse every candidate's identities.
-            sql = f"SELECT {CERT_COLS} FROM certificate c WHERE {where} LIMIT ${len(args)}"
+            inner = f"SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate c WHERE {where} LIMIT {limit}"
         else:
             # A certificate has a row per matching identity, group them back into one.
-            sql = ("SELECT sub.CERTIFICATE_ID AS id, sub.ISSUER_CA_ID AS issuer_ca_id, "
-                   "sub.CERTIFICATE AS der FROM ("
-                   "SELECT c.CERTIFICATE_ID, c.ISSUER_CA_ID, c.CERTIFICATE "
-                   f"FROM certificate_and_identities c WHERE {where} LIMIT ${len(args)}"
-                   ") sub GROUP BY sub.CERTIFICATE_ID, sub.ISSUER_CA_ID, sub.CERTIFICATE")
-        return await self.fetch(sql, *args)
+            inner = ("SELECT sub.CERTIFICATE_ID AS ID, sub.ISSUER_CA_ID, sub.CERTIFICATE FROM ("
+                     "SELECT c.CERTIFICATE_ID, c.ISSUER_CA_ID, c.CERTIFICATE "
+                     f"FROM certificate_and_identities c WHERE {where} LIMIT {limit}"
+                     ") sub GROUP BY sub.CERTIFICATE_ID, sub.ISSUER_CA_ID, sub.CERTIFICATE")
+        return await self.fetch(_withMeta(inner), *params.args)
 
-    async def certsByIssuer(self, caids: list[int], valid: bool = False, since: int | None = None,
-                            until: int | None = None, limit: int = 1000) -> list[dict]:
-        """The newest ``limit`` certificates issued by each of the CAs.
+    async def certsByIssuer(self, caids: list[int] | None = None, issuer: str | None = None,
+                            cert: dict[str, list] | None = None, valid: bool = False,
+                            since: int | None = None, until: int | None = None,
+                            limit: int = 1000) -> list[dict]:
+        """The newest ``limit`` certificates issued by each CA.
 
-        Each CA is queried on its own with ``ISSUER_CA_ID = $1``: crt.sh runs
-        PostgreSQL 12, which can only walk the ``(ISSUER_CA_ID, x509_notBefore)``
-        index newest first for a single CA. With ``= ANY(...)`` it reads and sorts
-        every certificate the CAs ever issued, which times out for big CAs.
+        The CAs are crt.sh ``caids``, the CAs named like ``issuer``, and/or the CA that
+        the certificate ``cert`` ({kind: [values]}) belongs to.
+
+        Each CA is joined LATERAL with ``ISSUER_CA_ID = <the CA>``: crt.sh runs PostgreSQL
+        12, which can only walk the ``(ISSUER_CA_ID, x509_notBefore)`` index newest first
+        for a single CA. With ``= ANY(...)`` it reads and sorts every certificate the CAs
+        ever issued, which times out for big CAs.
         """
 
-        clauses = ["c.ISSUER_CA_ID = $1"]
-        more, margs = _filters(valid, since, until, argn=2)
-        clauses.extend(more)
-        sql = (f"SELECT {CERT_COLS} FROM certificate c WHERE {' AND '.join(clauses)} "
-               f"ORDER BY x509_notBefore(c.CERTIFICATE) DESC LIMIT ${len(margs) + 2}")
+        params = Params()
+        sources = []
+        if caids:
+            sources.append(f"SELECT unnest({params.add(list(caids))}::int[]) AS CA_ID")
+        if issuer:
+            sources.append(f"SELECT ID AS CA_ID FROM ({_issuerName(params, issuer)}) named")
+        if cert:
+            cond = _alias(_lookup(params, cert), "s")
+            sources.append("SELECT cac.CA_ID FROM ca_certificate cac WHERE cac.CERTIFICATE_ID = "
+                           f"(SELECT s.ID FROM certificate s WHERE {cond} LIMIT 1)")
+        if not sources:
+            raise CrtshDbError("A CA ID, CA name, or CA certificate is required.")
 
-        rows: list[dict] = []
-        for caid in caids:
-            rows.extend(await self.fetch(sql, caid, *margs, limit))
-        return rows
+        clauses = ["c.ISSUER_CA_ID = cas.CA_ID", *_filters(params, valid, since, until)]
+        inner = (f"SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM ({' UNION '.join(sources)}) cas "
+                 "CROSS JOIN LATERAL (SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate c "
+                 f"WHERE {' AND '.join(clauses)} "
+                 f"ORDER BY x509_notBefore(c.CERTIFICATE) DESC LIMIT {params.add(limit)}) c")
+        return await self.fetch(_withMeta(inner), *params.args)
 
-    async def caCerts(self, caids: list[int]) -> list[dict]:
-        """The certificates for CAs (roots, intermediates, and cross-signs). Rows include ``ca_id``."""
+    async def related(self, by: str, cert: dict[str, list], valid: bool = False,
+                      limit: int = 100) -> list[dict]:
+        """Certificates that share ``by`` (see ``RELATED``) with the certificate ``cert``
+        ({kind: [values]}), excluding the certificate itself.
 
-        sql = (f"SELECT {CERT_COLS}, cac.CA_ID AS ca_id FROM ca_certificate cac "
-               "JOIN certificate c ON c.ID = cac.CERTIFICATE_ID WHERE cac.CA_ID = ANY($1::int[])")
-        return await self.fetch(sql, list(caids))
+        The source certificate's value is a subquery, so this is one round trip.
+        ``siblings`` (the same issuing CA) are the newest first.
+        """
 
-    # ---- Metadata ----
+        if by not in RELATED:
+            raise CrtshDbError(f"Unknown pivot {by}, expected one of: {', '.join(RELATED)}")
 
-    async def certCas(self, certids: list[int]) -> list[dict]:
-        """The CAs that CA certificates belong to, as ``certificate_id``, ``ca_id`` rows."""
+        params = Params()
+        cond = _lookup(params, cert)
+        source = f"(SELECT {_alias(RELATED[by], 's')} FROM certificate s WHERE {_alias(cond, 's')} LIMIT 1)"
+        clauses = [f"{_alias(RELATED[by])} = {source}", f"NOT {_alias(cond)}",
+                   *_filters(params, valid)]
+        order = "ORDER BY x509_notBefore(c.CERTIFICATE) DESC " if by == "siblings" else ""
+        inner = (f"SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate c "
+                 f"WHERE {' AND '.join(clauses)} {order}LIMIT {params.add(limit)}")
+        return await self.fetch(_withMeta(inner), *params.args)
 
-        sql = ("SELECT cac.CERTIFICATE_ID AS certificate_id, cac.CA_ID AS ca_id "
-               "FROM ca_certificate cac WHERE cac.CERTIFICATE_ID = ANY($1::bigint[])")
-        return await self.fetch(sql, list(certids))
+    async def chain(self, cert: dict[str, list], maxdepth: int = 10) -> list[dict]:
+        """Every certificate in the chains of ``cert`` ({kind: [values]}), in one recursive query.
 
-    async def cas(self, caids: list[int]) -> list[dict]:
-        """CAs by ID, as ``id``, ``name`` rows."""
+        Rows include ``child_id`` (the certificate this one may have issued, null for the
+        leaf) and ``depth`` (0 for the leaf). A certificate can be a row more than once,
+        once per child. Self-issued roots (certificates belonging to the CA that issued
+        them) end a chain.
+        """
 
-        sql = "SELECT ca.ID AS id, ca.NAME AS name FROM ca WHERE ca.ID = ANY($1::int[])"
-        return await self.fetch(sql, list(caids))
+        params = Params()
+        cond = _alias(_lookup(params, cert))
+        ctes = ("RECURSIVE chain AS ("
+                "(SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE, NULL::bigint AS CHILD_ID, 0 AS DEPTH "
+                f"FROM certificate c WHERE {cond} LIMIT 1) "
+                "UNION ALL "
+                "SELECT p.ID, p.ISSUER_CA_ID, p.CERTIFICATE, ch.ID, ch.DEPTH + 1 FROM chain ch "
+                "JOIN ca_certificate cac ON cac.CA_ID = ch.ISSUER_CA_ID "
+                "JOIN certificate p ON p.ID = cac.CERTIFICATE_ID "
+                f"WHERE ch.DEPTH < {params.add(maxdepth)} AND NOT EXISTS ("
+                "SELECT 1 FROM ca_certificate r WHERE r.CERTIFICATE_ID = ch.ID AND r.CA_ID = ch.ISSUER_CA_ID))")
+        inner = "SELECT ID, ISSUER_CA_ID, CERTIFICATE, CHILD_ID, DEPTH FROM chain"
+        return await self.fetch(_withMeta(inner, extra=("CHILD_ID", "DEPTH"), ctes=ctes), *params.args)
 
-    async def casByName(self, name: str, limit: int = 100) -> list[dict]:
-        """CAs whose name (an issuer DN) contains ``name``, case insensitive."""
+    # ---- CAs ----
 
-        pattern = "%" + likeEscape(name) + "%"
-        sql = ("SELECT ca.ID AS id, ca.NAME AS name FROM ca WHERE ca.NAME ILIKE $1 "
-               "ORDER BY ca.ID LIMIT $2")
-        return await self.fetch(sql, pattern, limit)
+    async def cas(self, caids: list[int] | None = None, name: str | None = None,
+                  certs: bool = False, limit: int = 100) -> list[dict]:
+        """CAs by ID or name (a substring of the CA's DN) and their certificates.
 
-    async def ctlog(self, certids: list[int]) -> list[dict]:
-        """The CT log entries of certificates."""
+        Returns a row per CA certificate (``ca_id``, ``ca_name``, and ``id``, which is
+        null for a CA crt.sh has no certificate for). With ``certs``, the rows are the
+        CA certificates with their metadata, like the other certificate queries.
+        """
 
-        sql = ("SELECT ctle.CERTIFICATE_ID AS certificate_id, ctle.ENTRY_ID AS entry_id, "
-               "ctle.ENTRY_TIMESTAMP AS entry_timestamp, ctl.NAME AS log_name, "
-               "ctl.URL AS log_url, ctl.OPERATOR AS log_operator "
-               "FROM ct_log_entry ctle JOIN ct_log ctl ON ctl.ID = ctle.CT_LOG_ID "
-               "WHERE ctle.CERTIFICATE_ID = ANY($1::bigint[]) ORDER BY ctle.ENTRY_TIMESTAMP")
-        return await self.fetch(sql, list(certids))
+        params = Params()
+        conds = []
+        if caids:
+            conds.append(f"ca.ID = ANY({params.add(list(caids))}::int[])")
+        if name:
+            conds.append(f"ca.NAME ILIKE {params.add('%' + likeEscape(name) + '%')}")
+        if not conds:
+            raise CrtshDbError("A CA name or ID is required.")
 
-    async def revoked(self, pairs: list[tuple[int, bytes]]) -> list[dict]:
-        """CRL revocations for (issuer CA ID, serial number bytes) pairs."""
+        ctes = (f"cas AS MATERIALIZED (SELECT ca.ID, ca.NAME FROM ca WHERE {' OR '.join(conds)} "
+                f"ORDER BY ca.ID LIMIT {params.add(limit)})")
+        if not certs:
+            sql = (f"WITH {ctes} SELECT cas.ID AS ca_id, cas.NAME AS ca_name, cac.CERTIFICATE_ID AS id "
+                   "FROM cas LEFT JOIN ca_certificate cac ON cac.CA_ID = cas.ID")
+            return await self.fetch(sql, *params.args)
 
-        if not pairs:
-            return []
-        sql = ("SELECT cr.CA_ID AS ca_id, cr.SERIAL_NUMBER AS serial_number, "
-               "cr.REASON_CODE AS reason_code, cr.REVOCATION_DATE AS revocation_date "
-               "FROM crl_revoked cr "
-               "JOIN unnest($1::int[], $2::bytea[]) AS p(ca_id, serial) "
-               "ON cr.CA_ID = p.ca_id AND cr.SERIAL_NUMBER = p.serial")
-        return await self.fetch(sql, [p[0] for p in pairs], [p[1] for p in pairs])
+        inner = ("SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE, cas.ID AS CA_ID, cas.NAME AS CA_NAME FROM cas "
+                 "LEFT JOIN ca_certificate cac ON cac.CA_ID = cas.ID "
+                 "LEFT JOIN certificate c ON c.ID = cac.CERTIFICATE_ID")
+        return await self.fetch(_withMeta(inner, extra=("CA_ID", "CA_NAME"), ctes=ctes), *params.args)
 
     # ---- Escape hatch ----
 

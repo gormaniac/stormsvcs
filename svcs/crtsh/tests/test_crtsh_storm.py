@@ -149,7 +149,7 @@ class TestCrtshStormCert(s_tests.SynTest):
             # Any identifier type.
             # crt.sh applies the limit, the precert and cert tie so either may be returned.
             assert len(await certIds(core, "slib.crtsh.cert 5a0b1c2d3e4f --type serial --limit 1 --yield")) == 1
-            assert fake.last("certs") == {"kind": "serial", "valus": [b"\x5a\x0b\x1c\x2d\x3e\x4f"], "limit": 1}
+            assert fake.last("certs") == {"lookups": {"serial": [b"\x5a\x0b\x1c\x2d\x3e\x4f"]}, "limit": 1}
 
             msgs = await core.stormlist("slib.crtsh.cert 999")
             self.stormIsInWarn("crt.sh has no certificates for: 999", msgs)
@@ -258,7 +258,7 @@ class TestCrtshStormPivot(s_tests.SynTest):
         async with crtshSvc(self) as (core, svc, fake):
             await core.nodes("slib.crtsh.cert 4 10 13")
 
-            assert await certIds(core, f"{CERT[4]} | slib.crtsh.pivot --by issued --limit 1") == [14]
+            assert await certIds(core, f"{CERT[4]} | slib.crtsh.pivot --by issued --limit 2") == [14, 13]
             assert await certIds(core, f"{CERT[10]} | slib.crtsh.pivot --by siblings --valid --no-precerts") == [14, 11]
             assert await certIds(core, f"{CERT[10]} | slib.crtsh.pivot --by key") == [9, 15]
             assert await certIds(core, f"{CERT[10]} | slib.crtsh.pivot --by subject") == [9, 15]

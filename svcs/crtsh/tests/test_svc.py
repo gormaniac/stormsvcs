@@ -3,6 +3,7 @@
 import contextlib
 import copy
 import datetime
+import hashlib
 import importlib
 import runpy
 import sys
@@ -117,7 +118,9 @@ class TestCrtshSvc(s_tests.SynTest):
             # Duplicates (here, by ID and SHA-256) are only returned once.
             certs = await svc.lookup(None, [10, PKI.sha256(2), PKI.sha256(10)])
             assert [c["crtsh"]["id"] for c in certs] == [10, 2]
-            assert fake.called("certs") == 2
+            # Every kind of identifier is looked up in one query.
+            assert fake.called("certs") == 1
+            assert set(fake.last("certs")["lookups"]) == {"id", "sha256"}
 
             # The metadata of every certificate.
             leaf = certs[0]
@@ -182,43 +185,66 @@ class TestCrtshSvc(s_tests.SynTest):
             assert fake.last("certsByIdentity")["like"] is None
             assert await ids(svc.searchGenr(identity="shop")) == [14]
 
-            # Issuers by name are resolved to crt.sh CA IDs.
+            # Issuers by name are matched in the same query.
             assert await ids(svc.searchGenr(dns="vertex.link", issuer="Issuing CA")) == [10, 9, 15, 11, 12]
-            assert fake.last("casByName")["name"] == "Issuing CA"
-            assert fake.last("certsByIdentity")["caids"] == [2]
+            assert fake.last("certsByIdentity")["issuer"] == "Issuing CA"
+            assert fake.last("certsByIdentity")["caids"] is None
             assert await ids(svc.searchGenr(dns="vertex.link", caids=[1])) == []
             assert await ids(svc.searchGenr(issuer="nope")) == []
 
             # An issuer alone lists what it issued.
             assert await ids(svc.searchGenr(issuer="Root R1")) == [2, 1]
-            assert fake.last("certsByIssuer")["caids"] == [1]
+            assert fake.last("certsByIssuer")["issuer"] == "Root R1"
+            assert await ids(svc.searchGenr(caids=[2], precerts=False, limit=2)) == [14, 10]
+            assert fake.last("certsByIssuer")["limit"] == 4
             assert await ids(svc.searchGenr(caids=[2], since=0, until=2 ** 60, valid=True,
                                             limit=1)) == [14]
 
             with pytest.raises(CrtshDbError, match="at least one"):
                 await ids(svc.searchGenr(dns=""))
 
-    async def test_search_batches(self):
-        # Metadata is fetched for each batch of results.
+    async def test_round_trips(self):
+        # crt.sh is slow per query, every operation is a single query.
         async with svcCtx(self) as (svc, fake):
-            with mock.patch.object(s_svc, "DETAIL_BATCH", 2):
-                assert len(await ids(svc.searchGenr(dns="vertex.link"))) == 5
-            assert fake.called("ctlog") == 3
+            sha1 = hashlib.sha1(PKI.row(10)["der"]).hexdigest()
+            for call in (
+                lambda: svc.lookup(None, [10, PKI.sha256(2), sha1]),
+                lambda: ids(svc.searchGenr(dns="vertex.link", issuer="Issuing", valid=True)),
+                lambda: ids(svc.searchGenr(issuer="Issuing", caids=[1])),
+                lambda: ids(svc.issuedGenr(caids=[1, 3], valu=PKI.sha256(4))),
+                lambda: ids(svc.pivotGenr(10, "key")),
+                lambda: ids(svc.pivotGenr(4, "issued")),
+                lambda: svc.chain(10),
+                lambda: svc.cas(name="Test", certs=True),
+            ):
+                calls = len(fake.calls)
+                await call()
+                assert len(fake.calls) == calls + 1, fake.calls[calls:]
 
     async def test_issued(self):
         async with svcCtx(self) as (svc, fake):
-            assert await ids(svc.issuedGenr(caids=[2])) == [14, 10, 9, 15, 11, 12]
+            # Unparsable certificates are included, unless a validity filter drops them.
+            assert await ids(svc.issuedGenr(caids=[2])) == [14, 10, 9, 15, 11, 12, 13]
             # Roots are issued by their own CA.
             assert await ids(svc.issuedGenr(caids=[1, 3])) == [4, 2, 3, 1]
             assert fake.called("certsByIssuer") == 2
+            assert fake.last("certsByIssuer")["caids"] == [1, 3]
 
             # A CA certificate's CA, and all of the CA's certificates are equal.
             assert await ids(svc.issuedGenr(valu=PKI.sha256(4), precerts=False, limit=3)) == [14, 10, 15]
-            assert fake.last("certsByIssuer")["caids"] == [2]
+            assert fake.last("certsByIssuer")["cert"] == {"sha256": [bytes.fromhex(PKI.sha256(4))]}
+            assert fake.last("certsByIssuer")["caids"] is None
             assert await ids(svc.issuedGenr(valu=2, kind="id", valid=True)) == [14, 10, 9, 11]
 
+            # Only an empty result looks the certificate up, to explain why.
+            calls = fake.called("certs")
             with pytest.raises(CrtshDbError, match="may not be a CA"):
                 await ids(svc.issuedGenr(valu=10))
+            assert fake.called("certs") == calls + 1
+            # A CA that issued nothing (in the time range) isn't an error.
+            assert await ids(svc.issuedGenr(valu=3, kind="id", since=2 ** 60)) == []
+            # Neither is one given by ID too.
+            assert await ids(svc.issuedGenr(caids=[99], valu=10)) == []
             with pytest.raises(CrtshDbError, match="CA ID or certificate is required"):
                 await ids(svc.issuedGenr())
             with pytest.raises(CrtshDbError, match="no certificate"):
@@ -226,11 +252,13 @@ class TestCrtshSvc(s_tests.SynTest):
 
     async def test_pivot(self):
         async with svcCtx(self) as (svc, fake):
-            assert await ids(svc.pivotGenr(4, "issued", limit=1)) == [14]
-            assert await ids(svc.pivotGenr(10, "siblings")) == [14, 9, 15, 11, 12]
+            assert await ids(svc.pivotGenr(4, "issued", limit=2)) == [14, 13]
+            assert await ids(svc.pivotGenr(10, "siblings")) == [14, 9, 15, 11, 12, 13]
             assert await ids(svc.pivotGenr(10, "siblings", valid=True, precerts=False)) == [14, 11]
             assert await ids(svc.pivotGenr(10, "key")) == [9, 15]
-            assert fake.last("certs")["kind"] == "spki"
+            assert fake.last("related") == {"by": "key", "cert": {"id": [10]}, "valid": False, "limit": 100}
+            assert await ids(svc.pivotGenr(10, "key", precerts=False)) == [15]
+            assert fake.last("related")["limit"] == 200
             assert await ids(svc.pivotGenr(10, "subject")) == [9, 15]
             assert await ids(svc.pivotGenr(10, "serial")) == [9]
             assert await ids(svc.pivotGenr(10, "ski", limit=1)) == [9]
@@ -241,11 +269,18 @@ class TestCrtshSvc(s_tests.SynTest):
             with pytest.raises(CrtshDbError, match="Unable to pivot by key"):
                 await ids(svc.pivotGenr(13, "key"))
 
-            noski = norm.certDetails(PKI.row(10))
-            noski["ski"] = None
-            with mock.patch.object(norm, "certDetails", return_value=noski):
-                with pytest.raises(CrtshDbError, match="no ski"):
-                    await ids(svc.pivotGenr(10, "ski"))
+            with pytest.raises(CrtshDbError, match="no certificate"):
+                await ids(svc.pivotGenr(999, "siblings"))
+
+            # Nothing related isn't an error, unless there's nothing to pivot on.
+            with mock.patch.object(fake, "related", new=mock.AsyncMock(return_value=[])):
+                assert await ids(svc.pivotGenr(10, "ski")) == []
+                assert await ids(svc.pivotGenr(13, "siblings")) == []
+                noski = norm.certDetails(PKI.row(10))
+                noski["ski"] = None
+                with mock.patch.object(norm, "certDetails", return_value=noski):
+                    with pytest.raises(CrtshDbError, match="no ski"):
+                        await ids(svc.pivotGenr(10, "ski"))
 
     async def test_chain(self):
         async with svcCtx(self) as (svc, fake):
@@ -277,6 +312,11 @@ class TestCrtshSvc(s_tests.SynTest):
             with pytest.raises(CrtshDbError, match="no certificate"):
                 await svc.chain(999)
 
+        # A certificate in more than one chain is returned once per child.
+        async with svcCtx(self) as (svc, fake):
+            rows = await fake.chain({"id": [10]})
+            assert [r["id"] for r, _ in svc._parse(rows + rows)] == [r["id"] for r in rows]
+
         # crt.sh doesn't know the issuer's certificate.
         pki = copy.copy(PKI)
         pki.cacerts = {}
@@ -293,6 +333,14 @@ class TestCrtshSvc(s_tests.SynTest):
             assert [c["crtsh"]["id"] for c in cas[0]["certs"]] == [2, 4]
             assert cas[0]["name"] == "C=US, O=Test Trust, CN=Test Issuing CA 1"
             assert await svc.cas(name="nope") == []
+
+        # A CA crt.sh has no certificate for.
+        pki = copy.copy(PKI)
+        pki.cacerts = {1: 1}
+        async with svcCtx(self, fake=FakeCrtshDb(pki)) as (svc, fake):
+            for certs in (True, False):
+                cas = await svc.cas(caids=[3, 1], certs=certs)
+                assert [(ca["id"], len(ca["certs"])) for ca in cas] == [(1, 1), (3, 0)]
             with pytest.raises(CrtshDbError, match="name or ID"):
                 await svc.cas()
 

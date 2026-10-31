@@ -232,14 +232,23 @@ def test_helpers():
     assert norm.certTime({"notbefore": 5}) == -5
     assert norm.certTime({}) == 0
 
-    assert norm.revocation({"reason_code": 1, "revocation_date": datetime.datetime(1970, 1, 1)}) == {
-        "time": 0, "reason": "keyCompromise", "code": 1}
-    assert norm.revocation({"reason_code": 99})["reason"] == "99"
+    assert norm.revocation({"code": 1, "time": 0}) == {"time": 0, "reason": "keyCompromise", "code": 1}
+    assert norm.revocation({"code": 99})["reason"] == "99"
     assert norm.revocation({})["reason"] is None
 
-    assert norm.ctlogEntry({"log_name": "A", "log_url": "u", "log_operator": "o", "entry_id": 1,
-                            "entry_timestamp": datetime.datetime(1970, 1, 1)}) == {
-        "log": "A", "url": "u", "operator": "o", "index": 1, "time": 0}
+    entry = {"log": "A", "url": "u", "operator": "o", "index": 1, "time": 0}
+    assert norm.ctlogEntry(dict(entry, extra=True)) == entry
+
+    # The crt.sh metadata every certificate query returns.
+    row = dict(PKI.row(10), issuer_name="Issuing CA", caids=[3, 2],
+               ctlog='[{"log": "A", "time": 5}, {"log": "B", "time": 2}, {"log": "C", "time": null}]',
+               revoked='{"code": 4, "time": 7}')
+    info = norm.certDetails(row)["crtsh"]
+    assert info["issuer"] == {"id": 2, "name": "Issuing CA"}
+    assert info["caids"] == [2, 3]
+    assert [e["log"] for e in info["ctlog"]] == ["A", "B", "C"]
+    assert info["logged"] == [2, 5]
+    assert info["revoked"] == {"time": 7, "reason": "superseded", "code": 4}
 
 
 def test_matches():
