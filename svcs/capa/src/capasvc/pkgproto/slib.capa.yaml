@@ -1,0 +1,154 @@
+name: slib.capa
+version: 0.1.3
+guid: debecd104d154eed9c8bec53a6b2531f
+
+synapse_minversion: [2, 137, 0]
+
+genopts:
+    dotstorm: true
+
+author:
+  url: https://github.com/gormaniac
+  name: John Gorman
+
+desc: A Storm Service that runs Mandiant's capa against files in the Axon and models the capa rules they match.
+
+docs:
+  - title: README
+    path: README.md
+
+# Import the capa rules (and the docs of the tags they become) whenever the package loads.
+# This is a no-op unless the service's rules or the tag prefix changed since the last import.
+onload: $lib.import(slib.capa.sync).onload()
+
+perms:
+  - perm: [ slib, capa, user ]
+    gate: cortex
+    desc: Scan files with capa and model the results.
+  - perm: [ slib, capa, admin ]
+    gate: cortex
+    desc: Manage tag settings and import the capa rules.
+
+modules:
+  # Privileged modules - the only modules that talk to the service.
+  - name: slib.capa.priv.user
+    asroot:perms:
+      - [ slib, capa, user ]
+  - name: slib.capa.priv.admin
+    asroot:perms:
+      - [ slib, capa, admin ]
+
+  # Unprivileged modules - node edits here run as the calling user.
+  - name: slib.capa.lib
+    perms:
+      - [ slib, capa, user ]
+  - name: slib.capa.model
+    perms:
+      - [ slib, capa, user ]
+  - name: slib.capa.sync
+    perms:
+      - [ slib, capa, admin ]
+  - name: slib.capa.util
+
+commands:
+
+  - name: slib.capa.scan
+    perms:
+      - [ slib, capa, user ]
+    descr: |
+      Run capa against files in the Axon and model the capa rules they match.
+
+      Every matched rule's meta:rule gets a -(matches)> edge to the file:bytes, which is tagged
+      with the rule's namespace (ex. "<prefix>.host_interaction.process.create", see
+      slib.capa.admin.tags). The full results are saved in the file's "slib:capa" node data.
+
+      Files already scanned with the same capa rules are skipped unless --force is used.
+
+      Examples:
+
+        file:bytes:sha256=<sha256> | slib.capa.scan
+
+        file:bytes#my.samples | slib.capa.scan --format sc64 --yield
+    cmdargs:
+      - - --format
+        - type: str
+          default: auto
+          choices: [ auto, pe, dotnet, elf, sc32, sc64, freeze ]
+          help: The file's format, detected by capa by default.
+      - - --os
+        - type: str
+          default: auto
+          choices: [ auto, windows, linux, macos ]
+          help: The file's OS, detected by capa by default.
+      - - --force
+        - default: false
+          action: store_true
+          help: Scan files that were already scanned with the same capa rules.
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the meta:rule nodes that matched instead of the inbound nodes.
+    cmdinputs:
+      - form: file:bytes
+        help: Files to scan, by :sha256. The bytes must be in the Axon.
+
+  - name: slib.capa.info
+    perms:
+      - [ slib, capa, user ]
+    descr: |
+      Print the versions of capa and its rules, the rule counts, the tag settings, and the
+      state of the rule import.
+
+      Use --yield to yield the meta:ruleset of the service's capa rules.
+    cmdargs:
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the meta:ruleset node.
+
+  - name: slib.capa.admin.sync
+    perms:
+      - [ slib, capa, admin ]
+    descr: |
+      Import every capa rule as a meta:rule, and every rule namespace as a documented syn:tag.
+
+      This runs automatically when the package loads, and is skipped if the service's rules
+      (and the tag prefix) are the same as the last import. Use --force to import them again,
+      ex. to restore edited rule nodes. Yields the meta:ruleset.
+
+      Examples:
+
+        slib.capa.admin.sync --force
+
+        // Reload the rules from the service's capa:rules directory first.
+        slib.capa.admin.sync --reload
+    cmdargs:
+      - - --force
+        - default: false
+          action: store_true
+          help: Import the rules and tags even if they haven't changed.
+      - - --reload
+        - default: false
+          action: store_true
+          help: Have the service reload its rules from disk first.
+
+  - name: slib.capa.admin.tags
+    perms:
+      - [ slib, capa, admin ]
+    descr: |
+      Configure the tags slib.capa applies, "<prefix>.<namespace>". The default prefix is
+      "rep.capa". Changing the prefix imports the tag docs under the new prefix. Prints the
+      settings without options.
+    cmdargs:
+      - - --prefix
+        - type: str
+          default: null
+          help: The tag prefix to use.
+      - - --enable
+        - default: false
+          action: store_true
+          help: Enable tagging.
+      - - --disable
+        - default: false
+          action: store_true
+          help: Disable tagging.

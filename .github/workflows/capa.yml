@@ -1,0 +1,21 @@
+name: capa Pipeline
+
+on:
+  workflow_dispatch:
+  workflow_call:
+  pull_request:
+    paths:
+      - "svcs/capa/**"
+      - ".github/workflows/capa.yml"
+      - ".github/workflows/_service.yml"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  pipeline:
+    uses: ./.github/workflows/_service.yml
+    with:
+      service: capa
+    secrets: inherit

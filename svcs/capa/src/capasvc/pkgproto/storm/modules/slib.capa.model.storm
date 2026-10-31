@@ -1,0 +1,175 @@
+// Model capa rules, rule namespaces (as tags), and capa results in Synapse.
+//
+// Node edits here run as the calling user. Every node created is linked to the
+// slib.capa meta:source node with a -(seen)> edge.
+
+init {
+    $sourceGuid = "ee5999b4059645168272e22d7cd087e3"
+}
+
+// ---- Helpers ----
+//
+// NOTE: A for loop that runs while a node is in a function's pipeline sends the
+// node downstream after its first iteration, reaching return() and ending the
+// function early. So functions here only yield a node when they don't loop, and
+// loops call helpers that yield/edit the node in their own runtime instead.
+
+// Link the node to the slib.capa meta:source.
+function seen(n) {
+    yield $n
+    [ <(seen)+ { [ meta:source=$sourceGuid :name=capa ] } ]
+    return($n)
+}
+
+function addTag(n, tag) {
+    yield $n
+    [ +#$tag ]
+    return($n)
+}
+
+function setData(n, name, valu) {
+    yield $n
+    $node.data.set($name, $valu)
+    return($n)
+}
+
+function refs(n, other) {
+    yield $n
+    [ +(refs)> { yield $other } ]
+    return($n)
+}
+
+function has(n, other) {
+    yield $n
+    [ +(has)> { yield $other } ]
+    return($n)
+}
+
+function matches(n, other) {
+    yield $n
+    [ +(matches)> { yield $other } ]
+    return($n)
+}
+
+function delTag(n, tag) {
+    yield $n
+    [ -#$tag ]
+    return($n)
+}
+
+// Remove the -(matches)> edges to a file from capa rules (meta:rule:type capa or capa.lib).
+function unmatch(file) {
+    yield $file
+    <(matches)- meta:rule +:type^=capa
+    [ -(matches)> { yield $file } ]
+    spin
+}
+
+// ---- Rules ----
+
+// The meta:ruleset for a version of the capa rules (see CapaSvc.rulesInfo).
+function ruleset(info) {
+    [ meta:ruleset=$info.ruleset
+        :name=`capa-rules {$info.version}`
+        :type=capa
+        :desc=`The capa rules (capa-rules {$info.version}) of the slib.capa service, for capa {$info.capa}.`
+    ]
+    $node.data.set("slib:capa", ({
+        "version": $info.version,
+        "sha256": $info.sha256,
+        "capa": $info.capa,
+        "rules": $info.rules,
+        "lib": $info.lib,
+        "namespaces": $info.namespaces,
+    }))
+    return($seen($node))
+}
+
+function technique(tid) {
+    [ it:mitre:attack:technique=$tid ]
+    return($node)
+}
+
+// Create a capa rule's meta:rule and set its props. Returns the node.
+function ruleNode(r) {
+    [ meta:rule=$r.guid
+        :name=$r.name
+        :type=$r.type
+        :desc?=$r.desc
+        :text?=$r.text
+        :url?=$r.url
+    ]
+    if $r.authors { [ :author={[ ps:contact=$r.authors.index(0) ]} ] }
+    $node.data.set("slib:capa", $r.meta)
+    return($seen($node))
+}
+
+// Model a capa rule (see CapaRules.ruleRecord) as a meta:rule. Returns the node.
+//
+// The rule's documentation (description, namespace, scopes, ATT&CK, MBC, references, and
+// examples) is its :desc, its YAML is its :text, and its full meta is its "slib:capa"
+// node data. It -(refs)> the ATT&CK techniques it maps to, and is in the ruleset, if given.
+function rule(r, ruleset=$lib.null) {
+    $n = $ruleNode($r)
+    for $tid in $r.techniques { $refs($n, $technique($tid)) }
+    if ($ruleset != $lib.null) { $has($ruleset, $n) }
+    return($n)
+}
+
+// Model the syn:tag of a rule namespace (see CapaRules.tagRecords) under a prefix.
+function tag(prefix, t) {
+    if $t.tag { $name = `{$prefix}.{$t.tag}` } else { $name = $prefix }
+    [ syn:tag=$name :title=$t.title :doc=$t.doc ]
+    return($node)
+}
+
+// ---- Results ----
+
+// The meta:rule of a capa rule (see CapaRules.ruleRecord), modeling it only if it doesn't exist.
+// slib.capa.sync imports every rule, so scans don't rebuild them.
+function ruleOf(r) {
+    meta:rule=$r.guid
+    return($node)
+}
+
+// Model capa's results (see CapaSvc.scan) for a file:bytes. Returns the matched meta:rule nodes.
+//
+// Every matched rule -(matches)> the file, the file is tagged with each rule's namespace
+// under the prefix (unless it's null), and the results are the file's "slib:capa" node data.
+// The edges and tags (under the prefix) of an earlier scan are removed first, so they only
+// show the latest results.
+function results(file, result, prefix=$lib.null) {
+    $unmatch($file)
+    if ($prefix != $lib.null) { $delTag($file, $prefix) }
+
+    $rules = ([])
+    $summary = ([])
+    for $m in $result.matches {
+        $r = $ruleOf($m.rule)
+        if ($r = $lib.null) { $r = $rule($m.rule) }
+        $matches($r, $file)
+        if ($prefix != $lib.null and $m.rule.tag) { $addTag($file, `{$prefix}.{$m.rule.tag}`) }
+        $summary.append(({
+            "rule": $m.rule.name,
+            "guid": $m.rule.guid,
+            "namespace": $m.rule.namespace,
+            "count": $m.count,
+            "addrs": $m.addrs,
+        }))
+        $rules.append($r)
+    }
+
+    $setData($file, "slib:capa", ({
+        "time": $result.time,
+        "capa": $result.capa,
+        "rules": $result.rules,
+        "flavor": $result.flavor,
+        "format": $result.format,
+        "arch": $result.arch,
+        "os": $result.os,
+        "extractor": $result.extractor,
+        "matches": $summary,
+    }))
+    $seen($file)
+    return($rules)
+}

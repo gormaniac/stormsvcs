@@ -1,0 +1,22 @@
+rule:
+  meta:
+    name: contain slib-capa test marker
+    namespace: testing/slib-capa
+    authors:
+      - test@example.com
+      - "@visi"
+    description: The file contains the slib.capa test marker string.
+    scopes:
+      static: file
+      dynamic: file
+    att&ck:
+      - Defense Evasion::Obfuscated Files or Information [T1027]
+      - Execution::Command and Scripting Interpreter::PowerShell [T1059.001]
+    mbc:
+      - Anti-Static Analysis::Executable Code Obfuscation [B0032]
+    references:
+      - https://github.com/gormaniac/stormsvcs
+    examples:
+      - 0123456789abcdef0123456789abcdef:0x1000
+  features:
+    - string: "slib-capa-test-marker"

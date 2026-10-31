@@ -1,0 +1,14 @@
+// Unprivileged helpers shared by the slib.capa modules and commands.
+
+// Warn about a failed service call. Returns true if the call failed.
+function failed(retn, what) {
+    if $retn.status { return((false)) }
+    $lib.warn("slib.capa: {what} failed: {err}", what=$what, err=$retn.mesg)
+    return((true))
+}
+
+// Yield the nodes a generator emits. divert needs a node generator (one that yields nodes),
+// the slib.capa.lib functions emit them.
+function nodes(items) {
+    for $item in $items { yield $item }
+}
