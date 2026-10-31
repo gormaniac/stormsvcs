@@ -106,7 +106,11 @@ class TestStormBazaar(s_tests.SynTest):
 
             # ClamAV and vendor results.
             scans = {n.get("scanner:name"): n for n in await core.nodes(f"{FILE} -> it:av:scan:result:target:file")}
-            assert set(scans) == {"clamav", "any.run", "triage", "reversinglabs", "unpacme"}
+            assert set(scans) == {"clamav", "any.run", "triage", "reversinglabs", "unpacme", "yoroi_yomi", "spamhaus_hbl",
+                                  "filescan-io", "cape", "cert-pl_mwdb", "kaspersky", "docguard"}
+            assert scans["yoroi_yomi"].get("verdict") == 10 and scans["yoroi_yomi"].get("signame") is None
+            assert scans["filescan-io"].get("verdict") == 10
+            assert scans["cape"].get("signame") == "agenttesla"
             assert scans["clamav"].get("signame") == "win.trojan.agenttesla-1234"
             assert scans["clamav"].get("verdict") == 40
             assert scans["reversinglabs"].get("multi:count") == 50
@@ -118,10 +122,30 @@ class TestStormBazaar(s_tests.SynTest):
             assert await nodeset(core, f"{FILE} <(refs)- inet:url") == {
                 ("inet:url", "https://app.any.run/tasks/1234"),
                 ("inet:url", "https://tria.ge/reports/1234/"),
-                ("inet:url", "https://a1000.reversinglabs.com/1234"),
-                ("inet:url", "https://www.unpac.me/results/1234"),
+                ("inet:url", "https://www.unpac.me/results/1234/"),
+                ("inet:url", "https://www.spamhaus.org/hbl/"),
+                ("inet:url", "https://www.filescan.io/uploads/1/reports/2/overview"),
+                ("inet:url", "https://www.capesandbox.com/analysis/96328/"),
+                ("inet:url", "https://mwdb.cert.pl/sample/x/"),
+                ("inet:url", "https://opentip.kaspersky.com/x/results"),
                 ("inet:url", "https://twitter.com/abuse_ch/status/1"),
             }
+
+            # URLs DocGuard found in the file.
+            assert await nodeset(core, f"{FILE} -(refs)> inet:url") == {
+                ("inet:url", "http://docguard.example.net/payload.bin")}
+
+            # Triage's extracted C2s.
+            cfg = (await core.nodes(f"it:sec:c2:config:file=sha256:{SHA256}"))[0]
+            assert cfg.get("family") == "agenttesla"
+            assert set(cfg.get("servers")) == {"tcp://c2.example.org:587", "tcp://9.8.7.6:2929"}
+            assert await nodeset(core, f"{FILE} -(refs)> * +#rep.abusech.bazaar.c2") == {
+                ("inet:fqdn", "c2.example.org"), ("inet:server", "tcp://9.8.7.6:2929")}
+            assert "rep.abusech.bazaar.agenttesla" in (await core.nodes("inet:fqdn=c2.example.org"))[0].tags
+
+            # File format, architecture, Magika type, and OLE flags; TrID and OLE details as notes.
+            for tag in ("magika.pebin", "format.pe", "arch.amd64", "ole.encrypted", "ole.vba_macros"):
+                assert f"rep.abusech.bazaar.{tag}" in f.tags or await count(core, f"{FILE} +#rep.abusech.bazaar.{tag}"), tag
             nodes = await core.nodes(f"file:subfile:parent=sha256:{SHA256} :child -> file:bytes")
             assert [n.get("sha256") for n in nodes] == [fd.UNPACKED]
             assert "rep.abusech.bazaar.agenttesla" in nodes[0].tags
@@ -151,15 +175,20 @@ class TestStormBazaar(s_tests.SynTest):
             # Comments and other file information.
             notes = {n.get("text"): n for n in await core.nodes(f"{FILE} <(about)- meta:note")}
             assert set(notes) == {"Delivered via a fake invoice.", "Confirmed AgentTesla.",
-                                  "comment: Seen in a phishing campaign"}
+                                  "comment: Seen in a phishing campaign",
+                                  "trid: 44.6% (.EXE) Win64 Executable (generic) (6522/11/2)",
+                                  "ole: format: MS Excel 97-2003, container: OLE, application: Microsoft Excel, maldoc score: 9",
+                                  "olevba Suspicious: Hex Strings - Hex-encoded strings were detected"}
             assert notes["Confirmed AgentTesla."].get("type") == "slib.abusech.bazaar.comment."
             assert notes["Confirmed AgentTesla."].get("created") == 1790859600000
             assert await count(core, "meta:note:text='Confirmed AgentTesla.' :author -> ps:contact +:name=analyst") == 1
 
             # Lookups are idempotent.
             await core.nodes(f"slib.abusech.bazaar.lookup --hash {SHA256}")
-            assert await count(core, "it:av:scan:result") == 5
-            assert await count(core, "meta:note") == 5
+            # 11 vendors (UnpacMe twice, for the sample and its unpacked file) and ClamAV.
+            assert await count(core, "it:av:scan:result") == 13
+            assert await count(core, "meta:note") == 8
+            assert await count(core, "it:sec:c2:config") == 1
             assert await count(core, "risk:tool:software") == 1
             assert await count(core, "crypto:x509:cert") == 1
 
@@ -253,15 +282,15 @@ class TestStormBazaar(s_tests.SynTest):
 
             msgs = await core.stormlist(
                 f"file:bytes={sha256} | slib.abusech.bazaar.submit --tag exe --delivery email_link "
-                f"--link https://x.com/1 --comment hi --dropped-by {SHA256}"
+                f"--link https://x.com/1 --ref any_run=https://app.any.run/tasks/1 --comment hi --dropped-by {SHA256}"
             )
             self.stormIsInPrint("Submitting", msgs)
             req = fake.last("/bazaar")
             assert req["files"]["file"] == ("evil.exe", b"MZ sample to submit")
             assert json.loads(req["form"]["json_data"]) == {
                 "anonymous": 0, "tags": ["exe"], "delivery_method": "email_link",
-                "references": {"links": ["https://x.com/1"]},
-                "context": {"comment": "hi", "dropped_by_sha256": SHA256},
+                "references": {"links": ["https://x.com/1"], "any_run": ["https://app.any.run/tasks/1"]},
+                "context": {"comment": "hi", "dropped_by_sha256": [SHA256]},
             }
 
             msgs = await core.stormlist(f"[ file:bytes={'a' * 64} ] | slib.abusech.bazaar.submit")
@@ -271,10 +300,16 @@ class TestStormBazaar(s_tests.SynTest):
 
     async def test_update(self):
         async with abusechSvc(self) as (core, svc, fake):
-            msgs = await core.stormlist(f"slib.abusech.bazaar.update --hash {SHA256} --comment hello --add tags=x --add bad")
+            msgs = await core.stormlist(f"slib.abusech.bazaar.update --hash {SHA256} --comment hello --add add_tag=x --add bad")
             self.stormIsInWarn("--add must be <key>=<value>", msgs)
             assert fake.queries("bazaar") == ["add_comment", "update"]
-            assert fake.last("/bazaar")["form"] == {"query": "update", "sha256_hash": SHA256, "key": "tags", "value": "x"}
+            assert fake.last("/bazaar")["form"] == {"query": "update", "sha256_hash": SHA256, "key": "add_tag", "value": "x"}
+
+            # Unknown keys, and updating samples MalwareBazaar doesn't have, fail.
+            msgs = await core.stormlist(f"slib.abusech.bazaar.update --hash {SHA256} --add tags=x")
+            self.stormIsInWarn("Unknown MalwareBazaar update key tags", msgs)
+            msgs = await core.stormlist(f"slib.abusech.bazaar.update --hash {'a' * 64} --comment x")
+            self.stormIsInWarn("hash_not_found", msgs)
 
             await core.nodes(f"[ {FILE} ]")
             await core.nodes(f"{FILE} | slib.abusech.bazaar.update --comment again")
@@ -642,7 +677,7 @@ class TestStormBlocklists(s_tests.SynTest):
             assert await count(core, "risk:tool:software:tag=rep.abusech.feodo.emotet") == 1
 
             nodes = await core.nodes("slib.abusech.feodo recommended --yield")
-            assert {n.repr() for n in nodes} == {"tcp://50.16.16.211:8080", "70.1.2.3"}
+            assert {n.repr() for n in nodes} == {"tcp://50.16.16.211:8080"}
             nodes = await core.nodes("slib.abusech.feodo aggressive --yield")
             assert [n.repr() for n in nodes] == ["tcp://80.1.2.3:447"]
             assert not await core.nodes("slib.abusech.feodo --limit 1")
@@ -655,10 +690,9 @@ class TestStormBlocklists(s_tests.SynTest):
             assert "rep.abusech.sslbl.c2" in cert.tags and "rep.abusech.sslbl.dridex" in cert.tags
             assert await count(core, f"crypto:x509:cert:sha1={'1' * 40} <(about)- meta:note +:text='Dridex C&C'") == 1
 
-            nodes = await core.nodes("slib.abusech.sslbl ips --yield")
-            assert [n.repr() for n in nodes] == ["tcp://90.1.2.3:443"]
-            assert "rep.abusech.sslbl.c2" in nodes[0].tags
-            await core.nodes("slib.abusech.sslbl ips-aggressive")
+            # The C2 IP lists were deprecated.
+            msgs = await core.stormlist("slib.abusech.sslbl ips")
+            self.stormIsInErr("Invalid choice", msgs)
 
             nodes = await core.nodes("slib.abusech.sslbl ja3 --yield")
             assert [n.repr() for n in nodes] == ["51c64c77e60f3980eea90869b68c58a8"]
@@ -667,7 +701,13 @@ class TestStormBlocklists(s_tests.SynTest):
     async def test_fplist(self):
         async with abusechSvc(self) as (core, svc, fake):
             msgs = await core.stormlist("slib.abusech.fplist")
-            self.stormIsInPrint("2 false positive entries", msgs)
+            self.stormIsInPrint("3 false positive entries", msgs)
+            # A sample's rows are one file, including the SHA3-384, and SHA3-only entries model too.
+            f = (await core.nodes(f"file:bytes={'0' * 64}"))[0]
+            assert f.get("md5") == "0" * 32 and f.get("sha1") == "0" * 40 and f.get("_sha3_384") == "0" * 96
+            assert await count(core, f"file:bytes:md5={'0' * 32}") == 1
+            nodes = await core.nodes(f"file:bytes:_sha3_384={'1' * 96}")
+            assert len(nodes) == 1 and "rep.abusech.hunting.fp.threatfox" in nodes[0].tags
             nodes = await core.nodes("slib.abusech.fplist --platform urlhaus --yield")
             assert [n.repr() for n in nodes] == ["legit.example.com"]
             assert "rep.abusech.hunting.fp.urlhaus" in nodes[0].tags
@@ -687,6 +727,9 @@ class TestStormEnrich(s_tests.SynTest):
             assert fake.queries("bazaar") == ["get_info"]
             assert set(fake.queries("yaraify")) == {"lookup_hash"}
             assert set(fake.queries("threatfox")) == {"search_hash", "search_ioc"}
+            # The IP is searched with a wildcard, so it finds its ip:port IOCs.
+            assert {"search_term": "1.2.3.4", "exact_match": False, "query": "search_ioc"} in [
+                r["json"] for r in fake.requests if r["path"].startswith("/threatfox")]
             assert {r["path"] for r in fake.requests if r["path"].startswith("/urlhaus")} == {
                 "/urlhaus/payload/", "/urlhaus/url/", "/urlhaus/host/"}
 
@@ -695,10 +738,16 @@ class TestStormEnrich(s_tests.SynTest):
             assert [n.get("sha256") for n in nodes] == [SHA256]
             assert fake.queries("bazaar") == ["get_info"] and not fake.queries("threatfox")
 
-            # SHA1s aren't supported by URLhaus and ThreatFox.
+            # URLhaus doesn't take SHA1s, and ThreatFox only finds them as hash IOCs.
             fake.requests.clear()
             await core.nodes(f"[ hash:sha1={fd.SHA1} ] | slib.abusech.enrich")
-            assert fake.queries("bazaar") == ["get_info"] and not fake.queries("threatfox")
+            assert fake.queries("bazaar") == ["get_info"] and fake.queries("threatfox") == ["search_ioc"]
+            assert not [r for r in fake.requests if r["path"].startswith("/urlhaus")]
+
+            # URLhaus doesn't take IPv6 hosts, ThreatFox does.
+            fake.requests.clear()
+            nodes = await core.nodes("[ inet:ipv6=2001:db8::1 ] | slib.abusech.enrich")
+            assert not [r for r in fake.requests if r["path"].startswith("/urlhaus")] and fake.queries("threatfox")
 
             msgs = await core.stormlist("[ ou:org=* ] | slib.abusech.enrich")
             self.stormIsInWarn("is not supported", msgs)
@@ -817,3 +866,52 @@ class TestStormPerms(s_tests.SynTest):
             # Users can't read the service-wide key, or other users' keys.
             msgs = await core.stormlist("$lib.print($lib.service.get(slib.abusech))", opts=opts)
             self.stormIsInErr("permission", msgs)
+
+
+class TestStormAudit(s_tests.SynTest):
+    """Endpoints and behaviors added after auditing the service against abuse.ch's docs and live APIs."""
+
+    async def test_new_options(self):
+        async with abusechSvc(self) as (core, svc, fake):
+            nodes = await core.nodes("slib.abusech.bazaar.search detections 12")
+            assert [n.get("sha256") for n in nodes] == [SHA256]
+            assert fake.last("/bazaar")["form"] == {"query": "recent_detections", "hours": "12"}
+            nodes = await core.nodes("slib.abusech.bazaar.search serial 0a1b2c3d")
+            assert len(nodes) == 2
+            assert fake.last("/bazaar")["form"] == {"query": "get_certificate", "serial_number": "0a1b2c3d"}
+
+            nodes = await core.nodes("slib.abusech.bazaar.export yara --yield")
+            assert {n.get("name") for n in nodes} == {"unixredflags3", "pe_imphash"}
+            assert nodes[0].form.name == "it:app:yara:rule"
+
+            nodes = await core.nodes("slib.abusech.urlhaus.export payloads --yield")
+            assert [n.repr() for n in nodes] == [fd.URLHAUS_URL["url"]]
+            assert await count(core, f"inet:urlfile:url={fd.URLHAUS_URL['url']} -> file:bytes +:sha256={fd.PAYLOAD}") == 1
+
+            # ThreatFox: IPs find their ip:port IOCs, and files their own hash IOC.
+            nodes = await core.nodes("[ inet:ipv4=5.6.7.8 ] | slib.abusech.threatfox.lookup --yield")
+            assert [n.repr() for n in nodes] == ["tcp://5.6.7.8:443"]
+            nodes = await core.nodes(f"slib.abusech.threatfox.lookup --hash {fd.SHA1} --yield")
+            assert nodes == [] and fake.queries("threatfox")[-1] == "search_ioc"
+
+            msgs = await core.stormlist("slib.abusech.yaraify.tasks ident --status all")
+            self.stormHasNoWarnErr(msgs)
+            assert fake.last("/yaraify")["json"] == {"query": "list_tasks", "identifier": "ident"}
+
+            msgs = await core.stormlist("[ inet:ipv6=2001:db8::1 ] | slib.abusech.urlhaus.lookup")
+            self.stormIsInWarn("only support FQDNs and IPv4", msgs)
+
+            # Submitting a file only known by its SHA1.
+            await core.nodes(f"[ file:bytes=* :sha1={fd.SHA1} ] | slib.abusech.threatfox.submit payload win.x")
+            assert fake.last("/threatfox")["json"]["ioc_type"] == "sha1_hash"
+
+    async def test_yaraify_results(self):
+        async with abusechSvc(self) as (core, svc, fake):
+            nodes = await core.nodes("slib.abusech.yaraify.lookup --task cfa49f83-6d98-11ed-a71a-42010aa4000b --yield")
+            assert [n.get("sha256") for n in nodes] == [SHA256]
+            assert await count(core, f"it:app:yara:match:file=sha256:{SHA256}") == 1
+            assert await count(core, f"{FILE} -> it:av:scan:result:target:file +:scanner:name=clamav") == 1
+            # Masked matches aren't modeled as rules.
+            assert await count(core, "it:app:yara:rule:name=xxx") == 0
+            msgs = await core.stormlist("slib.abusech.yaraify.lookup --task unknown-task")
+            self.stormIsInPrint("Task unknown-task is unknown", msgs)

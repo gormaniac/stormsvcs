@@ -46,7 +46,9 @@ FORM_ENDPOINTS = (
     ("bazaarSearch", ("subject", "Corp"), {}, "/bazaar", {"query": "get_subjectinfo", "subject_cn": "Corp"}),
     ("bazaarRecent", ("100",), {}, "/bazaar", {"query": "get_recent", "selector": "100"}),
     ("bazaarCscb", (), {}, "/bazaar", {"query": "get_cscb"}),
-    ("bazaarUpdate", (SHA256, "tags", "x"), {}, "/bazaar", {"query": "update", "sha256_hash": SHA256, "key": "tags", "value": "x"}),
+    ("bazaarUpdate", (SHA256, "add_tag", "x"), {}, "/bazaar", {"query": "update", "sha256_hash": SHA256, "key": "add_tag", "value": "x"}),
+    ("bazaarSearch", ("serial", "0a1b2c3d"), {}, "/bazaar", {"query": "get_certificate", "serial_number": "0a1b2c3d"}),
+    ("bazaarDetections", (500,), {}, "/bazaar", {"query": "recent_detections", "hours": "168"}),
     ("bazaarComment", (SHA256, "hi"), {}, "/bazaar", {"query": "add_comment", "sha256_hash": SHA256, "comment": "hi"}),
     ("urlhausUrl", ("http://a.com/x",), {}, "/urlhaus/url/", {"url": "http://a.com/x"}),
     ("urlhausUrlId", (105821,), {}, "/urlhaus/urlid/", {"urlid": "105821"}),
@@ -73,6 +75,7 @@ JSON_ENDPOINTS = (
       "confidence_level": 100, "tags": ["x"], "anonymous": 0, "is_compromised": False}),
     ("yaraifyHash", (SHA256,), {"malpedia": "tok"}, "/yaraify", {"query": "lookup_hash", "search_term": SHA256, "malpedia-token": "tok"}),
     ("yaraifySearch", ("yara", "Rule"), {"limit": 5}, "/yaraify", {"query": "get_yara", "search_term": "Rule", "result_max": 5}),
+    ("yaraifySearch", ("yara", "Rule"), {"limit": 5000}, "/yaraify", {"query": "get_yara", "result_max": 1000}),
     ("yaraifySearch", ("clamav", "Sig"), {}, "/yaraify", {"query": "get_clamav", "search_term": "Sig"}),
     ("yaraifySearch", ("imphash", "x"), {}, "/yaraify", {"query": "get_imphash"}),
     ("yaraifySearch", ("gimphash", "x"), {}, "/yaraify", {"query": "get_gimphash"}),
@@ -193,7 +196,7 @@ class TestNorm(s_tests.SynTest):
         assert s["rules"] == [{
             "name": "AgentTesla_Strings", "uuid": None, "author": "abuse.ch", "desc": "Detects AgentTesla",
             "url": "https://bazaar.abuse.ch/browse/signature/AgentTesla/", "date": None, "time": None, "tlp": None,
-            "license": None, "family": None, "text": None,
+            "sharing_tlp": None, "refmd5": None, "license": None, "family": None, "text": None,
         }]
 
         cert = s["certs"][0]
@@ -202,25 +205,57 @@ class TestNorm(s_tests.SynTest):
         assert cert["notbefore"] == "2026-01-01 00:00:00" and cert["notafter"] == "2027-01-01 00:00:00"
         assert cert["blocklisted"] is True and cert["reason"] == "Used to sign AgentTesla"
 
+        # Every vendor in the live vendor_intel has its own reader.
         scans = {sc["vendor"]: sc for sc in s["scans"]}
-        assert set(scans) == {"any.run", "triage", "reversinglabs", "unpacme"}
+        assert set(scans) == {"any.run", "triage", "reversinglabs", "unpacme", "yoroi_yomi", "spamhaus_hbl",
+                              "filescan-io", "cape", "cert-pl_mwdb", "kaspersky", "docguard"}
         assert scans["any.run"]["signame"] == "agenttesla"
         assert scans["any.run"]["verdict"] == 40
         assert scans["any.run"]["link"] == "https://app.any.run/tasks/1234"
         assert scans["any.run"]["time"] == "2026-10-01 12:05:00"
         assert "trojan" in scans["any.run"]["categories"]
-        assert scans["triage"]["score"] == 10.0 and scans["triage"]["verdict"] == 40
-        assert "AgentTesla" in scans["triage"]["categories"]
+        # Triage scores are 1-10.
+        assert scans["triage"]["score"] == 100.0 and scans["triage"]["verdict"] == 40
+        assert "AgentTesla" in scans["triage"]["categories"] and "Reads local data" in scans["triage"]["categories"]
+        assert scans["triage"]["c2s"] == [
+            {"c2": "c2.example.org:587", "obs": {"form": "inet:fqdn", "valu": "c2.example.org"},
+             "host": "c2.example.org", "port": 587, "url": "tcp://c2.example.org:587",
+             "family": "agenttesla", "family_tag": "agenttesla"},
+            {"c2": "9.8.7.6:2929", "obs": {"form": "inet:server", "valu": "9.8.7.6:2929", "ip": "9.8.7.6",
+                                           "ipform": "inet:ipv4", "port": 2929},
+             "host": "9.8.7.6", "port": 2929, "url": "tcp://9.8.7.6:2929",
+             "family": "agenttesla", "family_tag": "agenttesla"},
+        ]
         assert scans["reversinglabs"]["signame"] == "Win32.Trojan.AgentTesla"
         assert scans["reversinglabs"]["count"] == 50 and scans["reversinglabs"]["malicious"] == 40
+        assert scans["reversinglabs"]["verdict"] == 40 and scans["reversinglabs"]["time"] == "2026-10-01 12:00:00"
+        # UnpacMe lists the sample itself, which isn't a child of itself.
         assert scans["unpacme"]["children"] == [
             {"sha256": fake_data.UNPACKED, "md5": "9" * 32, "sha1": "8" * 40, "families": ["agenttesla"]},
         ]
         assert scans["unpacme"]["verdict"] == 40
+        # Verdicts that aren't detections: "Legit File", "suspicious", "NO_THREAT", and 0-1 scores.
+        assert scans["yoroi_yomi"]["verdict"] == 10 and scans["yoroi_yomi"]["signame"] is None
+        assert scans["yoroi_yomi"]["score"] == 10.0
+        assert scans["spamhaus_hbl"]["verdict"] == 30 and scans["spamhaus_hbl"]["signame"] is None
+        assert scans["filescan-io"]["verdict"] == 10 and scans["filescan-io"]["score"] == 0.0
+        assert scans["cape"]["signame"] == "AgentTesla" and scans["cape"]["verdict"] == 40
+        assert scans["cert-pl_mwdb"]["signame"] is None and scans["cert-pl_mwdb"]["verdict"] is None
+        assert scans["cert-pl_mwdb"]["link"] == "https://mwdb.cert.pl/sample/x/"
+        assert scans["kaspersky"]["verdict"] == 40 and scans["kaspersky"]["time"] == "2026-10-01T12:00:00"
+        assert scans["docguard"]["verdict"] == 40 and scans["docguard"]["urls"] == ["http://docguard.example.net/payload.bin"]
+        assert scans["docguard"]["categories"] == ["JS File - Malicious"]
+
+        assert s["attrs"] == ["magika.pebin", "format.pe", "arch.amd64", "ole.encrypted", "ole.vba_macros"]
 
         assert s["links"] == [{"context": "twitter", "url": "https://twitter.com/abuse_ch/status/1"}]
         assert s["related"] == [{"rel": "dropped_by", "sha256": fake_data.DROPPER}]
-        assert s["notes"] == ["comment: Seen in a phishing campaign"]
+        assert s["notes"] == [
+            "comment: Seen in a phishing campaign",
+            "trid: 44.6% (.EXE) Win64 Executable (generic) (6522/11/2)",
+            "ole: format: MS Excel 97-2003, container: OLE, application: Microsoft Excel, maldoc score: 9",
+            "olevba Suspicious: Hex Strings - Hex-encoded strings were detected",
+        ]
         assert [c["text"] for c in s["comments"]] == ["Delivered via a fake invoice.", "Confirmed AgentTesla."]
         assert s["comments"][1] == {"id": "1", "time": "2026-10-01 13:00:00", "author": "Analyst",
                                     "text": "Confirmed AgentTesla."}
@@ -240,24 +275,33 @@ class TestNorm(s_tests.SynTest):
         assert s["scans"][0]["vendor"] == "virustotal" and s["scans"][0]["verdict"] == 40
 
         s = norm.normSample({"md5_hash": "a" * 32, "reporter": "x", "anonymous": 1, "imphash": "notahash",
-                             "ole_information": [{"a": 1}, "b"], "comments": ["plain"]})
-        assert s["reporter"] is None and s["imphash"] is None
-        assert s["notes"] == ["ole: a=1", "ole: b"]
+                             "ole_information": [], "comments": ["plain"], "file_name": "na",
+                             "tlsh": "a" * 70})
+        assert s["reporter"] is None and s["imphash"] is None and s["notes"] == [] and s["name"] is None
+        # TLSHs are always versioned, some endpoints drop the T1.
+        assert s["tlsh"] == "t1" + "a" * 70
+        assert norm.normTlsh("T1" + "A" * 70) == "T1" + "A" * 70
         assert s["comments"] == [{"id": None, "time": None, "author": None, "text": "plain"}]
 
         info = norm.normFileInfo([{"context": "dropping_md5", "value": "a" * 32}, {"context": "x", "value": None}, "bad"])
         assert info["related"] == [{"rel": "dropping", "md5": "a" * 32}]
         assert norm.normVendors(None) == [] and norm.normVendors({"x": ["bad", {}]}) == []
 
-        # Vendors with only a score, or only a family.
-        sc = norm.normVendors({"FileScan-IO": {"threatlevel": 0.9, "report_link": "https://x/1"}})[0]
-        assert sc["verdict"] == 20 and sc["score"] == 0.9
-        sc = norm.normVendors({"Triage": {"score": "8"}})[0]
-        assert sc["verdict"] == 40 and sc["signame"] is None
+        # Triage's 1-10 scale, Intezer's verdict and family, and vendors MalwareBazaar adds later.
+        assert [norm.normVendors({"Triage": {"score": str(n)}})[0]["verdict"] for n in (9, 7, 3)] == [40, 30, 10]
+        assert norm.normVendors({"Triage": {"score": None}})[0]["verdict"] is None
+        sc = norm.normVendors({"Intezer": {"verdict": "suspicious", "family_name": "RustDesk"}})[0]
+        assert sc["signame"] == "RustDesk" and sc["verdict"] == 30
         sc = norm.normVendors({"Intezer": {"family_name": {"name": "Emotet"}}})[0]
         assert sc["signame"] == "Emotet" and sc["verdict"] == 40
-        sc = norm.normVendors({"X": {"detection": ["Fam1"], "verdict": "Odd Verdict"}})[0]
-        assert sc["signame"] == "Fam1" and "Odd Verdict" in sc["categories"]
+        sc = norm.normVendors({"NewVendor": {"malware_family": "Fam1", "verdict": "Odd", "link": "https://x/1"}})[0]
+        assert sc["vendor"] == "newvendor" and sc["signame"] == "Fam1" and sc["verdict"] == 40
+        assert sc["link"] == "https://x/1"
+        assert norm.normVendors({"Kaspersky": {"verdict": "NotCategorized", "detections": [{"detection_name": "HEUR:x"}]}})[0]["signame"] == "HEUR:x"
+        assert norm.normC2Config({"c2": "http://a.com/gate.php"})["url"] is None
+        assert norm.normC2Config({"c2": ""}) is None and norm.normC2Config("x") is None
+        assert norm.normC2Config({"c2": "a" * 64}) is None
+        assert norm.normOle(None) == {"attrs": [], "notes": []}
 
     def test_certs_rules(self):
         cert = norm.normCert(fake_data.CSCB[0], blocklist=True)
@@ -269,7 +313,18 @@ class TestNorm(s_tests.SynTest):
         assert norm.normCert("x") is None
         assert not norm.normCert({"serial_number": "aa", "cscb_listed": False})["blocklisted"]
 
-        assert norm.normRule({"rule_name": " r1 ", "reference": "not a url"})["url"] is None
+        rule = norm.normRule({"rule_name": " r1 ", "reference": "ditekSHen", "description": "d"})
+        assert rule["url"] is None and rule["desc"] == "d\n\nReference: ditekSHen"
+        assert norm.normRule({"rule_name": "r", "reference": "ditekSHen"})["desc"] == "Reference: ditekSHen"
+        # Matches of non-public rules are masked as "xxx".
+        assert norm.normRule({"rule_name": "xxx", "yarahub_uuid": "xxx"}) is None
+        assert norm.normRule({"rule_name": "r", "yarahub_uuid": "xxx"})["uuid"] is None
+        rule = norm.normRule(fake_data.YARAIFY_RECENT_RULES[1] | {"yarahub_reference_md5": "A" * 32})
+        assert rule["sharing_tlp"] == "red" and rule["refmd5"] == "a" * 32
+        assert norm.normYaraStats(fake_data.BAZAAR_YARA_STATS)[0] == {
+            "name": "unixredflags3", "uuid": None, "author": "Tim Brown @timb_machine", "desc": "Hunts for UNIX red flags",
+            "url": None, "date": None, "time": "2026-10-31 04:27:16", "tlp": None, "sharing_tlp": None, "refmd5": None,
+            "license": None, "family": None, "text": None}
         assert norm.normRule({"author": "x"}) is None
         assert norm.normRule("x") is None
         assert norm.normRules([{"rule_name": "a"}, None]) == [norm.normRule({"rule_name": "a"})]
@@ -294,15 +349,27 @@ class TestNorm(s_tests.SynTest):
         assert rule["tlp"] == "white" and rule["license"] == "CC BY-NC 4.0" and rule["family"] == "win.agent_tesla"
         assert rule["uuid"] == "6a6d2b48-1234-4cde-9f00-112233445566"
         assert f["clamav"] == ["Win.Packed.Generic-1"]
+        # The masked "xxx" match is dropped.
         assert f["unpacked"] == [{"sha256": fake_data.UNPACKED, "md5": "9" * 32, "name": "unpacked.bin",
                                   "rules": [norm.normRule({"rule_name": "AgentTesla_Unpacked", "author": "abuse.ch"})]}]
         assert f["tasks"] == ["cfa49f83-6d98-11ed-a71a-42010aa4000b"]
         assert norm.normYaraifyFile("x") is None
         assert norm.normYaraifyFile({"metadata": {}}) is None
 
+        # get_results puts the task's results at the top level.
+        f = norm.normYaraifyFile(fake_data.YARAIFY_RESULTS)
+        assert f["sha256"] == SHA256 and [r["name"] for r in f["rules"]] == ["win_agent_tesla_auto"]
+        assert f["clamav"] == ["Win.Packed.Generic-1"] and f["unpacked"][0]["sha256"] == fake_data.UNPACKED
+        task = norm.normTask(fake_data.YARAIFY_RESULTS)
+        assert task["clamav_scan"] is True and task["unpack"] is True and task["share_file"] is False
+
         task = norm.normTask(dict(fake_data.YARAIFY_FILE["tasks"][0], sha256_hash=SHA256))
         assert task["sha256"] == SHA256 and task["clamav_scan"] and task["unpack"] and task["share_file"]
         assert task["time"] == "2026-10-01 12:00:00"
+        # list_tasks rows don't include the task parameters, so they aren't made up.
+        task = norm.normTask({"task_id": "t", "sha256_hash": SHA256, "md5_hash": MD5.upper(), "task_status": "processed"})
+        assert task["md5"] == MD5 and task["clamav_scan"] is None and task["unpack"] is None
+        assert task["status"] == "processed"
         assert norm.normTask("x") is None
         task = norm.normTask({"unpacked_results": [{"unpacked_sha256": "bad"}, "x"]})
         assert task["unpacked"] == [] and task["sample"] is None
@@ -333,13 +400,21 @@ class TestNorm(s_tests.SynTest):
         p = norm.normUrlhausPayload(fake_data.URLHAUS_PAYLOAD)
         assert p["sha256"] == fake_data.PAYLOAD and p["last_seen"] == "2026-10-03 10:00:00"
         assert p["urls"][0]["url"] == "http://evil.example.com/bins/mozi.m" and p["urls"][0]["seen"] == "2026-10-01"
-        assert p["names"] == ["mozi.m"]
+        # The filename is only on each URL, and those dates are the payload's on the URL, not the URL's.
+        assert p["names"] == ["mozi.m"] and p["name"] == "mozi.m"
+        assert p["urls"][0]["added"] is None and p["urls"][0]["last_online"] is None
         assert norm.normUrlhausPayload({}) is None
 
-        # Signature lookups attach the payload to each URL.
+        # Signature lookups attach the payload to each URL, dated on that URL.
         u = norm.normUrls(fake_data.URLHAUS_SIGNATURE["urls"])[0]
         assert u["payloads"][0]["sha256"] == fake_data.PAYLOAD
         assert u["payloads"][0]["scans"][0]["verdict"] == 10
+        assert u["added"] is None and u["payloads"][0]["seen"] == "2026-10-01 10:00:00"
+
+        u = norm.normUrlhausPayloadRow(norm.parseCsv(fake_data.URLHAUS_PAYLOAD_CSV, norm.URLHAUS_PAYLOAD_CSV)[0])
+        assert u["url"] == "http://evil.example.com/bins/mozi.m" and u["payloads"][0]["sha256"] == fake_data.PAYLOAD
+        assert u["payloads"][0]["type"] == "elf" and u["payloads"][0]["seen"] == "2026-10-01 10:00:00"
+        assert norm.normUrlhausPayloadRow({"url": None}) is None
 
         assert norm.normBlacklists(None) == []
         assert norm.normVirusTotal(None) is None
@@ -357,6 +432,10 @@ class TestNorm(s_tests.SynTest):
         assert i["obs"] == {"form": "inet:fqdn", "valu": "gaga.com"}
         assert i["pattern"] == "[domain-name:value = 'gaga.com']"
         assert i["samples"][0]["sha256"] == SHA256 and i["samples"][0]["seen"] == "2026-10-01 07:00:00"
+        # The sample's time and MalwareBazaar link are kept.
+        assert i["samples"][0]["first_seen"] == "2026-10-01 07:00:00"
+        assert i["samples"][0]["links"] == [{"context": "malware_bazaar", "url": f"https://bazaar.abuse.ch/sample/{SHA256}/"}]
+        assert i["sightings"] is None and norm.normIoc(dict(fake_data.THREATFOX_IOC, sightings=3))["sightings"] == 3
 
         i = norm.normIoc(fake_data.THREATFOX_IPPORT)
         assert i["aliases"] == ["Agentemis", "BEACON", "CobaltStrike"] and i["reporter"] is None
@@ -369,7 +448,15 @@ class TestNorm(s_tests.SynTest):
         assert norm.stixPattern("url", "http://a/'x", None) == "[url:value = 'http://a/\\'x']"
         assert norm.normIoc({"ioc": "x"}) is None
         assert norm.normIoc("x") is None
-        assert norm.normIoc({"ioc": "a.com", "ioc_type": "domain", "malware_printable": "Unknown malware"})["family"] is None
+        for placeholder in ("Unknown malware", "Unknown Stealer", "Unknown Loader", "Unknown RAT", "None"):
+            i = norm.normIoc({"ioc": "a.com", "ioc_type": "domain", "malware_printable": placeholder})
+            assert i["family"] is None and i["family_tag"] is None, placeholder
+        assert norm.normIoc({"ioc": "a.com", "ioc_type": "domain", "malware_printable": "UnknownFamily"})["family"] == "UnknownFamily"
+        i = norm.normIoc({"ioc": "a@b.com", "ioc_type": "envelope_from"})
+        assert i["obs"] == {"form": "inet:email", "valu": "a@b.com"}
+        assert i["pattern"] == "[email-message:sender_ref.value = 'a@b.com']"
+        assert norm.normIoc({"ioc": "a@b.com", "ioc_type": "body_from"})["pattern"] == "[email-message:from_ref.value = 'a@b.com']"
+        assert norm.normIoc({"ioc": "a" * 96, "ioc_type": "sha3_384_hash"})["obs"]["hashes"] == {"sha3_384": "a" * 96}
 
         iocs = norm.normThreatFoxExport(fake_data.THREATFOX_EXPORT)
         assert len(iocs) == 1
@@ -401,8 +488,6 @@ class TestNorm(s_tests.SynTest):
         assert certs[1]["family"] == "AsyncRAT"
         assert norm.normSslblCert({"sha1": "bad"}) is None
 
-        ips = [norm.normSslblIp(r) for r in norm.parseCsv(fake_data.SSLBL_IPS, norm.SSLBL_IP_CSV)]
-        assert ips[0]["ip"] == "90.1.2.3" and ips[0]["port"] == 443 and ips[0]["source"] == "sslbl"
 
         ja3 = [norm.normJa3(r) for r in norm.parseCsv(fake_data.SSLBL_JA3, norm.SSLBL_JA3_CSV)][0]
         assert ja3 == {"ja3": "51c64c77e60f3980eea90869b68c58a8", "first_seen": "2017-07-14 18:08:15",
@@ -411,7 +496,7 @@ class TestNorm(s_tests.SynTest):
         assert norm.reasonFamily(None) is None
         assert norm.reasonFamily("C&C") is None
 
-        assert norm.parseLines(fake_data.FEODO_RECOMMENDED) == ["50.16.16.211", "70.1.2.3"]
+        assert norm.parseLines("# comment\n1.2.3.4\n\n5.6.7.8\n") == ["1.2.3.4", "5.6.7.8"]
 
         # CSV exports with an un-commented header.
         rows = norm.parseCsv("id,url\n1,http://a\n", ("id", "url"))
@@ -419,10 +504,18 @@ class TestNorm(s_tests.SynTest):
 
     def test_fplist(self):
         fps = norm.normFpList(fake_data.FPLIST)
-        assert fps[0] == {"obs": {"form": "file:bytes", "valu": "0" * 64, "hashes": {"sha256": "0" * 64}},
+        # A sample's per-hash rows are merged, and entries without a value are skipped.
+        assert len(fps) == 3
+        assert fps[0] == {"obs": {"form": "file:bytes", "valu": "0" * 32,
+                                  "hashes": {"md5": "0" * 32, "sha1": "0" * 40, "sha256": "0" * 64, "sha3_384": "0" * 96}},
                           "time": "2026-01-01 00:00:00", "platform": "malwarebazaar", "removed_by": "admin",
                           "notes": "Legitimate installer"}
         assert fps[1]["obs"] == {"form": "inet:fqdn", "valu": "legit.example.com"}
+        assert fps[2]["obs"]["hashes"] == {"sha3_384": "1" * 96}
+        # Two samples removed at the same time with the same notes aren't merged.
+        row = {"time_stamp": "t", "platform": "p", "entry_type": "md5", "removed_by": "a", "removal_notes": "n"}
+        fps = norm.normFpList([dict(row, entry_value="a" * 32), dict(row, entry_value="b" * 32)])
+        assert [f["obs"]["hashes"] for f in fps] == [{"md5": "a" * 32}, {"md5": "b" * 32}]
         assert norm.normFpList([{"entry_type": "x", "entry_value": "y"}, "bad"]) == []
 
 
@@ -611,6 +704,25 @@ class TestSvc(s_tests.SynTest):
             await svc.bazaarSearch("issuer", "CA", limit=5)
             assert "limit" not in fake.last()["form"]
 
+            # MalwareBazaar doesn't look up SHA3-384s.
+            with self.raises(AbuseChApiError):
+                await svc.bazaarInfo(fake_data.SHA3)
+            assert len(await svc.normBazaarDetections()) == 1
+            assert fake.last()["form"] == {"query": "recent_detections", "hours": "48"}
+
+            # Updates and comments on unknown samples fail instead of reporting success.
+            with self.raises(AbuseChApiError) as cm:
+                await svc.bazaarUpdate("a" * 64, "add_tag", "x")
+            assert "hash_not_found" in cm.exception.mesg
+            with self.raises(AbuseChApiError):
+                await svc.bazaarComment("a" * 64, "x")
+            with self.raises(AbuseChApiError):
+                await svc.bazaarUpdate(SHA256, "tags", "x")
+
+            rules = [r async for r in svc.bazaarExport("yara")]
+            assert [r["name"] for r in rules] == ["unixredflags3", "pe_imphash"]
+            assert fake.last()["path"] == "/bazaar_export/testkey/yara_rules.json"
+
             assert len(await svc.normBazaarRecent()) == 2
             assert fake.last()["form"]["selector"] == "time"
             with self.raises(AbuseChApiError):
@@ -646,6 +758,13 @@ class TestSvc(s_tests.SynTest):
             assert req["files"]["file"] == ("x.exe", b"MZdata")
             assert json.loads(req["form"]["json_data"]) == {
                 "anonymous": 1, "tags": ["exe"], "delivery_method": "email_attachment", "context": {"comment": "hi"}}
+            await svc.bazaarUpload([b"MZ"], "x.exe", references={"links": "https://a/1", "any_run": ["https://b/2"]},
+                                   context={"comment": "hi", "dropped_by_sha256": SHA256})
+            assert json.loads(fake.last()["form"]["json_data"]) == {
+                "anonymous": 0, "references": {"links": ["https://a/1"], "any_run": ["https://b/2"]},
+                "context": {"comment": "hi", "dropped_by_sha256": [SHA256]}}
+            fake.overrides[("bazaar", "")] = (200, {"query_status": "file_already_known"})
+            fake.overrides.clear()
 
             rows = [s async for s in svc.bazaarExport()]
             assert [r["sha256"] for r in rows] == [SHA256, "b" * 64]
@@ -664,6 +783,16 @@ class TestSvc(s_tests.SynTest):
             assert await svc.normUrlhausUrl(url="http://nope") is None
             assert (await svc.normUrlhausHost("1.2.3.4"))["url_count"] == 1
             assert await svc.normUrlhausHost("9.9.9.9") is None
+            # URLhaus host lookups don't support IPv6.
+            with self.raises(AbuseChApiError):
+                await svc.urlhausHost("2001:db8::1")
+            # Signature results get the family, it's not repeated on each payload.
+            res = await svc.normUrlhausSearch("signature", "Mozi")
+            pay = res["urls"][0]["payloads"][0]
+            assert pay["signature"] == "Mozi" and pay["families"] == ["mozi"]
+            urls = [u async for u in svc.urlhausExport("payloads")]
+            assert [(u["url"], u["payloads"][0]["sha256"]) for u in urls] == [(fake_data.URLHAUS_URL["url"], fake_data.PAYLOAD)]
+            assert fake.last()["path"] == "/urlhaus_export/testkey/payload.csv.zip"
             assert (await svc.normUrlhausPayload(fake_data.PAYLOAD))["urls"]
             assert await svc.normUrlhausPayload("a" * 64) is None
             with self.raises(AbuseChApiError):
@@ -710,8 +839,27 @@ class TestSvc(s_tests.SynTest):
             assert len(await svc.normThreatfox("recent", 2)) == 2
             assert fake.last()["json"]["days"] == 2
             assert len(await svc.normThreatfox("recent", limit=1)) == 1
-            assert (await svc.normThreatfox("id", 41))[0]["id"] == "41"
+            # The ioc query returns the IOC unwrapped.
+            iocs = await svc.normThreatfox("id", 41)
+            assert iocs[0]["id"] == "41" and iocs[0]["sightings"] == 3
+            assert (await svc.threatfoxIoc(41))["ioc"] == "gaga.com"
             assert await svc.normThreatfox("id", 99) == []
+            assert len(await svc.normThreatfox("recent", 1, limit=0)) == 2
+
+            # IPs are found by a wildcard search, filtered to the IP.
+            iocs = await svc.normThreatfox("ip", "5.6.7.8")
+            assert [i["ioc"] for i in iocs] == ["5.6.7.8:443"]
+            assert fake.last()["json"] == {"query": "search_ioc", "search_term": "5.6.7.8", "exact_match": False}
+            assert await svc.normThreatfox("ip", "5.6.7.80") == []
+
+            # Files find their own hash IOC and the IOCs associated with them, without duplicates.
+            iocs = await svc.normThreatfox("file", SHA256)
+            assert sorted(i["id"] for i in iocs) == ["41", "44"]
+            assert fake.queries("threatfox")[-2:] == ["search_ioc", "search_hash"]
+            await svc.normThreatfox("file", fake_data.SHA1)
+            assert fake.queries("threatfox")[-1] == "search_ioc"
+            with self.raises(AbuseChApiError):
+                await svc.threatfoxHash(fake_data.SHA1)
             assert (await svc.normThreatfox("search", "gaga.com", exact=True))[0]["ioc"] == "gaga.com"
             assert len(await svc.normThreatfox("hash", SHA256)) == 2
             assert len(await svc.normThreatfox("tag", "x")) == 2
@@ -741,7 +889,18 @@ class TestSvc(s_tests.SynTest):
             files = await svc.normYaraifySearch("yara", "MyRule")
             assert files[0]["rules"][0]["name"] == "MyRule"
             files = await svc.normYaraifySearch("clamav", "Sig", limit=1)
-            assert files[0]["rules"] == []
+            assert files[0]["rules"] == [] and files[0]["clamav"] == ["Sig"]
+
+            # get_results, unknown tasks, and list_tasks without any matches.
+            res = await svc.normYaraifyResults("task1")
+            assert res["status"] == "done" and res["file"]["clamav"] == ["Win.Packed.Generic-1"]
+            assert [r["name"] for r in res["file"]["rules"]] == ["win_agent_tesla_auto"]
+            assert await svc.normYaraifyResults("unknown-task") is None
+            fake.overrides[("yaraify", "list_tasks")] = (200, {"query_status": "ok", "data": "no results"})
+            assert await svc.normYaraifyTasks("ident") == []
+            fake.overrides.clear()
+            await svc.yaraifyTasks("ident", status=None)
+            assert fake.last()["json"] == {"query": "list_tasks", "identifier": "ident"}
             with self.raises(AbuseChApiError):
                 await svc.yaraifySearch("bogus", "x")
 
@@ -814,7 +973,8 @@ class TestSvc(s_tests.SynTest):
             c2s = [c async for c in svc.feodoBlocklist()]
             assert [c["ip"] for c in c2s] == ["50.16.16.211", "60.1.2.3"]
             c2s = [c async for c in svc.feodoBlocklist("recommended")]
-            assert [(c["ip"], c["port"]) for c in c2s] == [("50.16.16.211", 8080), ("70.1.2.3", None)]
+            assert [(c["ip"], c["port"], c["family"]) for c in c2s] == [("50.16.16.211", 8080, "QakBot")]
+            assert fake.last()["path"] == "/feodo/ipblocklist_recommended.json"
             c2s = [c async for c in svc.feodoBlocklist("aggressive", limit=1)]
             assert c2s[0]["family"] == "TrickBot"
             assert len([c async for c in svc.feodoBlocklist(limit=1)]) == 1
@@ -827,20 +987,29 @@ class TestSvc(s_tests.SynTest):
             certs = [c async for c in svc.sslblBlocklist()]
             assert [c["sha1"] for c in certs] == ["1" * 40, "2" * 40]
             assert len([c async for c in svc.sslblBlocklist(limit=1)]) == 1
-            ips = [c async for c in svc.sslblBlocklist("ips")]
-            assert ips[0]["ip"] == "90.1.2.3"
-            ips = [c async for c in svc.sslblBlocklist("ips-aggressive")]
-            assert ips[0]["port"] == 443
-            assert fake.last()["path"] == "/sslbl/sslipblacklist_aggressive.csv"
+            # The IP lists were deprecated, and a deprecated dataset is an error instead of empty.
+            with self.raises(AbuseChApiError):
+                [c async for c in svc.sslblBlocklist("ips")]
+            fake.overrides[("sslbl", "sslblacklist.csv")] = (200, fake_data.SSLBL_IPS)
+            with self.raises(AbuseChApiError) as cm:
+                [c async for c in svc.sslblBlocklist("certs")]
+            assert "has been deprecated on 2025-01-03" in cm.exception.mesg
+            fake.overrides.clear()
             ja3s = [c async for c in svc.sslblBlocklist("ja3")]
             assert ja3s[0]["family"] == "Dridex"
             with self.raises(AbuseChApiError):
                 [c async for c in svc.sslblBlocklist("bogus")]
 
+            # The list isn't wrapped in {"query_status", "data"}.
+            assert await svc.fplist() == fake_data.FPLIST
             fps = await svc.normFplist()
-            assert len(fps) == 2
+            assert len(fps) == 3
             fps = await svc.normFplist(platform="URLhaus")
             assert [f["obs"]["valu"] for f in fps] == ["legit.example.com"]
+            fake.overrides[("hunting", "get_fplist")] = (200, {"query_status": "ok", "data": {"1": fake_data.FPLIST["5"]}})
+            assert len(await svc.normFplist()) == 1
+            fake.overrides[("hunting", "get_fplist")] = (200, {"query_status": "no_results"})
+            assert await svc.fplist() == {}
 
     async def test_apikey(self):
         async with abusechSvc(self, apikey=None) as (core, svc, fake):
@@ -859,6 +1028,17 @@ class TestSvc(s_tests.SynTest):
 
             await svc.setApiKey(None)
             assert not await svc.hasApiKey()
+
+            # A rejected key is an error everywhere, not an empty result.
+            for coro in (svc.bazaarInfo(SHA256, apikey="badkey"), svc.normUrlhausUrl(url="http://a", apikey="badkey"),
+                         svc.normThreatfox("id", 41, apikey="badkey"), svc.fplist(apikey="badkey"),
+                         svc.urlhausDownload(fake_data.SAMPLE_SHA256, apikey="badkey"),
+                         svc.urlhausSubmit(["http://a.com/x"], apikey="badkey")):
+                with self.raises(AbuseChApiError) as cm:
+                    await coro
+                assert "unknown_auth_key" in cm.exception.mesg and "check your Auth-Key" in cm.exception.mesg
+            with self.raises(AbuseChApiError):
+                [s async for s in svc.bazaarExport(apikey="badkey")]
 
     async def test_cellapi(self):
         async with abusechSvc(self) as (core, svc, fake):

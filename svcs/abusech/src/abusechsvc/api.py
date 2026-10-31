@@ -18,7 +18,7 @@ RETN_METHS = (
     "rawRequest",
     # MalwareBazaar
     "bazaarQuery", "bazaarInfo", "normBazaarInfo", "bazaarSearch", "normBazaarSearch",
-    "bazaarRecent", "normBazaarRecent", "bazaarCscb", "normBazaarCscb", "bazaarFile",
+    "bazaarRecent", "normBazaarRecent", "bazaarDetections", "normBazaarDetections", "bazaarCscb", "normBazaarCscb", "bazaarFile",
     "bazaarUpload", "bazaarUpdate", "bazaarComment",
     # URLhaus
     "urlhausUrl", "urlhausUrlId", "normUrlhausUrl", "urlhausHost", "normUrlhausHost",

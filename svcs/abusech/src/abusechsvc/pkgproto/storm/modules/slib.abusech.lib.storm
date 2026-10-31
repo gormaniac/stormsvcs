@@ -49,6 +49,11 @@ function bazaarRecent(selector=time) {
     return($_samples($priv.bazaarRecent($selector), "MalwareBazaar recent samples", bazaar))
 }
 
+// Samples with new detections (ex. new vendor intel) in the last hours (1-168). Returns a list of file:bytes nodes.
+function bazaarDetections(hours=(48)) {
+    return($_samples($priv.bazaarDetections($hours), "MalwareBazaar recent detections", bazaar))
+}
+
 // The Code Signing Certificate Blocklist. Returns a list of crypto:x509:cert nodes.
 function bazaarCscb() {
     $retn = $priv.bazaarCscb()
@@ -65,7 +70,9 @@ function bazaarCscb() {
 function bazaarExport(kind=recent, limit=(0)) {
     for $retn in $priv.bazaarExport(kind=$kind, limit=$limit) {
         if $util.failed($retn, `MalwareBazaar {$kind} export`) { break }
-        $n = $model.sample($retn.data, bazaar)
+        // The yara export is MalwareBazaar's YARA rule statistics.
+        if ($kind = "yara") { $n = $model.rule($retn.data, bazaar) }
+        else { $n = $model.sample($retn.data, bazaar) }
         if $n { emit $n }
     }
 }
@@ -243,15 +250,13 @@ function feodoBlocklist(kind=all, limit=(0)) {
     }
 }
 
-// Emit nodes for an SSL Blacklist blocklist: certs (crypto:x509:cert), ips/ips-aggressive
-// (inet:server), or ja3 (hash:md5).
+// Emit nodes for an SSL Blacklist blocklist: certs (crypto:x509:cert) or ja3 (hash:md5).
 function sslblBlocklist(kind=certs, limit=(0)) {
     for $retn in $priv.sslblBlocklist(kind=$kind, limit=$limit) {
         if $util.failed($retn, `SSL Blacklist {$kind} blocklist`) { break }
         switch $kind {
             "certs": { $n = $model.sslblCert($retn.data) }
-            "ja3": { $n = $model.ja3($retn.data) }
-            *: { $n = $model.c2($retn.data, sslbl) }
+            *: { $n = $model.ja3($retn.data) }
         }
         if $n { emit $n }
     }
@@ -277,7 +282,8 @@ function fplist(platform=$lib.null) {
 //
 //   file:bytes/hash:md5/hash:sha1/hash:sha256 -> MalwareBazaar, YARAify, URLhaus (MD5/SHA256), ThreatFox
 //   inet:url                                  -> URLhaus, ThreatFox
-//   inet:fqdn/inet:ipv4/inet:ipv6             -> URLhaus (host), ThreatFox
+//   inet:fqdn/inet:ipv4                       -> URLhaus (host), ThreatFox
+//   inet:ipv6                                 -> ThreatFox
 //   inet:server                               -> ThreatFox (ip:port)
 function enrich(node, platforms=$lib.null) {
     if ($platforms = $lib.null) { $platforms = (bazaar, urlhaus, threatfox, yaraify) }
@@ -296,15 +302,20 @@ function enrich(node, platforms=$lib.null) {
             if ($platforms.has(bazaar)) { $nodes.append($bazaarLookup($sha)) }
             if ($platforms.has(yaraify)) { $nodes.append($yaraifyLookup($sha)) }
             if ($platforms.has(urlhaus) and ($htype = "md5" or $htype = "sha256")) { $nodes.append($urlhausPayload($sha)) }
-            if ($platforms.has(threatfox) and ($htype = "md5" or $htype = "sha256")) { $nodes.extend($threatfox(hash, $sha)) }
+            if ($platforms.has(threatfox)) { $nodes.extend($threatfox(file, $sha, limit=(0))) }
         }
         "inet:url": {
             if ($platforms.has(urlhaus)) { $nodes.append($urlhausUrl(url=$repr)) }
             if ($platforms.has(threatfox)) { $nodes.extend($threatfox(search, $repr, exact=(true))) }
         }
-        ("inet:fqdn", "inet:ipv4", "inet:ipv6"): {
+        "inet:fqdn": {
             if ($platforms.has(urlhaus)) { $nodes.append($urlhausHost($repr)) }
             if ($platforms.has(threatfox)) { $nodes.extend($threatfox(search, $repr, exact=(true))) }
+        }
+        ("inet:ipv4", "inet:ipv6"): {
+            // URLhaus host lookups don't support IPv6.
+            if ($platforms.has(urlhaus) and $form = "inet:ipv4") { $nodes.append($urlhausHost($repr)) }
+            if ($platforms.has(threatfox)) { $nodes.extend($threatfox(ip, $repr, limit=(0))) }
         }
         "inet:server": {
             $ip = $node.props.ipv4

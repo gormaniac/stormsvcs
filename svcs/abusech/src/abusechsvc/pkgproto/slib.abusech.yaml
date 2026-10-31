@@ -67,7 +67,8 @@ commands:
 
         file:bytes/hash:md5/hash:sha1/hash:sha256 -> MalwareBazaar, YARAify, URLhaus (MD5/SHA256), ThreatFox
         inet:url                                  -> URLhaus, ThreatFox
-        inet:fqdn/inet:ipv4/inet:ipv6             -> URLhaus (host), ThreatFox
+        inet:fqdn/inet:ipv4                       -> URLhaus (host), ThreatFox
+        inet:ipv6                                 -> ThreatFox
         inet:server                               -> ThreatFox (ip:port)
 
       Examples:
@@ -130,7 +131,7 @@ commands:
         - type: str
           action: append
           default: []
-          help: An MD5, SHA1, SHA256, or SHA3-384 hash to look up instead of using the inbound nodes. May be used multiple times.
+          help: An MD5, SHA1, or SHA256 hash to look up instead of using the inbound nodes. May be used multiple times.
       - - --yield
         - default: false
           action: store_true
@@ -162,7 +163,9 @@ commands:
         yara       - Samples matching a YARA rule (get_yarainfo)
         issuer     - Samples signed by a certificate issuer CN (get_issuerinfo)
         subject    - Samples signed by a certificate subject CN (get_subjectinfo)
+        serial     - Samples signed by a certificate serial number (get_certificate)
         recent     - Samples added in the last hour, or the latest 100 with the value "100" (get_recent)
+        detections - Samples with new detections in the last N hours (1-168), default 48 (recent_detections)
 
       Examples:
 
@@ -172,13 +175,13 @@ commands:
     cmdargs:
       - - by
         - type: str
-          choices: [ tag, signature, filetype, clamav, imphash, tlsh, telfhash, gimphash, dhash, yara, issuer, subject, recent ]
+          choices: [ tag, signature, filetype, clamav, imphash, tlsh, telfhash, gimphash, dhash, yara, issuer, subject, serial, recent, detections ]
           help: What to search by.
       - - value
         - type: str
           nargs: "?"
           default: null
-          help: The value to search for (for recent, "time" or "100").
+          help: The value to search for (for recent, "time" or "100", for detections, the hours).
       - - --limit
         - type: int
           default: 100
@@ -261,6 +264,11 @@ commands:
           action: append
           default: []
           help: A reference URL about the sample. May be used multiple times.
+      - - --ref
+        - type: str
+          action: append
+          default: []
+          help: A typed reference, <type>=<url> (ex. any_run=<url>, joe_sandbox=<url>, malpedia=<url>, twitter=<url>, urlhaus=<url>). May be used multiple times.
       - - --comment
         - type: str
           default: null
@@ -287,7 +295,7 @@ commands:
 
         file:bytes=<sha256> | slib.abusech.bazaar.update --comment "Seen in a phishing campaign"
 
-        slib.abusech.bazaar.update --hash <sha256> --add tags=AgentTesla --add urlhaus=https://urlhaus.abuse.ch/url/1/
+        slib.abusech.bazaar.update --hash <sha256> --add add_tag=AgentTesla --add urlhaus=https://urlhaus.abuse.ch/url/1/
     cmdargs:
       - - --hash
         - type: str
@@ -302,7 +310,7 @@ commands:
         - type: str
           action: append
           default: []
-          help: A <key>=<value> to add to the sample (ex. tags=x, urlhaus=<url>, any_run=<url>). May be used multiple times.
+          help: A <key>=<value> update. Keys are add_tag, remove_tag, urlhaus, any_run, joe_sandbox, malpedia, twitter, links, dropped_by_md5, dropped_by_sha256, dropped_by_malware, dropping_md5, dropping_sha256, dropping_malware, and comment. May be used multiple times.
     forms:
       input:
         - file:bytes
@@ -316,6 +324,7 @@ commands:
 
         recent - The samples added in the last 48 hours
         full   - Every sample (large, zipped)
+        yara   - The YARA rule statistics: every rule MalwareBazaar matches samples with (it:app:yara:rule)
 
       Examples:
 
@@ -327,7 +336,7 @@ commands:
         - type: str
           nargs: "?"
           default: recent
-          choices: [ recent, full ]
+          choices: [ recent, full, yara ]
           help: The export to model.
       - - --limit
         - type: int
@@ -336,10 +345,11 @@ commands:
       - - --yield
         - default: false
           action: store_true
-          help: Yield the file:bytes nodes.
+          help: Yield the file:bytes (or it:app:yara:rule) nodes.
     forms:
       output:
         - file:bytes
+        - it:app:yara:rule
 
   # ---- URLhaus ----
 
@@ -350,7 +360,7 @@ commands:
       Look up URLs, hosts, and payloads in URLhaus and model the results.
 
         inet:url                      -> URL information (/url/)
-        inet:fqdn/inet:ipv4/inet:ipv6 -> Host information and every URL URLhaus has seen on the host (/host/)
+        inet:fqdn/inet:ipv4           -> Host information and every URL URLhaus has seen on the host (/host/)
         file:bytes/hash:md5/sha256    -> Payload information and every URL that served it (/payload/)
 
       URLs are tagged with their threat, URLhaus tags, and status (ex. #rep.abusech.urlhaus.status.online),
@@ -376,7 +386,7 @@ commands:
         - type: str
           action: append
           default: []
-          help: A host (FQDN or IP) to look up instead of using the inbound nodes. May be used multiple times.
+          help: A host (FQDN or IPv4, URLhaus doesn't support IPv6) to look up instead of using the inbound nodes. May be used multiple times.
       - - --hash
         - type: str
           action: append
@@ -391,7 +401,6 @@ commands:
         - inet:url
         - inet:fqdn
         - inet:ipv4
-        - inet:ipv6
         - file:bytes
         - hash:md5
         - hash:sha256
@@ -399,7 +408,6 @@ commands:
         - inet:url
         - inet:fqdn
         - inet:ipv4
-        - inet:ipv6
         - file:bytes
 
   - name: slib.abusech.urlhaus.search
@@ -505,7 +513,8 @@ commands:
 
         recent - URLs added in the last 30 days
         online - URLs that are currently online
-        full   - URLs that are online or were added in the last 90 days (large)
+        full     - URLs that are online or were added in the last 90 days (large)
+        payloads - Every payload URLhaus collected, with the URL that served it (large)
 
       Examples:
 
@@ -515,7 +524,7 @@ commands:
         - type: str
           nargs: "?"
           default: recent
-          choices: [ recent, online, full ]
+          choices: [ recent, online, full, payloads ]
           help: The export to model.
       - - --limit
         - type: int
@@ -537,8 +546,9 @@ commands:
     descr: |
       Look up IOCs in ThreatFox and model them.
 
-        file:bytes/hash:*                         -> IOCs associated with the sample (search_hash)
-        inet:url/inet:fqdn/inet:ipv4/6/inet:server -> The IOC (search_ioc)
+        file:bytes/hash:*            -> The sample's own hash IOC (search_ioc), and IOCs associated with it (search_hash)
+        inet:ipv4/inet:ipv6          -> IOCs for the IP, ex. its ip:port C2s (search_ioc)
+        inet:url/inet:fqdn/inet:server -> The IOC (search_ioc)
 
       Each IOC is modeled as its observable (tagged with its threat type, malware family, and tags),
       an it:sec:stix:indicator for the ThreatFox IOC record (confidence, pattern, comment), the
@@ -571,8 +581,8 @@ commands:
           help: Allow --ioc searches to match partially (ThreatFox's default), instead of exactly.
       - - --limit
         - type: int
-          default: 100
-          help: The max number of IOCs per lookup.
+          default: 0
+          help: The max number of IOCs per lookup (0 for every match).
       - - --yield
         - default: false
           action: store_true
@@ -623,8 +633,8 @@ commands:
           help: The number of days, tag, or malware family.
       - - --limit
         - type: int
-          default: 100
-          help: The max number of IOCs (max 1000).
+          default: 0
+          help: The max number of IOCs (0 for every match; tag and malware searches return at most 1000).
     forms:
       output:
         - file:bytes
@@ -839,7 +849,7 @@ commands:
       - - --limit
         - type: int
           default: 25
-          help: The max number of files.
+          help: The max number of files (max 1000).
     forms:
       output:
         - file:bytes
@@ -877,7 +887,7 @@ commands:
       - - --share
         - default: false
           action: store_true
-          help: Share the file with the community.
+          help: Share the file with the community (YARAify shares by default, this command does not).
       - - --noclamav
         - default: false
           action: store_true
@@ -889,7 +899,7 @@ commands:
       - - --skipnoisy
         - default: false
           action: store_true
-          help: Skip noisy YARA rules.
+          help: Skip the scan if the file was scanned at least 10 times in the past 24 hours, returning the latest task.
       - - --wait
         - type: int
           default: 0
@@ -927,7 +937,7 @@ commands:
       - - --status
         - type: str
           default: processed
-          choices: [ queued, processed ]
+          choices: [ queued, processed, all ]
           help: The status of the tasks to list.
       - - --new
         - default: false
@@ -1094,22 +1104,23 @@ commands:
     descr: |
       Model an SSL Blacklist (SSLBL) blocklist.
 
-        certs          - Malicious TLS certificates by SHA1, with the listing reason (crypto:x509:cert)
-        ips            - Botnet C2 servers seen in the last 30 days (inet:server)
-        ips-aggressive - Every botnet C2 server ever seen (inet:server)
-        ja3            - Malicious JA3 fingerprints (hash:md5)
+        certs - Malicious TLS certificates by SHA1, with the listing reason (crypto:x509:cert)
+        ja3   - Malicious JA3 fingerprints (hash:md5). SSLBL stopped updating this list in 2021.
+
+      SSLBL's botnet C2 IP lists were deprecated on 2025-01-03, use slib.abusech.feodo or
+      slib.abusech.threatfox.search for C2 IPs.
 
       Examples:
 
         slib.abusech.sslbl certs
 
-        slib.abusech.sslbl ips --yield
+        slib.abusech.sslbl ja3 --yield
     cmdargs:
       - - list
         - type: str
           nargs: "?"
           default: certs
-          choices: [ certs, ips, ips-aggressive, ja3 ]
+          choices: [ certs, ja3 ]
           help: The blocklist to model.
       - - --limit
         - type: int
@@ -1122,8 +1133,6 @@ commands:
     forms:
       output:
         - crypto:x509:cert
-        - inet:server
-        - inet:ipv4
         - hash:md5
 
   # ---- Hunting ----

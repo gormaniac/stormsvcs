@@ -54,8 +54,13 @@ EXPORT_APIS = frozenset(("bazaar:export", "urlhaus:export", "threatfox:export"))
 
 OK_STATUSES = frozenset((
     "ok", "queued", "inserted", "updated", "success", "processing",
+    # Harmless outcomes of writes: the sample/value was already there.
+    "exists", "file_already_known",
 ))
 """``query_status`` values that mean a request succeeded."""
+
+AUTH_STATUSES = frozenset(("unknown_auth_key", "invalid_auth_key", "auth_key_required", "unauthorized"))
+"""``query_status`` values that mean the Auth-Key was missing or rejected."""
 
 MAX_RETRIES = 3
 """How many times to retry a request that receives an HTTP 429 or 503."""
@@ -88,9 +93,35 @@ def isNotFound(status: str | None) -> bool:
     if not status:
         return False
     status = status.lower()
-    if status in ("unknown_query", "unknown_selector"):
+    if status in AUTH_STATUSES or status in ("unknown_query", "unknown_selector", "unknown_operation", "unknown_key"):
         return False
     return status.startswith(("no_result", "unknown_")) or status.endswith("not_found")
+
+
+def checkStatus(base: str, code: int, data: Any, text: str, notfound: bool) -> bool:
+    """Raise for an error response. Returns True if the response means "not found".
+
+    Auth failures always raise. A "not found" raises too when ``notfound`` is False, which
+    writes use so a missing sample isn't reported as a successful update.
+    """
+
+    status = data.get("query_status") if isinstance(data, dict) else None
+    if code in (401, 403) or (status and str(status).lower() in AUTH_STATUSES):
+        mesg = errMesg(code, data, text) if code >= 400 else statusMesg(data)
+        raise AbuseChApiError(f"abuse.ch {base}: {mesg} (check your Auth-Key)", code=code, status=status)
+
+    if isNotFound(status):
+        if notfound:
+            return True
+        raise AbuseChApiError(f"abuse.ch {base}: {statusMesg(data)}", code=code, status=status)
+
+    if code >= 400:
+        raise AbuseChApiError(errMesg(code, data, text), code=code, status=status)
+
+    if status is not None and str(status).lower() not in OK_STATUSES:
+        raise AbuseChApiError(f"abuse.ch {base}: {statusMesg(data)}", code=code, status=status)
+
+    return False
 
 
 def normForm(data: Mapping[str, Any] | None) -> dict[str, str]:
@@ -281,7 +312,9 @@ class AbuseChClient:
             if files:
                 mpart = aiohttp.FormData()
                 for key, valu in normForm(form).items():
-                    mpart.add_field(key, valu)
+                    # abuse.ch's upload APIs expect their options as a JSON part.
+                    ctype = "application/json" if key == "json_data" else None
+                    mpart.add_field(key, valu, content_type=ctype)
                 for key, (name, byts) in files.items():
                     mpart.add_field(key, byts, filename=name, content_type="application/octet-stream")
                 kwargs["data"] = mpart
@@ -318,11 +351,12 @@ class AbuseChClient:
         form: Mapping[str, Any] | None = None,
         json_data: Any = None,
         files: Mapping[str, tuple[str, bytes]] | None = None,
+        notfound: bool = True,
     ) -> dict | None:
         """Call an abuse.ch API that returns JSON with a ``query_status``.
 
         Returns the parsed response, or ``None`` when ``query_status`` says the
-        query matched nothing.
+        query matched nothing (``notfound=False`` raises instead, see ``checkStatus``).
 
         Raises
         ------
@@ -341,16 +375,8 @@ class AbuseChClient:
             if code < 400:
                 raise AbuseChApiError(f"Unable to parse the JSON response from {base}", code=code)
 
-        status = data.get("query_status") if isinstance(data, dict) else None
-        if isNotFound(status):
+        if checkStatus(base, code, data, text, notfound):
             return None
-
-        if code >= 400:
-            raise AbuseChApiError(errMesg(code, data, text), code=code, status=status)
-
-        if status is not None and str(status).lower() not in OK_STATUSES:
-            raise AbuseChApiError(f"abuse.ch {base}: {statusMesg(data)}", code=code, status=status)
-
         return data
 
     async def fetch(
@@ -381,15 +407,6 @@ class AbuseChClient:
             except ValueError:
                 data = None
 
-        status = data.get("query_status") if isinstance(data, dict) else None
-        if isNotFound(status):
+        if checkStatus(base, code, data, body.decode("utf-8", "replace"), notfound=True):
             return b"", ctype
-
-        if code >= 400:
-            raise AbuseChApiError(errMesg(code, data, body.decode("utf-8", "replace")), code=code,
-                                  status=status)
-
-        if status is not None and str(status).lower() not in OK_STATUSES:
-            raise AbuseChApiError(f"abuse.ch {base}: {statusMesg(data)}", code=code, status=status)
-
         return body, ctype

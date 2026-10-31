@@ -44,11 +44,17 @@ class TestLiveDatasets(s_tests.SynTest):
             self.stormHasNoErr(msgs)
             self.stormHasNoWarnErr(msgs)
 
+    async def test_deprecated(self):
+        # SSLBL's C2 IP lists were deprecated, and now only hold a notice saying so.
+        async with liveSvc(self) as (core, svc):
+            text = (await svc.client.fetch("sslbl", "sslipblacklist.csv"))[0].decode()
+            assert "has been deprecated" in text
+
     async def test_sslbl(self):
         async with liveSvc(self) as (core, svc):
             certs = [c async for c in svc.sslblBlocklist("certs", limit=5)]
             assert certs and all(len(c["sha1"]) == 40 for c in certs)
-            for kind in ("certs", "ips", "ja3"):
+            for kind in ("certs", "ja3"):
                 msgs = await core.stormlist(f"slib.abusech.sslbl {kind} --limit 5")
                 self.stormHasNoWarnErr(msgs)
 

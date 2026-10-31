@@ -4,6 +4,15 @@ init {
 
     $references = ({})
     if $cmdopts.link { $references.links = $cmdopts.link }
+    for $ref in $cmdopts.ref {
+        $parts = $ref.split("=", maxsplit=(1))
+        if ($lib.len($parts) != 2) {
+            $lib.raise(BadArg, `slib.abusech.bazaar.submit: --ref must be <type>=<url>, not {$ref}.`)
+        }
+        ($rtype, $rurl) = $parts
+        if ($references.$rtype = $lib.null) { $references.$rtype = ([]) }
+        $references.$rtype.append($rurl)
+    }
     $context = ({})
     if $cmdopts.comment { $context.comment = $cmdopts.comment }
     if $cmdopts.dropped_by { $context.dropped_by_sha256 = $cmdopts.dropped_by }

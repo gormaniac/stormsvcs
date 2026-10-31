@@ -7,7 +7,8 @@ A Synapse Advanced Power-Up (Storm Service) that integrates every abuse.ch platf
 - **ThreatFox** - IOCs (C2s, payload delivery, payloads) shared by the community.
 - **YARAify** - YARA scanning, YARAhub rules, and file lookups.
 - **Feodo Tracker** - botnet C2 blocklists (Dridex, Emotet, TrickBot, QakBot, BazarLoader, ...).
-- **SSL Blacklist (SSLBL)** - malicious TLS certificates, botnet C2 IPs, and JA3 fingerprints.
+- **SSL Blacklist (SSLBL)** - malicious TLS certificates and JA3 fingerprints. (SSLBL's botnet C2 IP lists
+  were deprecated on 2025-01-03, use Feodo Tracker or ThreatFox for C2 IPs.)
 - **Hunting** - the abuse.ch false positive list.
 
 Every API endpoint and dataset is a method on the service, and is exposed through a Storm
@@ -79,32 +80,32 @@ permission. Users still need the normal node permissions for the nodes the comma
 | Command | Description |
 |---|---|
 | `slib.abusech.enrich` | Enrich any supported node from every platform that knows its form (files/hashes, URLs, FQDNs, IPs, servers). `--platform` limits it. |
-| `slib.abusech.bazaar.lookup` | Look up samples by MD5/SHA1/SHA256/SHA3-384 and model everything MalwareBazaar knows. |
-| `slib.abusech.bazaar.search` | Search samples by `tag`, `signature`, `filetype`, `clamav`, `imphash`, `tlsh`, `telfhash`, `gimphash`, `dhash`, `yara`, `issuer`, `subject`, or `recent`. |
+| `slib.abusech.bazaar.lookup` | Look up samples by MD5/SHA1/SHA256 and model everything MalwareBazaar knows. |
+| `slib.abusech.bazaar.search` | Search samples by `tag`, `signature`, `filetype`, `clamav`, `imphash`, `tlsh`, `telfhash`, `gimphash`, `dhash`, `yara`, `issuer`, `subject`, certificate `serial`, `recent`, or recent `detections`. |
 | `slib.abusech.bazaar.cscb` | Model the Code Signing Certificate Blocklist. |
 | `slib.abusech.bazaar.download` | Download samples into the Axon (unzipped). |
-| `slib.abusech.bazaar.submit` | Submit `file:bytes` from the Axon, with tags, delivery method, links, and context. |
-| `slib.abusech.bazaar.update` | Comment on samples, or add information (`--add key=value`) to samples you submitted. |
-| `slib.abusech.bazaar.export` | Model the `recent` or `full` CSV export. |
-| `slib.abusech.urlhaus.lookup` | Look up URLs (or URL IDs), hosts, and payloads. |
+| `slib.abusech.bazaar.submit` | Submit `file:bytes` from the Axon, with tags, delivery method, links, typed references (`--ref any_run=<url>`), and context. |
+| `slib.abusech.bazaar.update` | Comment on samples, or update samples you submitted (`--add add_tag=x`, `--add urlhaus=<url>`, ...). |
+| `slib.abusech.bazaar.export` | Model the `recent` or `full` CSV export, or the `yara` rule statistics. |
+| `slib.abusech.urlhaus.lookup` | Look up URLs (or URL IDs), hosts (FQDNs and IPv4, URLhaus doesn't support IPv6), and payloads. |
 | `slib.abusech.urlhaus.search` | URLs by `tag` or `signature`, and `recent-urls`/`recent-payloads`. |
 | `slib.abusech.urlhaus.download` | Download payloads into the Axon (unzipped). |
 | `slib.abusech.urlhaus.submit` | Report malware URLs. |
-| `slib.abusech.urlhaus.export` | Model the `recent`, `online`, or `full` CSV export. |
-| `slib.abusech.threatfox.lookup` | Look up IOCs by value, ID, or associated sample hash. |
-| `slib.abusech.threatfox.search` | IOCs by `recent` (days), `tag`, or `malware`. |
+| `slib.abusech.urlhaus.export` | Model the `recent`, `online`, or `full` CSV export, or every collected `payloads` URL. |
+| `slib.abusech.threatfox.lookup` | Look up IOCs by value, ID, IP (its `ip:port` C2s), or sample hash (the hash's own IOC and the IOCs associated with the sample). |
+| `slib.abusech.threatfox.search` | IOCs by `recent` (days), `tag`, or `malware`. Returns every match by default. |
 | `slib.abusech.threatfox.ref` | Print the IOC/threat `types`, every `tags` and `malware` family, or find a malware `label`. |
 | `slib.abusech.threatfox.submit` | Share IOCs (`inet:url`, `inet:fqdn`, `inet:server`, `file:bytes`, or `--ioc`). |
 | `slib.abusech.threatfox.export` | Model the `recent` or `full` JSON export. |
 | `slib.abusech.yaraify.lookup` | Look up files by hash, or scan task results by `--task`. |
 | `slib.abusech.yaraify.search` | Files by `yara`, `clamav`, `imphash`, `gimphash`, `dhash`, `tlsh`, or `telfhash`. |
 | `slib.abusech.yaraify.scan` | Scan files from the Axon (or rescan known files by hash), `--wait` models the results. |
-| `slib.abusech.yaraify.tasks` | List the tasks for your identifier, or generate a new one with `--new`. |
+| `slib.abusech.yaraify.tasks` | List the `queued`, `processed`, or `all` tasks for your identifier, or generate a new one with `--new`. |
 | `slib.abusech.yaraify.rules` | Model YARAhub rules, with their text, by `--uuid`, `--recent` rules, your `--deployed` rules, or `--all` shared rules. |
 | `slib.abusech.yaraify.deploy` | Deploy `it:app:yara:rule` nodes (or `--text`) for live hunting, or `--delete` your deployed rules. |
 | `slib.abusech.yaraify.download` | Download (shared) files into the Axon (unzipped), or files YARAify unpacked with `--unpacked`. |
 | `slib.abusech.feodo` | Model the `all`, `recommended`, or `aggressive` C2 blocklist. |
-| `slib.abusech.sslbl` | Model the `certs`, `ips`, `ips-aggressive`, or `ja3` blocklist. |
+| `slib.abusech.sslbl` | Model the `certs` or `ja3` blocklist. |
 | `slib.abusech.fplist` | Model the false positive list (optionally one `--platform`). |
 | `slib.abusech.apikey` | Set/clear your own Auth-Key. |
 | `slib.abusech.admin.apikey` | Set/clear/check the service-wide Auth-Key. |
@@ -157,8 +158,10 @@ the platform's `meta:source` with a `-(seen)>` edge, and has `.seen` updated fro
 | File type, tags, signature, delivery method, origin country | Tags, ex. `#rep.abusech.bazaar.type.exe`, `.agenttesla`, `.delivery.email_attachment`, `.origin.de` |
 | Malware families | `risk:tool:software` (`:soft:name`, `:soft:names` aliases, `:id` Malpedia ID, `:tag` the family's tag), Malpedia link `inet:url -(refs)>` |
 | Reporters | `inet:service:account` (on an `inet:service:platform` per abuse.ch platform) `-(seen)>` the node |
-| ClamAV, vendor intel (ANY.RUN, Triage, ReversingLabs, ...), VirusTotal | `it:av:scan:result` (`:scanner:name`, `:signame`, `:verdict`, `:time`, `:categories`, `:multi:count`, `:multi:count:malicious`), report links as `inet:url -(refs)> file:bytes` |
-| YARA rules and matches | `it:app:yara:rule` (`:name`, `:ext:id` YARAhub UUID, `:author`, `:url`, `:text`, `:created`, `:family`), TLP tag, description/license as a `meta:note`; `it:app:yara:match`. `:text` is only available for rules the author shares (TLP:WHITE), and is replaced when the author updates the rule. |
+| ClamAV, vendor intel, VirusTotal | `it:av:scan:result` (`:scanner:name`, `:signame`, `:verdict`, `:time`, `:categories`, `:multi:count`, `:multi:count:malicious`), report links as `inet:url -(refs)> file:bytes`. Each vendor (ANY.RUN, CAPE, CERT-PL MWDB, DocGuard, FileScan.IO, Intezer, Kaspersky, ReversingLabs, Spamhaus HBL, Triage, UnpacMe, YOROI) is read according to its own fields and scales |
+| Extracted malware configs (Triage) | `it:sec:c2:config` (`:file`, `:family`, `:servers`), the C2 host/server tagged `c2` and the family, `file:bytes -(refs)>` the C2 |
+| File format, architecture, Magika type, OLE flags | Tags, ex. `#rep.abusech.bazaar.format.pe`, `.arch.amd64`, `.magika.pebin`, `.ole.vba_macros`; TrID, OLE details, and olevba findings as `meta:note`s. URLs DocGuard found in a file as `file:bytes -(refs)> inet:url` |
+| YARA rules and matches | `it:app:yara:rule` (`:name`, `:ext:id` YARAhub UUID, `:author`, `:url`, `:text`, `:created`, `:family`), matching and sharing TLP tags, description/license/reference as a `meta:note`; `it:app:yara:match`, including the sample the author wrote the rule for. Matches of non-public rules (masked as "xxx") aren't modeled. `:text` is only available for rules the author shares (TLP:WHITE), and is replaced when the author updates the rule. |
 | Code signing certificates | `crypto:x509:cert` (`:sha256`/`:sha1` thumbprint, `:serial`, `:subject`, `:issuer`, `:validity:*`), `crypto:x509:signedfile`; CSCB listings tagged `#rep.abusech.bazaar.cscb` with the reason as a `meta:note` |
 | Unpacked/related files | `file:subfile` (YARAify/UnpacMe unpacked files), droppers as `file:bytes -(refs)> file:bytes` |
 | Comments, file information, OLE info | `meta:note -(about)>` the node |
@@ -169,10 +172,13 @@ the platform's `meta:source` with a `-(seen)>` edge, and has `.seen` updated fro
 | Feodo Tracker/SSLBL C2s | `inet:server` and `inet:ipv4` tagged `c2`, the family, and `status.<status>`; `inet:ipv4:asn` (with `inet:asn:name`), `:loc`; hostnames as `inet:dns:a` |
 | SSLBL certificates | `crypto:x509:cert:sha1` tagged `c2` and the family, with the listing reason as a `meta:note` |
 | SSLBL JA3 fingerprints | `hash:md5` tagged `ja3` and the family, with the listing reason as a `meta:note` |
-| False positive list | The entry's node tagged `#rep.abusech.hunting.fp` and `.fp.<platform>`, with the removal notes as a `meta:note` |
+| False positive list | The entry's node tagged `#rep.abusech.hunting.fp` and `.fp.<platform>`, with the removal notes as a `meta:note`. A sample's per-hash rows are merged into one `file:bytes` |
+| SHA3-384-only files (ThreatFox IOCs, the false positive list) | `file:bytes` keyed by `:_sha3_384` |
 
-Not modeled: popularity counters (MalwareBazaar download/upload/mail counts, ThreatFox
-credits), URLhaus takedown durations, and links to abuse.ch's own download endpoints. They
+Not modeled: popularity counters (MalwareBazaar download/upload/mail counts, ThreatFox credits
+and sightings, YARAify sightings, MalwareBazaar YARA rule sample counts), URLhaus takedown
+durations, links to abuse.ch's own download endpoints, and certificate signature algorithms
+(Synapse wants an OID). They
 don't describe the indicators themselves, and are still available from the service's methods
 and `slib.abusech.admin.request`.
 
@@ -181,17 +187,17 @@ and `slib.abusech.admin.request`.
 | Platform | Endpoint | Storm |
 |---|---|---|
 | MalwareBazaar | `get_info` | `slib.abusech.bazaar.lookup`, `slib.abusech.enrich` |
-| | `get_taginfo`, `get_siginfo`, `get_file_type`, `get_clamavinfo`, `get_imphash`, `get_tlsh`, `get_telfhash`, `get_gimphash`, `get_dhash_icon`, `get_yarainfo`, `get_issuerinfo`, `get_subjectinfo`, `get_recent` | `slib.abusech.bazaar.search` |
+| | `get_taginfo`, `get_siginfo`, `get_file_type`, `get_clamavinfo`, `get_imphash`, `get_tlsh`, `get_telfhash`, `get_gimphash`, `get_dhash_icon`, `get_yarainfo`, `get_issuerinfo`, `get_subjectinfo`, `get_certificate`, `get_recent`, `recent_detections` | `slib.abusech.bazaar.search` |
 | | `get_cscb` | `slib.abusech.bazaar.cscb` |
 | | `get_file` | `slib.abusech.bazaar.download` |
 | | Sample upload | `slib.abusech.bazaar.submit` |
 | | `update`, `add_comment` | `slib.abusech.bazaar.update` |
-| | CSV exports (`recent.csv`, `full.csv.zip`) | `slib.abusech.bazaar.export` |
+| | Exports (`recent.csv`, `full.csv.zip`, `yara_rules.json`) | `slib.abusech.bazaar.export` |
 | URLhaus | `/url/`, `/urlid/`, `/host/`, `/payload/` | `slib.abusech.urlhaus.lookup`, `slib.abusech.enrich` |
 | | `/tag/`, `/signature/`, `/urls/recent/`, `/payloads/recent/` | `slib.abusech.urlhaus.search` |
 | | `/download/{sha256}/` | `slib.abusech.urlhaus.download` |
 | | URL submission | `slib.abusech.urlhaus.submit` |
-| | CSV exports (`recent.csv`, `online.csv`, `full.csv.zip`) | `slib.abusech.urlhaus.export` |
+| | Exports (`recent.csv`, `online.csv`, `full.csv.zip`, `payload.csv.zip`) | `slib.abusech.urlhaus.export` |
 | ThreatFox | `search_ioc`, `search_hash`, `ioc` | `slib.abusech.threatfox.lookup`, `slib.abusech.enrich` |
 | | `get_iocs`, `taginfo`, `malwareinfo` | `slib.abusech.threatfox.search` |
 | | `types`, `tag_list`, `malware_list`, `get_label` | `slib.abusech.threatfox.ref` |
@@ -204,10 +210,16 @@ and `slib.abusech.admin.request`.
 | | `get_yara_rule`, `recent_yararules`, `show_deployed_yara_rules`, the YARAhub rule export | `slib.abusech.yaraify.rules` |
 | | YARA rule upload, `delete_yara_rule` | `slib.abusech.yaraify.deploy` |
 | | `get_file`, `get_unpacked` | `slib.abusech.yaraify.download` |
-| Feodo Tracker | `ipblocklist.json`, `ipblocklist_recommended.txt`, `ipblocklist_aggressive.csv` | `slib.abusech.feodo` |
-| SSL Blacklist | `sslblacklist.csv`, `sslipblacklist.csv`, `sslipblacklist_aggressive.csv`, `ja3_fingerprints.csv` | `slib.abusech.sslbl` |
+| Feodo Tracker | `ipblocklist.json`, `ipblocklist_recommended.json`, `ipblocklist_aggressive.csv` | `slib.abusech.feodo` |
+| SSL Blacklist | `sslblacklist.csv`, `ja3_fingerprints.csv` | `slib.abusech.sslbl` |
 | Hunting | `get_fplist` | `slib.abusech.fplist` |
 | Any | Anything else | `slib.abusech.admin.request` |
+
+Datasets that are left out on purpose, because another dataset above has the same (or more) data,
+or they aren't data to model: the plain-text hash/URL/IP lists and hostfile/RPZ/MISP/Suricata/Snort/
+ClamAV/vendor-firewall formats of every platform, the other URLhaus/ThreatFox CSV/JSON variants, the
+MalwareBazaar code signing blocklist CSV (`get_cscb` has the same data), and the hourly/daily malware
+sample batches (bulk zips of live malware).
 
 ## Development
 

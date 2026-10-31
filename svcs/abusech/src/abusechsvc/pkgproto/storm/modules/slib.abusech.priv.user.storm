@@ -34,6 +34,7 @@ function tagPrefix() {
 function bazaarInfo(sha) { return($svc.normBazaarInfo($sha, apikey=$userKey())) }
 function bazaarSearch(by, valu, limit=(100)) { return($svc.normBazaarSearch($by, $valu, limit=$limit, apikey=$userKey())) }
 function bazaarRecent(selector=time) { return($svc.normBazaarRecent($selector, apikey=$userKey())) }
+function bazaarDetections(hours=(48)) { return($svc.normBazaarDetections($hours, apikey=$userKey())) }
 function bazaarCscb() { return($svc.normBazaarCscb(apikey=$userKey())) }
 function bazaarExport(kind=recent, limit=(0)) {
     for $retn in $svc.bazaarExport(kind=$kind, limit=$limit, apikey=$userKey()) { emit $retn }

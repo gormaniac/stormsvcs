@@ -2,7 +2,12 @@ init {
     $abusech = $lib.import(slib.abusech.lib)
     $model = $lib.import(slib.abusech.model)
 
-    if ($cmdopts.by = "recent") {
+    if ($cmdopts.by = "detections") {
+        $hours = (48)
+        if $cmdopts.value { $hours = $lib.cast(int, $cmdopts.value) }
+        $files = $abusech.bazaarDetections($hours)
+    }
+    elif ($cmdopts.by = "recent") {
         $selector = "time"
         if $cmdopts.value { $selector = $cmdopts.value }
         $files = $abusech.bazaarRecent($selector)

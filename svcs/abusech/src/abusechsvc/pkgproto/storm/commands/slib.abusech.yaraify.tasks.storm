@@ -14,7 +14,9 @@ init {
         $lib.raise(BadArg, "slib.abusech.yaraify.tasks requires an identifier (or --new).")
     }
     else {
-        $retn = $priv.yaraifyTasks($cmdopts.identifier, status=$cmdopts.status)
+        $status = $cmdopts.status
+        if ($status = "all") { $status = $lib.null }
+        $retn = $priv.yaraifyTasks($cmdopts.identifier, status=$status)
         if (not $util.failed($retn, "Listing YARAify tasks")) {
             $rows = ([])
             for $task in $retn.data {

@@ -24,7 +24,9 @@ init {
             }
             "file:bytes": {
                 if $props.sha256 { return(($props.sha256, "sha256_hash")) }
+                if $props.sha1 { return(($props.sha1, "sha1_hash")) }
                 if $props.md5 { return(($props.md5, "md5_hash")) }
+                if $props._sha3_384 { return(($props._sha3_384, "sha3_384_hash")) }
             }
         }
         return(($lib.null, $lib.null))

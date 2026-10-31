@@ -89,6 +89,7 @@ BAZAAR_INFO = {
             "reference": "https://bazaar.abuse.ch/browse/signature/AgentTesla/",
         },
     ],
+    # Shaped like the live vendor_intel of real samples (2026-10).
     "vendor_intel": {
         "ANY.RUN": [
             {
@@ -96,8 +97,8 @@ BAZAAR_INFO = {
                 "verdict": "Malicious activity",
                 "file_name": "invoice.exe",
                 "date": "2026-10-01 12:05:00",
-                "tags": ["agenttesla", "trojan"],
                 "analysis_url": "https://app.any.run/tasks/1234",
+                "tags": ["agenttesla", "trojan"],
             },
         ],
         "Triage": {
@@ -105,7 +106,11 @@ BAZAAR_INFO = {
             "score": "10",
             "link": "https://tria.ge/reports/1234/",
             "tags": ["family:agenttesla", "keylogger"],
-            "signatures": [{"signature": "AgentTesla", "score": "10"}],
+            "signatures": [{"signature": "AgentTesla", "score": "10"}, {"signature": "Reads local data", "score": None}],
+            "malware_config": [
+                {"extraction": "c2", "family": "agenttesla", "c2": "c2.example.org:587"},
+                {"extraction": "c2", "family": "agenttesla", "c2": "9.8.7.6:2929"},
+            ],
         },
         "ReversingLabs": {
             "threat_name": "Win32.Trojan.AgentTesla",
@@ -114,17 +119,34 @@ BAZAAR_INFO = {
             "scanner_count": "50",
             "scanner_match": "40",
             "scanner_percent": "80.0",
-            "report_link": "https://a1000.reversinglabs.com/1234",
         },
         "UnpacMe": [
-            {
-                "sha256_hash": UNPACKED,
-                "md5_hash": "9" * 32,
-                "sha1_hash": "8" * 40,
-                "detections": ["AgentTesla"],
-                "link": "https://www.unpac.me/results/1234",
-            },
+            # UnpacMe lists the sample itself, then the files it unpacked.
+            {"sha256_hash": SHA256, "md5_hash": MD5, "sha1_hash": SHA1, "detections": [],
+             "link": "https://www.unpac.me/results/1234/"},
+            {"sha256_hash": UNPACKED, "md5_hash": "9" * 32, "sha1_hash": "8" * 40, "detections": ["AgentTesla"],
+             "link": "https://www.unpac.me/results/1234/"},
         ],
+        "YOROI_YOMI": {"detection": "Legit File", "score": "0.10"},
+        "Spamhaus_HBL": [{"detection": "suspicious", "link": "https://www.spamhaus.org/hbl/"}],
+        "FileScan-IO": {"verdict": "NO_THREAT", "threatlevel": "0.0", "confidence": "1.0",
+                        "report_link": "https://www.filescan.io/uploads/1/reports/2/overview"},
+        "CAPE": {"detection": "AgentTesla", "link": "https://www.capesandbox.com/analysis/96328/"},
+        "CERT-PL_MWDB": {"detection": None, "link": "https://mwdb.cert.pl/sample/x/"},
+        "Kaspersky": {"verdict": "Malware", "file_type": "exe x64", "first_seen": "2026-10-01T12:00:00Z",
+                      "last_seen": "2026-10-02T00:00:00Z", "hitscount": 10,
+                      "report_link": "https://opentip.kaspersky.com/x/results", "detections": []},
+        "DocGuard": {"verdict": "Malicious", "filetype": "JS File - Malicious", "alertlevel": "0",
+                     "urls": ["http://docguard.example.net/payload.bin"]},
+    },
+    "file_format": "pe",
+    "file_arch": "amd64",
+    "magika": "pebin",
+    "trid": ["44.6% (.EXE) Win64 Executable (generic) (6522/11/2)"],
+    "ole_information": {
+        "oleid": {"file_format": "MS Excel 97-2003", "container_format": "OLE", "application_name": "Microsoft Excel",
+                  "author": None, "encrypted": True, "vba_macros": True, "xlm_macros": None, "maldoc_score": 9},
+        "olevba": [{"type": "Suspicious", "keyword": "Hex Strings", "description": "Hex-encoded strings were detected"}],
     },
     "comments": [
         {"id": "1", "date_added": "2026-10-01 13:00:00", "twitter_handle": "analyst", "display_name": "Analyst",
@@ -387,7 +409,11 @@ YARAIFY_FILE = {
                     "unpacked_file_name": "unpacked.bin",
                     "unpacked_md5": "9" * 32,
                     "unpacked_sha256": UNPACKED,
-                    "unpacked_yara_matches": [{"rule_name": "AgentTesla_Unpacked", "author": "abuse.ch"}],
+                    "unpacked_yara_matches": [
+                        {"rule_name": "AgentTesla_Unpacked", "author": "abuse.ch"},
+                        # Matches of non-public rules are masked.
+                        {"rule_name": "xxx", "author": "xxx", "yarahub_uuid": "xxx"},
+                    ],
                 },
             ],
         },
@@ -419,6 +445,15 @@ private rule helper_rule {
 }
 """
 
+# get_results puts one task's results at the top level, next to the file's metadata.
+YARAIFY_RESULTS = {
+    "metadata": YARAIFY_FILE["metadata"],
+    "yaraify_parameters": {"clamav_scan": 1, "unpack": 1, "share_file": 0},
+    "static_results": YARAIFY_FILE["tasks"][0]["static_results"],
+    "clamav_results": ["Win.Packed.Generic-1"],
+    "unpack_results": YARAIFY_FILE["tasks"][0]["unpacker_results"],
+}
+
 # recent_yararules and show_deployed_yara_rules only list rule metadata, never the text.
 YARAIFY_RECENT_RULES = [
     {"time_stamp": "2026-10-01 00:00:00", "rule_name": "New_Rule_1", "author": "someone",
@@ -444,11 +479,23 @@ YARA_RULES = {
     "11111111-2222-3333-4444-555555555555": NEW_RULE_TEXT,
 }
 
+# Shaped like the live list: a flat dict keyed by ID (no query_status/data wrapper), with a
+# sample listed once per hash type on consecutive rows, and some entries without a value.
 FPLIST = {
-    "1": {"time_stamp": "2026-01-01 00:00:00 UTC", "platform": "MalwareBazaar", "entry_type": "sha256_hash",
+    "1": {"time_stamp": "2026-01-01 00:00:00 UTC", "platform": "MalwareBazaar", "entry_type": "md5",
+          "entry_value": "0" * 32, "removed_by": "admin", "removal_notes": "Legitimate installer"},
+    "2": {"time_stamp": "2026-01-01 00:00:00 UTC", "platform": "MalwareBazaar", "entry_type": "sha1",
+          "entry_value": "0" * 40, "removed_by": "admin", "removal_notes": "Legitimate installer"},
+    "3": {"time_stamp": "2026-01-01 00:00:00 UTC", "platform": "MalwareBazaar", "entry_type": "sha256",
           "entry_value": "0" * 64, "removed_by": "admin", "removal_notes": "Legitimate installer"},
-    "2": {"time_stamp": "2026-01-02 00:00:00 UTC", "platform": "URLhaus", "entry_type": "domain",
+    "4": {"time_stamp": "2026-01-01 00:00:00 UTC", "platform": "MalwareBazaar", "entry_type": "sha3_384",
+          "entry_value": "0" * 96, "removed_by": "admin", "removal_notes": "Legitimate installer"},
+    "5": {"time_stamp": "2026-01-02 00:00:00 UTC", "platform": "URLhaus", "entry_type": "domain",
           "entry_value": "legit.example.com", "removed_by": "admin", "removal_notes": None},
+    "6": {"time_stamp": "2026-01-03 00:00:00 UTC", "platform": "ThreatFox", "entry_type": "sha3_384",
+          "entry_value": "1" * 96, "removed_by": "admin", "removal_notes": "Only a SHA3-384"},
+    "7": {"time_stamp": "2026-01-04 00:00:00 UTC", "platform": "URLhaus", "entry_type": "url",
+          "entry_value": "", "removed_by": "admin", "removal_notes": None},
 }
 
 FEODO_JSON = [
@@ -459,7 +506,7 @@ FEODO_JSON = [
      "as_name": "CHINANET", "country": "CN", "first_seen": "2026-07-01 00:00:00", "last_online": "2026-08-01",
      "malware": "Emotet"},
 ]
-FEODO_RECOMMENDED = "# Feodo Tracker recommended\n50.16.16.211\n70.1.2.3\n"
+FEODO_RECOMMENDED = [FEODO_JSON[0]]
 FEODO_AGGRESSIVE = (
     "################################################################\n"
     '# first_seen_utc,dst_ip,dst_port,c2_status,last_online,malware\n'
@@ -472,15 +519,24 @@ SSLBL_CERTS = (
     "2026-10-01 00:00:00,1111111111111111111111111111111111111111,Dridex C&C\n"
     "2026-09-01 00:00:00,2222222222222222222222222222222222222222,AsyncRAT C&C\n"
 )
+# The live IP lists only hold this notice now.
 SSLBL_IPS = (
-    "# abuse.ch SSLBL Botnet C2 IP Blacklist (CSV)\n"
-    "# Firstseen,DstIP,DstPort\n"
-    "2026-10-01 00:00:00,90.1.2.3,443\n"
+    "################################################################\n"
+    "# ATTENTION: This list has been deprecated on 2025-01-03       #\n"
+    "################################################################\n"
 )
 SSLBL_JA3 = (
     "# ja3_md5,Firstseen,Lastseen,Listingreason\n"
     "51c64c77e60f3980eea90869b68c58a8,2017-07-14 18:08:15,2019-07-27 20:42:54,Dridex\n"
 )
+
+BAZAAR_YARA_STATS = {
+    "1": [{"sample_cnt": 117065, "yara_rule_name": "unixredflags3", "yara_rule_author": "Tim Brown @timb_machine",
+           "yara_rule_reference": None, "yara_rule_description": "Hunts for UNIX red flags",
+           "last_hit_utc": "2026-10-31 04:27:16"}],
+    "2": [{"sample_cnt": 107053, "yara_rule_name": "pe_imphash", "yara_rule_author": None,
+           "yara_rule_reference": None, "yara_rule_description": None, "last_hit_utc": "2026-10-31 03:27:20"}],
+}
 
 BAZAAR_CSV = (
     '################################################################\n'
@@ -491,6 +547,13 @@ BAZAAR_CSV = (
     '"f34d5f2d4577ed6d9ceec516c1f5a744", "24576:abcdefg:hijklmn", "T1A2B3C4D5E6F7"\n'
     f'"2026-10-01 13:00:00", "{"b" * 64}", "{"b" * 32}", "{"b" * 40}", "anonymous", "a.zip", "zip", '
     '"application/zip", "n/a", "n/a", "n/a", "n/a", "n/a", "n/a"\n'
+)
+
+URLHAUS_PAYLOAD_CSV = (
+    "################################################################\n"
+    "# abuse.ch URLhaus Collected Payloads\n"
+    "# firstseen,url,filetype,md5,sha256\n"
+    f'"2026-10-01 10:00:00","http://evil.example.com/bins/mozi.m","elf","{PAYLOAD_MD5}","{PAYLOAD}"\n'
 )
 
 URLHAUS_CSV = (
@@ -593,6 +656,8 @@ class FakeAbuseCh:
 
         if info["authkey"] is None and base in ("bazaar", "urlhaus", "threatfox", "yaraify", "hunting"):
             return self._json({"query_status": "unauthorized"}, status=401)
+        if info["authkey"] == "badkey":
+            return self._json({"query_status": "unknown_auth_key"}, status=403)
 
         handler = getattr(self, f"_{base.replace(':', '_')}")
         return await handler(request, info, path, query)
@@ -608,18 +673,22 @@ class FakeAbuseCh:
                 return self._json({"query_status": "hash_not_found"})
             case "get_taginfo" | "get_siginfo" | "get_file_type" | "get_clamavinfo" | "get_imphash" | \
                  "get_tlsh" | "get_telfhash" | "get_gimphash" | "get_dhash_icon" | "get_yarainfo" | \
-                 "get_issuerinfo" | "get_subjectinfo" | "get_recent":
+                 "get_issuerinfo" | "get_subjectinfo" | "get_certificate" | "get_recent":
                 if "nothing" in form.values():
                     return self._json({"query_status": "no_results"})
                 return self._json(ok(BAZAAR_LIST))
             case "get_cscb":
                 return self._json(ok(CSCB))
+            case "recent_detections":
+                return self._json(ok(BAZAAR_LIST[:1]))
             case "get_file":
                 if form.get("sha256_hash") == SAMPLE_SHA256:
                     return web.Response(body=mkzip({f"{SAMPLE_SHA256}.exe": SAMPLE_BYTES}, b"infected"),
                                         content_type="application/zip")
                 return self._json({"query_status": "file_not_found"})
             case "update" | "add_comment":
+                if form.get("sha256_hash") != SHA256:
+                    return self._json({"query_status": "hash_not_found"})
                 return self._json({"query_status": "success"})
         return self._json({"query_status": "unknown_query"})
 
@@ -636,6 +705,8 @@ class FakeAbuseCh:
             return web.Response(body=mkzip({"full.csv": BAZAAR_CSV.encode()}), content_type="application/zip")
         if name == "recent.csv":
             return web.Response(text=BAZAAR_CSV)
+        if name == "yara_rules.json":
+            return self._json(BAZAAR_YARA_STATS)
         return self._json({"status": 404, "message": "Invalid export file name"}, status=404)
 
     async def _urlhaus(self, request, info, path, query):
@@ -647,6 +718,8 @@ class FakeAbuseCh:
         if path == "urlid/":
             return self._json(URLHAUS_URL if form.get("urlid") == "105821" else {"query_status": "no_results"})
         if path == "host/":
+            if ":" in (form.get("host") or ""):
+                return self._json({"query_status": "invalid_host"})
             if form.get("host") == "1.2.3.4":
                 return self._json(URLHAUS_HOST)
             return self._json({"query_status": "no_results"})
@@ -679,6 +752,8 @@ class FakeAbuseCh:
             return web.Response(body=mkzip({"csv.txt": URLHAUS_CSV.encode()}), content_type="application/zip")
         if name in ("recent.csv", "online.csv"):
             return web.Response(text=URLHAUS_CSV)
+        if name == "payload.csv.zip":
+            return web.Response(body=mkzip({"payload.txt": URLHAUS_PAYLOAD_CSV.encode()}), content_type="application/zip")
         return self._json({"status": 404, "message": "Invalid export file name"}, status=404)
 
     async def _threatfox(self, request, info, path, query):
@@ -687,14 +762,21 @@ class FakeAbuseCh:
             case "get_iocs":
                 return self._json(ok([THREATFOX_IOC, THREATFOX_IPPORT]))
             case "ioc":
-                return self._json(ok(THREATFOX_IOC) if body.get("id") == 41 else {"query_status": "no_result"})
+                # The live ioc query returns the IOC itself, without the query_status/data wrapper.
+                if body.get("id") == 41:
+                    return self._json(dict(THREATFOX_IOC, sightings=3))
+                return self._json({"query_status": "unknown_ioc_id"})
             case "search_ioc":
                 term = body.get("search_term")
-                for item in (THREATFOX_IOC, THREATFOX_IPPORT, THREATFOX_URL):
-                    if item["ioc"] == term:
-                        return self._json(ok([item]))
-                return self._json({"query_status": "no_result"})
+                items = (THREATFOX_IOC, THREATFOX_IPPORT, THREATFOX_URL, THREATFOX_HASH)
+                if body.get("exact_match"):
+                    found = [i for i in items if i["ioc"] == term]
+                else:
+                    found = [i for i in items if term in i["ioc"]]
+                return self._json(ok(found) if found else {"query_status": "no_result"})
             case "search_hash":
+                if len(body.get("hash") or "") not in (32, 64):
+                    return self._json({"query_status": "illegal_hash"})
                 if body.get("hash") in (SHA256, MD5):
                     return self._json(ok([THREATFOX_IOC, THREATFOX_HASH]))
                 return self._json({"query_status": "no_result"})
@@ -746,7 +828,9 @@ class FakeAbuseCh:
             case "get_results":
                 if body.get("task_id") == "queued-task":
                     return self._json(ok("queued"))
-                return self._json(ok(YARAIFY_FILE))
+                if body.get("task_id") == "unknown-task":
+                    return self._json({"query_status": "error", "data": "unknown_task_id"})
+                return self._json(ok(YARAIFY_RESULTS))
             case "list_tasks":
                 return self._json(ok([dict(YARAIFY_FILE["tasks"][0], sha256_hash=SHA256)]))
             case "generate_identifier":
@@ -777,14 +861,14 @@ class FakeAbuseCh:
                             content_type="application/zip")
 
     async def _hunting(self, request, info, path, query):
-        return self._json(ok(FPLIST))
+        return self._json(FPLIST)
 
     async def _feodo(self, request, info, path, query):
         match path:
             case "ipblocklist.json":
                 return self._json(FEODO_JSON)
-            case "ipblocklist_recommended.txt":
-                return web.Response(text=FEODO_RECOMMENDED)
+            case "ipblocklist_recommended.json":
+                return self._json(FEODO_RECOMMENDED)
             case "ipblocklist_aggressive.csv":
                 return web.Response(text=FEODO_AGGRESSIVE)
         return web.Response(status=404)

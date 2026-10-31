@@ -185,19 +185,25 @@ function fileNode(hashes, plat, first=$lib.null, last=$lib.null) {
         $existing = $lib.null
         $sha1 = $hashes.sha1
         $md5 = $hashes.md5
+        $sha3 = $hashes.sha3_384
         if $sha1 {
             for $n in ${ file:bytes:sha1=$sha1 } { $existing = $n break }
         }
         if ($existing = $lib.null and $md5) {
             for $n in ${ file:bytes:md5=$md5 } { $existing = $n break }
         }
+        if ($existing = $lib.null and $sha3 and $lib.model.prop("file:bytes:_sha3_384")) {
+            for $n in ${ file:bytes:_sha3_384=$sha3 } { $existing = $n break }
+        }
         if $existing { yield $existing }
-        elif $hashes.sha1 { [ file:bytes=`guid:{$lib.guid(sha1, $hashes.sha1)}` ] }
-        elif $hashes.md5 { [ file:bytes=`guid:{$lib.guid(md5, $hashes.md5)}` ] }
+        elif $sha1 { [ file:bytes=`guid:{$lib.guid(sha1, $sha1)}` ] }
+        elif $md5 { [ file:bytes=`guid:{$lib.guid(md5, $md5)}` ] }
+        elif $sha3 { [ file:bytes=`guid:{$lib.guid(sha3_384, $sha3)}` ] }
         else { return($lib.null) }
     }
     [ :md5 ?= $hashes.md5 :sha1 ?= $hashes.sha1 :sha256 ?= $hashes.sha256 ]
-    return($seen($node, $plat, $first, $last))
+    $file = $seen($node, $plat, $first, $last)
+    return($setProp($file, "_sha3_384", $hashes.sha3_384))
 }
 
 function fileProps(n, s) {
@@ -278,6 +284,9 @@ function rule(r, plat) {
     $rulenode = $seen($node, $plat, $r.time)
 
     if $r.tlp { $tagNode($rulenode, $plat, (`tlp.{$r.tlp}`,)) }
+    if $r.sharing_tlp { $tagNode($rulenode, $plat, (`sharing.{$r.sharing_tlp}`,)) }
+    // The sample the author wrote the rule for.
+    if $r.refmd5 { $yaraMatch($rulenode, $fileNode(({"md5": $r.refmd5}), $plat), $plat) }
     $desc = $r.desc
     if $r.license {
         if $desc { $desc = `{$desc}
@@ -319,7 +328,32 @@ function scan(file, sc, plat) {
             $tagNode($childnode, $plat, $child.families)
         }
     }
+
+    // C2s from the malware config the vendor extracted, and URLs it found in the file.
+    for $c2 in $sc.c2s { $c2config($file, $c2, $plat) }
+    for $u in $sc.urls { $edge($file, refs, $urlNode($u, $plat)) }
     return($scannode)
+}
+
+// A C2 from an extracted malware config (see norm.normC2Config), as an it:sec:c2:config for the
+// file with the C2 in :servers, and the C2 host/server tagged c2 and with the family.
+function c2config(file, c, plat) {
+    $srv = $obsNode($c.obs, $plat)
+    if $srv {
+        $tagNode($srv, $plat, (c2, $c.family_tag))
+        $edge($file, refs, $srv)
+    }
+    $cfg = $c2ConfigNode($file, $c, $plat)
+    if $c.url { $addArrayValu($cfg, servers, $c.url) }
+    if $c.family { $family($plat, $c.family, $c.family_tag) }
+    return($cfg)
+}
+
+function c2ConfigNode(file, c, plat) {
+    $props = ({"file": $file.value()})
+    if $c.family { $props.family = $c.family }
+    [ it:sec:c2:config=$props ]
+    return($seen($node, $plat))
 }
 
 function scanNode(file, sc, plat) {
@@ -401,6 +435,7 @@ function sample(s, plat) {
     if $s.type { $tagNode($file, $plat, (`type.{$s.type}`,)) }
     if $s.delivery_method { $tagNode($file, $plat, (`delivery.{$s.delivery_method}`,), $first) }
     if $s.origin_country { $tagNode($file, $plat, (`origin.{$s.origin_country}`,), $first) }
+    $tagNode($file, $plat, $s.attrs)
 
     if $s.signature { $family($plat, $s.signature, $s.families.0) }
     $reporter($s.reporter, $file, $plat)
@@ -442,7 +477,7 @@ function sample(s, plat) {
     // URLhaus payload lookups include the URLs that served the payload.
     for $u in $s.urls {
         $urlnode = $url($u, $plat)
-        $urlfile($urlnode, $file, $plat, $u.seen)
+        $urlfile($urlnode, $file, $plat, $u.seen, $u.last_seen)
     }
 
     return($file)
@@ -453,10 +488,10 @@ function passwdNode(passwd) {
     return($node)
 }
 
-function urlfile(urlnode, file, plat, time=$lib.null) {
+function urlfile(urlnode, file, plat, time=$lib.null, last=$lib.null) {
     if ($urlnode = $lib.null or $file = $lib.null) { return($lib.null) }
     [ inet:urlfile=($urlnode, $file) ]
-    return($seen($node, $plat, $time))
+    return($seen($node, $plat, $time, $last))
 }
 
 // The host of a URLhaus URL or host lookup, tagged with its blacklist listings.
@@ -486,7 +521,7 @@ function url(u, plat=urlhaus) {
 
     for $p in $u.payloads {
         $file = $sample($p, $plat)
-        $urlfile($urlnode, $file, $plat, $p.seen)
+        $urlfile($urlnode, $file, $plat, $p.seen, $p.last)
     }
     return($urlnode)
 }
@@ -528,6 +563,7 @@ function ioc(i, plat=threatfox) {
     for $s in $i.samples {
         $file = $sample($s, $plat)
         $edge($file, refs, $obsnode)
+        if $i.family_tag { $tagNode($file, $plat, ($i.family_tag,), $s.seen) }
     }
     return($obsnode)
 }
