@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import os
+import shutil
 import sys
 
 import synapse.common as s_common
@@ -204,6 +205,51 @@ class TestCapaSvc(s_tests.SynTest):
                 with self.raises(CapaSvcError) as cm:
                     await svc.rulesInfo()
                 assert "has no rules" in cm.exception.mesg
+
+            # An unreadable rule doesn't stop the service from starting either.
+            with open(os.path.join(dirn, "rule.yml"), "wb") as fd:
+                fd.write(b"\xff\xfe")
+            async with self.getTestCell(CapaSvc, {"capa:rules": dirn}) as svc:
+                with self.raises(CapaSvcError) as cm:
+                    await svc.rulesInfo()
+                assert "Unable to read the capa rule rule.yml" in cm.exception.mesg
+
+    async def test_rules_changed(self):
+        # Scans refuse to run with rules on disk that aren't the loaded rules.
+        with self.getTestDir() as dirn:
+            rules = os.path.join(dirn, "rules")
+            shutil.copytree(RULES, rules)
+            async with self.getTestAxon() as axon:
+                await axon.put(SAMPLE)
+                async with self.getTestCell(CapaSvc, svcConf(axon, **{"capa:rules": rules})) as svc:
+                    extra = os.path.join(rules, "testing", "never.yml")
+                    with open(extra, "a") as fd:
+                        fd.write("# changed\n")
+
+                    with self.raises(CapaSvcError) as cm:
+                        await svc.scan(SAMPLE_SHA256, fmt="sc64")
+                    assert "changed since the service loaded them" in cm.exception.mesg
+
+                    os.unlink(extra)
+                    with self.raises(CapaSvcError) as cm:
+                        await svc.scan(SAMPLE_SHA256, fmt="sc64")
+                    assert "changed since the service loaded them" in cm.exception.mesg
+
+                    shutil.rmtree(rules)
+                    with self.raises(CapaSvcError) as cm:
+                        await svc.scan(SAMPLE_SHA256, fmt="sc64")
+                    assert "The capa rules on disk can't be read" in cm.exception.mesg
+
+    async def test_cache_lock(self):
+        # Rule cache builds run one at a time, and scans wait for the latest one.
+        async with self.getTestCell(CapaSvc, svcConf()) as svc:
+            await waitProcs(svc)
+            async with svc.cacheLock:
+                await svc.reload()
+                await asyncio.sleep(0.2)
+                assert not svc.cacheReady.is_set()
+                assert not svc.procs
+            await asyncio.wait_for(svc.cacheReady.wait(), timeout=60)
 
     async def test_leftovers(self):
         with self.getTestDir() as dirn:

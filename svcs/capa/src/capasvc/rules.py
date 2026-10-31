@@ -140,6 +140,57 @@ def ruleMeta(meta: dict[str, Any]) -> dict[str, Any]:
     return norm(meta)
 
 
+def readRules(path: str) -> list[tuple[str, str]]:
+    """Read every rule file in a capa rules directory.
+
+    Returns
+    -------
+    list[tuple[str, str]]
+        The ``(path, text)`` of every rule, sorted by path (relative to the directory).
+
+    Raises
+    ------
+    CapaRulesError
+        If the directory is missing, has no rules, or a rule can't be read as UTF-8.
+    """
+
+    root = Path(path)
+    if not root.is_dir():
+        raise CapaRulesError(f"The capa rules directory {path} does not exist.")
+
+    try:
+        paths = sorted(capa.rules.collect_rule_file_paths([root]))
+    except OSError as err:
+        raise CapaRulesError(f"Unable to read the capa rules directory {path}: {err}") from None
+    if not paths:
+        raise CapaRulesError(f"The capa rules directory {path} has no rules.")
+
+    files = []
+    for rpath in paths:
+        relpath = rpath.relative_to(root).as_posix()
+        try:
+            text = rpath.read_bytes().decode("utf-8")
+        except (OSError, UnicodeDecodeError) as err:
+            raise CapaRulesError(f"Unable to read the capa rule {relpath}: {err}") from None
+        files.append((relpath, text))
+    return files
+
+
+def hashRules(files: list[tuple[str, str]]) -> str:
+    """The SHA256 of a rules directory's rules (see ``readRules``), their paths and contents."""
+
+    hasher = hashlib.sha256()
+    for relpath, text in files:
+        hasher.update(relpath.encode() + b"\x00" + text.encode() + b"\x00")
+    return hasher.hexdigest()
+
+
+def rulesSha256(path: str) -> str:
+    """The SHA256 of the rules in a capa rules directory, as they are on disk now."""
+
+    return hashRules(readRules(path))
+
+
 class CapaRules:
     """A loaded capa rules directory and the Synapse records for its rules and namespaces.
 
@@ -169,24 +220,14 @@ class CapaRules:
         Raises
         ------
         CapaRulesError
-            If the directory is missing, has no rules, has an invalid rule, or has
-            two rules with the same name.
+            If the directory is missing, has no rules, has an unreadable or invalid rule,
+            or has two rules with the same name.
         """
 
-        root = Path(self.path)
-        if not root.is_dir():
-            raise CapaRulesError(f"The capa rules directory {self.path} does not exist.")
+        files = readRules(self.path)
 
-        paths = sorted(capa.rules.collect_rule_file_paths([root]))
-        if not paths:
-            raise CapaRulesError(f"The capa rules directory {self.path} has no rules.")
-
-        hasher = hashlib.sha256()
         rules = {}
-        for rpath in paths:
-            text = rpath.read_bytes().decode("utf-8")
-            relpath = rpath.relative_to(root).as_posix()
-            hasher.update(relpath.encode() + b"\x00" + text.encode() + b"\x00")
+        for relpath, text in files:
             try:
                 rule = capa.rules.Rule.from_yaml(text)
             except Exception as err:
@@ -200,7 +241,7 @@ class CapaRules:
             rules[rule.name] = self.ruleRecord(rule.meta, text, relpath)
 
         self.rules = rules
-        self.sha256 = hasher.hexdigest()
+        self.sha256 = hashRules(files)
 
     def url(self, relpath: str) -> str | None:
         """The URL that documents a rule, by its path relative to the rules directory."""
@@ -237,6 +278,8 @@ class CapaRules:
             "path": self.path,
             "version": self.version,
             "sha256": self.sha256,
+            # Changes when anything slib.capa.sync models from the rules changes.
+            "key": s_common.guid((self.sha256, self.version, self.urlfmt)),
             "ruleset": rulesetGuid(self.version),
             "rules": len(self.rules),
             "lib": sum(1 for r in self.rules.values() if r["lib"]),

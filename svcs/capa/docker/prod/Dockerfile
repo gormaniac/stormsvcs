@@ -1,5 +1,5 @@
 # Fetch the capa rules and FLIRT signatures that match the version of capa in uv.lock.
-# The release tag and commits are pinned, tests/test_capa.py checks CAPA_VERSION matches.
+# The release tag and commits are pinned, tests/test_rules.py checks CAPA_VERSION matches.
 FROM alpine:3.22 AS capa-data
 
 ARG CAPA_VERSION=v10.0.0

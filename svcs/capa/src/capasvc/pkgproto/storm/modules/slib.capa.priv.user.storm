@@ -20,7 +20,7 @@ function tagPrefix() {
     return($lib.null)
 }
 
-// What was last imported by slib.capa.sync: the rules' sha256, and "<tag prefix>:<sha256>".
+// What was last imported by slib.capa.sync: the rules' key, and "<tag prefix>:<key>".
 function syncState() {
     return(({
         "rules": $lib.globals.get("slib:capa:sync:rules"),

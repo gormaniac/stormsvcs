@@ -1,7 +1,8 @@
 // Import the service's capa rules as meta:rule nodes, and their namespaces as documented tags.
 //
 // Runs when the package loads (see the package's onload) and from slib.capa.admin.sync. An
-// import is skipped if it was already done for the same rules (by their sha256) and tag prefix.
+// import is skipped if it was already done for the same rules and tag prefix. Rules are compared
+// by their key (see CapaSvc.rulesInfo), which also changes with capa:rules:version and :url.
 
 init {
     $util = $lib.import(slib.capa.util)
@@ -42,7 +43,7 @@ function syncRules(info, force=(false)) {
     $model = $lib.import(slib.capa.model)
 
     $set = $model.ruleset($info)
-    if ((not $force) and $priv.syncState().rules = $info.sha256) {
+    if ((not $force) and $priv.syncState().rules = $info.key) {
         if $lib.debug { $lib.print("slib.capa: The capa rules ({v}) are already imported.", v=$info.version) }
         return($set)
     }
@@ -54,7 +55,7 @@ function syncRules(info, force=(false)) {
         $model.rule($retn.data, $set)
         $count = ($count + 1)
     }
-    $privadmin.setSynced(rules, $info.sha256)
+    $privadmin.setSynced(rules, $info.key)
     $lib.print("slib.capa: Imported {n} capa rules ({v}).", n=$count, v=$info.version)
     return($set)
 }
@@ -67,7 +68,7 @@ function syncTags(info, force=(false)) {
     $model = $lib.import(slib.capa.model)
 
     $prefix = $priv.tagSettings().prefix
-    $key = `{$prefix}:{$info.sha256}`
+    $key = `{$prefix}:{$info.key}`
     if ((not $force) and $priv.syncState().tags = $key) {
         if $lib.debug { $lib.print("slib.capa: The {p} tags are already imported.", p=$prefix) }
         return((0))

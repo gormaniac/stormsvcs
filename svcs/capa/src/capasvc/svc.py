@@ -24,7 +24,7 @@ import synapse.telepath as s_telepath
 
 from .api import CapaCellApi, CapaSvcError
 from .defs import RULES_URL, RULES_VERSION
-from .rules import CapaRules, CapaRulesError, nsTag, ruleGuid
+from .rules import CapaRules, CapaRulesError, nsTag, ruleGuid, rulesSha256
 
 
 logger = logging.getLogger(__name__)
@@ -169,6 +169,9 @@ class CapaSvc(s_cell.Cell):
         # Set once capa's rules cache is built, see _warmCache.
         self.cacheReady = asyncio.Event()
         self.cacheReady.set()
+        # Only one cache build runs at a time, capa skips a build if the cache file exists,
+        # even if another build is still writing it.
+        self.cacheLock = asyncio.Lock()
         try:
             await self.reload()
         except (CapaSvcError, CapaRulesError):
@@ -227,7 +230,8 @@ class CapaSvc(s_cell.Cell):
         """
 
         try:
-            await self._buildCache(rules)
+            async with self.cacheLock:
+                await self._buildCache(rules)
         finally:
             ready.set()
 
@@ -322,6 +326,17 @@ class CapaSvc(s_cell.Cell):
 
         rules = self._getRules()
         await self.cacheReady.wait()
+
+        # capa reads the rules from disk, so they must still be the rules the results claim.
+        try:
+            ondisk = await s_coro.executor(rulesSha256, rules.path)
+        except CapaRulesError as err:
+            raise CapaSvcError(f"The capa rules on disk can't be read: {err.mesg}") from None
+        if ondisk != rules.sha256:
+            raise CapaSvcError(
+                "The capa rules on disk changed since the service loaded them, reload them "
+                "with: slib.capa.admin.sync --reload"
+            )
 
         async with self.sema:
             path = s_common.genpath(self.workdir, f"{sha256}.{s_common.guid()}")

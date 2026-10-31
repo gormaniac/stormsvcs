@@ -146,9 +146,9 @@ class TestCapaStormSync(s_tests.SynTest):
             msgs = await core.stormlist("slib.capa.admin.sync --reload")
             self.stormHasNoWarnErr(msgs)
 
-            # A new version of the rules is imported into its own ruleset.
+            # A new version of the rules is imported into its own ruleset, even with the
+            # same rule files.
             svc.capaRules.version = "vtest2"
-            svc.capaRules.sha256 = "00" * 32
             msgs = await core.stormlist("slib.capa.admin.sync")
             self.stormIsInPrint("Imported 6 capa rules (vtest2)", msgs)
             query = f"meta:ruleset={rulesetGuid('vtest2')} -(has)> meta:rule"
@@ -156,7 +156,7 @@ class TestCapaStormSync(s_tests.SynTest):
             assert len(await core.nodes("meta:rule")) == 6
 
             # The onload runs whenever the package loads, it imports what changed.
-            svc.capaRules.sha256 = "11" * 32
+            svc.capaRules.urlfmt = "https://example.com/{path}"
             msgs = await core.stormlist("$lib.import(slib.capa.sync).onload()")
             self.stormIsInPrint("Imported 6 capa rules (vtest2)", msgs)
             await core.nodes("$lib.globals.set('slib:capa:sync:tags', $lib.null)")
@@ -236,10 +236,31 @@ class TestCapaStormScan(s_tests.SynTest):
             assert sorted(n.get("name") for n in nodes) == MATCHED
             assert all(n.ndef[0] == "meta:rule" for n in nodes)
 
-            # Rules from a scan are modeled even if they weren't imported.
+            # Scans link the imported rules, they don't rebuild them.
+            guid = ruleGuid("contain xor")
+            await core.nodes(f"meta:rule={guid} [ :desc=edited ]")
+            await core.nodes(SCAN + " --force")
+            assert (await core.nodes(f"meta:rule={guid}"))[0].get("desc") == "edited"
+
+            # Rules from a scan are modeled if they weren't imported.
             await core.nodes("meta:rule | delnode --force")
             await core.nodes(SCAN + " --force")
             assert len(await core.nodes("meta:rule")) == 4
+            node = (await core.nodes(f"meta:rule={guid}"))[0]
+            assert node.get("desc") == svc.capaRules.rules["contain xor"]["desc"]
+
+            # A scan removes the results of an earlier scan: capa match edges and tags under
+            # the prefix. Other rules and tags are left alone.
+            await core.nodes(
+                f"{FILE} [ +#rep.capa.stale +#other.tag "
+                "<(matches)+ { [ meta:rule=* :type=capa :name=stale ] } "
+                "<(matches)+ { [ meta:rule=* :type=yara :name=other ] } ]"
+            )
+            await core.nodes(SCAN + " --force")
+            file = (await core.nodes(FILE))[0]
+            assert leafTags(file) == TAGS | {"other.tag"}
+            names = {n.get("name") for n in await core.nodes(f"{FILE} <(matches)- meta:rule")}
+            assert names == set(MATCHED) | {"other"}
 
             # The module API.
             msgs = await core.stormlist(
@@ -304,8 +325,13 @@ class TestCapaStormScan(s_tests.SynTest):
     async def test_scan_no_rules(self):
         async with capaSvc(self, conf={"capa:rules": None}) as (core, svc, axon):
             await putSample(core, axon)
-            msgs = await core.stormlist(SCAN)
-            self.stormIsInWarn("Getting the capa rules info failed", msgs)
+            sha256 = await putSample(core, axon, b"another file")
+            msgs = await core.stormlist(f"file:bytes:sha256*in=({SAMPLE_SHA256}, {sha256}) "
+                                        "| slib.capa.scan --format sc64")
+            warns = [m[1]["mesg"] for m in msgs if m[0] == "warn"]
+            # One warning for the rules info, and one per file for the scan.
+            assert len([w for w in warns if "Getting the capa rules info failed" in w]) == 1
+            assert len([w for w in warns if "no capa:rules directory configured" in w]) == 3
             self.stormIsInWarn(f"Scanning {SAMPLE_SHA256} failed: The slib.capa service has no "
                                "capa:rules directory configured.", msgs)
 

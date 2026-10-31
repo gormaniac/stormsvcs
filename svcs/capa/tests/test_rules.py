@@ -113,8 +113,17 @@ class TestCapaRules:
         nons = rules.rules["contain marker without a namespace"]
         assert nons["namespace"] is None and nons["tag"] is None
 
-        # The same rules always have the same hash.
-        assert loadRules().sha256 == rules.sha256
+        # The same rules always have the same hash, which is the hash of the files on disk.
+        assert loadRules().sha256 == rules.sha256 == s_rules.rulesSha256(RULES)
+
+        # The sync key changes with the version and URLs too.
+        keys = {
+            rules.info()["key"],
+            loadRules(urlfmt="").info()["key"],
+            s_rules.CapaRules(RULES, "vother", None).info()["key"],
+            s_rules.CapaRules(RULES, "vother", "").info()["key"],
+        }
+        assert len(keys) == 3
 
     def test_no_urls(self):
         rules = loadRules(urlfmt="")
@@ -159,6 +168,12 @@ class TestCapaRules:
         shutil.copy(tmp_path / "dup" / "testing" / "never.yml", tmp_path / "dup" / "never2.yml")
         with pytest.raises(s_rules.CapaRulesError, match="Duplicate capa rule name"):
             loadRules(str(tmp_path / "dup"))
+
+        notutf8 = tmp_path / "notutf8"
+        notutf8.mkdir()
+        (notutf8 / "rule.yml").write_bytes(b"rule:\n  meta:\n    name: \xff\xfe\n")
+        with pytest.raises(s_rules.CapaRulesError, match="Unable to read the capa rule rule.yml"):
+            loadRules(str(notutf8))
 
         bad = tmp_path / "bad"
         bad.mkdir()

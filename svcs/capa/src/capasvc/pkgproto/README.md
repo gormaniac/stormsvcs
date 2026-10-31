@@ -57,7 +57,8 @@ for $rule in $capa.scan($node, fmt=auto, osname=auto, force=(false)) { $lib.prin
 
 The service loads every rule in its rules directory and, when the package loads (ex. when the service
 is added, updated, or the Cortex restarts), the package imports any rules that changed since the last
-import. Each rule is a `meta:rule`:
+import (or since `capa:rules:version` or `capa:rules:url` changed). Scans link the imported rule nodes,
+they only model a rule that isn't in the Cortex yet. Each rule is a `meta:rule`:
 
 | Prop | Value |
 | --- | --- |
@@ -84,6 +85,8 @@ tag. The tag docs are imported with the rules, and again whenever the tag prefix
 
 Scanning a `file:bytes`:
 
+- Removes the results of an earlier scan: the `-(matches)>` edges from capa rules, and every tag under
+  the tag prefix (including any added by hand), so they only show the latest results.
 - Adds a `-(matches)>` edge to it from every matched rule's `meta:rule`.
 - Tags it with each matched rule's namespace, unless tagging is disabled.
 - Saves the results in its `slib:capa` node data: the capa and rules versions, the format, arch, and OS
@@ -110,7 +113,9 @@ The container image bundles the [capa-rules](https://github.com/mandiant/capa-ru
 its version of capa (pinned in `docker/prod/Dockerfile`, Apache 2.0) and capa's FLIRT signatures, and
 sets `capa:rules` and `capa:sigs` to them (`SYN_CAPASVC_CAPA_RULES` and `SYN_CAPASVC_CAPA_SIGS`). To use
 other rules, point `capa:rules` at them, set `capa:rules:version` (and `capa:rules:url`), restart the
-service, and the next package load (or `slib.capa.admin.sync`) imports them.
+service (or run `slib.capa.admin.sync --reload`), and the next package load imports them. Scans refuse
+to run if the rules on disk changed since the service loaded them, so results always match the imported
+rules.
 
 capa runs in a subprocess per file, and caches its parsed rules in the service's storage.
 

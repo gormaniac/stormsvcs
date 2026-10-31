@@ -3,7 +3,12 @@ init {
     $util = $lib.import(slib.capa.util)
     // Looked up once, to skip files already scanned with these rules.
     $info = $lib.null
-    if (not $cmdopts.force) { $info = $capa.info() }
+    $force = $cmdopts.force
+    if (not $force) {
+        $info = $capa.info()
+        // The rules aren't available (the lookup warned), so the scans fail without the check.
+        if ($info = $lib.null) { $force = (true) }
+    }
 }
 
 // Statements after an if block still run for a node spun inside it, so the work is in the else.
@@ -13,5 +18,5 @@ if ($node.form() != "file:bytes") {
     if $cmdopts.yield { spin }
 } else {
     divert $cmdopts.yield $util.nodes($capa.scan($node, fmt=$cmdopts.format, osname=$cmdopts.os,
-                                                 force=$cmdopts.force, rinfo=$info))
+                                                 force=$force, rinfo=$info))
 }

@@ -13,9 +13,9 @@ init {
         $lib.print("rules: {version} ({rules} rules, {lib} library rules, {ns} namespaces)",
                    version=$info.version, rules=$info.rules, lib=$info.lib, ns=$info.namespaces)
         $lib.print("rules sha256: {sha256}", sha256=$info.sha256)
-        $lib.print("rules imported: {done}", done=($state.rules = $info.sha256))
+        $lib.print("rules imported: {done}", done=($state.rules = $info.key))
         $lib.print("tags: enabled={enabled} prefix={prefix}", enabled=$tags.enabled, prefix=$tags.prefix)
-        $lib.print("tag docs imported: {done}", done=($state.tags = `{$tags.prefix}:{$info.sha256}`))
+        $lib.print("tag docs imported: {done}", done=($state.tags = `{$tags.prefix}:{$info.key}`))
     }
 }
 
