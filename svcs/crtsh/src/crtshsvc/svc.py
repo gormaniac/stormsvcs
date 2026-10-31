@@ -402,10 +402,10 @@ class CrtshSvc(s_cell.Cell):
         )
         if not rows and cert and not caids and not (await self._one(kind, valu))["caids"]:
             # Explain why: there's no such certificate, or it isn't a CA certificate.
-                raise CrtshDbError(
-                    f"crt.sh doesn't know of a CA for certificate {valu}, "
-                    "it may not be a CA certificate."
-                )
+            raise CrtshDbError(
+                f"crt.sh doesn't know of a CA for certificate {valu}, "
+                "it may not be a CA certificate."
+            )
 
         items = [i for i in self._parse(rows) if precerts or not i[1].get("precert")]
         for _, details in self._sort(items)[:limit]:

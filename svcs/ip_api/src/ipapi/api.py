@@ -1,6 +1,5 @@
 """The CellApi implementation for ipapi."""
 
-
 from typing import TYPE_CHECKING
 
 import synapse.lib.cell as s_cell
