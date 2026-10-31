@@ -42,11 +42,16 @@ function syncRules(info, force=(false)) {
     $privadmin = $lib.import(slib.capa.priv.admin)
     $model = $lib.import(slib.capa.model)
 
-    $set = $model.ruleset($info)
     if ((not $force) and $priv.syncState().rules = $info.key) {
-        if $lib.debug { $lib.print("slib.capa: The capa rules ({v}) are already imported.", v=$info.version) }
-        return($set)
+        // Nothing to edit, this runs every time the package loads.
+        $set = $model.rulesetOf($info)
+        if ($set != $lib.null) {
+            if $lib.debug { $lib.print("slib.capa: The capa rules ({v}) are already imported.", v=$info.version) }
+            return($set)
+        }
     }
+
+    $set = $model.ruleset($info)
 
     $lib.print("slib.capa: Importing {n} capa rules ({v}).", n=$info.rules, v=$info.version)
     $count = (0)

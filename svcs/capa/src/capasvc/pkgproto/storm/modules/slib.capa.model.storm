@@ -67,6 +67,12 @@ function unmatch(file) {
 
 // ---- Rules ----
 
+// The meta:ruleset for a version of the capa rules, or null if it isn't in the Cortex.
+function rulesetOf(info) {
+    meta:ruleset=$info.ruleset
+    return($node)
+}
+
 // The meta:ruleset for a version of the capa rules (see CapaSvc.rulesInfo).
 function ruleset(info) {
     [ meta:ruleset=$info.ruleset
@@ -132,23 +138,70 @@ function ruleOf(r) {
     return($node)
 }
 
+function tagsOf(n) {
+    yield $n
+    return($node.tags())
+}
+
+// Whether a node has any tags below a tag.
+function hasBelow(n, tag) {
+    $start = `{$tag}.`
+    for $t in $tagsOf($n) {
+        if $t.startswith($start) { return((true)) }
+    }
+    return((false))
+}
+
+// Remove the tags an earlier scan applied (saved in its "slib:capa" node data), whatever
+// the tag settings are now. Their parent tags (ex. the prefix, and "rep" above "rep.capa")
+// are removed too, but only if no other tags are left below them. Other tags are left alone,
+// even under a shared prefix (ex. "rep").
+function clearTags(file) {
+    $data = $file.data.get("slib:capa")
+    if ($data = $lib.null) { return() }
+    if (not $data.tags) { return() }
+
+    $parents = ({})
+    for $tag in $data.tags {
+        $delTag($file, $tag)
+        $anc = $tag
+        while ($anc.split(".").size() > 1) {
+            $anc = $lib.regex.replace("\\.[^.]+$", "", $anc)
+            $parents.$anc = $anc.split(".").size()
+        }
+    }
+
+    // Deepest first, so a parent is only checked once its children are gone.
+    $depths = ([])
+    for ($anc, $depth) in $parents { $depths.append(($depth, $anc)) }
+    $depths.sort(reverse=(true))
+    for ($depth, $anc) in $depths {
+        if (not $hasBelow($file, $anc)) { $delTag($file, $anc) }
+    }
+}
+
 // Model capa's results (see CapaSvc.scan) for a file:bytes. Returns the matched meta:rule nodes.
 //
 // Every matched rule -(matches)> the file, the file is tagged with each rule's namespace
 // under the prefix (unless it's null), and the results are the file's "slib:capa" node data.
-// The edges and tags (under the prefix) of an earlier scan are removed first, so they only
-// show the latest results.
+// The capa edges and the tags of an earlier scan are removed first (see clearTags), so they
+// only show the latest results.
 function results(file, result, prefix=$lib.null) {
     $unmatch($file)
-    if ($prefix != $lib.null) { $delTag($file, $prefix) }
+    $clearTags($file)
 
     $rules = ([])
     $summary = ([])
+    $tags = ([])
     for $m in $result.matches {
         $r = $ruleOf($m.rule)
         if ($r = $lib.null) { $r = $rule($m.rule) }
         $matches($r, $file)
-        if ($prefix != $lib.null and $m.rule.tag) { $addTag($file, `{$prefix}.{$m.rule.tag}`) }
+        if ($prefix != $lib.null and $m.rule.tag) {
+            $tag = $lib.cast(syn:tag, `{$prefix}.{$m.rule.tag}`)
+            $addTag($file, $tag)
+            if (not $tags.has($tag)) { $tags.append($tag) }
+        }
         $summary.append(({
             "rule": $m.rule.name,
             "guid": $m.rule.guid,
@@ -169,6 +222,9 @@ function results(file, result, prefix=$lib.null) {
         "os": $result.os,
         "extractor": $result.extractor,
         "matches": $summary,
+        // The tags this scan applied, for the next scan to remove.
+        "prefix": $prefix,
+        "tags": $tags,
     }))
     $seen($file)
     return($rules)

@@ -24,16 +24,17 @@ import synapse.telepath as s_telepath
 
 from .api import CapaCellApi, CapaSvcError
 from .defs import RULES_URL, RULES_VERSION
-from .rules import CapaRules, CapaRulesError, nsTag, ruleGuid, rulesSha256
+from .rules import CapaRules, CapaRulesError, nsTag, ruleGuid, rulesSha256, rulesStat
 
 
 logger = logging.getLogger(__name__)
 
-FORMATS = ("auto", "pe", "dotnet", "elf", "sc32", "sc64", "freeze")
+FORMATS = ("auto", "pe", "dotnet", "elf", "sc32", "sc64")
 """The capa input formats the service supports, ``auto`` lets capa detect it.
 
-Sandbox report formats (cape, drakvuf, vmray) are left out, their results describe
-the sample the report is about, not the report file itself.
+Formats that describe another file are left out: sandbox reports (cape, drakvuf, vmray) and
+frozen features (freeze). Their results are about the sample they came from, not the file
+that was scanned.
 """
 
 OSES = ("auto", "windows", "linux", "macos")
@@ -353,27 +354,41 @@ class CapaSvc(s_cell.Cell):
         rules = self._getRules()
         await self.cacheReady.wait()
 
-        # capa reads the rules from disk, so they must still be the rules the results claim.
-        try:
-            ondisk = await s_coro.executor(rulesSha256, rules.path)
-        except CapaRulesError as err:
-            raise CapaSvcError(f"The capa rules on disk can't be read: {err.mesg}") from None
-        if ondisk != rules.sha256:
-            raise CapaSvcError(
-                "The capa rules on disk changed since the service loaded them, reload them "
-                "with: slib.capa.admin.sync --reload"
-            )
-
         async with self.sema:
             path = s_common.genpath(self.workdir, f"{sha256}.{s_common.guid()}")
             try:
                 await self._fetch(sha256, path)
+                # Checked right before capa runs, after any wait for a worker or the download.
+                await self._checkRules(rules)
                 doc = await self._runCapa(rules, path, fmt, osname)
             finally:
                 if os.path.exists(path):
                     os.unlink(path)
 
         return self._summarize(rules, sha256, doc)
+
+    async def _checkRules(self, rules: CapaRules) -> None:
+        """Make sure the rules on disk (that capa reads) are still the loaded rules.
+
+        Raises
+        ------
+        CapaSvcError
+            If the rules on disk changed or can't be read.
+        """
+
+        try:
+            # Only stat the files, unless something about them changed.
+            if await s_coro.executor(rulesStat, rules.path) == rules.stat:
+                return
+            if await s_coro.executor(rulesSha256, rules.path) == rules.sha256:
+                return
+        except CapaRulesError as err:
+            raise CapaSvcError(f"The capa rules on disk can't be read: {err.mesg}") from None
+
+        raise CapaSvcError(
+            "The capa rules on disk changed since the service loaded them, reload them "
+            "with: slib.capa.admin.sync --reload"
+        )
 
     async def _fetch(self, sha256: str, path: str) -> None:
         """Save a file from the Axon to ``path``."""

@@ -164,10 +164,22 @@ class TestCapaStormSync(s_tests.SynTest):
             self.stormNotInPrint("Importing", msgs)
             self.stormIsInPrint("Imported the docs of 7 rep.capa tags.", msgs)
 
+            # A skipped import doesn't edit the ruleset, it's only lifted.
+            await core.nodes(f"meta:ruleset={rulesetGuid('vtest2')} [ :desc=edited ]")
+            await core.nodes("slib.capa.admin.sync")
+            node = (await core.nodes(f"meta:ruleset={rulesetGuid('vtest2')}"))[0]
+            assert node.get("desc") == "edited"
+
             # Already imported messages are printed with debug.
             msgs = await core.stormlist("slib.capa.admin.sync", opts={"debug": True})
             self.stormIsInPrint("The capa rules (vtest2) are already imported.", msgs)
             self.stormIsInPrint("The rep.capa tags are already imported.", msgs)
+
+            # A missing ruleset is imported again.
+            await core.nodes(f"meta:ruleset={rulesetGuid('vtest2')} | delnode --force")
+            msgs = await core.stormlist("slib.capa.admin.sync")
+            self.stormIsInPrint("Imported 6 capa rules (vtest2)", msgs)
+            assert len(await core.nodes(f"meta:ruleset={rulesetGuid('vtest2')} -(has)> *")) == 6
 
     async def test_sync_errors(self):
         async with capaSvc(self, conf={"capa:rules": None}) as (core, svc, axon):
@@ -249,16 +261,18 @@ class TestCapaStormScan(s_tests.SynTest):
             node = (await core.nodes(f"meta:rule={guid}"))[0]
             assert node.get("desc") == svc.capaRules.rules["contain xor"]["desc"]
 
-            # A scan removes the results of an earlier scan: capa match edges and tags under
-            # the prefix. Other rules and tags are left alone.
+            # A scan removes the results of an earlier scan: capa match edges and the tags it
+            # applied. Other rules and tags are left alone, even under the prefix.
             await core.nodes(
-                f"{FILE} [ +#rep.capa.stale +#other.tag "
+                f"{FILE} [ +#rep.capa.mine +#other.tag "
                 "<(matches)+ { [ meta:rule=* :type=capa :name=stale ] } "
                 "<(matches)+ { [ meta:rule=* :type=yara :name=other ] } ]"
             )
             await core.nodes(SCAN + " --force")
             file = (await core.nodes(FILE))[0]
-            assert leafTags(file) == TAGS | {"other.tag"}
+            assert leafTags(file) == TAGS | {"other.tag", "rep.capa.mine"}
+            data = await file.getData("slib:capa")
+            assert data["prefix"] == "rep.capa" and set(data["tags"]) == TAGS
             names = {n.get("name") for n in await core.nodes(f"{FILE} <(matches)- meta:rule")}
             assert names == set(MATCHED) | {"other"}
 
@@ -284,7 +298,7 @@ class TestCapaStormScan(s_tests.SynTest):
             file = (await core.nodes(FILE))[0]
             assert leafTags(file) == {t.replace("rep.capa", "my.capa") for t in TAGS}
 
-            await core.nodes(f"{FILE} [ -#my ]")
+            # With tagging disabled, a re-scan still removes the tags the last scan applied.
             msgs = await core.stormlist("slib.capa.admin.tags --disable")
             self.stormIsInPrint("enabled=false prefix=my.capa", msgs)
             await core.nodes(SCAN + " --force")
@@ -294,8 +308,64 @@ class TestCapaStormScan(s_tests.SynTest):
             msgs = await core.stormlist("slib.capa.admin.tags --enable")
             self.stormIsInPrint("enabled=true prefix=my.capa", msgs)
 
+            # A new prefix: the re-scan removes the tags under the old one.
+            await core.nodes(SCAN + " --force")
+            await core.nodes("slib.capa.admin.tags --prefix rep.capa")
+            await core.nodes(SCAN + " --force")
+            file = (await core.nodes(FILE))[0]
+            assert leafTags(file) == TAGS
+            assert not [t for t in file.tags if t.startswith("my")]
+
             msgs = await core.stormlist("slib.capa.admin.tags --enable --disable")
             self.stormIsInErr("Use --enable or --disable, not both.", msgs)
+
+    async def test_scan_shared_prefix(self):
+        # A prefix shared with other tags (ex. "rep"), only the tags capa applied are removed.
+        async with capaSvc(self) as (core, svc, axon):
+            await putSample(core, axon)
+            await core.nodes("slib.capa.admin.tags --prefix rep")
+            await core.nodes(f"{FILE} [ +#rep.vt.malicious +#rep.testing.mine ]")
+
+            await core.nodes(SCAN)
+            capatags = {t.replace("rep.capa", "rep") for t in TAGS}
+            assert leafTags((await core.nodes(FILE))[0]) == capatags | {
+                "rep.vt.malicious", "rep.testing.mine",
+            }
+
+            # The next scan matches fewer rules: their tags, and the parents left empty, go.
+            runCapa = svc._runCapa
+
+            async def onlyXor(*args):
+                doc = await runCapa(*args)
+                doc["rules"] = {k: v for k, v in doc["rules"].items() if k == "contain xor"}
+                return doc
+
+            svc._runCapa = onlyXor
+            await core.nodes(SCAN + " --force")
+            file = (await core.nodes(FILE))[0]
+            assert leafTags(file) == {"rep.testing.ops.xor", "rep.vt.malicious", "rep.testing.mine"}
+            assert "rep.testing.slib_capa" not in file.tags
+
+            # Nothing matches: every capa tag goes, the shared ones stay.
+            async def nothing(*args):
+                doc = await runCapa(*args)
+                doc["rules"] = {}
+                return doc
+
+            svc._runCapa = nothing
+            await core.nodes(SCAN + " --force")
+            file = (await core.nodes(FILE))[0]
+            assert set(file.tags) == {"rep", "rep.vt", "rep.vt.malicious", "rep.testing",
+                                      "rep.testing.mine"}
+
+            # With only capa tags, the prefix and its parents are removed too.
+            await core.nodes(f"{FILE} [ -#rep ]")
+            svc._runCapa = runCapa
+            await core.nodes("slib.capa.admin.tags --prefix rep.capa")
+            await core.nodes(SCAN + " --force")
+            svc._runCapa = nothing
+            await core.nodes(SCAN + " --force")
+            assert not (await core.nodes(FILE))[0].tags
 
     async def test_scan_errors(self):
         async with capaSvc(self) as (core, svc, axon):

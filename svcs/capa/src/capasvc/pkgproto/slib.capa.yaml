@@ -1,5 +1,5 @@
 name: slib.capa
-version: 0.1.3
+version: 0.1.4
 guid: debecd104d154eed9c8bec53a6b2531f
 
 synapse_minversion: [2, 137, 0]
@@ -73,7 +73,7 @@ commands:
       - - --format
         - type: str
           default: auto
-          choices: [ auto, pe, dotnet, elf, sc32, sc64, freeze ]
+          choices: [ auto, pe, dotnet, elf, sc32, sc64 ]
           help: The file's format, detected by capa by default.
       - - --os
         - type: str

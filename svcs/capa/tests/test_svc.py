@@ -101,6 +101,11 @@ class TestCapaSvc(s_tests.SynTest):
                     await svc.scan(SAMPLE_SHA256, fmt="cape")
                 assert "Invalid format cape" in cm.exception.mesg
 
+                # Frozen features describe another file, like sandbox reports.
+                with self.raises(CapaSvcError) as cm:
+                    await svc.scan(SAMPLE_SHA256, fmt="freeze")
+                assert "Invalid format freeze" in cm.exception.mesg
+
                 with self.raises(CapaSvcError) as cm:
                     await svc.scan(SAMPLE_SHA256, osname="android")
                 assert "Invalid OS android" in cm.exception.mesg
@@ -242,6 +247,13 @@ class TestCapaSvc(s_tests.SynTest):
                     await svc.rulesInfo()
                 assert "Unable to read the capa rule rule.yml" in cm.exception.mesg
 
+        # So does a URL template with other placeholders.
+        for urlfmt in ("https://x/{owner}/{path}", "https://x/{}", "https://x/{path"):
+            async with self.getTestCell(CapaSvc, svcConf(**{"capa:rules:url": urlfmt})) as svc:
+                with self.raises(CapaSvcError) as cm:
+                    await svc.rulesInfo()
+                assert cm.exception.mesg.startswith(f"Invalid capa:rules:url {urlfmt!r}")
+
     async def test_rules_changed(self):
         # Scans refuse to run with rules on disk that aren't the loaded rules.
         with self.getTestDir() as dirn:
@@ -250,7 +262,27 @@ class TestCapaSvc(s_tests.SynTest):
             async with self.getTestAxon() as axon:
                 await axon.put(SAMPLE)
                 async with self.getTestCell(CapaSvc, svcConf(axon, **{"capa:rules": rules})) as svc:
+                    # Unchanged rules are only stat'd, not read.
+                    with mock.patch.object(s_svc, "rulesSha256") as sha:
+                        await svc.scan(SAMPLE_SHA256, fmt="sc64")
+                    sha.assert_not_called()
+
+                    # A touched (but unchanged) rule is read and hashed, and still matches.
                     extra = os.path.join(rules, "testing", "never.yml")
+                    os.utime(extra, ns=(1, 1))
+                    await svc.scan(SAMPLE_SHA256, fmt="sc64")
+
+                    # The check runs after any wait for a worker, right before capa runs.
+                    async def change(*args):
+                        with open(extra, "a") as fd:
+                            fd.write("# changed while waiting\n")
+
+                    with mock.patch.object(svc, "_fetch", side_effect=change):
+                        with self.raises(CapaSvcError) as cm:
+                            await svc.scan(SAMPLE_SHA256, fmt="sc64")
+                    assert "changed since the service loaded them" in cm.exception.mesg
+                    await svc.reload()
+
                     with open(extra, "a") as fd:
                         fd.write("# changed\n")
 

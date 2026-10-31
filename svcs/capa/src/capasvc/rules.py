@@ -6,7 +6,6 @@ becomes a tag under the configured prefix (see ``tagRecords``), ex. the namespac
 """
 
 
-import functools
 import hashlib
 import os
 import re
@@ -16,8 +15,6 @@ from typing import Any
 import capa.rules
 import capa.rules.cache
 import synapse.common as s_common
-import synapse.datamodel as s_datamodel
-import synapse.exc as s_exc
 import synapse.lib.types as s_types
 
 
@@ -52,23 +49,14 @@ def rulesetGuid(version: str) -> str:
     return s_common.guid(("slib.capa", "ruleset", version))
 
 
-@functools.cache
-def _tagPartType() -> s_types.TagPart:
-    """Synapse's ``syn:tag:part`` type, built once (a data model takes a moment to build)."""
-
-    return s_datamodel.Model().type("syn:tag:part")
-
-
 def tagPart(text: str) -> str:
-    """Normalize a tag part with Synapse's own ``syn:tag:part`` type.
+    """Normalize a tag part like Synapse's ``syn:tag:part`` type, with its own regex.
 
-    Returns an empty string for text with no valid characters (Synapse rejects those).
+    This is ``synapse.lib.types.TagPart._normPyStr``, without building a data model to get
+    the type. Returns an empty string for text with no valid characters (Synapse rejects those).
     """
 
-    try:
-        return _tagPartType().norm(text)[0]
-    except s_exc.BadTypeValu:
-        return ""
+    return "_".join(s_types.tagpartre.findall(text.lower().strip()))
 
 
 def nsTag(namespace: str | None) -> str | None:
@@ -208,6 +196,30 @@ def rulesSha256(path: str) -> str:
     return hashRules(readRules(path))
 
 
+def rulesStat(path: str) -> str:
+    """A cheap fingerprint of the rule files in a directory: their paths, sizes, and mtimes.
+
+    It only reads directory entries, not rules. If it hasn't changed, neither have the rules.
+
+    Raises
+    ------
+    CapaRulesError
+        If the directory can't be read.
+    """
+
+    if not os.path.isdir(path):
+        raise CapaRulesError(f"The capa rules directory {path} does not exist.")
+
+    hasher = hashlib.sha256()
+    try:
+        for rpath in sorted(capa.rules.collect_rule_file_paths([Path(path)])):
+            info = rpath.stat()
+            hasher.update(f"{rpath}\x00{info.st_size}\x00{info.st_mtime_ns}\x00".encode())
+    except OSError as err:
+        raise CapaRulesError(f"Unable to read the capa rules directory {path}: {err}") from None
+    return hasher.hexdigest()
+
+
 class CapaRules:
     """A loaded capa rules directory and the Synapse records for its rules and namespaces.
 
@@ -229,7 +241,28 @@ class CapaRules:
         self.urlfmt = urlfmt or None
         self.rules: dict[str, dict[str, Any]] = {}
         self.sha256 = ""
+        self.stat = ""
+        self.checkUrlFmt()
         self.load()
+
+    def checkUrlFmt(self) -> None:
+        """Make sure the URL template only uses {version} and {path}.
+
+        Raises
+        ------
+        CapaRulesError
+            If the template is invalid.
+        """
+
+        if not self.urlfmt:
+            return
+        try:
+            self.urlfmt.format(version="v", path="p")
+        except (KeyError, IndexError, ValueError, AttributeError) as err:
+            raise CapaRulesError(
+                f"Invalid capa:rules:url {self.urlfmt!r}, it may only use {{version}} and "
+                f"{{path}}: {err!r}"
+            ) from None
 
     def load(self) -> None:
         """Parse every rule in the rules directory.
@@ -241,6 +274,8 @@ class CapaRules:
             or has two rules with the same name.
         """
 
+        # Before the files are read, so a change while they're read shows up as a new stat.
+        stat = rulesStat(self.path)
         files = readRules(self.path)
 
         rules = {}
@@ -259,6 +294,7 @@ class CapaRules:
 
         self.rules = rules
         self.sha256 = hashRules(files)
+        self.stat = stat
         # The name capa gives its cache of these rules, see cacheName.
         self.cacheId = capa.rules.cache.compute_cache_identifier(
             [text.encode("utf-8") for _, text in files]

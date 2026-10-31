@@ -40,8 +40,9 @@ meta:rule:name="create process on windows" -(refs)> it:mitre:attack:technique
 ```
 
 Supported formats are `auto` (the default, capa detects PE, .NET, and ELF files), `pe`, `dotnet`, `elf`,
-`sc32`, `sc64`, and `freeze` (features frozen by capa). Sandbox reports (CAPE, DRAKVUF, VMRay) aren't
-supported, their results describe the sample the report is about, not the report file.
+`sc32`, and `sc64`. Formats that describe another file aren't supported: sandbox reports (CAPE, DRAKVUF,
+VMRay) and features frozen by capa (`freeze`). Their results are about the sample they came from, not the
+file that was scanned.
 
 The module API can also be used directly:
 
@@ -85,12 +86,15 @@ tag. The tag docs are imported with the rules, and again whenever the tag prefix
 
 Scanning a `file:bytes`:
 
-- Removes the results of an earlier scan: the `-(matches)>` edges from capa rules, and every tag under
-  the tag prefix (including any added by hand), so they only show the latest results.
+- Removes the results of an earlier scan, so they only show the latest results: the `-(matches)>` edges
+  from capa rules, and the tags that scan applied (saved in its node data, whatever the tag settings are
+  now). Their parent tags, up to the prefix, are removed too if nothing else is left below them. Other
+  tags are left alone, even under a shared prefix like `rep`.
 - Adds a `-(matches)>` edge to it from every matched rule's `meta:rule`.
 - Tags it with each matched rule's namespace, unless tagging is disabled.
 - Saves the results in its `slib:capa` node data: the capa and rules versions, the format, arch, and OS
-  capa detected, and every matched rule with its match count and (up to 100) match addresses.
+  capa detected, every matched rule with its match count and (up to 100) match addresses, and the tags
+  it applied (with their prefix).
 
 Like capa's own output, library rules and rules that only match parts of other rules aren't reported.
 Rules matched in internal namespaces are, ex. `#rep.capa.internal.limitation.file` means capa found the
@@ -103,7 +107,7 @@ file is packed or an installer, so its results may be incomplete.
 | `axon:url` | | The Telepath URL of the Axon to pull files from. Required to scan. |
 | `capa:rules` | The bundled rules | The capa rules directory. |
 | `capa:rules:version` | `v10.0.0` | The version of the rules, used for rule URLs and the ruleset name. |
-| `capa:rules:url` | `https://github.com/mandiant/capa-rules/blob/{version}/{path}` | A template for each rule's `:url`. Set to `""` for none. |
+| `capa:rules:url` | `https://github.com/mandiant/capa-rules/blob/{version}/{path}` | A template for each rule's `:url`, it may only use `{version}` and `{path}`. Set to `""` for none. |
 | `capa:sigs` | The bundled signatures | FLIRT signatures capa uses to recognize library code in PE files. |
 | `capa:timeout` | `900` | Seconds before a capa run is killed. |
 | `capa:workers` | `2` | The max number of files capa analyzes at once. |

@@ -127,6 +127,29 @@ class TestCapaRules:
         }
         assert len(keys) == 3
 
+    def test_rulesStat(self, tmp_path):
+        rules = loadRules()
+        assert rules.stat == s_rules.rulesStat(RULES)
+
+        shutil.copytree(RULES, tmp_path / "rules")
+        stat = s_rules.rulesStat(str(tmp_path / "rules"))
+        os.utime(tmp_path / "rules" / "testing" / "never.yml", ns=(1, 1))
+        assert s_rules.rulesStat(str(tmp_path / "rules")) != stat
+
+        with pytest.raises(s_rules.CapaRulesError, match="does not exist"):
+            s_rules.rulesStat(str(tmp_path / "newp"))
+
+        # A rule file that can't be stat'd (ex. a broken symlink).
+        (tmp_path / "rules" / "broken.yml").symlink_to(tmp_path / "newp.yml")
+        with pytest.raises(s_rules.CapaRulesError, match="Unable to read the capa rules"):
+            s_rules.rulesStat(str(tmp_path / "rules"))
+
+    def test_url_template(self):
+        with pytest.raises(s_rules.CapaRulesError, match="may only use"):
+            loadRules(urlfmt="https://x/{name}")
+        rules = loadRules(urlfmt="https://x/{path}")
+        assert rules.rules["contain xor"]["url"] == "https://x/testing/ops/xor.yml"
+
     def test_no_urls(self):
         rules = loadRules(urlfmt="")
         assert all(r["url"] is None for r in rules.rules.values())
