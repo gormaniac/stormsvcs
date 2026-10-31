@@ -25,7 +25,7 @@ import json
 import re
 import tempfile
 import zipfile
-from collections.abc import AsyncIterator, Iterable
+from collections.abc import AsyncIterator, Iterable, Iterator
 from typing import Any
 from urllib.parse import quote
 
@@ -213,6 +213,11 @@ class AbuseChSvc(s_cell.Cell):
             self.abuseinfo.pop("apikey")
         return True
 
+    async def maxSize(self) -> int:
+        """The max size, in bytes, of a file downloaded from or submitted to abuse.ch."""
+
+        return self.maxsize
+
     async def hasApiKey(self) -> bool:
         """Whether the service has a stored or configured Auth-Key."""
 
@@ -239,49 +244,54 @@ class AbuseChSvc(s_cell.Cell):
             raise AbuseChApiError(f"abuse.ch {base}: {path} {match.group(0).strip('# ').strip()}")
         return text
 
-    async def _iterLines(self, base: str, path: str, apikey=None) -> AsyncIterator[str]:
-        """Stream a (possibly huge, possibly zipped) dataset's lines.
+    async def _downloadBytes(self, base: str, path: str, apikey=None) -> bytes:
+        """Download a dataset into memory (unzipped), with only a read timeout. For datasets of a few MB."""
 
-        The dataset is downloaded into a temporary file, then read line by line (from inside the
-        zip, when it's zipped) so exports of several GB never have to fit in memory.
+        buf = io.BytesIO()
+        await self.client.download(base, path, buf, apikey=self.getApiKey(apikey))
+        byts = buf.getvalue()
+        if byts[:2] == b"PK":
+            byts = b"\n".join(b for _, b in unzip(byts, password=None))
+        return byts
+
+    @staticmethod
+    def _fileLines(fd: Any, base: str, path: str) -> Iterator[str]:
+        """Yield the lines of a downloaded dataset file, from inside it when it's a zip."""
+
+        fd.seek(0)
+        if fd.read(2) == b"PK":
+            fd.seek(0)
+            try:
+                zfd = zipfile.ZipFile(fd)
+            except zipfile.BadZipFile as err:
+                raise AbuseChApiError(f"Unable to unzip {path}: {err}") from err
+            names = [i.filename for i in zfd.infolist() if not i.is_dir()]
+            streams = (io.TextIOWrapper(zfd.open(n), encoding="utf-8", errors="replace") for n in names)
+        else:
+            fd.seek(0)
+            streams = iter([io.TextIOWrapper(fd, encoding="utf-8", errors="replace")])
+
+        for stream in streams:
+            for num, line in enumerate(stream):
+                # Retired datasets are replaced with a comment saying so (ex. SSLBL's IP lists).
+                if num < 20 and line.startswith("#") and re.search(r"\bhas been deprecated\b", line, re.IGNORECASE):
+                    raise AbuseChApiError(f"abuse.ch {base}: {path} {line.strip('#').strip()}")
+                yield line.rstrip("\r\n")
+
+    async def _csvRows(self, base: str, path: str, fields: tuple[str, ...], apikey=None) -> AsyncIterator[dict]:
+        """Stream the rows of a (possibly huge, possibly zipped) CSV dataset.
+
+        The dataset is downloaded into a temporary file, then parsed line by line (from inside the
+        zip, when it's zipped) with one CSV reader, so quoted fields that span lines parse correctly
+        and exports of several GB never have to fit in memory.
         """
 
         with tempfile.TemporaryFile() as fd:
             await self.client.download(base, path, fd, apikey=self.getApiKey(apikey))
-            fd.seek(0)
-            if fd.read(2) == b"PK":
-                fd.seek(0)
-                try:
-                    zfd = zipfile.ZipFile(fd)
-                except zipfile.BadZipFile as err:
-                    raise AbuseChApiError(f"Unable to unzip {path}: {err}") from err
-                names = [i.filename for i in zfd.infolist() if not i.is_dir()]
-                streams = (io.TextIOWrapper(zfd.open(n), encoding="utf-8", errors="replace") for n in names)
-            else:
-                fd.seek(0)
-                streams = iter([io.TextIOWrapper(fd, encoding="utf-8", errors="replace")])
-
-            for stream in streams:
-                for num, line in enumerate(stream):
-                    # Retired datasets are replaced with a comment saying so (ex. SSLBL's IP lists).
-                    if num < 20 and line.startswith("#") and re.search(r"\bhas been deprecated\b", line, re.IGNORECASE):
-                        raise AbuseChApiError(f"abuse.ch {base}: {path} {line.strip('#').strip()}")
-                    yield line.rstrip("\r\n")
-                    if num % 1000 == 999:
-                        await asyncio.sleep(0)
-
-    async def _csvRows(self, base: str, path: str, fields: tuple[str, ...], apikey=None) -> AsyncIterator[dict]:
-        """Stream the rows of a CSV dataset (see ``_iterLines``)."""
-
-        batch = []
-        async for line in self._iterLines(base, path, apikey=apikey):
-            batch.append(line)
-            if len(batch) >= 1000:
-                for row in norm.parseCsvLines(batch, fields):
-                    yield row
-                batch = []
-        for row in norm.parseCsvLines(batch, fields):
-            yield row
+            for num, row in enumerate(norm.parseCsvLines(self._fileLines(fd, base, path), fields)):
+                yield row
+                if num % 1000 == 999:
+                    await asyncio.sleep(0)
 
     def _sample(self, files: list[tuple[str, bytes]]) -> dict | None:
         """Describe a downloaded sample (the first file in its zip) for Storm."""
@@ -761,9 +771,10 @@ class AbuseChSvc(s_cell.Cell):
 
         if kind not in THREATFOX_EXPORTS:
             raise AbuseChApiError(f"Unknown ThreatFox export: {kind}")
-        text = await self._fetchText("threatfox:export", THREATFOX_EXPORTS[kind], apikey=apikey)
+        # A few MB, downloaded with a read timeout only, since slow links take longer than the request timeout.
+        byts = await self._downloadBytes("threatfox:export", THREATFOX_EXPORTS[kind], apikey=apikey)
         try:
-            data = json.loads(text) if text.strip() else {}
+            data = json.loads(byts) if byts.strip() else {}
         except ValueError as err:
             raise AbuseChApiError(f"Unable to parse the ThreatFox {kind} export: {err}") from err
         for count, ioc in enumerate(norm.normThreatFoxExport(data), start=1):
@@ -972,7 +983,9 @@ class AbuseChSvc(s_cell.Cell):
     async def yaraifyRulesExport(self, limit: int = 0, apikey=None) -> AsyncIterator[dict]:
         """Yield every TLP:CLEAR YARAhub rule, normalized, from YARAify's rule export."""
 
-        byts, _ = await self._fetch("yaraify:export", "yarahub/yaraify-rules.zip", apikey=apikey)
+        buf = io.BytesIO()
+        await self.client.download("yaraify:export", "yarahub/yaraify-rules.zip", buf, apikey=self.getApiKey(apikey))
+        byts = buf.getvalue()
         files = unzip(byts, password=None) if byts[:2] == b"PK" else [("rules.yar", byts)]
         count = 0
         for _, rbyts in files:

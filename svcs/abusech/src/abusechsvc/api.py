@@ -15,7 +15,7 @@ from .defs import SVC_EVTS, PKGDEFS, SVC_NAME, SVC_VER
 # AbuseChSvc methods that are exposed over Telepath as-is, wrapped in a TelepathRetn.
 # See AbuseChSvc for each method's arguments and the abuse.ch endpoint it calls.
 RETN_METHS = (
-    "rawRequest",
+    "rawRequest", "maxSize",
     # MalwareBazaar
     "bazaarQuery", "bazaarInfo", "normBazaarInfo", "bazaarSearch", "normBazaarSearch",
     "bazaarRecent", "normBazaarRecent", "bazaarDetections", "normBazaarDetections", "bazaarCscb", "normBazaarCscb", "bazaarFile",
@@ -52,6 +52,9 @@ async def _retn(coro: Awaitable) -> TelepathRetn:
         data = await coro
     except AbuseChApiError as err:
         return TelepathRetn(status=False, mesg=err.mesg, data=None)
+    except (ValueError, TypeError) as err:
+        # Bad input from Storm, ex. a non-numeric ID.
+        return TelepathRetn(status=False, mesg=f"Invalid input: {err}", data=None)
     return TelepathRetn(status=True, mesg="", data=data)
 
 
@@ -66,6 +69,8 @@ async def _retnGenr(genr: AsyncIterator) -> AsyncIterator[TelepathRetn]:
             yield TelepathRetn(status=True, mesg="", data=item)
     except AbuseChApiError as err:
         yield TelepathRetn(status=False, mesg=err.mesg, data=None)
+    except (ValueError, TypeError) as err:
+        yield TelepathRetn(status=False, mesg=f"Invalid input: {err}", data=None)
 
 
 def _retnMeth(name: str):

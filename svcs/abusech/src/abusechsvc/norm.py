@@ -17,6 +17,7 @@ code short, and lets it be unit tested without a Cortex. The shapes are:
 
 
 import csv
+import ipaddress
 import re
 from collections.abc import Iterable, Iterator
 from typing import Any
@@ -178,7 +179,8 @@ def parseCsv(text: str, fields: tuple[str, ...]) -> list[dict]:
 def parseCsvLines(lines: Iterable[str], fields: tuple[str, ...]) -> Iterator[dict]:
     """Like ``parseCsv`` but streaming, over an iterable of lines (ex. a file too large to load)."""
 
-    data = (line for line in lines if line.strip() and not line.lstrip().startswith("#"))
+    # The reader needs the line endings to keep newlines inside quoted fields.
+    data = (line + "\n" for line in lines if line.strip() and not line.lstrip().startswith("#"))
     for row in csv.reader(data, skipinitialspace=True):
         if not row:
             continue
@@ -195,6 +197,25 @@ def parseLines(text: str) -> list[str]:
 
 
 # ---- Observables ----
+
+
+def ipAddr(valu: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
+    """Parse an IPv4/IPv6 address, or None if the value isn't one."""
+
+    try:
+        return ipaddress.ip_address(valu)
+    except ValueError:
+        return None
+
+
+def serverUrl(host: str, port: int | None) -> str | None:
+    """A ``tcp://host:port`` URL, bracketing IPv6 hosts."""
+
+    if not port:
+        return None
+    ip = ipAddr(host)
+    host = f"[{ip}]" if ip and ip.version == 6 else host.lower()
+    return f"tcp://{host}:{port}"
 
 
 def normObservable(kind: str | None, valu: Any) -> dict | None:
@@ -222,17 +243,21 @@ def normObservable(kind: str | None, valu: Any) -> dict | None:
     if kind in ("url",) or (not kind and "://" in valu):
         return {"form": "inet:url", "valu": valu}
 
-    if kind in ("ip:port", "ip_port", "ipport") or (not kind and re.match(r"^\[?[0-9a-fA-F:.]+\]?:\d+$", valu)):
-        host, _, port = valu.rpartition(":")
-        host = host.strip("[]")
-        port = toInt(port)
-        if not host or port is None:
+    # A bare IP, which an IPv6 address could otherwise be mistaken for an ip:port.
+    ip = ipAddr(valu)
+    if kind in ("ip", "ipv4", "ipv6", "ip_address", "ip-addr") or (not kind and ip):
+        if not ip:
             return None
-        form = "inet:ipv6" if ":" in host else "inet:ipv4"
-        return {"form": "inet:server", "valu": valu, "ip": host, "ipform": form, "port": port}
+        return {"form": "inet:ipv6" if ip.version == 6 else "inet:ipv4", "valu": str(ip)}
 
-    if kind in ("ip", "ipv4", "ipv6", "ip_address", "ip-addr") or (not kind and re.match(r"^[0-9.]+$|^[0-9a-fA-F:]+:[0-9a-fA-F:]*$", valu)):
-        return {"form": "inet:ipv6" if ":" in valu else "inet:ipv4", "valu": valu}
+    if kind in ("ip:port", "ip_port", "ipport") or (not kind and re.match(r"^(\[[0-9a-fA-F:.]+\]|[0-9.]+):\d+$", valu)):
+        host, _, port = valu.rpartition(":")
+        ip = ipAddr(host.strip("[]"))
+        port = toInt(port)
+        if ip is None or port is None:
+            return None
+        form = "inet:ipv6" if ip.version == 6 else "inet:ipv4"
+        return {"form": "inet:server", "valu": valu, "ip": str(ip), "ipform": form, "port": port}
 
     if kind in ("domain", "fqdn", "hostname", "host") or not kind:
         return {"form": "inet:fqdn", "valu": valu.lower().rstrip(".")}
@@ -453,7 +478,7 @@ def normC2Config(cfg: Any, family: str | None = None) -> dict | None:
         "obs": obs,
         "host": host.lower(),
         "port": port,
-        "url": None if obs["form"] == "inet:url" else (f"tcp://{host.lower()}:{port}" if port else None),
+        "url": None if obs["form"] == "inet:url" else serverUrl(host, port),
         "family": fam,
         "family_tag": normTag(fam),
     }

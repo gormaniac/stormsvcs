@@ -54,6 +54,7 @@ modules:
       - [ slib, abusech, user ]
   - name: slib.abusech.model
   - name: slib.abusech.util
+  - name: slib.abusech.download
 
 commands:
 
@@ -322,6 +323,8 @@ commands:
     descr: |
       Model the samples in a MalwareBazaar CSV export.
 
+      Modeling runs at roughly 50 rows/second, so use --limit with the full export.
+
         recent - The samples added in the last 48 hours
         full   - Every sample (a ~230 MB download, streamed)
         yara   - The YARA rule statistics: every rule MalwareBazaar matches samples with (it:app:yara:rule)
@@ -510,6 +513,9 @@ commands:
       - [ slib, abusech, user ]
     descr: |
       Model the URLs in a URLhaus CSV export.
+
+      Modeling runs at roughly 50 rows/second, so use --limit with the full and payloads exports
+      (millions of rows).
 
         recent - URLs added in the last 30 days
         online - URLs that are currently online

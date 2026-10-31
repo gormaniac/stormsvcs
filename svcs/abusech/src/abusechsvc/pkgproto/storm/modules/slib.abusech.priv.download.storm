@@ -5,16 +5,9 @@
 
 init {
     $svc = $lib.service.get("slib.abusech")
+    $util = $lib.import(slib.abusech.util)
 }
 
-// Only reads the calling user's own vault, see slib.abusech.priv.user.
-function userKey() {
-    $vault = $lib.vault.bytype(abusech, scope=user)
-    if ($vault = $lib.null) { return($lib.null) }
-    $secrets = $vault.secrets
-    if ($secrets = $lib.null) { return($lib.null) }
-    return($secrets.apikey)
-}
 
 function _save(retn) {
     if (not $retn.status) { return($retn) }
@@ -25,7 +18,7 @@ function _save(retn) {
     return(({"status": (true), "mesg": "", "data": ({"sha256": $sha256, "size": $size, "name": $file.name})}))
 }
 
-function bazaar(sha256) { return($_save($svc.bazaarFile($sha256, apikey=$userKey()))) }
-function urlhaus(sha256) { return($_save($svc.urlhausDownload($sha256, apikey=$userKey()))) }
-function yaraify(sha256) { return($_save($svc.yaraifyFile($sha256, apikey=$userKey()))) }
-function yaraifyUnpacked(sha256) { return($_save($svc.yaraifyUnpacked($sha256, apikey=$userKey()))) }
+function bazaar(sha256) { return($_save($svc.bazaarFile($sha256, apikey=$util.userKey()))) }
+function urlhaus(sha256) { return($_save($svc.urlhausDownload($sha256, apikey=$util.userKey()))) }
+function yaraify(sha256) { return($_save($svc.yaraifyFile($sha256, apikey=$util.userKey()))) }
+function yaraifyUnpacked(sha256) { return($_save($svc.yaraifyUnpacked($sha256, apikey=$util.userKey()))) }

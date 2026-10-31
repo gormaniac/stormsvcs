@@ -1,5 +1,15 @@
 // Unprivileged helpers shared by the slib.abusech commands.
 
+// The calling user's own abuse.ch Auth-Key, from their user scoped "abusech" vault (or null).
+// Only the user scope is read, so another user's or role's secrets are never exposed.
+function userKey() {
+    $vault = $lib.vault.bytype(abusech, scope=user)
+    if ($vault = $lib.null) { return($lib.null) }
+    $secrets = $vault.secrets
+    if ($secrets = $lib.null) { return($lib.null) }
+    return($secrets.apikey)
+}
+
 // Whether a string looks like an IPv6 address (vs. IPv4).
 function isIpv6(ip) {
     return(($lib.cast(str, $ip) ~= ":"))

@@ -167,6 +167,15 @@ class TestNorm(s_tests.SynTest):
         assert norm.normObservable(None, "1.2.3.4")["form"] == "inet:ipv4"
         assert norm.normObservable(None, "a.com")["form"] == "inet:fqdn"
         assert norm.normObservable(None, "a" * 64)["form"] == "file:bytes"
+        # A bare IPv6 address isn't an ip:port, and IPv6 servers are bracketed.
+        assert norm.normObservable(None, "2001:db8::1") == {"form": "inet:ipv6", "valu": "2001:db8::1"}
+        assert norm.normObservable(None, "[2001:db8::1]:443")["ip"] == "2001:db8::1"
+        assert norm.normObservable("ip", "not an ip") is None
+        assert norm.normObservable("ip:port", "[nope]:1") is None
+        assert norm.serverUrl("2001:db8::1", 443) == "tcp://[2001:db8::1]:443"
+        assert norm.serverUrl("A.com", 80) == "tcp://a.com:80" and norm.serverUrl("a.com", None) is None
+        assert norm.normC2Config({"c2": "[2001:db8::1]:443"})["url"] == "tcp://[2001:db8::1]:443"
+        assert norm.normC2Config({"c2": "2001:db8::1"})["obs"] == {"form": "inet:ipv6", "valu": "2001:db8::1"}
         assert norm.normHost("1.2.3.4")["form"] == "inet:ipv4"
         assert norm.normHost("a.com")["form"] == "inet:fqdn"
         assert norm.normHost(None) is None
@@ -497,6 +506,10 @@ class TestNorm(s_tests.SynTest):
         assert norm.reasonFamily("C&C") is None
 
         assert norm.parseLines("# comment\n1.2.3.4\n\n5.6.7.8\n") == ["1.2.3.4", "5.6.7.8"]
+
+        # Quoted fields that span lines.
+        rows = list(norm.parseCsvLines(['"1","a', 'b"', '"2","c"'], ("id", "name")))
+        assert rows == [{"id": "1", "name": "a\nb"}, {"id": "2", "name": "c"}]
 
         # CSV exports with an un-commented header.
         rows = norm.parseCsv("id,url\n1,http://a\n", ("id", "url"))
@@ -1048,6 +1061,13 @@ class TestSvc(s_tests.SynTest):
 
                 retn = await prox.bazaarInfo("nothex")
                 assert not retn["status"] and "Not an MD5" in retn["mesg"]
+
+                # Bad input is a failed result, not an exception in Storm.
+                retn = await prox.threatfoxIoc("abc")
+                assert not retn["status"] and retn["mesg"].startswith("Invalid input")
+                items = [i async for i in prox.bazaarExport(limit="abc")]
+                assert not items[-1]["status"] and items[-1]["mesg"].startswith("Invalid input")
+                assert (await prox.maxSize())["data"] == svc.maxsize
 
                 items = [i async for i in prox.feodoBlocklist()]
                 assert all(i["status"] for i in items) and len(items) == 2

@@ -23,7 +23,7 @@ init {
     // Submit a file:bytes node (or rescan it if it's not in the Axon). Returns the task ID, or null.
     function scan(n) {
         $sha256 = $n.props.sha256
-        if ($sha256 and $privsub.hasFile($sha256) and not $cmdopts.rescan) {
+        if ($sha256 and $n.props.size and $privsub.hasFile($sha256) and not $cmdopts.rescan) {
             $name = $n.props.name
             if (not $name) { $name = $sha256 }
             $retn = $privsub.yaraifyScan($sha256, $n.props.size, $name, identifier=$cmdopts.identifier,

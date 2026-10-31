@@ -301,9 +301,14 @@ License: {$r.license}` }
 // A meta:note -(about)> a node. Notes are deduplicated by their type, text, and author.
 function noteAbout(n, type, text, author=$lib.null, time=$lib.null) {
     if ($n = $lib.null or not $text) { return($lib.null) }
-    [ meta:note=({"type": $type, "text": $text}) ]
-    if $author { [ :author ?= {[ ps:contact=({"name": $author}) ]} ] }
-    [ :created ?= $time +(about)> { yield $n } ]
+    $props = ({"type": $type, "text": $text})
+    if $author { $props.author = $contactNode($author).value() }
+    [ meta:note=$props :created ?= $time +(about)> { yield $n } ]
+    return($node)
+}
+
+function contactNode(name) {
+    [ ps:contact=({"name": $name}) ]
     return($node)
 }
 

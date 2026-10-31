@@ -1,45 +1,21 @@
 init {
-    $privdl = $lib.import(slib.abusech.priv.download)
+    $dl = $lib.import(slib.abusech.download)
     $model = $lib.import(slib.abusech.model)
     $util = $lib.import(slib.abusech.util)
-
-    // Download a sample into the Axon and model it. Returns the file:bytes node, or null.
-    function download(sha256) {
-        $sha256 = $lib.cast(str, $sha256).lower()
-        if ($util.hashType($sha256) != "sha256") {
-            $lib.warn("slib.abusech.yaraify.download: {sha} is not a SHA256 hash.", sha=$sha256)
-            return($lib.null)
-        }
-        if $cmdopts.unpacked { $retn = $privdl.yaraifyUnpacked($sha256) }
-        else { $retn = $privdl.yaraify($sha256) }
-        if $util.failed($retn, `Downloading {$sha256} from YARAify`) { return($lib.null) }
-        if ($retn.data = $lib.null) {
-            $lib.warn("slib.abusech.yaraify.download: YARAify does not have {sha} available.", sha=$sha256)
-            return($lib.null)
-        }
-        $info = $retn.data
-        if ($info.sha256 != $sha256) {
-            $lib.warn("slib.abusech.yaraify.download: Downloaded {got} but expected {sha}.", got=$info.sha256, sha=$sha256)
-        }
-        $lib.print("slib.abusech.yaraify.download: Saved {sha} ({size} bytes) to the Axon.", sha=$info.sha256, size=$info.size)
-        return($model.sample(({"sha256": $info.sha256, "size": $info.size, "name": $info.name,
-                                "clamav": ([]), "scans": ([]), "rules": ([]), "certs": ([]), "tags": ([]),
-                                "families": ([])}), yaraify))
-    }
 }
 
 if $cmdopts.hash {
     // --hash ignores inbound nodes.
     spin |
     for $sha in $cmdopts.hash {
-        $file = $download($sha)
+        $file = $dl.download(yaraify, $sha, unpacked=$cmdopts.unpacked)
         if ($cmdopts.yield and $file) { yield $file }
     }
 }
 else {
     $sha = $util.nodeHash($node)
     $results = ([])
-    if ($sha and $util.hashType($sha) = "sha256") { $results = ($download($sha),) }
+    if ($sha and $util.hashType($sha) = "sha256") { $results = ($dl.download(yaraify, $sha, unpacked=$cmdopts.unpacked),) }
     else {
         $lib.warn("slib.abusech.yaraify.download: {form} {repr} has no SHA256 to download.", form=$node.form(), repr=$node.repr())
     }

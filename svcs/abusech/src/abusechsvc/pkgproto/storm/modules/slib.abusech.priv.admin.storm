@@ -2,16 +2,9 @@
 
 init {
     $svc = $lib.service.get("slib.abusech")
+    $util = $lib.import(slib.abusech.util)
 }
 
-// Only reads the calling user's own vault, see slib.abusech.priv.user.
-function userKey() {
-    $vault = $lib.vault.bytype(abusech, scope=user)
-    if ($vault = $lib.null) { return($lib.null) }
-    $secrets = $vault.secrets
-    if ($secrets = $lib.null) { return($lib.null) }
-    return($secrets.apikey)
-}
 
 // Auth-Key and tag settings
 
@@ -31,5 +24,5 @@ function setTagsEnabled(enabled) { $lib.globals.set("slib:abusech:tag:enabled", 
 
 function rawRequest(base, path="", method=post, form=$lib.null, json=$lib.null, params=$lib.null) {
     return($svc.rawRequest($base, path=$path, method=$method, form=$form, json_data=$json, params=$params,
-                           apikey=$userKey()))
+                           apikey=$util.userKey()))
 }

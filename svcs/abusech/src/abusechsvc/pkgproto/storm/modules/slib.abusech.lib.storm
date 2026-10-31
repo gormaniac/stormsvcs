@@ -318,11 +318,10 @@ function enrich(node, platforms=$lib.null) {
             if ($platforms.has(threatfox)) { $nodes.extend($threatfox(ip, $repr, limit=(0))) }
         }
         "inet:server": {
-            $ip = $node.props.ipv4
-            if ($ip = $lib.null) { $ip = $node.props.ipv6 }
-            if ($platforms.has(threatfox) and $node.props.port) {
-                $ipport = `{$lib.repr(inet:ipv4, $ip)}:{$node.props.port}`
-                if $node.props.ipv6 { $ipport = `{$node.props.ipv6}:{$node.props.port}` }
+            $port = $node.props.port
+            if ($platforms.has(threatfox) and $port) {
+                if $node.props.ipv4 { $ipport = `{$lib.repr(inet:ipv4, $node.props.ipv4)}:{$port}` }
+                else { $ipport = `{$node.props.ipv6}:{$port}` }
                 $nodes.extend($threatfox(search, $ipport, exact=(true)))
             }
         }

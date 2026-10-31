@@ -915,3 +915,43 @@ class TestStormAudit(s_tests.SynTest):
             assert await count(core, "it:app:yara:rule:name=xxx") == 0
             msgs = await core.stormlist("slib.abusech.yaraify.lookup --task unknown-task")
             self.stormIsInPrint("Task unknown-task is unknown", msgs)
+
+
+class TestStormReview(s_tests.SynTest):
+    """Fixes from the code review."""
+
+    async def test_review_fixes(self):
+        async with abusechSvc(self) as (core, svc, fake):
+            # IPv6 servers enrich instead of aborting the query.
+            msgs = await core.stormlist("[ inet:server=\"tcp://[2001:db8::1]:443\" ] | slib.abusech.enrich")
+            self.stormHasNoErr(msgs)
+            assert fake.last("/threatfox")["json"]["search_term"] == "2001:db8::1:443"
+
+            # Bad IDs warn and move on.
+            msgs = await core.stormlist("slib.abusech.threatfox.lookup --id abc --id 41 --yield")
+            self.stormIsInWarn("Invalid input", msgs)
+            assert [m[1][0][1] for m in msgs if m[0] == "node"] == ["gaga.com"]
+
+            # Files without a size are rescanned by hash, not submitted.
+            size, sha256 = await core.axon.put(b"MZ no size")
+            sha256 = sha256.hex()
+            await core.nodes(f"[ file:bytes={sha256} ]")
+            msgs = await core.stormlist(f"file:bytes={sha256} | slib.abusech.yaraify.scan")
+            self.stormHasNoErr(msgs)
+            assert fake.queries("yaraify")[-1] == "rescan_file"
+
+            # Files too large to submit are rejected before they're read out of the Axon.
+            svc.maxsize = 4
+            await core.nodes(f"file:bytes={sha256} [ :size={size} ]")
+            msgs = await core.stormlist(f"file:bytes={sha256} | slib.abusech.bazaar.submit")
+            self.stormIsInWarn("larger than the max of 4", msgs)
+            assert "file" not in fake.last("/bazaar")["files"] if fake.queries("bazaar") else True
+
+            # Identical comments from different authors are different notes.
+            model = "$m = $lib.import(slib.abusech.model)"
+            await core.nodes(f"{model} [ inet:fqdn=a.com ] $m.noteAbout($node, t, same, alice)")
+            await core.nodes(f"{model} [ inet:fqdn=b.com ] $m.noteAbout($node, t, same, bob)")
+            nodes = await core.nodes("meta:note:text=same")
+            assert len(nodes) == 2
+            assert await count(core, "meta:note:text=same -(about)> inet:fqdn") == 2
+            assert await count(core, "inet:fqdn=a.com <(about)- meta:note :author -> ps:contact +:name=alice") == 1
