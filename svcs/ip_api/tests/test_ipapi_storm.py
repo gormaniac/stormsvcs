@@ -6,7 +6,7 @@ import synapse.tests.utils as s_tests
 
 from ipapi import __version__
 from ipapi.svc import IpApiSvc
-from ipapi.defs import SVC_NAME
+from ipapi.defs import PKGDEFS, SVC_NAME
 
 
 CMDS = (
@@ -56,6 +56,17 @@ class TestIpApiStorm(s_tests.SynTest):
         async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
             for cmd in CMDS:
                 assert cmd in core.stormcmds
+
+    async def test_pkg_cmd_inputs(self):
+        async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
+            for cdef in PKGDEFS[0]["commands"]:
+                # The "forms" key is deprecated and removed in Synapse 3.0.0, use "cmdinputs".
+                assert "forms" not in cdef, cdef["name"]
+                for cmdinput in cdef.get("cmdinputs", ()):
+                    assert core.model.form(cmdinput["form"]) is not None, (cdef["name"], cmdinput)
+
+            msgs = await core.stormlist(f"{SVC_NAME}.query --help")
+            self.stormIsInPrint("IPs to query ip-api.com for", msgs)
 
     async def test_pkg_mods_exist(self):
         async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):

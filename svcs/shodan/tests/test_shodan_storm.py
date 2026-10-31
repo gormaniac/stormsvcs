@@ -42,6 +42,12 @@ class TestShodanStormPkg(s_tests.SynTest):
             for cmd in CMDS:
                 assert cmd in core.stormcmds, cmd
 
+            for cdef in PKGDEFS[0]["commands"]:
+                # The "forms" key is deprecated and removed in Synapse 3.0.0, use "cmdinputs".
+                assert "forms" not in cdef, cdef["name"]
+                for cmdinput in cdef.get("cmdinputs", ()):
+                    assert core.model.form(cmdinput["form"]) is not None, (cdef["name"], cmdinput)
+
             for mod in MODS:
                 msgs = await core.stormlist(f"$mod = $lib.import({mod})")
                 self.stormHasNoErr(msgs)
@@ -77,10 +83,14 @@ class TestShodanStormHost(s_tests.SynTest):
             assert len(await core.nodes("inet:asn=15169 :owner -> ou:org +:name='google llc'")) == 1
             assert len(await core.nodes("inet:dns:a=(dns.google, 8.8.8.8)")) == 1
 
-            nodes = await core.nodes("inet:server=tcp://8.8.8.8:443 -(uses)> it:prod:softver")
+            nodes = await core.nodes("inet:server=tcp://8.8.8.8:443 -(uses)> it:prod:softver +:name")
             assert len(nodes) == 1
             assert nodes[0].get("cpe") == "cpe:2.3:a:f5:nginx:1.25.3:*:*:*:*:*:*:*"
             assert nodes[0].get("vers") == "1.25.3"
+            # The banner's product/version aren't applied to its other CPEs.
+            nodes = await core.nodes("it:prod:softver:cpe='cpe:2.3:o:linux:linux_kernel:*:*:*:*:*:*:*:*'")
+            assert len(nodes) == 1
+            assert nodes[0].get("name") is None and nodes[0].get("vers") is None
 
             nodes = await core.nodes("inet:tls:servercert:server=tcp://8.8.8.8:443 -> crypto:x509:cert")
             assert len(nodes) == 1
@@ -104,7 +114,7 @@ class TestShodanStormHost(s_tests.SynTest):
             await core.nodes("slib.shodan.host --ip 8.8.8.8")
             assert len(await core.nodes("risk:vulnerable")) == 2
             assert len(await core.nodes("crypto:x509:cert")) == 1
-            assert len(await core.nodes("it:prod:softver")) == 1
+            assert len(await core.nodes("it:prod:softver")) == 2
 
     async def test_host_pipeline(self):
         async with shodanSvc(self) as (core, svc, fake):
@@ -422,13 +432,14 @@ class TestShodanStormScanAlerts(s_tests.SynTest):
 
             scans = [r for r in fake.requests if r["path"] == "/api/shodan/scan"]
             assert len(scans) == 1
-            assert set(scans[0]["query"]["ips"].split(",")) == {"9.9.9.9", "8.8.8.8", "1.2.3.0/24"}
+            # Shodan ignores query params on POST /shodan/scan, the IPs must be in a form body.
+            assert set(scans[0]["form"]["ips"].split(",")) == {"9.9.9.9", "8.8.8.8", "1.2.3.0/24"}
             assert len(await core.nodes("inet:ipv4=8.8.8.8 -> inet:server")) == 2
 
             msgs = await core.stormlist("slib.shodan.scan.status")
             self.stormIsInPrint("Total scans: 1", msgs)
             msgs = await core.stormlist("slib.shodan.scan.status SCAN1")
-            self.stormIsInPrint("Scan SCAN1: DONE", msgs)
+            self.stormIsInPrint("Scan SCAN1: DONE (1 IPs", msgs)
             msgs = await core.stormlist("slib.shodan.scan.internet 8443 https")
             self.stormIsInPrint("Submitted scan ISCAN1", msgs)
 
@@ -491,9 +502,11 @@ class TestShodanStormScanAlerts(s_tests.SynTest):
 
             msgs = await core.stormlist('slib.shodan.notifier.add slack --desc soc --arg "webhook_url=https://x?a=b"')
             self.stormIsInPrint("Created notifier NOTIF1", msgs)
-            query = fake.last("/api/notifier", "POST")["query"]
-            assert query["webhook_url"] == "https://x?a=b"
-            assert query["description"] == "soc"
+            # Shodan only reads POST /notifier's arguments from a form body.
+            form = fake.last("/api/notifier", "POST")["form"]
+            assert form["webhook_url"] == "https://x?a=b"
+            assert form["description"] == "soc"
+            assert form["provider"] == "slack"
 
             msgs = await core.stormlist("slib.shodan.notifier.add slack --arg nope")
             self.stormIsInWarn("nope is not in the format", msgs)

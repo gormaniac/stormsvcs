@@ -110,17 +110,18 @@ class ShodanSvc(s_cell.Cell):
     async def hasApiKey(self) -> bool:
         return bool(self.getApiKey())
 
-    async def _api(self, method: str, path: str, apikey=None, base="api", params=None, json_data=None):
+    async def _api(self, method: str, path: str, apikey=None, base="api", params=None, json_data=None, form=None):
         return await self.client.request(
-            method, path, base=base, apikey=self.getApiKey(apikey), params=params, json_data=json_data,
+            method, path, base=base, apikey=self.getApiKey(apikey), params=params, json_data=json_data, form=form,
         )
 
-    async def rawRequest(self, method: str, path: str, base: str = "api", params=None, json_data=None, apikey=None):
+    async def rawRequest(self, method: str, path: str, base: str = "api", params=None, json_data=None,
+                         apikey=None, form=None):
         """Send an arbitrary request to a Shodan API. An escape hatch for new endpoints."""
 
         if not path.startswith("/"):
             path = "/" + path
-        return await self._api(method, path, apikey=apikey, base=base, params=params, json_data=json_data)
+        return await self._api(method, path, apikey=apikey, base=base, params=params, json_data=json_data, form=form)
 
     # ---- Search methods ----
 
@@ -200,15 +201,16 @@ class ShodanSvc(s_cell.Cell):
         """POST /shodan/scan
 
         ``ips`` is a list of IPs/CIDRs, or a dict of ``{ip: [[port, protocol], ...]}``.
+        Shodan only reads the arguments from a form body, it ignores query params.
         """
         if isinstance(ips, dict):
             ips = json.dumps(ips)
-        return await self._api("post", "/shodan/scan", apikey, params={"ips": ips, "force": force})
+        return await self._api("post", "/shodan/scan", apikey, form={"ips": ips, "force": force})
 
     async def scanInternet(self, port: int, protocol: str, apikey=None) -> dict:
-        """POST /shodan/scan/internet"""
+        """POST /shodan/scan/internet (form body, like POST /shodan/scan)"""
         return await self._api("post", "/shodan/scan/internet", apikey,
-                               params={"port": port, "protocol": protocol})
+                               form={"port": port, "protocol": protocol})
 
     async def scans(self, page: int = 1, apikey=None) -> dict:
         """GET /shodan/scans"""
@@ -280,11 +282,11 @@ class ShodanSvc(s_cell.Cell):
         return await self._api("get", "/notifier/provider", apikey)
 
     async def notifierCreate(self, provider: str, args: dict, desc: str | None = None, apikey=None) -> dict:
-        """POST /notifier"""
-        params = dict(args or {})
-        params["provider"] = provider
-        params["description"] = desc
-        return await self._api("post", "/notifier", apikey, params=params)
+        """POST /notifier (form body, like POST /shodan/scan)"""
+        form = dict(args or {})
+        form["provider"] = provider
+        form["description"] = desc
+        return await self._api("post", "/notifier", apikey, form=form)
 
     async def notifierGet(self, nid: str, apikey=None) -> dict:
         """GET /notifier/{id}"""

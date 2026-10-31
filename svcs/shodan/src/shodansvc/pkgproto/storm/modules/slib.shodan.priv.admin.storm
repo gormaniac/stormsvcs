@@ -40,6 +40,6 @@ function orgMemberDel(user) { return($svc.orgMemberDel($user, apikey=$userKey())
 
 // Raw requests
 
-function rawRequest(path, method=get, base=api, params=$lib.null, json=$lib.null) {
-    return($svc.rawRequest($method, $path, base=$base, params=$params, json_data=$json, apikey=$userKey()))
+function rawRequest(path, method=get, base=api, params=$lib.null, json=$lib.null, form=$lib.null) {
+    return($svc.rawRequest($method, $path, base=$base, params=$params, json_data=$json, form=$form, apikey=$userKey()))
 }

@@ -39,7 +39,8 @@ HOST_8888 = {
             "timestamp": "2026-10-01T12:00:00.000000",
             "product": "nginx",
             "version": "1.25.3",
-            "cpe23": ["cpe:2.3:a:f5:nginx:1.25.3"],
+            # Real banners list OS CPEs alongside the product's.
+            "cpe23": ["cpe:2.3:a:f5:nginx:1.25.3", "cpe:2.3:o:linux:linux_kernel"],
             "data": "HTTP/1.1 200 OK\r\nServer: nginx\r\n\r\n",
             "hostnames": ["dns.google"],
             "domains": ["dns.google"],
@@ -213,7 +214,7 @@ ROUTES: dict[tuple[str, str], Any] = {
     ("POST", "/api/shodan/scan"): (200, {"id": "SCAN1", "count": 1, "credits_left": 97}),
     ("POST", "/api/shodan/scan/internet"): (200, {"id": "ISCAN1"}),
     ("GET", "/api/shodan/scans"): (200, {"total": 1, "matches": [{"id": "SCAN1", "status": "DONE", "size": 1, "credits_left": 97, "created": "2026-10-01"}]}),
-    ("GET", "/api/shodan/scan/SCAN1"): (200, {"id": "SCAN1", "status": "DONE", "size": 1, "created": "2026-10-01"}),
+    ("GET", "/api/shodan/scan/SCAN1"): (200, {"id": "SCAN1", "status": "DONE", "count": 1, "created": "2026-10-01"}),
     ("POST", "/api/shodan/alert"): (200, ALERT),
     ("POST", "/api/shodan/alert/ALERT1"): (200, ALERT),
     ("GET", "/api/shodan/alert/info"): (200, [ALERT]),
@@ -264,6 +265,14 @@ ROUTES: dict[tuple[str, str], Any] = {
 STREAM_BANNERS = [HOST_8888["data"][0], HOST_8888["data"][1]]
 
 
+# Endpoints that only read their arguments from a form body, and the argument they require.
+FORM_ROUTES = {
+    ("POST", "/api/shodan/scan"): "ips",
+    ("POST", "/api/shodan/scan/internet"): "protocol",
+    ("POST", "/api/notifier"): "provider",
+}
+
+
 class FakeShodan:
     """Run with ``async with FakeShodan() as fake:`` and pass ``fake.urls`` as ``shodan:urls``."""
 
@@ -274,18 +283,23 @@ class FakeShodan:
 
     async def _handle(self, request: web.Request) -> web.StreamResponse:
         body = None
+        form = {}
         if request.can_read_body:
-            raw = await request.read()
-            try:
-                body = json.loads(raw)
-            except ValueError:
-                body = raw.decode()
+            if request.content_type == "application/x-www-form-urlencoded":
+                form = dict(await request.post())
+            else:
+                raw = await request.read()
+                try:
+                    body = json.loads(raw)
+                except ValueError:
+                    body = raw.decode()
 
         self.requests.append({
             "method": request.method,
             "path": request.path,
             "query": dict(request.query),
             "json": body,
+            "form": form,
         })
 
         if request.path.startswith("/stream/"):
@@ -293,6 +307,11 @@ class FakeShodan:
 
         if request.query.get("key") == "badkey":
             return web.json_response({"error": "Invalid API key"}, status=401)
+
+        # Like the real API, these endpoints ignore query params and only read a form body.
+        required = FORM_ROUTES.get((request.method, request.path))
+        if required and required not in form:
+            return web.json_response({"error": f"Missing {required} (it must be in the form body)"})
 
         route = self.routes.get((request.method, request.path))
         if route is None:

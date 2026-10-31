@@ -1,5 +1,5 @@
 name: slib.ipapi
-version: 0.1.0
+version: 0.1.1
 guid: 92cc9d722c63125d64911389cd39c685
 
 synapse_minversion: [2, 137, 0]
@@ -68,13 +68,11 @@ commands:
             
             A bit redundant when not using --query because nodes stay in the pipeline otherwise.
 
-    forms:
-      input:
-        - inet:ipv4
-        - inet:ipv6
-      output:
-        - inet:ipv4
-        - inet:ipv6
+    cmdinputs:
+      - form: inet:ipv4
+        help: IPs to query ip-api.com for (ignored when --query is used).
+      - form: inet:ipv6
+        help: IPs to query ip-api.com for (ignored when --query is used).
 
   - name: slib.ipapi.admin.settag
     perms:

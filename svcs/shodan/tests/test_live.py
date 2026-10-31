@@ -17,6 +17,7 @@ import pytest
 import synapse.tests.utils as s_tests
 
 from shodansvc import ShodanSvc
+from shodansvc.client import ShodanApiError
 
 
 LIVE = os.environ.get("SLIB_SHODAN_LIVE") == "1"
@@ -126,3 +127,30 @@ class TestLiveKeyed(s_tests.SynTest):
             msgs = await core.stormlist("[ inet:fqdn=dns.google ] | slib.shodan.dns.lookup --yield")
             self.stormHasNoErr(msgs)
             assert len(await core.nodes("inet:dns:a:fqdn=dns.google")) >= 1
+
+    async def test_form_endpoints(self):
+        # These only read their arguments from a form body, query params are silently ignored
+        # (POST /shodan/scan then fails with "Private IPs not allowed: "). Invalid arguments
+        # prove Shodan parsed them, without submitting a scan or creating a notifier.
+        async with liveSvc(self, apikey=APIKEY) as (_core, svc):
+            with self.raises(ShodanApiError) as cm:
+                await svc.scan(["not-an-ip"])
+            assert cm.exception.mesg == "Empty list of IPs"
+
+            with self.raises(ShodanApiError) as cm:
+                await svc.scanInternet(1, "not-a-protocol")
+            assert cm.exception.mesg == "Unknown protocol"
+
+            with self.raises(ShodanApiError) as cm:
+                await svc.notifierCreate("webhook", {})
+            assert cm.exception.mesg == "Invalid arguments for the provider"
+
+    async def test_host_softvers(self):
+        async with liveSvc(self, apikey=APIKEY) as (core, _svc):
+            msgs = await core.stormlist("slib.shodan.host --ip 45.33.32.156")
+            self.stormHasNoErr(msgs)
+            # scanme.nmap.org's banners list OS CPEs (ex. Ubuntu's) next to OpenSSH's and Apache's.
+            # A banner's product/version must never be applied to an OS CPE.
+            assert await core.nodes("it:prod:softver")
+            nodes = await core.nodes("it:prod:softver:cpe^='cpe:2.3:o:'")
+            assert all(n.get("name") is None and n.get("vers") is None for n in nodes)

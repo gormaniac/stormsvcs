@@ -17,6 +17,7 @@ from shodansvc.client import (
 )
 
 from .fakeshodan import (
+    FORM_ROUTES,
     CVE_LOG4SHELL,
     DNS_DOMAIN,
     EUVD_NO_CVE,
@@ -109,6 +110,42 @@ class TestNorm(s_tests.SynTest):
         assert norm.normVulns(["CVE-2023-44487"])[0]["cve"] == "CVE-2023-44487"
         assert norm.normVulns(None) == []
 
+    def test_norm_softvers(self):
+        # A real scanme.nmap.org banner: the product/version only belong on the matching application CPE.
+        cpes = norm.normCpes(["cpe:2.3:a:openbsd:openssh:6.6.1p1", "cpe:2.3:o:canonical:ubuntu_linux"])
+        assert norm.normSoftvers(cpes, "OpenSSH", "6.6.1p1 Ubuntu 2ubuntu2.13") == [
+            {"cpe": cpes[0], "product": "OpenSSH", "version": "6.6.1p1 Ubuntu 2ubuntu2.13"},
+            {"cpe": cpes[1], "product": None, "version": None},
+        ]
+
+        # A version-less CPE is shared by every version, so the product/version get their own entry.
+        cpes = norm.normCpes(["cpe:2.3:a:f5:nginx", "cpe:2.3:o:linux:linux_kernel"])
+        assert norm.normSoftvers(cpes, "nginx", "1.24.0") == [
+            {"cpe": cpes[0], "product": None, "version": None},
+            {"cpe": cpes[1], "product": None, "version": None},
+            {"cpe": None, "product": "nginx", "version": "1.24.0"},
+        ]
+
+        # A shorter version of another product's CPE (OpenSSL 1.1) must not match nginx 1.18.0.
+        cpes = norm.normCpes(["cpe:2.3:a:openssl:openssl:1.1", "cpe:2.3:a:f5:nginx:1.18.0"])
+        assert norm.normSoftvers(cpes, "nginx", "1.18.0") == [
+            {"cpe": cpes[0], "product": None, "version": None},
+            {"cpe": cpes[1], "product": "nginx", "version": "1.18.0"},
+        ]
+        assert norm.normSoftvers(cpes[:1], "x", "1.1.0") == [
+            {"cpe": cpes[0], "product": None, "version": None},
+            {"cpe": None, "product": "x", "version": "1.1.0"},
+        ]
+
+        # CPE 2.3 escapes colons within a component.
+        assert norm._cpeInfo(r"cpe:2.3:a:acme:foo\:bar:2.0:*:*:*:*:*:*:*") == ("a", "2.0")
+
+        assert norm.normSoftvers(["cpe:/a:ntp:ntp:3"], "ntpd", "3") == [
+            {"cpe": "cpe:/a:ntp:ntp:3", "product": "ntpd", "version": "3"},
+        ]
+        assert norm.normSoftvers([], "nginx", None) == [{"cpe": None, "product": "nginx", "version": None}]
+        assert norm.normSoftvers([], None, None) == []
+
     def test_norm_host(self):
         host = norm.normHost(HOST_8888)
         assert host["ip"] == "8.8.8.8"
@@ -120,7 +157,14 @@ class TestNorm(s_tests.SynTest):
         assert len(host["banners"]) == 2
 
         https, dns = host["banners"]
-        assert https["cpes"] == ["cpe:2.3:a:f5:nginx:1.25.3:*:*:*:*:*:*:*"]
+        assert https["cpes"] == [
+            "cpe:2.3:a:f5:nginx:1.25.3:*:*:*:*:*:*:*",
+            "cpe:2.3:o:linux:linux_kernel:*:*:*:*:*:*:*:*",
+        ]
+        assert https["softvers"] == [
+            {"cpe": "cpe:2.3:a:f5:nginx:1.25.3:*:*:*:*:*:*:*", "product": "nginx", "version": "1.25.3"},
+            {"cpe": "cpe:2.3:o:linux:linux_kernel:*:*:*:*:*:*:*:*", "product": None, "version": None},
+        ]
         assert https["module"] == "https"
         assert https["http"]["title"] == "Google DNS"
         assert https["cert"]["sha256"] == "a" * 64
@@ -181,15 +225,25 @@ class TestClient(s_tests.SynTest):
         assert normParam(3) == "3"
         assert normParams({"a": None, "b": True}) == {"b": "true"}
         assert normParams(None) == {}
+        # Dicts (ex. POST /shodan/scan's {ip: [[port, protocol]]} "ips") are sent as JSON.
+        assert normParam({"1.2.3.4": [[443, "https"]]}) == '{"1.2.3.4": [[443, "https"]]}'
+        with self.raises(ShodanApiError):
+            normParams("ips=1.2.3.4")
 
     def test_err_mesg(self):
         assert errMesg(404, {"error": "nope"}, "") == "nope"
         assert errMesg(404, {"detail": "Not Found"}, "") == "Not Found"
-        assert errMesg(401, None, "<html>") == "Invalid Shodan API key"
+        # Shodan's 401s are an HTML page (bad key) or empty (the plan lacks the API, ex. streams).
+        assert errMesg(401, None, "<html>").startswith("Shodan rejected the API key")
+        assert errMesg(401, None, "").startswith("Shodan rejected the API key")
+        # Ex. /org and /shodan/data on plans without them, which return an HTML page.
+        assert errMesg(403, None, "<html>").startswith("Access denied")
+        # The keyless APIs can't have key problems, ex. a WAF's 403 page.
+        assert errMesg(403, None, "<html>", keyed=False) == "HTTP 403"
         assert errMesg(500, None, "") == "HTTP 500"
         assert errMesg(500, None, "plain error") == "plain error"
         # The Streaming API wraps an HTML error page in JSON.
-        assert errMesg(401, {"error": "<html><title>401 Unauthorized</title></html>"}, "") == "Invalid Shodan API key"
+        assert errMesg(401, {"error": "<html><title>401 Unauthorized</title></html>"}, "").startswith("Shodan rejected")
 
     async def test_rate_limiter(self):
         limiter = RateLimiter(20)
@@ -213,6 +267,10 @@ class TestClient(s_tests.SynTest):
                 await client.request("get", "/shodan/ports", apikey="badkey")
             assert cm.exception.code == 401
             assert cm.exception.mesg == "Invalid API key"
+
+            with self.raises(ShodanApiError) as cm:
+                await client.request("post", "/shodan/alert", apikey="key", json_data={}, form={})
+            assert "both a JSON body and a form body" in cm.exception.mesg
 
             with self.raises(ShodanApiError) as cm:
                 await client.request("get", "/shodan/host/10.0.0.1", apikey="key")
@@ -277,8 +335,12 @@ class TestShodanSvc(s_tests.SynTest):
 
                 req = fake.last()
                 assert (req["method"], req["path"]) == (method, path), name
+                # Shodan ignores query params on these, they must be sent in a form body.
+                args_sent = req["form"] if (method, path) in FORM_ROUTES else req["query"]
                 for key, valu in query.items():
-                    assert req["query"].get(key) == valu, (name, key, req["query"])
+                    assert args_sent.get(key) == valu, (name, key, req)
+                    if (method, path) in FORM_ROUTES:
+                        assert key not in req["query"], (name, key, req["query"])
 
                 if path.startswith(KEYLESS):
                     assert "key" not in req["query"], name
