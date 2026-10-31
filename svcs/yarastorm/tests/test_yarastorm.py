@@ -3,13 +3,15 @@
 
 import binascii
 import hashlib
+import pathlib
+import tomllib
 
 import synapse.common as s_common
 import synapse.tests.utils as s_tests
 import yara_x
 from yarastorm import __version__, YaraSvc
 from yarastorm.svc import YaraRules
-from yarastorm.defs import SVC_NAME
+from yarastorm.defs import PKGDEFS, SVC_NAME
 
 
 CMDS = (
@@ -23,6 +25,13 @@ MODS = (f"{SVC_NAME}.lib",)
 
 class TestYaraStorm(s_tests.SynTest):
     """Test suite for the yarastorm service."""
+
+    def test_versions_match(self):
+        # The version lives in pyproject.toml (the image tag), __init__.py, and the package yaml.
+        pyproject = pathlib.Path(__file__).parent.parent / "pyproject.toml"
+        with pyproject.open("rb") as fd:
+            assert tomllib.load(fd)["project"]["version"] == __version__
+        assert PKGDEFS[0]["version"] == __version__
 
     async def test_svc_starts(self):
         async with self.getTestCoreProxSvc(YaraSvc) as (core, prox, svc):

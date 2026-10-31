@@ -1,5 +1,7 @@
 """Pytests for the slib.ipapi Storm package (commands, modules, and perms)."""
 
+import pathlib
+import tomllib
 from unittest import mock
 
 import synapse.tests.utils as s_tests
@@ -46,6 +48,13 @@ SUCCESS_DATA = {
 
 class TestIpApiStorm(s_tests.SynTest):
     """Test suite for the slib.ipapi Storm package's commands and modules."""
+
+    def test_versions_match(self):
+        # The version lives in pyproject.toml (the image tag), __init__.py, and the package yaml.
+        pyproject = pathlib.Path(__file__).parent.parent / "pyproject.toml"
+        with pyproject.open("rb") as fd:
+            assert tomllib.load(fd)["project"]["version"] == __version__
+        assert PKGDEFS[0]["version"] == __version__
 
     async def test_svc_starts(self):
         async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
