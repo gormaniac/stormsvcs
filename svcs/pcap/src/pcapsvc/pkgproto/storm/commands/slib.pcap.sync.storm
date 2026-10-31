@@ -1,4 +1,11 @@
 init {
+    // The sync edits nodes as root in this view, and replaces the service's rules with this
+    // view's, so only users that can add rules to the view's layer may run it here.
+    $layer = $lib.layer.get().iden
+    if (not ($lib.user.allowed("node.add.it:app:snort:rule", gateiden=$layer)
+             and $lib.user.allowed("node.add.it:app:suricata:rule", gateiden=$layer))) {
+        $lib.raise(AuthDeny, "slib.pcap.sync edits the rules in the current view, it needs permission to add it:app:snort:rule and it:app:suricata:rule nodes to its layer.")
+    }
     $sync = $lib.import(slib.pcap.priv.sync)
     $util = $lib.import(slib.pcap.util)
 

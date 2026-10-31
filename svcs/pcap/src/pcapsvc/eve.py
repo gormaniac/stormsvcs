@@ -14,7 +14,11 @@ import datetime
 import ipaddress
 import logging
 import os
+import re
 from typing import Any
+
+_SHA256 = re.compile("[0-9a-f]{64}")
+"""A SHA-256, in hex."""
 
 logger = logging.getLogger(__name__)
 
@@ -292,9 +296,11 @@ def _fileinfo(enr: Any, flow: dict, ev: dict, txs: dict[int, dict], filestore: s
             enr.unsaved += 1
         return
 
-    path = os.path.join(filestore, sha256[:2], sha256)
-    if not os.path.exists(path):
+    # The engine wrote this (see FileStore.addPath), the name has to be a SHA-256.
+    sha256 = str(sha256).lower()
+    if not _SHA256.fullmatch(sha256):
         return
+    path = os.path.join(filestore, sha256[:2], sha256)
 
     client = fromClient(flow, ev)
     side = enr.sides[client]
@@ -319,7 +325,7 @@ def _fileinfo(enr: Any, flow: dict, ev: dict, txs: dict[int, dict], filestore: s
         side,
         path,
         sha256,
-        info.get("size") or os.path.getsize(path),
+        info.get("size"),
         proto,
         name=name,
         mime=mime,

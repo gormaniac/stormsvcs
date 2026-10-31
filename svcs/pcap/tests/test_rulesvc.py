@@ -401,8 +401,13 @@ class TestFeedSync(s_tests.SynTest):
             self.stormHasNoErr(msgs)
             self.stormIsInPrint("Rules: 0 loaded", msgs)
 
-            # Syncing edits nodes as root, so only slib.pcap.sync is needed.
+            # Syncing edits nodes as root, but only in views the user can add rules to.
             await user.addRule((True, ("slib", "pcap", "sync")))
+            msgs = await core.stormlist(f"slib.pcap.sync --no-push --feed {S3}", opts=opts)
+            self.stormIsInErr("needs permission to add it:app:snort:rule", msgs)
+            self.len(0, await core.nodes("it:app:snort:rule"))
+            await user.addRule((True, ("node", "add", "it:app:snort:rule")))
+            await user.addRule((True, ("node", "add", "it:app:suricata:rule")))
             msgs = await core.stormlist(f"slib.pcap.sync --no-push --feed {S3}", opts=opts)
             self.stormHasNoWarnErr(msgs)
             assert await count(core, "it:app:snort:rule") == 6

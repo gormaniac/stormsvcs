@@ -14,6 +14,7 @@ that sent it, then ``enrichFlow`` adds what was found to the flow's dict, per si
 And for the flow as a whole: ``tls`` (SNIs, JA3, JA3S, JA4) and ``http`` (hosts, requests).
 """
 
+import contextlib
 import email
 import email.policy
 import hashlib
@@ -21,7 +22,7 @@ import locale
 import os
 import posixpath
 import re
-import shutil
+import stat
 import struct
 import urllib.parse
 from typing import Any
@@ -203,22 +204,45 @@ class FileStore:
             self.files[sha256] = len(data)
         return sha256
 
-    def addPath(self, path: str, sha256: str, size: int) -> str | None:
-        """Store a file that's already on disk (ex. Suricata extracted it) by moving it.
+    def addPath(self, path: str) -> tuple[str, int] | None:
+        """Store a file an engine extracted (ex. Suricata's file store) by copying it.
 
-        Returns its SHA-256, or None if it's over the limits.
+        The engine's output isn't trusted (it parsed the capture): the file is opened without
+        following symlinks, must be a regular file, and is hashed and sized while it's copied.
+
+        Returns its (SHA-256, size), or None if it's over the limits or isn't a regular file.
         """
 
-        if self.maxsize and size > self.maxsize:
-            self.skipped += 1
+        try:
+            ifd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        except OSError:
             return None
-        if sha256 not in self.files:
-            if self.limit and len(self.files) >= self.limit:
-                self.skipped += 1
+        tmp = os.path.join(self.dirn, f".part-{os.getpid()}-{id(path)}")
+        try:
+            if not stat.S_ISREG(os.fstat(ifd).st_mode):
                 return None
-            shutil.move(path, os.path.join(self.dirn, sha256))
-            self.files[sha256] = size
-        return sha256
+            digest = hashlib.sha256()
+            size = 0
+            with os.fdopen(ifd, "rb", closefd=False) as src, open(tmp, "wb") as dst:
+                while byts := src.read(1024 * 1024):
+                    size += len(byts)
+                    if self.maxsize and size > self.maxsize:
+                        self.skipped += 1
+                        return None
+                    digest.update(byts)
+                    dst.write(byts)
+            sha256 = digest.hexdigest()
+            if sha256 not in self.files:
+                if self.limit and len(self.files) >= self.limit:
+                    self.skipped += 1
+                    return None
+                os.replace(tmp, os.path.join(self.dirn, sha256))
+                self.files[sha256] = size
+            return sha256, size
+        finally:
+            os.close(ifd)
+            with contextlib.suppress(OSError):
+                os.remove(tmp)
 
     def path(self, sha256: str) -> str:
         """The path a stored file was written to."""
@@ -370,8 +394,11 @@ class Enricher:
     ) -> None:
         """Add a file that's already on disk (Suricata extracted it)."""
 
-        if self.files.addPath(path, sha256, size) is None:
+        # The file's own hash and size, not the engine's (see FileStore.addPath).
+        added = self.files.addPath(path)
+        if added is None:
             return
+        sha256, size = added
         self._addEntry(
             side,
             {

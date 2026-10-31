@@ -295,17 +295,18 @@ def main(argv: list[str]) -> None:
     cmd = argv[2:]
     strict = bool(spec.get("strict"))
 
-    def layer(name: str, func, *args) -> None:
+    def layer(name: str, func, *args, required: bool = False) -> None:
         try:
             func(*args)
         except (SandboxError, OSError, ValueError) as err:
-            if strict:
+            if strict or required:
                 _fail(f"{name}: {err}")
             _warn(f"{name} skipped: {err}")
 
     layer("rlimits", setRlimits, spec.get("rlimits") or {})
     if spec.get("uid") is not None:
-        layer("user", dropUser, int(spec["uid"]), int(spec["gid"]))
+        # Never fall back to running an engine as root when the drop fails, even best-effort.
+        layer("user", dropUser, int(spec["uid"]), int(spec["gid"]), required=True)
 
     libc = _libc()
 

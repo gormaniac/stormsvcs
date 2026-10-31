@@ -109,7 +109,7 @@ the directories searchable yourself if the engines can't get to their files. `sa
 | `pcap:files:maxsize` | `67108864` | The largest file extracted from a flow (64 MiB), `0` for no limit. |
 | `pcap:files:limit` | `10000` | The max number of files extracted from one capture, `0` for no limit. |
 | `pcap:feeds` | see [Rule feeds](#rule-feeds) | The feeds the service starts with. Only read the first time it starts, after that use `slib.pcap.admin.feed`. |
-| `pcap:feeds:secrets` | `{}` | Secrets feed URLs use as `${name}`, ex. `{"talos:oinkcode": "..."}`. |
+| `pcap:feeds:secrets` | `{}` | Secrets feed URLs use as `${name}`, each only sent to its hosts, ex. `{"talos:oinkcode": {"value": "...", "hosts": ["www.snort.org"]}}`. |
 | `pcap:feeds:interval` | `24` | Hours between feed downloads. |
 | `pcap:feeds:timeout` | `300` | Seconds before a feed download times out. |
 | `pcap:feeds:maxsize` | `268435456` | The max size of a feed (and of the rules it unpacks to), 256 MiB. |
@@ -269,7 +269,13 @@ changed any other way (ex. editing `:enabled` or `:text` directly) are picked up
 Manage feeds with `slib.pcap.admin.feed`. A feed is a URL to a `.rules` file, or a `.tar.gz`,
 `.tgz`, `.gz`, or `.zip` of them, and the engine its rules are for. Feeds that need a key (ex.
 Talos' registered and subscriber rules, an ET Pro code) use `${name}` placeholders, filled in
-from the service's `pcap:feeds:secrets` so the key isn't stored in the Cortex:
+from the service's `pcap:feeds:secrets` so the key isn't stored in the Cortex. Each secret lists
+the hosts it may be sent to (exact, or `*.example.com`), since Cortex admins choose feed URLs:
+
+```yaml
+pcap:feeds:secrets:
+  talos:oinkcode: {value: "<oinkcode>", hosts: ["www.snort.org", "snort.org"]}
+```
 
 ```
 slib.pcap.admin.feed add talos 'https://www.snort.org/rules/snortrules-snapshot-31200.tar.gz?oinkcode=${talos:oinkcode}' --engine snort3
@@ -305,8 +311,10 @@ view. Change it with `slib.pcap.admin.schedule`. Each run:
 2. **Pushes every enabled rule** in the view to the service (unless `--no-push`), which replaces
    its rules with them and rebuilds each engine's rules if they changed.
 
-Syncing edits nodes as root (in the job's view), so `slib.pcap.sync` holders don't need node
-permissions.
+Syncing edits nodes as root (in the job's view), so `slib.pcap.sync` holders don't need
+permissions for the rulesets, references, and edges it makes. They do need permission to add
+`it:app:snort:rule` and `it:app:suricata:rule` nodes to the view's layer, since a sync edits that
+view and replaces the service's rules with the view's (the last push wins).
 
 ### Matches
 

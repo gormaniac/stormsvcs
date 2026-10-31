@@ -168,3 +168,33 @@ def test_rule_nodedef():
         "updated": "2024-03-05",
     }
     assert info["edges"] == [("refs", ("hash:md5", "662002d61f1aebd64fc204ce40fd65f2"))]
+
+
+def test_feed_secrets():
+    secrets = {
+        "talos:oinkcode": {"value": "abc123", "hosts": ["www.snort.org", "*.example.com"]},
+        "bad": "a plain string",
+    }
+    url = "https://www.snort.org/rules/x.tar.gz?oinkcode=${talos:oinkcode}"
+    assert s_feeds.feedUrl(url, secrets).endswith("oinkcode=abc123")
+    assert s_feeds.feedUrl("https://a.b.example.com/${talos:oinkcode}", secrets) == (
+        "https://a.b.example.com/abc123"
+    )
+
+    # Admins choose feed URLs, a secret is only sent to its hosts.
+    for bad in (
+        "https://attacker.example.net/?k=${talos:oinkcode}",
+        "https://www.snort.org.attacker.net/?k=${talos:oinkcode}",
+        "https://example.com/?k=${talos:oinkcode}",
+        "https://${talos:oinkcode}.attacker.net/",
+    ):
+        with pytest.raises(s_feeds.FeedError, match="isn't allowed to be sent"):
+            s_feeds.feedUrl(bad, secrets)
+    with pytest.raises(s_feeds.FeedError, match="needs the secret"):
+        s_feeds.feedUrl("https://www.snort.org/${nope}", secrets)
+    with pytest.raises(s_feeds.FeedError, match="needs the secret"):
+        s_feeds.feedUrl("https://www.snort.org/${bad}", secrets)
+
+    assert s_feeds.redact("GET https://www.snort.org/?oinkcode=abc123 failed", secrets) == (
+        "GET https://www.snort.org/?oinkcode=${talos:oinkcode} failed"
+    )

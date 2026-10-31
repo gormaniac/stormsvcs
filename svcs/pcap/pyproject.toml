@@ -1,6 +1,6 @@
 [project]
 name = "pcapsvc"
-version = "0.4.2"
+version = "0.4.3"
 description = "A Storm Service that models the flows in PCAP files from an Axon as inet:flow nodes"
 readme = "README.md"
 license-files = ["LICENSE"]

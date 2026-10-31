@@ -16,6 +16,7 @@ import io
 import os
 import re
 import tarfile
+import urllib.parse
 import zipfile
 from collections.abc import Iterator
 from typing import Any, TypedDict
@@ -102,35 +103,59 @@ them with a URL that references the oinkcode as a secret (see the README)."""
 _SECRET = re.compile(r"\$\{([a-zA-Z0-9_.:-]+)\}")
 
 
-def feedUrl(url: str, secrets: dict[str, str] | None = None) -> str:
+def hostAllowed(host: str, patterns: list[str]) -> bool:
+    """Whether a host matches one of a secret's hosts, ex. ``snort.org`` or ``*.snort.org``."""
+
+    host = (host or "").lower().rstrip(".")
+    for pattern in patterns:
+        pattern = str(pattern).lower().rstrip(".")
+        if pattern.startswith("*."):
+            if host.endswith(pattern[1:]):
+                return True
+        elif host == pattern:
+            return True
+    return False
+
+
+def feedUrl(url: str, secrets: dict[str, dict] | None = None) -> str:
     """A feed's URL with its ``${name}`` secrets filled in.
+
+    Each secret is ``{"value": ..., "hosts": [...]}`` and is only sent to its hosts, so a feed
+    URL (which Cortex admins set) can't send it anywhere else.
 
     Raises
     ------
     FeedError
-        If the URL references a secret that isn't in the service's config.
+        If the URL references a secret that isn't in the service's config, or that isn't
+        allowed to be sent to the URL's host.
     """
 
     secrets = secrets or {}
+    host = urllib.parse.urlsplit(_SECRET.sub("x", url)).hostname or ""
 
     def fill(match: re.Match) -> str:
         name = match.group(1)
-        if name not in secrets:
+        secret = secrets.get(name)
+        if not isinstance(secret, dict) or "value" not in secret:
             raise FeedError(
                 f"The feed's URL needs the secret ${{{name}}}, set it in the "
-                "service's pcap:feeds:secrets config."
+                'service\'s pcap:feeds:secrets config as {"value": ..., "hosts": [...]}.'
             )
-        return str(secrets[name])
+        if not hostAllowed(host, secret.get("hosts") or []):
+            raise FeedError(f"The secret ${{{name}}} isn't allowed to be sent to {host}.")
+        return urllib.parse.quote(str(secret["value"]), safe="")
 
     return _SECRET.sub(fill, url)
 
 
-def redact(text: str, secrets: dict[str, str] | None = None) -> str:
+def redact(text: str, secrets: dict[str, dict] | None = None) -> str:
     """Replace any secret's value in text (ex. an error message) with its placeholder."""
 
-    for name, valu in (secrets or {}).items():
+    for name, secret in (secrets or {}).items():
+        valu = secret.get("value") if isinstance(secret, dict) else None
         if valu:
             text = text.replace(str(valu), f"${{{name}}}")
+            text = text.replace(urllib.parse.quote(str(valu), safe=""), f"${{{name}}}")
     return text
 
 

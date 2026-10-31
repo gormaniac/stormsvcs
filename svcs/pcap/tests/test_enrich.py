@@ -394,3 +394,31 @@ class TestHttp2:
         # A POST's response isn't the file at its path.
         assert dst[hashlib.sha256(b"ok").hexdigest()]["name"] is None
         assert len(dst) == 2
+
+
+class TestFileStorePath:
+    def test_add_path(self, tmp_path):
+        # Files an engine extracted aren't trusted: they're hashed and sized here, and symlinks
+        # and other non-regular files are refused.
+        store = p_enrich.FileStore(str(tmp_path / "store"), maxsize=10)
+        (tmp_path / "store").mkdir()
+        good = tmp_path / "good"
+        good.write_bytes(b"hello")
+        assert store.addPath(str(good)) == (hashlib.sha256(b"hello").hexdigest(), 5)
+        assert good.exists()
+        assert (tmp_path / "store" / hashlib.sha256(b"hello").hexdigest()).read_bytes() == b"hello"
+
+        secret = tmp_path / "secret"
+        secret.write_bytes(b"secret")
+        link = tmp_path / "link"
+        link.symlink_to(secret)
+        assert store.addPath(str(link)) is None
+        assert store.addPath(str(tmp_path)) is None
+        assert store.addPath(str(tmp_path / "missing")) is None
+
+        big = tmp_path / "big"
+        big.write_bytes(b"x" * 11)
+        assert store.addPath(str(big)) is None and store.skipped == 1
+        assert sorted(p.name for p in (tmp_path / "store").iterdir()) == [
+            hashlib.sha256(b"hello").hexdigest()
+        ]

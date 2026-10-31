@@ -1,5 +1,5 @@
 name: slib.pcap
-version: 0.4.2
+version: 0.4.3
 guid: e02a89d21d5b4eb588a03a7156b3b467
 
 synapse_minversion: [2, 234, 0]
@@ -322,7 +322,8 @@ commands:
       Add, remove, enable, or disable a rule feed.
 
       A feed's URL can reference secrets from the service's pcap:feeds:secrets config as
-      ${name}, ex. a Talos oinkcode. Talos Registered and Subscriber rules have their own
+      ${name}, ex. a Talos oinkcode. A secret is only sent to the hosts the service's operator
+      allowed for it. Talos Registered and Subscriber rules have their own
       license terms, it's up to you to follow them.
 
       Examples:

@@ -215,11 +215,20 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
         },
         "pcap:feeds:secrets": {
             "type": "object",
-            "additionalProperties": {"type": "string"},
+            "additionalProperties": {
+                "type": "object",
+                "properties": {
+                    "value": {"type": "string"},
+                    "hosts": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["value", "hosts"],
+                "additionalProperties": False,
+            },
             "default": {},
             "description": (
-                'Secrets feed URLs reference as ${name}, ex. {"talos:oinkcode": "..."}. '
-                "Only the service's operator can see them."
+                "Secrets feed URLs reference as ${name}, each only sent to its hosts, ex. "
+                '{"talos:oinkcode": {"value": "...", "hosts": ["www.snort.org"]}}. Only the '
+                "service's operator can see them."
             ),
         },
         "pcap:feeds:interval": {
