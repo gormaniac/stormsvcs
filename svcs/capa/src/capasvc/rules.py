@@ -6,6 +6,7 @@ becomes a tag under the configured prefix (see ``tagRecords``), ex. the namespac
 """
 
 
+import functools
 import hashlib
 import os
 import re
@@ -14,6 +15,9 @@ from typing import Any
 
 import capa.rules
 import synapse.common as s_common
+import synapse.datamodel as s_datamodel
+import synapse.exc as s_exc
+import synapse.lib.types as s_types
 
 
 RULE_TYPE = "capa"
@@ -23,7 +27,6 @@ LIB_RULE_TYPE = "capa.lib"
 """The ``meta:rule:type`` of capa library rules, which are only used by other rules."""
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-TAG_PART_RE = re.compile(r"\w+")
 TECHNIQUE_RE = re.compile(r"\[(T\d{4}(?:\.\d{3})?)\]\s*$")
 BEHAVIOR_RE = re.compile(r"\[([A-Z]\d{4}(?:\.[A-Z]?\d{3})?)\]\s*$")
 
@@ -48,10 +51,23 @@ def rulesetGuid(version: str) -> str:
     return s_common.guid(("slib.capa", "ruleset", version))
 
 
-def tagPart(text: str) -> str:
-    """Normalize a tag part the way Synapse does (``syn:tag:part``)."""
+@functools.cache
+def _tagPartType() -> s_types.TagPart:
+    """Synapse's ``syn:tag:part`` type, built once (a data model takes a moment to build)."""
 
-    return "_".join(TAG_PART_RE.findall(text.lower().strip()))
+    return s_datamodel.Model().type("syn:tag:part")
+
+
+def tagPart(text: str) -> str:
+    """Normalize a tag part with Synapse's own ``syn:tag:part`` type.
+
+    Returns an empty string for text with no valid characters (Synapse rejects those).
+    """
+
+    try:
+        return _tagPartType().norm(text)[0]
+    except s_exc.BadTypeValu:
+        return ""
 
 
 def nsTag(namespace: str | None) -> str | None:

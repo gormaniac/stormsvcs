@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import os
 import shutil
+from unittest import mock
 import sys
 
 import synapse.common as s_common
@@ -166,11 +167,38 @@ class TestCapaSvc(s_tests.SynTest):
                 await svc.scan(SAMPLE_SHA256)
             assert "no axon:url configured" in cm.exception.mesg
 
+        # The Axon is down, the client keeps trying to connect in the background.
         conf = svcConf(**{"axon:url": "tcp://127.0.0.1:1/axon"})
         async with self.getTestCell(CapaSvc, conf) as svc:
-            with self.raises(CapaSvcError) as cm:
-                await svc.scan(SAMPLE_SHA256)
-            assert cm.exception.mesg.startswith(f"Unable to read {SAMPLE_SHA256} from the Axon")
+            with mock.patch.object(s_svc, "AXON_TIMEOUT", 0.5):
+                with self.raises(CapaSvcError) as cm:
+                    await svc.scan(SAMPLE_SHA256)
+            assert cm.exception.mesg == "Unable to connect to the Axon within 0.5 seconds."
+
+    async def test_axon_client(self):
+        # Every scan uses the service's one Axon client, which reconnects if the link drops.
+        async with self.getTestAxon() as axon:
+            await axon.put(SAMPLE)
+            async with self.getTestCell(CapaSvc, svcConf(axon)) as svc:
+                proxy = await svc.axon.proxy()
+                await svc._fetch(SAMPLE_SHA256, os.path.join(svc.workdir, "a"))
+                assert await svc.axon.proxy() is proxy
+
+                await proxy.fini()
+                path = os.path.join(svc.workdir, "b")
+                await svc._fetch(SAMPLE_SHA256, path)
+                with open(path, "rb") as fd:
+                    assert fd.read() == SAMPLE
+
+                # Other Axon errors are reported.
+                newproxy = await svc.axon.proxy()
+                with mock.patch.object(newproxy, "size", side_effect=OSError("boom")):
+                    with self.raises(CapaSvcError) as cm:
+                        await svc._fetch(SAMPLE_SHA256, path)
+                assert cm.exception.mesg == f"Unable to read {SAMPLE_SHA256} from the Axon: boom"
+
+            # The client is closed with the service.
+            assert svc.axon.isfini
 
     async def test_rules(self):
         async with self.getTestCell(CapaSvc, svcConf()) as svc:

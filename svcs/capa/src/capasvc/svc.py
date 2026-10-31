@@ -39,6 +39,9 @@ the sample the report is about, not the report file itself.
 OSES = ("auto", "windows", "linux", "macos")
 """The OS values capa accepts, ``auto`` lets capa detect it."""
 
+AXON_TIMEOUT = 30
+"""Seconds to wait for the Axon connection before a scan fails."""
+
 MAX_ADDRS = 100
 """The max number of match addresses kept per rule."""
 
@@ -159,6 +162,12 @@ class CapaSvc(s_cell.Cell):
         # Leftovers from a run that was killed with the service.
         for name in os.listdir(self.workdir):
             os.unlink(os.path.join(self.workdir, name))
+
+        # One Telepath client for every scan, it reconnects on its own if the Axon goes away.
+        self.axon: s_telepath.Client | None = None
+        if url := self.conf.get("axon:url"):
+            self.axon = await s_telepath.Client.anit(url)
+            self.onfini(self.axon)
 
         self.sema = asyncio.Semaphore(self.conf.get("capa:workers"))
         self.procs: set[asyncio.subprocess.Process] = set()
@@ -352,29 +361,35 @@ class CapaSvc(s_cell.Cell):
     async def _fetch(self, sha256: str, path: str) -> None:
         """Save a file from the Axon to ``path``."""
 
-        url = self.conf.get("axon:url")
-        if not url:
+        if self.axon is None:
             raise CapaSvcError("The slib.capa service has no axon:url configured.")
 
         maxsize = self.conf.get("capa:maxsize")
         byts = s_common.uhex(sha256)
 
         try:
-            async with s_telepath.withTeleEnv():
-                async with await s_telepath.openurl(url) as axon:
-                    size = await axon.size(byts)
-                    if size is None:
-                        raise CapaSvcError(f"The file {sha256} is not in the Axon.")
-                    if size > maxsize:
-                        raise CapaSvcError(
-                            f"The file {sha256} is {size} bytes, more than the {maxsize} byte "
-                            "max (capa:maxsize)."
-                        )
-                    with open(path, "wb") as fd:
-                        async for chunk in axon.get(byts):
-                            fd.write(chunk)
+            axon = await self.axon.proxy(timeout=AXON_TIMEOUT)
+            size = await axon.size(byts)
+            if size is None:
+                raise CapaSvcError(f"The file {sha256} is not in the Axon.")
+            if size > maxsize:
+                raise CapaSvcError(
+                    f"The file {sha256} is {size} bytes, more than the {maxsize} byte "
+                    "max (capa:maxsize)."
+                )
+            # Disk writes run in a thread, so a large file doesn't block the service.
+            fd = await s_coro.executor(open, path, "wb")
+            try:
+                async for chunk in axon.get(byts):
+                    await s_coro.executor(fd.write, chunk)
+            finally:
+                await s_coro.executor(fd.close)
         except CapaSvcError:
             raise
+        except TimeoutError:
+            raise CapaSvcError(
+                f"Unable to connect to the Axon within {AXON_TIMEOUT} seconds."
+            ) from None
         except s_exc.NoSuchFile:
             raise CapaSvcError(f"The file {sha256} is not in the Axon.") from None
         except Exception as err:

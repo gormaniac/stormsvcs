@@ -24,6 +24,8 @@ class TestHelpers:
         assert s_rules.nsTag(None) is None
         assert s_rules.nsTag("///") is None
         assert s_rules.tagPart(" a-b c ") == "a_b_c"
+        assert s_rules.tagPart("---") == ""
+        assert s_rules.tagPart("Über") == "über"
 
     def test_contact(self):
         assert s_rules.contact("Visi@Vertex.Link ") == {"email": "visi@vertex.link"}
