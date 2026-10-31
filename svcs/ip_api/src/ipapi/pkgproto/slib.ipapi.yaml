@@ -1,5 +1,5 @@
 name: slib.ipapi
-version: 0.1.2
+version: 0.2.0
 guid: 92cc9d722c63125d64911389cd39c685
 
 synapse_minversion: [2, 137, 0]

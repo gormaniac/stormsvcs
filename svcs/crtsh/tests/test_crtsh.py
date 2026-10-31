@@ -18,21 +18,31 @@ def makeCert() -> bytes:
     """A self-signed DER certificate with a few SANs."""
 
     key = ec.generate_private_key(ec.SECP256R1())
-    name = x509.Name([
-        x509.NameAttribute(NameOID.COMMON_NAME, "vertex.link"),
-        x509.NameAttribute(NameOID.ORGANIZATION_NAME, "The Vertex Project"),
-    ])
+    name = x509.Name(
+        [
+            x509.NameAttribute(NameOID.COMMON_NAME, "vertex.link"),
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "The Vertex Project"),
+        ]
+    )
     now = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
     cert = (
         x509.CertificateBuilder()
-        .subject_name(name).issuer_name(name)
+        .subject_name(name)
+        .issuer_name(name)
         .public_key(key.public_key())
-        .serial_number(0x8a0b)
-        .not_valid_before(now).not_valid_after(now + datetime.timedelta(days=90))
-        .add_extension(x509.SubjectAlternativeName([
-            x509.DNSName("*.vertex.link"), x509.DNSName("vertex.link"),
-            x509.RFC822Name("visi@vertex.link"),
-        ]), critical=False)
+        .serial_number(0x8A0B)
+        .not_valid_before(now)
+        .not_valid_after(now + datetime.timedelta(days=90))
+        .add_extension(
+            x509.SubjectAlternativeName(
+                [
+                    x509.DNSName("*.vertex.link"),
+                    x509.DNSName("vertex.link"),
+                    x509.RFC822Name("visi@vertex.link"),
+                ]
+            ),
+            critical=False,
+        )
         .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
         .sign(key, hashes.SHA256())
     )
@@ -40,7 +50,6 @@ def makeCert() -> bytes:
 
 
 class TestCrtshNorm:
-
     def test_parse(self):
         der = makeCert()
         details = norm.certDetails({"id": 1, "issuer_ca_id": 2, "der": der})
@@ -65,7 +74,6 @@ class TestCrtshNorm:
 
 
 class TestCrtshStormPkg(s_tests.SynTest):
-
     def test_versions_match(self):
         pyproject = pathlib.Path(__file__).parent.parent / "pyproject.toml"
         with pyproject.open("rb") as fd:

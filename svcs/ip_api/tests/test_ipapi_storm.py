@@ -329,9 +329,7 @@ class TestIpApiStormPerms(s_tests.SynTest):
         async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
             adminIden, _userIden = await self._addPermUsers(core)
 
-            msgs = await core.stormlist(
-                f"{SVC_NAME}.admin.disabletag", opts={"user": adminIden}
-            )
+            msgs = await core.stormlist(f"{SVC_NAME}.admin.disabletag", opts={"user": adminIden})
             self.stormHasNoErr(msgs)
 
             msgs = await core.stormlist('$lib.print($lib.globals.get("slib:ipapi:tag:enabled"))')
@@ -343,9 +341,7 @@ class TestIpApiStormPerms(s_tests.SynTest):
 
             await core.stormlist(f"{SVC_NAME}.admin.disabletag", opts={"user": adminIden})
 
-            msgs = await core.stormlist(
-                f"{SVC_NAME}.admin.enabletag", opts={"user": adminIden}
-            )
+            msgs = await core.stormlist(f"{SVC_NAME}.admin.enabletag", opts={"user": adminIden})
             self.stormHasNoErr(msgs)
 
             msgs = await core.stormlist('$lib.print($lib.globals.get("slib:ipapi:tag:enabled"))')

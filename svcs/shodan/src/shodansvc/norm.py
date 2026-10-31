@@ -5,10 +5,8 @@ reshaping here keeps the Storm modeling code short, and lets it be unit tested
 without a Cortex.
 """
 
-
 import re
 from typing import Any
-
 
 # The max length of banner text stored in an inet:banner node.
 MAX_BANNER_LEN = 16384
@@ -94,9 +92,13 @@ def normSoftvers(cpes: list[str], product: str | None, version: str | None) -> l
                 candidates.append((cpe, vers.lower()))
 
         exact = [cpe for cpe, vers in candidates if vers == lvers]
-        prefix = [cpe for cpe, vers in candidates
-                  if len(lvers) > len(vers) and lvers.startswith(vers)
-                  and not (lvers[len(vers)].isalnum() or lvers[len(vers)] == ".")]
+        prefix = [
+            cpe
+            for cpe, vers in candidates
+            if len(lvers) > len(vers)
+            and lvers.startswith(vers)
+            and not (lvers[len(vers)].isalnum() or lvers[len(vers)] == ".")
+        ]
         match = (exact or prefix or [None])[0]
 
     retn = []
@@ -123,12 +125,14 @@ def normVulns(vulns: Any) -> list[dict]:
     if isinstance(vulns, dict):
         for cve, info in vulns.items():
             info = info if isinstance(info, dict) else {}
-            retn.append({
-                "cve": cve.upper(),
-                "cvss": info.get("cvss"),
-                "verified": bool(info.get("verified", False)),
-                "summary": info.get("summary"),
-            })
+            retn.append(
+                {
+                    "cve": cve.upper(),
+                    "cvss": info.get("cvss"),
+                    "verified": bool(info.get("verified", False)),
+                    "summary": info.get("summary"),
+                }
+            )
     else:
         for cve in _list(vulns):
             retn.append({"cve": str(cve).upper(), "cvss": None, "verified": False, "summary": None})
@@ -252,12 +256,16 @@ def normBanner(banner: dict) -> dict:
             "host": http.get("host"),
             "status": http.get("status"),
             "favicon": (http.get("favicon") or {}).get("hash"),
-        } if http else None,
+        }
+        if http
+        else None,
         "ssh": {
             "type": ssh.get("type"),
             "fingerprint": ssh.get("fingerprint"),
             "key": ssh.get("key"),
-        } if ssh else None,
+        }
+        if ssh
+        else None,
     }
 
 
@@ -320,12 +328,14 @@ def normDnsRecords(data: dict) -> list[dict]:
     for rec in data.get("data") or []:
         sub = rec.get("subdomain") or ""
         fqdn = f"{sub}.{domain}" if sub else domain
-        retn.append({
-            "fqdn": fqdn.lower(),
-            "type": (rec.get("type") or "").upper(),
-            "value": rec.get("value"),
-            "seen": _ts(rec.get("last_seen")),
-        })
+        retn.append(
+            {
+                "fqdn": fqdn.lower(),
+                "type": (rec.get("type") or "").upper(),
+                "value": rec.get("value"),
+                "seen": _ts(rec.get("last_seen")),
+            }
+        )
     return retn
 
 
@@ -384,12 +394,14 @@ def normAdvisory(data: dict) -> dict:
     if data.get("cve"):
         retn = normCve(data["cve"])
     else:
-        retn = normCve({
-            "summary": data.get("summary") or data.get("description"),
-            "cvss": data.get("cvss"),
-            "epss": data.get("epss"),
-            "published_time": data.get("published_time"),
-        })
+        retn = normCve(
+            {
+                "summary": data.get("summary") or data.get("description"),
+                "cvss": data.get("cvss"),
+                "epss": data.get("epss"),
+                "published_time": data.get("published_time"),
+            }
+        )
 
     aliases = [advid]
     for key in ("ghsa", "euvd"):

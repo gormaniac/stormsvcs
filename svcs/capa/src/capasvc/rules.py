@@ -5,7 +5,6 @@ becomes a tag under the configured prefix (see ``tagRecords``), ex. the namespac
 ``anti-analysis/anti-debugging`` is the tag ``<prefix>.anti_analysis.anti_debugging``.
 """
 
-
 import hashlib
 import os
 import re
@@ -16,7 +15,6 @@ import capa.rules
 import capa.rules.cache
 import synapse.common as s_common
 import synapse.lib.types as s_types
-
 
 RULE_TYPE = "capa"
 """The ``meta:rule:type`` of capa rules."""
@@ -95,10 +93,12 @@ def ruleDoc(meta: dict[str, Any]) -> str:
         lines.extend([desc, ""])
 
     if meta.get("lib"):
-        lines.extend([
-            "This is a capa library rule. It is only used by other rules, capa never reports it.",
-            "",
-        ])
+        lines.extend(
+            [
+                "This is a capa library rule. It is only used by other rules, capa never reports it.",
+                "",
+            ]
+        )
 
     if namespace := meta.get("namespace"):
         lines.append(f"Namespace: {namespace}")
@@ -145,8 +145,13 @@ def ruleMeta(meta: dict[str, Any]) -> dict[str, Any]:
 
 
 def ruleRecord(
-    meta: dict[str, Any], text: str | None, guid: str | None = None, type: str | None = None,
-    path: str | None = None, url: str | None = None, custom: bool = False,
+    meta: dict[str, Any],
+    text: str | None,
+    guid: str | None = None,
+    type: str | None = None,
+    path: str | None = None,
+    url: str | None = None,
+    custom: bool = False,
 ) -> dict[str, Any]:
     """The record slib.capa models a capa rule's ``meta:rule`` node from.
 
@@ -416,11 +421,13 @@ class CapaRules:
             namespace = nsnames[tag]
             if not tag:
                 title = "capa"
-                doc = [(
-                    f"Files that matched capa rules (capa-rules {self.version}). Each tag below "
-                    "this one is a capa rule namespace, ex. anti-analysis/anti-debugging is "
-                    "anti_analysis.anti_debugging."
-                )]
+                doc = [
+                    (
+                        f"Files that matched capa rules (capa-rules {self.version}). Each tag below "
+                        "this one is a capa rule namespace, ex. anti-analysis/anti-debugging is "
+                        "anti_analysis.anti_debugging."
+                    )
+                ]
             else:
                 title = f"capa: {namespace}"
                 doc = [f"Files that matched a capa rule in the {namespace} namespace."]
@@ -432,11 +439,13 @@ class CapaRules:
             if tag and (subrules := len(below.get(tag, set()) - set(direct[tag]))):
                 doc.extend(["", f"Plus {subrules} rules in the namespaces below this one."])
 
-            records.append({
-                "tag": tag,
-                "namespace": namespace,
-                "title": title,
-                "doc": "\n".join(doc),
-            })
+            records.append(
+                {
+                    "tag": tag,
+                    "namespace": namespace,
+                    "title": title,
+                    "doc": "\n".join(doc),
+                }
+            )
 
         return records

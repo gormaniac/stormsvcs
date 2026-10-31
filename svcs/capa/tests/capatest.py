@@ -18,8 +18,10 @@ RULES = os.path.join(os.path.dirname(__file__), "data", "rules")
 RULES_VERSION = "vtest"
 
 SAMPLE = (
-    bytes.fromhex("4831c0" "4831db" "c3")  # xor rax, rax; xor rbx, rbx; ret
-    + b"\x00" * 16 + b"slib-capa-test-marker\x00" + b"\x00" * 16
+    bytes.fromhex("4831c04831dbc3")  # xor rax, rax; xor rbx, rbx; ret
+    + b"\x00" * 16
+    + b"slib-capa-test-marker\x00"
+    + b"\x00" * 16
 )
 """A 64-bit shellcode sample that matches the test rules (with --format sc64)."""
 

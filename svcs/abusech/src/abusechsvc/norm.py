@@ -15,24 +15,42 @@ code short, and lets it be unit tested without a Cortex. The shapes are:
 * obs - an observable (``normObservable``) - a value typed into the Synapse form it models as.
 """
 
-
 import csv
 import ipaddress
 import re
 from collections.abc import Iterable, Iterator
 from typing import Any
 
-
 HEX_RE = re.compile(r"^[0-9a-fA-F]+$")
 TAG_RE = re.compile(r"[^a-z0-9_]+")
 
 VERDICTS = {
-    "benign": 10, "clean": 10, "legit": 10, "legit file": 10, "no threat": 10, "no threats": 10,
-    "no threats detected": 10, "whitelisted": 10, "trusted": 10, "known": 10,
-    "unknown": 20, "notcategorized": 20, "not categorized": 20, "informational": 20, "informative": 20,
-    "no specific threat": 20, "not suspicious": 20,
-    "suspicious": 30, "suspicious file": 30, "suspicious activity": 30, "likely malicious": 30,
-    "malicious": 40, "malicious file": 40, "malicious activity": 40, "malware": 40, "known malware": 40,
+    "benign": 10,
+    "clean": 10,
+    "legit": 10,
+    "legit file": 10,
+    "no threat": 10,
+    "no threats": 10,
+    "no threats detected": 10,
+    "whitelisted": 10,
+    "trusted": 10,
+    "known": 10,
+    "unknown": 20,
+    "notcategorized": 20,
+    "not categorized": 20,
+    "informational": 20,
+    "informative": 20,
+    "no specific threat": 20,
+    "not suspicious": 20,
+    "suspicious": 30,
+    "suspicious file": 30,
+    "suspicious activity": 30,
+    "likely malicious": 30,
+    "malicious": 40,
+    "malicious file": 40,
+    "malicious activity": 40,
+    "malware": 40,
+    "known malware": 40,
 }
 """Vendor verdict strings (lower case, with ``_`` as spaces) mapped to Synapse's ``it:av:scan:result:verdict`` levels."""
 
@@ -176,7 +194,13 @@ def verdict(valu: Any) -> int | None:
         return VERDICTS[valu]
     if re.match(r"^(no|not|non)\b", valu):
         return 10
-    for word, level in (("malic", 40), ("suspic", 30), ("legit", 10), ("clean", 10), ("benign", 10)):
+    for word, level in (
+        ("malic", 40),
+        ("suspic", 30),
+        ("legit", 10),
+        ("clean", 10),
+        ("benign", 10),
+    ):
         if word in valu:
             return level
     return None
@@ -199,13 +223,20 @@ def parseCsvLines(lines: Iterable[str], fields: tuple[str, ...]) -> Iterator[dic
         # The URLhaus/MalwareBazaar exports sometimes include an un-commented header.
         if row[0].strip().lower() == fields[0]:
             continue
-        yield {k: (v.strip() if v.strip() not in ("", "n/a", "None") else None) for k, v in zip(fields, row)}
+        yield {
+            k: (v.strip() if v.strip() not in ("", "n/a", "None") else None)
+            for k, v in zip(fields, row)
+        }
 
 
 def parseLines(text: str) -> list[str]:
     """Parse a plain text blocklist (one value per line, ``#`` comments)."""
 
-    return [line.strip() for line in text.splitlines() if line.strip() and not line.lstrip().startswith("#")]
+    return [
+        line.strip()
+        for line in text.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
 
 
 # ---- Observables ----
@@ -244,8 +275,19 @@ def normObservable(kind: str | None, valu: Any) -> dict | None:
     valu = str(valu).strip()
     kind = (kind or "").lower()
 
-    if kind in ("md5_hash", "md5", "sha1_hash", "sha1", "sha256_hash", "sha256", "sha3_384_hash",
-                "sha3_384", "hash", "file", "") and isHex(valu):
+    if kind in (
+        "md5_hash",
+        "md5",
+        "sha1_hash",
+        "sha1",
+        "sha256_hash",
+        "sha256",
+        "sha3_384_hash",
+        "sha3_384",
+        "hash",
+        "file",
+        "",
+    ) and isHex(valu):
         hashes = {32: "md5", 40: "sha1", 64: "sha256", 96: "sha3_384"}
         htype = hashes.get(len(valu))
         if htype:
@@ -262,7 +304,9 @@ def normObservable(kind: str | None, valu: Any) -> dict | None:
             return None
         return {"form": "inet:ipv6" if ip.version == 6 else "inet:ipv4", "valu": str(ip)}
 
-    if kind in ("ip:port", "ip_port", "ipport") or (not kind and re.match(r"^(\[[0-9a-fA-F:.]+\]|[0-9.]+):\d+$", valu)):
+    if kind in ("ip:port", "ip_port", "ipport") or (
+        not kind and re.match(r"^(\[[0-9a-fA-F:.]+\]|[0-9.]+):\d+$", valu)
+    ):
         host, _, port = valu.rpartition(":")
         ip = ipAddr(host.strip("[]"))
         port = toInt(port)
@@ -305,10 +349,18 @@ def normRule(rule: dict) -> dict | None:
     if not name or name.strip().lower() == "xxx":
         return None
 
-    reference = rule.get("reference") or rule.get("yarahub_reference_link") or rule.get("yara_rule_reference")
+    reference = (
+        rule.get("reference")
+        or rule.get("yarahub_reference_link")
+        or rule.get("yara_rule_reference")
+    )
     desc = (rule.get("description") or rule.get("yara_rule_description") or "").strip() or None
     if isinstance(reference, str) and reference.strip() and "://" not in reference:
-        desc = f"{desc}\n\nReference: {reference.strip()}" if desc else f"Reference: {reference.strip()}"
+        desc = (
+            f"{desc}\n\nReference: {reference.strip()}"
+            if desc
+            else f"Reference: {reference.strip()}"
+        )
     uuid = lower(rule.get("yarahub_uuid") or rule.get("uuid"))
     refmd5 = lower(rule.get("yarahub_reference_md5"))
     sharing = rule.get("yarahub_rule_sharing_tlp")
@@ -320,7 +372,9 @@ def normRule(rule: dict) -> dict | None:
         "url": reference if isinstance(reference, str) and "://" in reference else None,
         "date": ts(rule.get("date")),
         "time": ts(rule.get("time_stamp") or rule.get("last_hit_utc")),
-        "tlp": normTag(re.sub(r"(?i)^tlp:", "", rule.get("tlp") or rule.get("yarahub_rule_matching_tlp") or "")),
+        "tlp": normTag(
+            re.sub(r"(?i)^tlp:", "", rule.get("tlp") or rule.get("yarahub_rule_matching_tlp") or "")
+        ),
         "sharing_tlp": normTag(re.sub(r"(?i)^tlp:", "", sharing or "")),
         "refmd5": refmd5 if isHex(refmd5, 32) else None,
         "license": rule.get("yarahub_license"),
@@ -343,7 +397,9 @@ def normCert(cert: dict, blocklist: bool = False) -> dict | None:
         return None
 
     thumb = lower(cert.get("thumbprint"))
-    algo = lower(cert.get("thumbprint_algorithm")) or {40: "sha1", 64: "sha256", 32: "md5"}.get(len(thumb or ""))
+    algo = lower(cert.get("thumbprint_algorithm")) or {40: "sha1", 64: "sha256", 32: "md5"}.get(
+        len(thumb or "")
+    )
     serial = lower(cert.get("serial_number") or cert.get("serial"))
     if serial:
         serial = serial.replace(":", "")
@@ -409,10 +465,21 @@ def _firstKey(info: dict, keys: tuple[str, ...]) -> Any:
     return None
 
 
-def _scan(vendor: str, *, verdict_: int | None = None, signame: Any = None, score: float | None = None,
-          link: Any = None, time: Any = None, categories: Any = None, count: Any = None,
-          malicious: Any = None, children: list | None = None, c2s: list | None = None,
-          urls: list | None = None) -> dict:
+def _scan(
+    vendor: str,
+    *,
+    verdict_: int | None = None,
+    signame: Any = None,
+    score: float | None = None,
+    link: Any = None,
+    time: Any = None,
+    categories: Any = None,
+    count: Any = None,
+    malicious: Any = None,
+    children: list | None = None,
+    c2s: list | None = None,
+    urls: list | None = None,
+) -> dict:
     """The normalized scan shape. A vendor naming a family, without a verdict, detected the file."""
 
     if isinstance(signame, list):
@@ -502,12 +569,14 @@ def _children(items: Any) -> list[dict]:
         if isinstance(child, dict):
             sha256 = lower(child.get("sha256_hash") or child.get("sha256"))
             if isHex(sha256, 64):
-                retn.append({
-                    "sha256": sha256,
-                    "md5": lower(child.get("md5_hash")),
-                    "sha1": lower(child.get("sha1_hash")),
-                    "families": normTags(child.get("detections")),
-                })
+                retn.append(
+                    {
+                        "sha256": sha256,
+                        "md5": lower(child.get("md5_hash")),
+                        "sha1": lower(child.get("sha1_hash")),
+                        "families": normTags(child.get("detections")),
+                    }
+                )
     return retn
 
 
@@ -524,39 +593,65 @@ def _detections(valu: Any) -> list[str]:
 
 
 def _vendorAnyRun(info):
-    return _scan("any.run", verdict_=verdict(info.get("verdict")), signame=info.get("malware_family"),
-                 link=info.get("analysis_url"), time=info.get("date"), categories=info.get("tags"))
+    return _scan(
+        "any.run",
+        verdict_=verdict(info.get("verdict")),
+        signame=info.get("malware_family"),
+        link=info.get("analysis_url"),
+        time=info.get("date"),
+        categories=info.get("tags"),
+    )
 
 
 def _vendorFamilyLink(vendor):
     # CAPE and CERT-PL's MWDB only report a detected family (or null) and a link.
     def func(info):
         return _scan(vendor, signame=info.get("detection"), link=info.get("link"))
+
     return func
 
 
 def _vendorYoroi(info):
-    return _scan("yoroi_yomi", verdict_=verdict(info.get("detection")), score=_scaled(info.get("score"), 100))
+    return _scan(
+        "yoroi_yomi", verdict_=verdict(info.get("detection")), score=_scaled(info.get("score"), 100)
+    )
 
 
 def _vendorIntezer(info):
-    return _scan("intezer", verdict_=verdict(info.get("verdict")), signame=info.get("family_name"),
-                 link=info.get("analysis_url"))
+    return _scan(
+        "intezer",
+        verdict_=verdict(info.get("verdict")),
+        signame=info.get("family_name"),
+        link=info.get("analysis_url"),
+    )
 
 
 def _vendorTriage(info):
     score = toFloat(info.get("score"))
     family = info.get("malware_family")
     c2s = [c for c in (normC2Config(c, family) for c in lst(info.get("malware_config"))) if c]
-    return _scan("triage", verdict_=_triageVerdict(score), signame=family, score=_scaled(score, 10),
-                 link=info.get("link"), categories=lst(info.get("tags")) + lst(info.get("signatures")), c2s=c2s)
+    return _scan(
+        "triage",
+        verdict_=_triageVerdict(score),
+        signame=family,
+        score=_scaled(score, 10),
+        link=info.get("link"),
+        categories=lst(info.get("tags")) + lst(info.get("signatures")),
+        c2s=c2s,
+    )
 
 
 def _vendorReversingLabs(info):
-    return _scan("reversinglabs", verdict_=verdict(info.get("status")), signame=info.get("threat_name"),
-                 score=toFloat(info.get("scanner_percent")), link=info.get("report_link"),
-                 time=info.get("first_seen"), count=info.get("scanner_count"),
-                 malicious=info.get("scanner_match"))
+    return _scan(
+        "reversinglabs",
+        verdict_=verdict(info.get("status")),
+        signame=info.get("threat_name"),
+        score=toFloat(info.get("scanner_percent")),
+        link=info.get("report_link"),
+        time=info.get("first_seen"),
+        count=info.get("scanner_count"),
+        malicious=info.get("scanner_match"),
+    )
 
 
 def _vendorSpamhaus(info):
@@ -566,34 +661,60 @@ def _vendorSpamhaus(info):
 def _vendorUnpacMe(info):
     children = _children([info])
     families = [f for c in children for f in c["families"]]
-    return _scan("unpacme", verdict_=40 if families else None, signame=_detections(info.get("detections")),
-                 link=info.get("link"), children=children)
+    return _scan(
+        "unpacme",
+        verdict_=40 if families else None,
+        signame=_detections(info.get("detections")),
+        link=info.get("link"),
+        children=children,
+    )
 
 
 def _vendorFileScan(info):
-    return _scan("filescan-io", verdict_=verdict(info.get("verdict")), score=_scaled(info.get("threatlevel"), 100),
-                 link=info.get("report_link"))
+    return _scan(
+        "filescan-io",
+        verdict_=verdict(info.get("verdict")),
+        score=_scaled(info.get("threatlevel"), 100),
+        link=info.get("report_link"),
+    )
 
 
 def _vendorKaspersky(info):
     dets = _detections(info.get("detections"))
-    return _scan("kaspersky", verdict_=verdict(info.get("verdict")), signame=dets, link=info.get("report_link"),
-                 time=info.get("first_seen"), categories=dets[1:])
+    return _scan(
+        "kaspersky",
+        verdict_=verdict(info.get("verdict")),
+        signame=dets,
+        link=info.get("report_link"),
+        time=info.get("first_seen"),
+        categories=dets[1:],
+    )
 
 
 def _vendorDocGuard(info):
-    return _scan("docguard", verdict_=verdict(info.get("verdict")), categories=[info.get("filetype")],
-                 urls=info.get("urls"))
+    return _scan(
+        "docguard",
+        verdict_=verdict(info.get("verdict")),
+        categories=[info.get("filetype")],
+        urls=info.get("urls"),
+    )
 
 
 def _vendorGeneric(vendor, info):
     """A vendor ``VENDORS`` doesn't know, read with the common key names."""
 
-    return _scan(vendor, verdict_=verdict(_firstKey(info, VERDICT_KEYS)), signame=_firstKey(info, FAMILY_KEYS),
-                 score=toFloat(_firstKey(info, SCORE_KEYS)), link=_firstKey(info, LINK_KEYS),
-                 time=_firstKey(info, TIME_KEYS), categories=info.get("tags"),
-                 count=info.get("scanner_count"), malicious=info.get("scanner_match"),
-                 children=_children(lst(info.get("unpacked")) + lst(info.get("children"))))
+    return _scan(
+        vendor,
+        verdict_=verdict(_firstKey(info, VERDICT_KEYS)),
+        signame=_firstKey(info, FAMILY_KEYS),
+        score=toFloat(_firstKey(info, SCORE_KEYS)),
+        link=_firstKey(info, LINK_KEYS),
+        time=_firstKey(info, TIME_KEYS),
+        categories=info.get("tags"),
+        count=info.get("scanner_count"),
+        malicious=info.get("scanner_match"),
+        children=_children(lst(info.get("unpacked")) + lst(info.get("children"))),
+    )
 
 
 VENDORS = {
@@ -666,12 +787,14 @@ def normComments(comments: Any) -> list[dict]:
     retn = []
     for cmt in lst(comments):
         if isinstance(cmt, dict) and cmt.get("comment"):
-            retn.append({
-                "id": str(cmt.get("id")) if cmt.get("id") is not None else None,
-                "time": ts(cmt.get("date_added")),
-                "author": cmt.get("display_name") or cmt.get("twitter_handle"),
-                "text": cmt["comment"],
-            })
+            retn.append(
+                {
+                    "id": str(cmt.get("id")) if cmt.get("id") is not None else None,
+                    "time": ts(cmt.get("date_added")),
+                    "author": cmt.get("display_name") or cmt.get("twitter_handle"),
+                    "text": cmt["comment"],
+                }
+            )
         elif isinstance(cmt, str) and cmt.strip():
             retn.append({"id": None, "time": None, "author": None, "text": cmt.strip()})
     return retn
@@ -681,15 +804,40 @@ def emptySample() -> dict:
     """The normalized sample shape, with every field empty."""
 
     return {
-        "sha256": None, "md5": None, "sha1": None, "sha3_384": None,
-        "size": None, "name": None, "names": [], "mime": None, "type": None,
-        "first_seen": None, "last_seen": None,
-        "signature": None, "families": [], "tags": [],
-        "reporter": None, "origin_country": None, "delivery_method": None,
-        "imphash": None, "tlsh": None, "telfhash": None, "gimphash": None, "ssdeep": None,
-        "dhash_icon": None, "magika": None, "archive_pw": None,
-        "clamav": [], "rules": [], "certs": [], "scans": [],
-        "links": [], "related": [], "notes": [], "comments": [], "attrs": [],
+        "sha256": None,
+        "md5": None,
+        "sha1": None,
+        "sha3_384": None,
+        "size": None,
+        "name": None,
+        "names": [],
+        "mime": None,
+        "type": None,
+        "first_seen": None,
+        "last_seen": None,
+        "signature": None,
+        "families": [],
+        "tags": [],
+        "reporter": None,
+        "origin_country": None,
+        "delivery_method": None,
+        "imphash": None,
+        "tlsh": None,
+        "telfhash": None,
+        "gimphash": None,
+        "ssdeep": None,
+        "dhash_icon": None,
+        "magika": None,
+        "archive_pw": None,
+        "clamav": [],
+        "rules": [],
+        "certs": [],
+        "scans": [],
+        "links": [],
+        "related": [],
+        "notes": [],
+        "comments": [],
+        "attrs": [],
     }
 
 
@@ -720,7 +868,11 @@ def normSample(data: dict) -> dict | None:
 
     retn["size"] = toInt(data.get("file_size") or data.get("response_size"))
     name = data.get("file_name") or data.get("filename")
-    if isinstance(name, str) and name.strip() and name.strip().lower() not in ("n/a", "na", "unknown", "none"):
+    if (
+        isinstance(name, str)
+        and name.strip()
+        and name.strip().lower() not in ("n/a", "na", "unknown", "none")
+    ):
         retn["name"] = name.strip()
         retn["names"] = [name.strip()]
     retn["mime"] = lower(data.get("file_type_mime") or data.get("mime_type"))
@@ -731,7 +883,11 @@ def normSample(data: dict) -> dict | None:
     )
 
     signature = data.get("signature")
-    if isinstance(signature, str) and signature.strip() and signature.lower() not in ("none", "n/a"):
+    if (
+        isinstance(signature, str)
+        and signature.strip()
+        and signature.lower() not in ("none", "n/a")
+    ):
         retn["signature"] = signature.strip()
         retn["families"] = normTags(signature)
 
@@ -742,9 +898,22 @@ def normSample(data: dict) -> dict | None:
     retn["origin_country"] = lower(data.get("origin_country"))
     retn["delivery_method"] = normTag(data.get("delivery_method"))
 
-    for key in ("imphash", "tlsh", "telfhash", "gimphash", "ssdeep", "dhash_icon", "magika", "archive_pw"):
+    for key in (
+        "imphash",
+        "tlsh",
+        "telfhash",
+        "gimphash",
+        "ssdeep",
+        "dhash_icon",
+        "magika",
+        "archive_pw",
+    ):
         valu = data.get(key)
-        if isinstance(valu, str) and valu.strip() and valu.strip().lower() not in ("n/a", "none", "null"):
+        if (
+            isinstance(valu, str)
+            and valu.strip()
+            and valu.strip().lower() not in ("n/a", "none", "null")
+        ):
             retn[key] = valu.strip()
     if retn["imphash"] and not isHex(retn["imphash"], 32):
         retn["imphash"] = None
@@ -772,11 +941,20 @@ def normSample(data: dict) -> dict | None:
         retn["scans"].append(vt)
     vtpercent = toFloat(data.get("vtpercent"))
     if vtpercent is not None and vt is None:
-        retn["scans"].append({
-            "vendor": "virustotal", "verdict": 40 if vtpercent > 0 else 10, "signame": None,
-            "score": vtpercent, "link": None, "time": None, "categories": [], "count": None,
-            "malicious": None, "children": [],
-        })
+        retn["scans"].append(
+            {
+                "vendor": "virustotal",
+                "verdict": 40 if vtpercent > 0 else 10,
+                "signame": None,
+                "score": vtpercent,
+                "link": None,
+                "time": None,
+                "categories": [],
+                "count": None,
+                "malicious": None,
+                "children": [],
+            }
+        )
 
     finfo = normFileInfo(data.get("file_information"))
     retn["links"] = finfo["links"]
@@ -796,8 +974,15 @@ def normSample(data: dict) -> dict | None:
     retn["comments"] = normComments(data.get("comments"))
     comment = data.get("comment")
     if isinstance(comment, str) and comment.strip():
-        retn["comments"].insert(0, {"id": None, "time": retn["first_seen"], "author": retn["reporter"],
-                                    "text": comment.strip()})
+        retn["comments"].insert(
+            0,
+            {
+                "id": None,
+                "time": retn["first_seen"],
+                "author": retn["reporter"],
+                "text": comment.strip(),
+            },
+        )
 
     return retn
 
@@ -827,10 +1012,14 @@ def normOle(ole: Any) -> dict:
             if valu is True and normTag(key):
                 retn["attrs"].append(f"ole.{normTag(key)}")
         parts = []
-        for key, label in (("file_format", "format"), ("container_format", "container"),
-                           ("application_name", "application"), ("author", "author"),
-                           ("external_relationships", "external relationships"),
-                           ("maldoc_score", "maldoc score")):
+        for key, label in (
+            ("file_format", "format"),
+            ("container_format", "container"),
+            ("application_name", "application"),
+            ("author", "author"),
+            ("external_relationships", "external relationships"),
+            ("maldoc_score", "maldoc score"),
+        ):
             if oleid.get(key) not in (None, ""):
                 parts.append(f"{label}: {oleid[key]}")
         if parts:
@@ -859,18 +1048,22 @@ def normTask(task: dict) -> dict | None:
 
     params = task.get("task_parameters") or {}
     unpacked = []
-    for unp in lst(task.get("unpacker_results") or task.get("unpacked_results") or task.get("unpack_results")):
+    for unp in lst(
+        task.get("unpacker_results") or task.get("unpacked_results") or task.get("unpack_results")
+    ):
         if not isinstance(unp, dict):
             continue
         sha256 = lower(unp.get("unpacked_sha256"))
         if not isHex(sha256, 64):
             continue
-        unpacked.append({
-            "sha256": sha256,
-            "md5": lower(unp.get("unpacked_md5")),
-            "name": unp.get("unpacked_file_name"),
-            "rules": normRules(unp.get("unpacked_yara_matches")),
-        })
+        unpacked.append(
+            {
+                "sha256": sha256,
+                "md5": lower(unp.get("unpacked_md5")),
+                "name": unp.get("unpacked_file_name"),
+                "rules": normRules(unp.get("unpacked_yara_matches")),
+            }
+        )
 
     sample = normSample(task.get("metadata") or {}) if task.get("metadata") else None
     params = params or task.get("yaraify_parameters") or {}
@@ -911,8 +1104,10 @@ def normYaraifyFile(data: dict) -> dict | None:
         return None
 
     taskitems = lst(data.get("tasks"))
-    if not taskitems and any(k in data for k in ("static_results", "clamav_results", "unpack_results",
-                                                    "unpacker_results")):
+    if not taskitems and any(
+        k in data
+        for k in ("static_results", "clamav_results", "unpack_results", "unpacker_results")
+    ):
         taskitems = [data]
     tasks = [t for t in (normTask(t) for t in taskitems) if t]
     unpacked = []
@@ -975,7 +1170,9 @@ def normUrl(data: dict) -> dict | None:
 
     status = lower(data.get("url_status"))
     host = data.get("host") or None
-    added, last_online = timePair(ts(data.get("date_added") or data.get("dateadded")), ts(data.get("last_online")))
+    added, last_online = timePair(
+        ts(data.get("date_added") or data.get("dateadded")), ts(data.get("last_online"))
+    )
     return {
         "id": str(data.get("id") or data.get("url_id") or "") or None,
         "url": data["url"].strip(),
@@ -985,7 +1182,9 @@ def normUrl(data: dict) -> dict | None:
         "last_online": last_online,
         "threat": normTag(data.get("threat")),
         "tags": normTags(data.get("tags")),
-        "reporter": data.get("reporter") if data.get("reporter") not in (None, "anonymous") else None,
+        "reporter": data.get("reporter")
+        if data.get("reporter") not in (None, "anonymous")
+        else None,
         "larted": toBool(data.get("larted")),
         "takedown": toInt(data.get("takedown_time_seconds")),
         "reference": data.get("urlhaus_reference") or data.get("urlhaus_link"),
@@ -1043,8 +1242,15 @@ def normUrlhausPayloadRow(row: dict) -> dict | None:
 
     if not row.get("url"):
         return None
-    return normUrl({"url": row["url"], "md5_hash": row.get("md5"), "sha256_hash": row.get("sha256"),
-                    "file_type": row.get("filetype"), "firstseen": row.get("firstseen")})
+    return normUrl(
+        {
+            "url": row["url"],
+            "md5_hash": row.get("md5"),
+            "sha256_hash": row.get("sha256"),
+            "file_type": row.get("filetype"),
+            "firstseen": row.get("firstseen"),
+        }
+    )
 
 
 # ---- ThreatFox ----
@@ -1068,8 +1274,10 @@ def stixPattern(ioc_type: str, valu: str, obs: dict | None) -> str | None:
     valu = valu.replace("\\", "\\\\").replace("'", "\\'")
     if ioc_type == "ip:port" and obs:
         addr = "ipv6-addr" if obs["ipform"] == "inet:ipv6" else "ipv4-addr"
-        return (f"[network-traffic:dst_ref.type = '{addr}' AND network-traffic:dst_ref.value = "
-                f"'{obs['ip']}' AND network-traffic:dst_port = {obs['port']}]")
+        return (
+            f"[network-traffic:dst_ref.type = '{addr}' AND network-traffic:dst_ref.value = "
+            f"'{obs['ip']}' AND network-traffic:dst_port = {obs['port']}]"
+        )
     tmpl = STIX_PATTERNS.get(ioc_type)
     return tmpl.format(valu=valu) if tmpl else None
 
@@ -1099,12 +1307,18 @@ def normIoc(data: dict) -> dict | None:
                 sample["links"].append({"context": "malware_bazaar", "url": link})
             samples.append(sample)
 
-    seen = timePair(ts(data.get("first_seen") or data.get("first_seen_utc")),
-                    ts(data.get("last_seen") or data.get("last_seen_utc")))
+    seen = timePair(
+        ts(data.get("first_seen") or data.get("first_seen_utc")),
+        ts(data.get("last_seen") or data.get("last_seen_utc")),
+    )
 
     family = data.get("malware_printable") or data.get("fk_malware")
     # ThreatFox uses placeholders like "Unknown malware" and "Unknown Stealer" for unattributed IOCs.
-    if not isinstance(family, str) or not family.strip() or re.match(r"(?i)^(unknown\b|none$)", family.strip()):
+    if (
+        not isinstance(family, str)
+        or not family.strip()
+        or re.match(r"(?i)^(unknown\b|none$)", family.strip())
+    ):
         family = None
     aliases = splitList(data.get("malware_alias"))
     malware = lower(data.get("malware") or data.get("fk_malware"))
@@ -1124,15 +1338,20 @@ def normIoc(data: dict) -> dict | None:
         "confidence": toInt(data.get("confidence_level")),
         "first_seen": seen[0],
         "last_seen": seen[1],
-        "reference": data.get("reference") if isinstance(data.get("reference"), str) and "://" in data.get("reference", "") else None,
-        "reporter": data.get("reporter") if data.get("reporter") not in (None, "anonymous") and not toBool(data.get("anonymous")) else None,
+        "reference": data.get("reference")
+        if isinstance(data.get("reference"), str) and "://" in data.get("reference", "")
+        else None,
+        "reporter": data.get("reporter")
+        if data.get("reporter") not in (None, "anonymous") and not toBool(data.get("anonymous"))
+        else None,
         "tags": normTags(data.get("tags")),
         "comment": (data.get("comment") or "").strip() or None,
         "compromised": toBool(data.get("is_compromised")),
         "sightings": toInt(data.get("sightings")),
         "credits": [
             {"from": c.get("credits_from"), "amount": toInt(c.get("credits_amount"))}
-            for c in lst(data.get("credits")) if isinstance(c, dict)
+            for c in lst(data.get("credits"))
+            if isinstance(c, dict)
         ],
         "obs": obs,
         "pattern": stixPattern(ioc_type, valu, obs),
@@ -1148,7 +1367,7 @@ def normYaraStats(data: Any) -> list[dict]:
     """Normalize MalwareBazaar's YARA rule statistics export (``{"<rank>": [{yara_rule_name, ...}]}``) into rules."""
 
     items = []
-    for recs in (data.values() if isinstance(data, dict) else [data]):
+    for recs in data.values() if isinstance(data, dict) else [data]:
         items.extend(r for r in lst(recs) if isinstance(r, dict))
     return normRules(items)
 
@@ -1170,10 +1389,20 @@ def normThreatFoxExport(data: Any) -> list[dict]:
 # ---- Blocklists (Feodo Tracker and SSL Blacklist) ----
 
 
-def normC2(ip: str | None, port: Any, *, family: str | None = None, status: str | None = None,
-           first_seen: str | None = None, last_online: str | None = None, hostname: str | None = None,
-           asn: Any = None, as_name: str | None = None, country: str | None = None,
-           source: str = "feodo") -> dict | None:
+def normC2(
+    ip: str | None,
+    port: Any,
+    *,
+    family: str | None = None,
+    status: str | None = None,
+    first_seen: str | None = None,
+    last_online: str | None = None,
+    hostname: str | None = None,
+    asn: Any = None,
+    as_name: str | None = None,
+    country: str | None = None,
+    source: str = "feodo",
+) -> dict | None:
     """The normalized shape of a botnet C2 server from a blocklist."""
 
     if not ip:
@@ -1187,8 +1416,12 @@ def normC2(ip: str | None, port: Any, *, family: str | None = None, status: str 
         "ip": host["valu"],
         "ipform": host["form"],
         "port": port,
-        "family": family.strip() if family and family.strip().lower() not in ("none", "unknown") else None,
-        "family_tag": normTag(family) if family and family.strip().lower() not in ("none", "unknown") else None,
+        "family": family.strip()
+        if family and family.strip().lower() not in ("none", "unknown")
+        else None,
+        "family_tag": normTag(family)
+        if family and family.strip().lower() not in ("none", "unknown")
+        else None,
         "status": lower(status),
         "first_seen": first_seen,
         "last_online": last_online,
@@ -1232,7 +1465,9 @@ def reasonFamily(reason: str | None) -> str | None:
 
     if not reason:
         return None
-    family = re.sub(r"\s*(C&C|C2|malware distribution|botnet).*$", "", reason, flags=re.IGNORECASE).strip()
+    family = re.sub(
+        r"\s*(C&C|C2|malware distribution|botnet).*$", "", reason, flags=re.IGNORECASE
+    ).strip()
     return family or None
 
 
@@ -1328,12 +1563,14 @@ def parseYara(text: str) -> list[dict]:
     starts = [m for m in RULE_RE.finditer(text)]
     for idx, match in enumerate(starts):
         end = starts[idx + 1].start() if idx + 1 < len(starts) else len(text)
-        body = text[match.start():end].strip()
+        body = text[match.start() : end].strip()
         meta = {}
         msect = re.search(r"\bmeta\s*:(.*?)(?:\bstrings\s*:|\bcondition\s*:)", body, re.DOTALL)
         if msect:
             for mm in META_RE.finditer(msect.group(1)):
-                meta.setdefault(mm.group(1).lower(), mm.group(2) if mm.group(2) is not None else mm.group(3))
+                meta.setdefault(
+                    mm.group(1).lower(), mm.group(2) if mm.group(2) is not None else mm.group(3)
+                )
         rule = normRule(dict(meta, rule_name=match.group(1), rule=body))
         if rule:
             retn.append(rule)

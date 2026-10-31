@@ -1,6 +1,8 @@
 [project]
 name = "stormsvcs"
-authors = "John Gorman"
+authors = [
+    {"name" = "John Gorman"}
+]
 version = "0.0.1"
 description = "A monorepo of independent custom Synapse Advanced Power-Ups"
 readme = "README.md"
@@ -27,3 +29,10 @@ dev = [
 target-version = "py311"
 # The line limit from .github/copilot-instructions.md.
 line-length = 100
+# exclude some common directories and file types from Ruff checks
+exclude = [".ruff_cache/", ".git/", ".claude/", "**/*.md", "**/*.yml", "**/*.yaml", "**/tests/*"]
+# Ignore some specific rules
+lint.ignore = [
+    "RUF012",
+    "BLE001",
+]

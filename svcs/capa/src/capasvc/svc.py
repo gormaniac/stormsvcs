@@ -6,7 +6,6 @@ Storm package can model them. Methods raise ``CapaSvcError`` (or ``CapaRulesErro
 on failure, ``CapaCellApi`` wraps them in the standard ``TelepathRetn`` convention.
 """
 
-
 import asyncio
 import collections
 import json
@@ -30,7 +29,6 @@ from .api import CapaCellApi, CapaSvcError
 from .custom import CustomRules
 from .defs import RULES_URL, RULES_VERSION
 from .rules import CapaRules, CapaRulesError, ruleRecord, rulesSha256, rulesStat
-
 
 logger = logging.getLogger(__name__)
 
@@ -232,7 +230,9 @@ class CapaSvc(s_cell.Cell):
 
         try:
             self.capaRules = await s_coro.executor(
-                CapaRules, path, self.conf.get("capa:rules:version"),
+                CapaRules,
+                path,
+                self.conf.get("capa:rules:version"),
                 self.conf.get("capa:rules:url"),
             )
         except CapaRulesError as err:
@@ -289,7 +289,8 @@ class CapaSvc(s_cell.Cell):
         try:
             proc = await asyncio.create_subprocess_exec(
                 *self._cacheCmd(paths),
-                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
             )
             self.procs.add(proc)
             timeout = self.conf.get("capa:timeout")
@@ -471,7 +472,11 @@ class CapaSvc(s_cell.Cell):
     # ---- Scanning ----
 
     async def scan(
-        self, sha256: str, fmt: str = "auto", osname: str = "auto", custom: str | None = None,
+        self,
+        sha256: str,
+        fmt: str = "auto",
+        osname: str = "auto",
+        custom: str | None = None,
     ) -> dict[str, Any]:
         """Pull a file from the Axon, run capa against it, and return a summary of the results.
 
@@ -519,7 +524,11 @@ class CapaSvc(s_cell.Cell):
                 del self.customUse[custom]
 
     async def _scan(
-        self, rules: CapaRules, sha256: str, fmt: str, osname: str,
+        self,
+        rules: CapaRules,
+        sha256: str,
+        fmt: str,
+        osname: str,
         cset: CustomRules | None = None,
     ) -> dict[str, Any]:
         """Fetch a file and run capa against it, see ``scan``."""
@@ -604,7 +613,11 @@ class CapaSvc(s_cell.Cell):
             raise CapaSvcError(f"Unable to read {sha256} from the Axon: {err}") from None
 
     def _capaCmd(
-        self, rules: CapaRules, path: str, fmt: str, osname: str,
+        self,
+        rules: CapaRules,
+        path: str,
+        fmt: str,
+        osname: str,
         cset: CustomRules | None = None,
     ) -> list[str]:
         """The command line that runs capa against a file and prints its JSON results."""
@@ -612,14 +625,29 @@ class CapaSvc(s_cell.Cell):
         sigs = self.conf.get("capa:sigs") or self.nosigsdir
         custom = ["--rules", cset.path] if cset is not None else []
         return [
-            sys.executable, "-m", "capa.main", "--json", "--quiet",
-            "--rules", rules.path, *custom, "--signatures", sigs,
-            "--format", fmt, "--os", osname,
+            sys.executable,
+            "-m",
+            "capa.main",
+            "--json",
+            "--quiet",
+            "--rules",
+            rules.path,
+            *custom,
+            "--signatures",
+            sigs,
+            "--format",
+            fmt,
+            "--os",
+            osname,
             path,
         ]
 
     async def _runCapa(
-        self, rules: CapaRules, path: str, fmt: str, osname: str,
+        self,
+        rules: CapaRules,
+        path: str,
+        fmt: str,
+        osname: str,
         cset: CustomRules | None = None,
     ) -> dict[str, Any]:
         """Run capa against a file in a subprocess and return its result document."""
@@ -673,7 +701,10 @@ class CapaSvc(s_cell.Cell):
         return ruleRecord(meta, source)
 
     def _summarize(
-        self, rules: CapaRules, sha256: str, doc: dict[str, Any],
+        self,
+        rules: CapaRules,
+        sha256: str,
+        doc: dict[str, Any],
         cset: CustomRules | None = None,
     ) -> dict[str, Any]:
         """Condense a capa result document into the results slib.capa models."""
@@ -703,11 +734,13 @@ class CapaSvc(s_cell.Cell):
                 if addr is not None:
                     addrs.append(addr)
 
-            matches.append({
-                "rule": record,
-                "count": len(result.get("matches", ())),
-                "addrs": addrs[:MAX_ADDRS],
-            })
+            matches.append(
+                {
+                    "rule": record,
+                    "count": len(result.get("matches", ())),
+                    "addrs": addrs[:MAX_ADDRS],
+                }
+            )
 
         matches.sort(key=lambda m: m["rule"]["name"])
 
@@ -729,4 +762,3 @@ class CapaSvc(s_cell.Cell):
             "extractor": analysis.get("extractor"),
             "matches": matches,
         }
-

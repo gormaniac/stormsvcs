@@ -33,11 +33,9 @@ ISSUER_CERT = 4267304698
 
 
 class TestLive(s_tests.SynTest):
-
     async def test_live(self):
         conf = {"crtsh:connect:timeout": 600}
         async with self.getTestCoreProxSvc(CrtshSvc, ssvc_conf=conf) as (core, prox, svc):
-
             # ---- Lookups by every identifier ----
             cert = await svc.get(CERTID)
             assert cert is not None and "error" not in cert
@@ -64,9 +62,13 @@ class TestLive(s_tests.SynTest):
             # ---- Search ----
             ids = [d["crtsh"]["id"] async for d in svc.searchGenr(dns="www.comodo.com", limit=500)]
             assert CERTID in ids
-            async for details in svc.searchGenr(dns="comodo.com", valid=True, precerts=False, limit=20):
+            async for details in svc.searchGenr(
+                dns="comodo.com", valid=True, precerts=False, limit=20
+            ):
                 assert not details["precert"]
-                assert norm.matches(details, "dns", "comodo.com", "suffix"), norm.fieldValues(details, "dns")
+                assert norm.matches(details, "dns", "comodo.com", "suffix"), norm.fieldValues(
+                    details, "dns"
+                )
 
             # ---- CAs, issued, and chains ----
             cas = await svc.cas(name="Sectigo Public Server Authentication CA OV R36")
@@ -92,14 +94,22 @@ class TestLive(s_tests.SynTest):
             # ---- Storm, end to end ----
             msgs = await core.stormlist(f"slib.crtsh.cert {CERTID} --chain --yield")
             self.stormHasNoWarnErr(msgs)
-            nodes = await core.nodes(f"crypto:x509:cert:sha256={cert['sha256']} :issuer:cert -> crypto:x509:cert")
+            nodes = await core.nodes(
+                f"crypto:x509:cert:sha256={cert['sha256']} :issuer:cert -> crypto:x509:cert"
+            )
             assert len(nodes) == 1
-            fqdns = (await core.nodes(f"crypto:x509:cert:sha256={cert['sha256']}"))[0].get("identities:fqdns")
+            fqdns = (await core.nodes(f"crypto:x509:cert:sha256={cert['sha256']}"))[0].get(
+                "identities:fqdns"
+            )
             assert any(f == "comodo.com" or f.endswith(".comodo.com") for f in fqdns), fqdns
 
-            msgs = await core.stormlist("slib.crtsh.search --dns www.comodo.com --exact --valid --limit 5")
+            msgs = await core.stormlist(
+                "slib.crtsh.search --dns www.comodo.com --exact --valid --limit 5"
+            )
             self.stormHasNoWarnErr(msgs)
 
-            msgs = await core.stormlist(f"slib.crtsh.admin.sql 'SELECT ID, NAME FROM ca WHERE ID = $1' --args (({ISSUER}),)")
+            msgs = await core.stormlist(
+                f"slib.crtsh.admin.sql 'SELECT ID, NAME FROM ca WHERE ID = $1' --args (({ISSUER}),)"
+            )
             self.stormHasNoWarnErr(msgs)
             self.stormIsInPrint("Sectigo Public Server Authentication CA OV R36", msgs)

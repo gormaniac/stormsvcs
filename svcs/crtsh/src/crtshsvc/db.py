@@ -34,7 +34,6 @@ connection (crt.sh allows one per client, see its docstring). Tests swap it for 
 fake with the same methods.
 """
 
-
 import asyncio
 import logging
 import random
@@ -42,7 +41,6 @@ import re
 from typing import Any
 
 import asyncpg
-
 
 logger = logging.getLogger(__name__)
 
@@ -113,10 +111,20 @@ CONN_ERRORS = (
 )
 
 # Messages from crt.sh's PgBouncer (or Postgres) that mean "reconnect", or "back off, then reconnect".
-RECONNECT_MESGS = ("client_idle_timeout", "server conn crashed", "server_login_retry",
-                   "query_wait_timeout", "terminating connection")
-BACKOFF_MESGS = ("max_client_conn", "too many connections", "the database system is starting up",
-                 "the database system is in recovery mode", "cannot connect now")
+RECONNECT_MESGS = (
+    "client_idle_timeout",
+    "server conn crashed",
+    "server_login_retry",
+    "query_wait_timeout",
+    "terminating connection",
+)
+BACKOFF_MESGS = (
+    "max_client_conn",
+    "too many connections",
+    "the database system is starting up",
+    "the database system is in recovery mode",
+    "cannot connect now",
+)
 
 
 class CrtshDbError(Exception):
@@ -158,8 +166,9 @@ def _alias(cond: str, alias: str = "c") -> str:
     return cond.replace("{c}", alias)
 
 
-def _filters(params: Params, valid: bool = False, since: int | None = None,
-             until: int | None = None) -> list[str]:
+def _filters(
+    params: Params, valid: bool = False, since: int | None = None, until: int | None = None
+) -> list[str]:
     """The validity conditions shared by searches, on ``certificate c``.
 
     ``since``/``until`` are epoch millis bounds on notBefore.
@@ -238,9 +247,18 @@ class CrtshDb:
     Every query method returns rows as plain dicts.
     """
 
-    def __init__(self, dsn: str = DEFAULT_DSN, timeout: float | None = None, retries: int = 3,
-                 keepalive: float = 10, idle: float = 300, connect_timeout: float = 300,
-                 backoff: float = 1.0, statement_timeout: float = 0, connect=None):
+    def __init__(
+        self,
+        dsn: str = DEFAULT_DSN,
+        timeout: float | None = None,
+        retries: int = 3,
+        keepalive: float = 10,
+        idle: float = 300,
+        connect_timeout: float = 300,
+        backoff: float = 1.0,
+        statement_timeout: float = 0,
+        connect=None,
+    ):
         self.dsn = dsn
         self.timeout = timeout or None
         self.statement_timeout = statement_timeout
@@ -269,7 +287,9 @@ class CrtshDb:
         try:
             await conn.execute(f"SET statement_timeout = {int(self.statement_timeout * 1000)}")
         except asyncpg.PostgresError as err:
-            logger.warning("Unable to set the crt.sh statement_timeout, using the server's: %s", err)
+            logger.warning(
+                "Unable to set the crt.sh statement_timeout, using the server's: %s", err
+            )
         return conn
 
     async def _connect(self) -> asyncpg.Connection:
@@ -284,10 +304,15 @@ class CrtshDb:
                 logger.debug("Connected to the crt.sh database.")
                 return conn
             except Exception as err:
-                transient = (_mesgIn(err, BACKOFF_MESGS + RECONNECT_MESGS)
-                             or isinstance(err, (*CONN_ERRORS, asyncio.TimeoutError,
-                                                 asyncpg.exceptions.CannotConnectNowError,
-                                                 asyncpg.exceptions.TooManyConnectionsError)))
+                transient = _mesgIn(err, BACKOFF_MESGS + RECONNECT_MESGS) or isinstance(
+                    err,
+                    (
+                        *CONN_ERRORS,
+                        asyncio.TimeoutError,
+                        asyncpg.exceptions.CannotConnectNowError,
+                        asyncpg.exceptions.TooManyConnectionsError,
+                    ),
+                )
                 if not transient or loop.time() + delay > deadline:
                     raise CrtshDbError(f"Unable to connect to the crt.sh database: {err}") from err
                 logger.info("crt.sh refused the connection (%s), retrying in %.1fs.", err, delay)
@@ -361,7 +386,7 @@ class CrtshDb:
                     raise CrtshDbError(
                         f"crt.sh canceled the query (statement timeout), try a narrower search: {err}"
                     ) from err
-                except asyncio.TimeoutError as err:
+                except TimeoutError as err:
                     # The connection is mid-query, it can't be reused.
                     await self._drop()
                     raise CrtshDbError(f"crt.sh query timed out after {self.timeout}s.") from err
@@ -369,7 +394,10 @@ class CrtshDb:
                     # The replica canceled the query to apply replication, just retry it.
                     retry = err
                 except Exception as err:
-                    if not (isinstance(err, CONN_ERRORS) or _mesgIn(err, RECONNECT_MESGS + BACKOFF_MESGS)):
+                    if not (
+                        isinstance(err, CONN_ERRORS)
+                        or _mesgIn(err, RECONNECT_MESGS + BACKOFF_MESGS)
+                    ):
                         if isinstance(err, asyncpg.PostgresError):
                             raise CrtshDbError(f"crt.sh query failed: {err}") from err
                         raise
@@ -390,15 +418,24 @@ class CrtshDb:
 
         params = Params()
         cond = _alias(_lookup(params, lookups))
-        inner = (f"SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate c WHERE {cond} "
-                 f"LIMIT {params.add(limit)}")
+        inner = (
+            f"SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate c WHERE {cond} "
+            f"LIMIT {params.add(limit)}"
+        )
         return await self.fetch(_withMeta(inner), *params.args)
 
-    async def certsByIdentity(self, text: str, like: str | None = None,
-                              nametypes: list[str] | None = None, caids: list[int] | None = None,
-                              issuer: str | None = None, valid: bool = False,
-                              since: int | None = None, until: int | None = None,
-                              limit: int = 1000) -> list[dict]:
+    async def certsByIdentity(
+        self,
+        text: str,
+        like: str | None = None,
+        nametypes: list[str] | None = None,
+        caids: list[int] | None = None,
+        issuer: str | None = None,
+        valid: bool = False,
+        since: int | None = None,
+        until: int | None = None,
+        limit: int = 1000,
+    ) -> list[dict]:
         """Search certificate identities (subject attributes and SANs) like crt.sh does.
 
         ``text`` is full text searched with the indexed ``identities()``. With ``like``
@@ -411,7 +448,9 @@ class CrtshDb:
         """
 
         params = Params()
-        clauses = [f"plainto_tsquery('certwatch', {params.add(tsquery(text))}) @@ identities(c.CERTIFICATE)"]
+        clauses = [
+            f"plainto_tsquery('certwatch', {params.add(tsquery(text))}) @@ identities(c.CERTIFICATE)"
+        ]
         if like is not None:
             clauses.append(f"c.NAME_VALUE ILIKE {params.add(like)}")
         if nametypes:
@@ -429,16 +468,24 @@ class CrtshDb:
             inner = f"SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate c WHERE {where} LIMIT {limit}"
         else:
             # A certificate has a row per matching identity, group them back into one.
-            inner = ("SELECT sub.CERTIFICATE_ID AS ID, sub.ISSUER_CA_ID, sub.CERTIFICATE FROM ("
-                     "SELECT c.CERTIFICATE_ID, c.ISSUER_CA_ID, c.CERTIFICATE "
-                     f"FROM certificate_and_identities c WHERE {where} LIMIT {limit}"
-                     ") sub GROUP BY sub.CERTIFICATE_ID, sub.ISSUER_CA_ID, sub.CERTIFICATE")
+            inner = (
+                "SELECT sub.CERTIFICATE_ID AS ID, sub.ISSUER_CA_ID, sub.CERTIFICATE FROM ("
+                "SELECT c.CERTIFICATE_ID, c.ISSUER_CA_ID, c.CERTIFICATE "
+                f"FROM certificate_and_identities c WHERE {where} LIMIT {limit}"
+                ") sub GROUP BY sub.CERTIFICATE_ID, sub.ISSUER_CA_ID, sub.CERTIFICATE"
+            )
         return await self.fetch(_withMeta(inner), *params.args)
 
-    async def certsByIssuer(self, caids: list[int] | None = None, issuer: str | None = None,
-                            cert: dict[str, list] | None = None, valid: bool = False,
-                            since: int | None = None, until: int | None = None,
-                            limit: int = 1000) -> list[dict]:
+    async def certsByIssuer(
+        self,
+        caids: list[int] | None = None,
+        issuer: str | None = None,
+        cert: dict[str, list] | None = None,
+        valid: bool = False,
+        since: int | None = None,
+        until: int | None = None,
+        limit: int = 1000,
+    ) -> list[dict]:
         """The newest ``limit`` certificates issued by each CA.
 
         The CAs are crt.sh ``caids``, the CAs named like ``issuer``, and/or the CA that
@@ -458,20 +505,25 @@ class CrtshDb:
             sources.append(f"SELECT ID AS CA_ID FROM ({_issuerName(params, issuer)}) named")
         if cert:
             cond = _alias(_lookup(params, cert), "s")
-            sources.append("SELECT cac.CA_ID FROM ca_certificate cac WHERE cac.CERTIFICATE_ID = "
-                           f"(SELECT s.ID FROM certificate s WHERE {cond} LIMIT 1)")
+            sources.append(
+                "SELECT cac.CA_ID FROM ca_certificate cac WHERE cac.CERTIFICATE_ID = "
+                f"(SELECT s.ID FROM certificate s WHERE {cond} LIMIT 1)"
+            )
         if not sources:
             raise CrtshDbError("A CA ID, CA name, or CA certificate is required.")
 
         clauses = ["c.ISSUER_CA_ID = cas.CA_ID", *_filters(params, valid, since, until)]
-        inner = (f"SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM ({' UNION '.join(sources)}) cas "
-                 "CROSS JOIN LATERAL (SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate c "
-                 f"WHERE {' AND '.join(clauses)} "
-                 f"ORDER BY x509_notBefore(c.CERTIFICATE) DESC LIMIT {params.add(limit)}) c")
+        inner = (
+            f"SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM ({' UNION '.join(sources)}) cas "
+            "CROSS JOIN LATERAL (SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate c "
+            f"WHERE {' AND '.join(clauses)} "
+            f"ORDER BY x509_notBefore(c.CERTIFICATE) DESC LIMIT {params.add(limit)}) c"
+        )
         return await self.fetch(_withMeta(inner), *params.args)
 
-    async def related(self, by: str, cert: dict[str, list], valid: bool = False,
-                      limit: int = 100) -> list[dict]:
+    async def related(
+        self, by: str, cert: dict[str, list], valid: bool = False, limit: int = 100
+    ) -> list[dict]:
         """Certificates that share ``by`` (see ``RELATED``) with the certificate ``cert``
         ({kind: [values]}), excluding the certificate itself.
 
@@ -485,14 +537,21 @@ class CrtshDb:
         params = Params()
         cond = _lookup(params, cert)
         source = f"(SELECT {_alias(RELATED[by], 's')} FROM certificate s WHERE {_alias(cond, 's')} LIMIT 1)"
-        clauses = [f"{_alias(RELATED[by])} = {source}", f"NOT {_alias(cond)}",
-                   *_filters(params, valid)]
+        clauses = [
+            f"{_alias(RELATED[by])} = {source}",
+            f"NOT {_alias(cond)}",
+            *_filters(params, valid),
+        ]
         order = "ORDER BY x509_notBefore(c.CERTIFICATE) DESC " if by == "siblings" else ""
-        inner = (f"SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate c "
-                 f"WHERE {' AND '.join(clauses)} {order}LIMIT {params.add(limit)}")
+        inner = (
+            f"SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate c "
+            f"WHERE {' AND '.join(clauses)} {order}LIMIT {params.add(limit)}"
+        )
         return await self.fetch(_withMeta(inner), *params.args)
 
-    async def chain(self, cert: dict[str, list], maxdepth: int = 10, maxrows: int = 500) -> list[dict]:
+    async def chain(
+        self, cert: dict[str, list], maxdepth: int = 10, maxrows: int = 500
+    ) -> list[dict]:
         """Every certificate in the chains of ``cert`` ({kind: [values]}), in one recursive query.
 
         Rows include ``child_id`` (the certificate this one may have issued, null for the
@@ -507,22 +566,31 @@ class CrtshDb:
 
         params = Params()
         cond = _alias(_lookup(params, cert))
-        ctes = ("RECURSIVE chain AS ("
-                "(SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE, NULL::bigint AS CHILD_ID, 0 AS DEPTH, "
-                f"ARRAY[c.ID] AS PATH FROM certificate c WHERE {cond} LIMIT 1) "
-                "UNION ALL "
-                "SELECT p.ID, p.ISSUER_CA_ID, p.CERTIFICATE, ch.ID, ch.DEPTH + 1, ch.PATH || p.ID FROM chain ch "
-                "JOIN ca_certificate cac ON cac.CA_ID = ch.ISSUER_CA_ID "
-                "JOIN certificate p ON p.ID = cac.CERTIFICATE_ID "
-                f"WHERE ch.DEPTH < {params.add(maxdepth)} AND NOT p.ID = ANY(ch.PATH) AND NOT EXISTS ("
-                "SELECT 1 FROM ca_certificate r WHERE r.CERTIFICATE_ID = ch.ID AND r.CA_ID = ch.ISSUER_CA_ID))")
+        ctes = (
+            "RECURSIVE chain AS ("
+            "(SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE, NULL::bigint AS CHILD_ID, 0 AS DEPTH, "
+            f"ARRAY[c.ID] AS PATH FROM certificate c WHERE {cond} LIMIT 1) "
+            "UNION ALL "
+            "SELECT p.ID, p.ISSUER_CA_ID, p.CERTIFICATE, ch.ID, ch.DEPTH + 1, ch.PATH || p.ID FROM chain ch "
+            "JOIN ca_certificate cac ON cac.CA_ID = ch.ISSUER_CA_ID "
+            "JOIN certificate p ON p.ID = cac.CERTIFICATE_ID "
+            f"WHERE ch.DEPTH < {params.add(maxdepth)} AND NOT p.ID = ANY(ch.PATH) AND NOT EXISTS ("
+            "SELECT 1 FROM ca_certificate r WHERE r.CERTIFICATE_ID = ch.ID AND r.CA_ID = ch.ISSUER_CA_ID))"
+        )
         inner = f"SELECT ID, ISSUER_CA_ID, CERTIFICATE, CHILD_ID, DEPTH FROM chain LIMIT {params.add(maxrows)}"
-        return await self.fetch(_withMeta(inner, extra=("CHILD_ID", "DEPTH"), ctes=ctes), *params.args)
+        return await self.fetch(
+            _withMeta(inner, extra=("CHILD_ID", "DEPTH"), ctes=ctes), *params.args
+        )
 
     # ---- CAs ----
 
-    async def cas(self, caids: list[int] | None = None, name: str | None = None,
-                  certs: bool = False, limit: int = 100) -> list[dict]:
+    async def cas(
+        self,
+        caids: list[int] | None = None,
+        name: str | None = None,
+        certs: bool = False,
+        limit: int = 100,
+    ) -> list[dict]:
         """CAs by ID or name (a substring of the CA's DN) and their certificates.
 
         Returns a row per CA certificate (``ca_id``, ``ca_name``, and ``id``, which is
@@ -539,17 +607,25 @@ class CrtshDb:
         if not conds:
             raise CrtshDbError("A CA name or ID is required.")
 
-        ctes = (f"cas AS MATERIALIZED (SELECT ca.ID, ca.NAME FROM ca WHERE {' OR '.join(conds)} "
-                f"ORDER BY ca.ID LIMIT {params.add(limit)})")
+        ctes = (
+            f"cas AS MATERIALIZED (SELECT ca.ID, ca.NAME FROM ca WHERE {' OR '.join(conds)} "
+            f"ORDER BY ca.ID LIMIT {params.add(limit)})"
+        )
         if not certs:
-            sql = (f"WITH {ctes} SELECT cas.ID AS ca_id, cas.NAME AS ca_name, cac.CERTIFICATE_ID AS id "
-                   "FROM cas LEFT JOIN ca_certificate cac ON cac.CA_ID = cas.ID")
+            sql = (
+                f"WITH {ctes} SELECT cas.ID AS ca_id, cas.NAME AS ca_name, cac.CERTIFICATE_ID AS id "
+                "FROM cas LEFT JOIN ca_certificate cac ON cac.CA_ID = cas.ID"
+            )
             return await self.fetch(sql, *params.args)
 
-        inner = ("SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE, cas.ID AS CA_ID, cas.NAME AS CA_NAME FROM cas "
-                 "LEFT JOIN ca_certificate cac ON cac.CA_ID = cas.ID "
-                 "LEFT JOIN certificate c ON c.ID = cac.CERTIFICATE_ID")
-        return await self.fetch(_withMeta(inner, extra=("CA_ID", "CA_NAME"), ctes=ctes), *params.args)
+        inner = (
+            "SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE, cas.ID AS CA_ID, cas.NAME AS CA_NAME FROM cas "
+            "LEFT JOIN ca_certificate cac ON cac.CA_ID = cas.ID "
+            "LEFT JOIN certificate c ON c.ID = cac.CERTIFICATE_ID"
+        )
+        return await self.fetch(
+            _withMeta(inner, extra=("CA_ID", "CA_NAME"), ctes=ctes), *params.args
+        )
 
     # ---- Escape hatch ----
 

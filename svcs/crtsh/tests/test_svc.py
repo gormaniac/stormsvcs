@@ -51,10 +51,14 @@ def test_helpers():
 
     assert s_svc.identityQuery("subject", " CN=x ") == ("x", None)
     assert s_svc.identityQuery("subject", "C=US, O=The Vertex Project+OU=Eng, 1.2.3=x") == (
-        "US The Vertex Project Eng x", None)
+        "US The Vertex Project Eng x",
+        None,
+    )
     assert s_svc.identityQuery("ip", "1.2.3.4") == ("1.2.3.4", "1.2.3.4")
     assert s_svc.identityQuery("ip", "2001:db8::1") == (
-        ":2001:DB8:0:0:0:0:0:1", ":2001:DB8:0:0:0:0:0:1")
+        ":2001:DB8:0:0:0:0:0:1",
+        ":2001:DB8:0:0:0:0:0:1",
+    )
     with pytest.raises(CrtshDbError, match="Invalid IP"):
         s_svc.identityQuery("ip", "nope")
     assert s_svc.identityQuery("dns", "*.vertex_link") == ("*.vertex_link", "%vertex\\_link")
@@ -85,11 +89,30 @@ def test_helpers():
         with pytest.raises(CrtshDbError, match="Unable to tell"):
             s_svc.guessKind(valu)
 
-    row = s_svc._safeRow({"b": b"\x01", "m": memoryview(b"\x02"), "a": bytearray(b"\x03"),
-                          "t": datetime.datetime(1970, 1, 1), "l": [1, (b"\x04",)],
-                          "n": None, "s": "x", "f": 1.5, "o": complex(1, 2)})
-    assert row == {"b": "01", "m": "02", "a": "03", "t": 0, "l": [1, ["04"]], "n": None,
-                   "s": "x", "f": 1.5, "o": "(1+2j)"}
+    row = s_svc._safeRow(
+        {
+            "b": b"\x01",
+            "m": memoryview(b"\x02"),
+            "a": bytearray(b"\x03"),
+            "t": datetime.datetime(1970, 1, 1),
+            "l": [1, (b"\x04",)],
+            "n": None,
+            "s": "x",
+            "f": 1.5,
+            "o": complex(1, 2),
+        }
+    )
+    assert row == {
+        "b": "01",
+        "m": "02",
+        "a": "03",
+        "t": 0,
+        "l": [1, ["04"]],
+        "n": None,
+        "s": "x",
+        "f": 1.5,
+        "o": "(1+2j)",
+    }
 
     assert s_svc._preferredParent({"notbefore": 5}, []) is None
     child = {"notbefore": 5}
@@ -112,7 +135,6 @@ def test_helpers():
 
 
 class TestCrtshSvc(s_tests.SynTest):
-
     async def test_lookup(self):
         async with svcCtx(self) as (svc, fake):
             # Duplicates (here, by ID and SHA-256) are only returned once.
@@ -124,7 +146,10 @@ class TestCrtshSvc(s_tests.SynTest):
 
             # The metadata of every certificate.
             leaf = certs[0]
-            assert leaf["crtsh"]["issuer"] == {"id": 2, "name": "C=US, O=Test Trust, CN=Test Issuing CA 1"}
+            assert leaf["crtsh"]["issuer"] == {
+                "id": 2,
+                "name": "C=US, O=Test Trust, CN=Test Issuing CA 1",
+            }
             assert [e["log"] for e in leaf["crtsh"]["ctlog"]] == ["Test Log A", "Test Log B"]
             assert leaf["crtsh"]["logged"] == [e["time"] for e in leaf["crtsh"]["ctlog"]]
             assert leaf["crtsh"]["caids"] == []
@@ -173,7 +198,10 @@ class TestCrtshSvc(s_tests.SynTest):
             assert call["limit"] == 500
 
             assert await ids(svc.searchGenr(dns="www.vertex.link", exact=True)) == [10, 9, 15]
-            assert await ids(svc.searchGenr(dns="vertex.link", valid=True, precerts=False)) == [10, 11]
+            assert await ids(svc.searchGenr(dns="vertex.link", valid=True, precerts=False)) == [
+                10,
+                11,
+            ]
             assert await ids(svc.searchGenr(dns="vertex.link", limit=2)) == [10, 9]
             assert await ids(svc.searchGenr(dns="vertex.link", org="vertex", cn="old")) == [11]
             assert await ids(svc.searchGenr(ip="2001:db8::1")) == [10, 9]
@@ -186,7 +214,13 @@ class TestCrtshSvc(s_tests.SynTest):
             assert await ids(svc.searchGenr(identity="shop")) == [14]
 
             # Issuers by name are matched in the same query.
-            assert await ids(svc.searchGenr(dns="vertex.link", issuer="Issuing CA")) == [10, 9, 15, 11, 12]
+            assert await ids(svc.searchGenr(dns="vertex.link", issuer="Issuing CA")) == [
+                10,
+                9,
+                15,
+                11,
+                12,
+            ]
             assert fake.last("certsByIdentity")["issuer"] == "Issuing CA"
             assert fake.last("certsByIdentity")["caids"] is None
             assert await ids(svc.searchGenr(dns="vertex.link", caids=[1])) == []
@@ -197,8 +231,9 @@ class TestCrtshSvc(s_tests.SynTest):
             assert fake.last("certsByIssuer")["issuer"] == "Root R1"
             assert await ids(svc.searchGenr(caids=[2], precerts=False, limit=2)) == [14, 10]
             assert fake.last("certsByIssuer")["limit"] == 4
-            assert await ids(svc.searchGenr(caids=[2], since=0, until=2 ** 60, valid=True,
-                                            limit=1)) == [14]
+            assert await ids(
+                svc.searchGenr(caids=[2], since=0, until=2**60, valid=True, limit=1)
+            ) == [14]
 
             with pytest.raises(CrtshDbError, match="at least one"):
                 await ids(svc.searchGenr(dns=""))
@@ -231,7 +266,11 @@ class TestCrtshSvc(s_tests.SynTest):
             assert fake.last("certsByIssuer")["caids"] == [1, 3]
 
             # A CA certificate's CA, and all of the CA's certificates are equal.
-            assert await ids(svc.issuedGenr(valu=PKI.sha256(4), precerts=False, limit=3)) == [14, 10, 15]
+            assert await ids(svc.issuedGenr(valu=PKI.sha256(4), precerts=False, limit=3)) == [
+                14,
+                10,
+                15,
+            ]
             assert fake.last("certsByIssuer")["cert"] == {"sha256": [bytes.fromhex(PKI.sha256(4))]}
             assert fake.last("certsByIssuer")["caids"] is None
             assert await ids(svc.issuedGenr(valu=2, kind="id", valid=True)) == [14, 10, 9, 11]
@@ -242,7 +281,7 @@ class TestCrtshSvc(s_tests.SynTest):
                 await ids(svc.issuedGenr(valu=10))
             assert fake.called("certs") == calls + 1
             # A CA that issued nothing (in the time range) isn't an error.
-            assert await ids(svc.issuedGenr(valu=3, kind="id", since=2 ** 60)) == []
+            assert await ids(svc.issuedGenr(valu=3, kind="id", since=2**60)) == []
             # Neither is one given by ID too.
             assert await ids(svc.issuedGenr(caids=[99], valu=10)) == []
             with pytest.raises(CrtshDbError, match="CA ID or certificate is required"):
@@ -256,7 +295,12 @@ class TestCrtshSvc(s_tests.SynTest):
             assert await ids(svc.pivotGenr(10, "siblings")) == [14, 9, 15, 11, 12, 13]
             assert await ids(svc.pivotGenr(10, "siblings", valid=True, precerts=False)) == [14, 11]
             assert await ids(svc.pivotGenr(10, "key")) == [9, 15]
-            assert fake.last("related") == {"by": "key", "cert": {"id": [10]}, "valid": False, "limit": 100}
+            assert fake.last("related") == {
+                "by": "key",
+                "cert": {"id": [10]},
+                "valid": False,
+                "limit": 100,
+            }
             assert await ids(svc.pivotGenr(10, "key", precerts=False)) == [15]
             assert fake.last("related")["limit"] == 200
             assert await ids(svc.pivotGenr(10, "subject")) == [9, 15]
@@ -369,23 +413,47 @@ class TestCrtshSvc(s_tests.SynTest):
                 retn = await prox.get(10)
                 assert retn["status"] and retn["data"]["crtsh"]["id"] == 10
                 retn = await prox.lookup("nope", 1)
-                assert retn == {"status": False, "mesg": "Unknown lookup type nope, expected one of: "
-                                "id, sha256, sha1, serial, ski, spki, spkisha1, subjectsha1",
-                                "data": None}
+                assert retn == {
+                    "status": False,
+                    "mesg": "Unknown lookup type nope, expected one of: "
+                    "id, sha256, sha1, serial, ski, spki, spkisha1, subjectsha1",
+                    "data": None,
+                }
 
                 items = [i async for i in prox.searchGenr(dns="vertex.link", limit=2)]
                 assert [i["data"]["crtsh"]["id"] for i in items] == [10, 9]
                 items = [i async for i in prox.pivotGenr(10, "nope")]
-                assert items == [{"status": False, "data": None,
-                                  "mesg": "Unknown pivot nope, expected one of: "
-                                          "issued, siblings, key, subject, serial, ski"}]
-                assert [i["data"]["crtsh"]["id"] async for i in prox.issuedGenr(caids=[1])] == [2, 1]
+                assert items == [
+                    {
+                        "status": False,
+                        "data": None,
+                        "mesg": "Unknown pivot nope, expected one of: "
+                        "issued, siblings, key, subject, serial, ski",
+                    }
+                ]
+                assert [i["data"]["crtsh"]["id"] async for i in prox.issuedGenr(caids=[1])] == [
+                    2,
+                    1,
+                ]
 
     async def test_db_conf(self):
-        conf = {"crtsh:dsn": "postgresql://u@db.example:5433/certs", "crtsh:timeout": 5,
-                "crtsh:retries": 1, "crtsh:keepalive": 2, "crtsh:idle": 3,
-                "crtsh:connect:timeout": 4, "crtsh:statement:timeout": 6}
+        conf = {
+            "crtsh:dsn": "postgresql://u@db.example:5433/certs",
+            "crtsh:timeout": 5,
+            "crtsh:retries": 1,
+            "crtsh:keepalive": 2,
+            "crtsh:idle": 3,
+            "crtsh:connect:timeout": 4,
+            "crtsh:statement:timeout": 6,
+        }
         async with self.getTestCell(CrtshSvc, conf=conf) as svc:
             db = svc.db
-            assert (db.dsn, db.timeout, db.retries, db.keepalive, db.idle, db.connect_timeout,
-                    db.statement_timeout) == ("postgresql://u@db.example:5433/certs", 5, 1, 2, 3, 4, 6)
+            assert (
+                db.dsn,
+                db.timeout,
+                db.retries,
+                db.keepalive,
+                db.idle,
+                db.connect_timeout,
+                db.statement_timeout,
+            ) == ("postgresql://u@db.example:5433/certs", 5, 1, 2, 3, 4, 6)

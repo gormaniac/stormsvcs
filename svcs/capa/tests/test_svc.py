@@ -28,7 +28,6 @@ async def waitProcs(svc) -> None:
 
 
 class TestHelpers:
-
     def test_fmtAddr(self):
         assert s_svc.fmtAddr({"type": "absolute", "value": 0x401000}) == "0x401000"
         assert s_svc.fmtAddr({"type": "no address"}) is None
@@ -50,7 +49,6 @@ class TestHelpers:
 
 
 class TestCapaSvc(s_tests.SynTest):
-
     async def test_scan(self):
         async with self.getTestAxon() as axon:
             await axon.put(SAMPLE)
@@ -61,7 +59,9 @@ class TestCapaSvc(s_tests.SynTest):
                 assert res["md5"] and res["sha1"]
                 assert res["capa"] == "10.0.0"
                 assert res["rules"] == {
-                    "version": RULES_VERSION, "sha256": svc.capaRules.sha256, "custom": None,
+                    "version": RULES_VERSION,
+                    "sha256": svc.capaRules.sha256,
+                    "custom": None,
                 }
                 assert res["flavor"] == "static"
                 assert res["format"] == "sc64"
@@ -94,7 +94,6 @@ class TestCapaSvc(s_tests.SynTest):
             await axon.put(SAMPLE)
             await axon.put(b"hello world")
             async with self.getTestCell(CapaSvc, svcConf(axon, **{"capa:maxsize": 32})) as svc:
-
                 with self.raises(CapaSvcError) as cm:
                     await svc.scan("newp")
                 assert "Invalid SHA256" in cm.exception.mesg
@@ -393,7 +392,6 @@ class TestCapaSvc(s_tests.SynTest):
 
 
 class TestCapaApi(s_tests.SynTest):
-
     async def test_api(self):
         async with self.getTestAxon() as axon:
             await axon.put(SAMPLE)

@@ -18,8 +18,12 @@ from capasvc.rules import CapaRules
 from .capatest import RULES, RULES_VERSION, SAMPLE, SAMPLE_SHA256, svcConf
 
 
-def customRule(name: str, feature: str = 'string: "slib-capa-test-marker"',
-               namespace: str = "custom/marker", extra: str = "") -> str:
+def customRule(
+    name: str,
+    feature: str = 'string: "slib-capa-test-marker"',
+    namespace: str = "custom/marker",
+    extra: str = "",
+) -> str:
     """The YAML of a custom capa rule."""
 
     return (
@@ -42,7 +46,6 @@ MARKER = customRule("custom marker rule")
 
 
 class TestCustomRules:
-
     def official(self):
         return CapaRules(RULES, RULES_VERSION)
 
@@ -72,8 +75,10 @@ class TestCustomRules:
 
         # The key only depends on the rules, not their order, and the set is only saved once.
         other = s_common.guid()
-        rules = [{"guid": guid, "text": MARKER},
-                 {"guid": other, "text": customRule("another rule")}]
+        rules = [
+            {"guid": guid, "text": MARKER},
+            {"guid": other, "text": customRule("another rule")},
+        ]
         one = CustomRules(official, rules, str(tmp_path))
         two = CustomRules(official, list(reversed(rules)), str(tmp_path))
         assert one.key == two.key != cset.key
@@ -85,14 +90,18 @@ class TestCustomRules:
     def test_skipped(self, tmp_path):
         official = self.official()
         guids = [s_common.guid() for _ in range(6)]
-        cset = CustomRules(official, [
-            {"guid": guids[0], "text": MARKER},
-            {"guid": guids[1], "text": customRule("custom marker rule")},  # Same name.
-            {"guid": guids[2], "text": customRule("contain xor")},  # An official rule's name.
-            {"guid": guids[3], "text": "rule:\n  meta:\n    name: bad\n"},
-            {"guid": guids[4], "text": None},
-            {"guid": "newp", "text": MARKER},
-        ], str(tmp_path))
+        cset = CustomRules(
+            official,
+            [
+                {"guid": guids[0], "text": MARKER},
+                {"guid": guids[1], "text": customRule("custom marker rule")},  # Same name.
+                {"guid": guids[2], "text": customRule("contain xor")},  # An official rule's name.
+                {"guid": guids[3], "text": "rule:\n  meta:\n    name: bad\n"},
+                {"guid": guids[4], "text": None},
+                {"guid": "newp", "text": MARKER},
+            ],
+            str(tmp_path),
+        )
 
         assert list(cset.records) == ["custom marker rule"]
         assert cset.shadowed == [{"guid": guids[2], "name": "contain xor"}]
@@ -132,23 +141,25 @@ class TestCustomRules:
 
 
 class TestCapaSvcCustom(s_tests.SynTest):
-
     async def test_scan_custom(self):
         async with self.getTestAxon() as axon:
             await axon.put(SAMPLE)
             async with self.getTestCell(CapaSvc, svcConf(axon)) as svc:
                 guid = s_common.guid()
                 # Custom rules can use the official rules, ex. a library rule.
-                ret = customRule("custom ret rule", feature="match: contain ret",
-                                 namespace="custom/ops/ret").replace(
+                ret = customRule(
+                    "custom ret rule", feature="match: contain ret", namespace="custom/ops/ret"
+                ).replace(
                     "      static: file\n      dynamic: file\n",
                     "      static: function\n      dynamic: unsupported\n",
                 )
-                info = await svc.custom([
-                    {"guid": guid, "text": MARKER},
-                    {"guid": s_common.guid(), "text": ret},
-                    {"guid": s_common.guid(), "text": customRule("never", "string: newp")},
-                ])
+                info = await svc.custom(
+                    [
+                        {"guid": guid, "text": MARKER},
+                        {"guid": s_common.guid(), "text": ret},
+                        {"guid": s_common.guid(), "text": customRule("never", "string: newp")},
+                    ]
+                )
                 assert len(info["rules"]) == 3 and not info["errors"]
 
                 res = await svc.scan(SAMPLE_SHA256, fmt="sc64", custom=info["key"])
@@ -162,17 +173,24 @@ class TestCapaSvcCustom(s_tests.SynTest):
 
                 # capa's cache of the official and custom rules is kept, other caches aren't.
                 cset = svc.customSets[info["key"]]
-                assert sorted(os.listdir(svc.cachedir)) == sorted([
-                    svc.capaRules.cacheName(svc.cachedir), cset.cacheName(svc.cachedir),
-                ])
+                assert sorted(os.listdir(svc.cachedir)) == sorted(
+                    [
+                        svc.capaRules.cacheName(svc.cachedir),
+                        cset.cacheName(svc.cachedir),
+                    ]
+                )
 
                 # Sending the same rules again reuses the set.
-                again = await svc.custom([
-                    {"guid": guid, "text": MARKER},
-                    {"guid": cset.records["custom ret rule"]["guid"], "text": ret},
-                    {"guid": cset.records["never"]["guid"],
-                     "text": customRule("never", "string: newp")},
-                ])
+                again = await svc.custom(
+                    [
+                        {"guid": guid, "text": MARKER},
+                        {"guid": cset.records["custom ret rule"]["guid"], "text": ret},
+                        {
+                            "guid": cset.records["never"]["guid"],
+                            "text": customRule("never", "string: newp"),
+                        },
+                    ]
+                )
                 assert again["key"] == info["key"] and svc.customSets[info["key"]] is cset
 
                 # Scans without the key only use the official rules.
@@ -199,9 +217,11 @@ class TestCapaSvcCustom(s_tests.SynTest):
                 assert info["key"] is None and len(info["errors"]) == 2
 
                 # A custom rule capa can't load with the official rules fails the scans with it.
-                info = await svc.custom([
-                    {"guid": s_common.guid(), "text": customRule("x", "match: newp rule")},
-                ])
+                info = await svc.custom(
+                    [
+                        {"guid": s_common.guid(), "text": customRule("x", "match: newp rule")},
+                    ]
+                )
                 for _ in range(2):
                     with self.raises(CapaSvcError) as cm:
                         await svc.scan(SAMPLE_SHA256, fmt="sc64", custom=info["key"])
@@ -232,7 +252,6 @@ class TestCapaSvcCustom(s_tests.SynTest):
 
 
 class TestCapaSvcCustomCache(s_tests.SynTest):
-
     async def test_reload_while_waiting(self):
         # A custom rule scan that waited on the cache lock through a reload fails, and doesn't
         # touch the new rules' cache.

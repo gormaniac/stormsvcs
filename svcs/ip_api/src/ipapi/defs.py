@@ -1,10 +1,8 @@
 """The Python definition of the ipapi Storm package."""
 
-
 from stormlibpp import StormPkg
 
 from . import __version__
-
 
 SVC_NAME = "slib.ipapi"
 SVC_VER = __version__
@@ -16,7 +14,7 @@ SVC_SYN_MIN_VER = (2, 137, 0)
 SVC_EVTS = {
     "add": {
         "storm": (
-            f'[(meta:source={SVC_GUID} :name={SVC_NAME})] | spin | '
+            f"[(meta:source={SVC_GUID} :name={SVC_NAME})] | spin | "
             'if ($lib.globals.get("slib:ipapi:tag:enabled") = (null)) '
             '{ $lib.globals.set("slib:ipapi:tag:enabled", (true)) } '
             'if ($lib.globals.get("slib:ipapi:tag:prefix") = (null)) '
@@ -33,4 +31,3 @@ class SlibIpApiPkg(StormPkg):
 
 
 PKGDEFS = (SlibIpApiPkg().asdict(),)
-

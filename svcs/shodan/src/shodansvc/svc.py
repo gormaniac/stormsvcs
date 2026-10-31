@@ -6,7 +6,6 @@ Shodan's data as-is (or normalized, for the ``norm*`` variants) and raise
 ``TelepathRetn`` convention for Storm.
 """
 
-
 import json
 from collections.abc import AsyncIterator
 from typing import Any
@@ -18,7 +17,6 @@ import synapse.lib.cell as s_cell
 from . import norm
 from .api import ShodanCellApi
 from .client import ShodanApiError, ShodanClient
-
 
 # Streaming API endpoints and whether they take a comma separated list of values.
 STREAM_KINDS = {
@@ -110,44 +108,84 @@ class ShodanSvc(s_cell.Cell):
     async def hasApiKey(self) -> bool:
         return bool(self.getApiKey())
 
-    async def _api(self, method: str, path: str, apikey=None, base="api", params=None, json_data=None, form=None):
+    async def _api(
+        self,
+        method: str,
+        path: str,
+        apikey=None,
+        base="api",
+        params=None,
+        json_data=None,
+        form=None,
+    ):
         return await self.client.request(
-            method, path, base=base, apikey=self.getApiKey(apikey), params=params, json_data=json_data, form=form,
+            method,
+            path,
+            base=base,
+            apikey=self.getApiKey(apikey),
+            params=params,
+            json_data=json_data,
+            form=form,
         )
 
-    async def rawRequest(self, method: str, path: str, base: str = "api", params=None, json_data=None,
-                         apikey=None, form=None):
+    async def rawRequest(
+        self,
+        method: str,
+        path: str,
+        base: str = "api",
+        params=None,
+        json_data=None,
+        apikey=None,
+        form=None,
+    ):
         """Send an arbitrary request to a Shodan API. An escape hatch for new endpoints."""
 
         if not path.startswith("/"):
             path = "/" + path
-        return await self._api(method, path, apikey=apikey, base=base, params=params, json_data=json_data, form=form)
+        return await self._api(
+            method, path, apikey=apikey, base=base, params=params, json_data=json_data, form=form
+        )
 
     # ---- Search methods ----
 
     async def host(self, ip: str, history: bool = False, minify: bool = False, apikey=None) -> dict:
         """GET /shodan/host/{ip}"""
-        return await self._api("get", f"/shodan/host/{_seg(ip)}", apikey,
-                               params={"history": history, "minify": minify})
+        return await self._api(
+            "get", f"/shodan/host/{_seg(ip)}", apikey, params={"history": history, "minify": minify}
+        )
 
-    async def normHost(self, ip: str, history: bool = False, minify: bool = False, apikey=None) -> dict:
+    async def normHost(
+        self, ip: str, history: bool = False, minify: bool = False, apikey=None
+    ) -> dict:
         """Like ``host()`` but normalized for modeling."""
         return norm.normHost(await self.host(ip, history=history, minify=minify, apikey=apikey))
 
     async def count(self, query: str, facets=None, apikey=None) -> dict:
         """GET /shodan/host/count"""
-        return await self._api("get", "/shodan/host/count", apikey,
-                               params={"query": query, "facets": facets})
+        return await self._api(
+            "get", "/shodan/host/count", apikey, params={"query": query, "facets": facets}
+        )
 
-    async def search(self, query: str, page: int = 1, facets=None, minify: bool = True,
-                     fields=None, apikey=None) -> dict:
+    async def search(
+        self, query: str, page: int = 1, facets=None, minify: bool = True, fields=None, apikey=None
+    ) -> dict:
         """GET /shodan/host/search - a single page of results."""
-        return await self._api("get", "/shodan/host/search", apikey, params={
-            "query": query, "page": page, "facets": facets, "minify": minify, "fields": fields,
-        })
+        return await self._api(
+            "get",
+            "/shodan/host/search",
+            apikey,
+            params={
+                "query": query,
+                "page": page,
+                "facets": facets,
+                "minify": minify,
+                "fields": fields,
+            },
+        )
 
-    async def searchGenr(self, query: str, limit: int = 100, minify: bool = True,
-                         page: int = 1, apikey=None) -> AsyncIterator[dict]:
+    async def searchGenr(
+        self, query: str, limit: int = 100, minify: bool = True, page: int = 1, apikey=None
+    ) -> AsyncIterator[dict]:
         """Page through /shodan/host/search, yielding normalized banners.
 
         Each page of 100 results uses one Shodan query credit. ``limit=0`` pages
@@ -209,8 +247,9 @@ class ShodanSvc(s_cell.Cell):
 
     async def scanInternet(self, port: int, protocol: str, apikey=None) -> dict:
         """POST /shodan/scan/internet (form body, like POST /shodan/scan)"""
-        return await self._api("post", "/shodan/scan/internet", apikey,
-                               form={"port": port, "protocol": protocol})
+        return await self._api(
+            "post", "/shodan/scan/internet", apikey, form={"port": port, "protocol": protocol}
+        )
 
     async def scans(self, page: int = 1, apikey=None) -> dict:
         """GET /shodan/scans"""
@@ -251,16 +290,22 @@ class ShodanSvc(s_cell.Cell):
 
     async def alertTriggerDisable(self, aid: str, trigger: str, apikey=None) -> dict:
         """DELETE /shodan/alert/{id}/trigger/{trigger}"""
-        return await self._api("delete", f"/shodan/alert/{_seg(aid)}/trigger/{_seg(trigger)}", apikey)
+        return await self._api(
+            "delete", f"/shodan/alert/{_seg(aid)}/trigger/{_seg(trigger)}", apikey
+        )
 
     async def alertTriggerIgnore(self, aid: str, trigger: str, service: str, apikey=None) -> dict:
         """PUT /shodan/alert/{id}/trigger/{trigger}/ignore/{ip:port}"""
-        path = f"/shodan/alert/{_seg(aid)}/trigger/{_seg(trigger)}/ignore/{quote(service, safe=':/,')}"
+        path = (
+            f"/shodan/alert/{_seg(aid)}/trigger/{_seg(trigger)}/ignore/{quote(service, safe=':/,')}"
+        )
         return await self._api("put", path, apikey)
 
     async def alertTriggerUnignore(self, aid: str, trigger: str, service: str, apikey=None) -> dict:
         """DELETE /shodan/alert/{id}/trigger/{trigger}/ignore/{ip:port}"""
-        path = f"/shodan/alert/{_seg(aid)}/trigger/{_seg(trigger)}/ignore/{quote(service, safe=':/,')}"
+        path = (
+            f"/shodan/alert/{_seg(aid)}/trigger/{_seg(trigger)}/ignore/{quote(service, safe=':/,')}"
+        )
         return await self._api("delete", path, apikey)
 
     async def alertNotifierAdd(self, aid: str, nid: str, apikey=None) -> dict:
@@ -281,7 +326,9 @@ class ShodanSvc(s_cell.Cell):
         """GET /notifier/provider"""
         return await self._api("get", "/notifier/provider", apikey)
 
-    async def notifierCreate(self, provider: str, args: dict, desc: str | None = None, apikey=None) -> dict:
+    async def notifierCreate(
+        self, provider: str, args: dict, desc: str | None = None, apikey=None
+    ) -> dict:
         """POST /notifier (form body, like POST /shodan/scan)"""
         form = dict(args or {})
         form["provider"] = provider
@@ -302,14 +349,19 @@ class ShodanSvc(s_cell.Cell):
 
     # ---- Directory ----
 
-    async def queries(self, page: int = 1, sort: str = "timestamp", order: str = "desc", apikey=None) -> dict:
+    async def queries(
+        self, page: int = 1, sort: str = "timestamp", order: str = "desc", apikey=None
+    ) -> dict:
         """GET /shodan/query"""
-        return await self._api("get", "/shodan/query", apikey,
-                               params={"page": page, "sort": sort, "order": order})
+        return await self._api(
+            "get", "/shodan/query", apikey, params={"page": page, "sort": sort, "order": order}
+        )
 
     async def queriesSearch(self, query: str, page: int = 1, apikey=None) -> dict:
         """GET /shodan/query/search"""
-        return await self._api("get", "/shodan/query/search", apikey, params={"query": query, "page": page})
+        return await self._api(
+            "get", "/shodan/query/search", apikey, params={"query": query, "page": page}
+        )
 
     async def queriesTags(self, size: int = 10, apikey=None) -> dict:
         """GET /shodan/query/tags"""
@@ -333,7 +385,9 @@ class ShodanSvc(s_cell.Cell):
 
     async def orgMemberAdd(self, user: str, notify: bool = True, apikey=None) -> dict:
         """PUT /org/member/{user}"""
-        return await self._api("put", f"/org/member/{_seg(user)}", apikey, params={"notify": notify})
+        return await self._api(
+            "put", f"/org/member/{_seg(user)}", apikey, params={"notify": notify}
+        )
 
     async def orgMemberDel(self, user: str, apikey=None) -> dict:
         """DELETE /org/member/{user}"""
@@ -359,21 +413,48 @@ class ShodanSvc(s_cell.Cell):
 
     # ---- DNS ----
 
-    async def dnsDomain(self, domain: str, history: bool = False, rtype: str | None = None,
-                        page: int = 1, apikey=None) -> dict:
+    async def dnsDomain(
+        self,
+        domain: str,
+        history: bool = False,
+        rtype: str | None = None,
+        page: int = 1,
+        apikey=None,
+    ) -> dict:
         """GET /dns/domain/{domain} - a single page."""
-        return await self._api("get", f"/dns/domain/{_seg(domain)}", apikey, params={
-            "history": history or None, "type": rtype, "page": page,
-        })
+        return await self._api(
+            "get",
+            f"/dns/domain/{_seg(domain)}",
+            apikey,
+            params={
+                "history": history or None,
+                "type": rtype,
+                "page": page,
+            },
+        )
 
-    async def dnsDomainAll(self, domain: str, history: bool = False, rtype: str | None = None,
-                           maxpages: int = 10, apikey=None) -> dict:
+    async def dnsDomainAll(
+        self,
+        domain: str,
+        history: bool = False,
+        rtype: str | None = None,
+        maxpages: int = 10,
+        apikey=None,
+    ) -> dict:
         """Page through /dns/domain/{domain}, merging all pages into one normalized result."""
 
-        retn = {"domain": domain.lower(), "tags": [], "subdomains": [], "records": [], "more": False}
+        retn = {
+            "domain": domain.lower(),
+            "tags": [],
+            "subdomains": [],
+            "records": [],
+            "more": False,
+        }
         page = 1
         while True:
-            data = await self.dnsDomain(domain, history=history, rtype=rtype, page=page, apikey=apikey)
+            data = await self.dnsDomain(
+                domain, history=history, rtype=rtype, page=page, apikey=apikey
+            )
             retn["tags"] = data.get("tags") or retn["tags"]
             retn["subdomains"].extend(data.get("subdomains") or [])
             retn["records"].extend(norm.normDnsRecords(data))
@@ -398,8 +479,13 @@ class ShodanSvc(s_cell.Cell):
 
     async def trendsSearch(self, query: str, facets=None, apikey=None) -> dict:
         """GET trends.shodan.io/api/v1/search"""
-        return await self._api("get", "/api/v1/search", apikey, base="trends",
-                               params={"query": query, "facets": facets})
+        return await self._api(
+            "get",
+            "/api/v1/search",
+            apikey,
+            base="trends",
+            params={"query": query, "facets": facets},
+        )
 
     async def trendsFacets(self, apikey=None) -> list:
         """GET trends.shodan.io/api/v1/search/facets"""
@@ -447,41 +533,72 @@ class ShodanSvc(s_cell.Cell):
             return norm.normAdvisory(await self.euvd(vulnid))
         return norm.normCve(await self.cve(vulnid))
 
-    async def cves(self, cpe23: str | None = None, product: str | None = None, is_kev: bool = False,
-                   sort_by_epss: bool = False, skip: int = 0, limit: int = 1000,
-                   start_date: str | None = None, end_date: str | None = None,
-                   count: bool = False) -> dict:
+    async def cves(
+        self,
+        cpe23: str | None = None,
+        product: str | None = None,
+        is_kev: bool = False,
+        sort_by_epss: bool = False,
+        skip: int = 0,
+        limit: int = 1000,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        count: bool = False,
+    ) -> dict:
         """GET cvedb.shodan.io/cves
 
         Returns ``{"cves": [...]}`` with each CVE normalized, or ``{"total": n}`` with ``count``.
         """
         params = {
-            "cpe23": cpe23, "product": product, "skip": skip, "limit": limit,
-            "start_date": start_date, "end_date": end_date,
-            "is_kev": is_kev or None, "sort_by_epss": sort_by_epss or None, "count": count or None,
+            "cpe23": cpe23,
+            "product": product,
+            "skip": skip,
+            "limit": limit,
+            "start_date": start_date,
+            "end_date": end_date,
+            "is_kev": is_kev or None,
+            "sort_by_epss": sort_by_epss or None,
+            "count": count or None,
         }
         data = await self.client.request("get", "/cves", base="cvedb", params=params)
         if "cves" in data:
             data["cves"] = [norm.normCve(c) for c in data["cves"] or []]
         return data
 
-    async def cpes(self, product: str, skip: int = 0, limit: int = 1000, count: bool = False) -> dict:
+    async def cpes(
+        self, product: str, skip: int = 0, limit: int = 1000, count: bool = False
+    ) -> dict:
         """GET cvedb.shodan.io/cpes
 
         CVEDB returns shortened CPE 2.3 strings, they're padded so Synapse accepts them.
         """
-        data = await self.client.request("get", "/cpes", base="cvedb", params={
-            "product": product, "skip": skip, "limit": limit, "count": count or None,
-        })
+        data = await self.client.request(
+            "get",
+            "/cpes",
+            base="cvedb",
+            params={
+                "product": product,
+                "skip": skip,
+                "limit": limit,
+                "count": count or None,
+            },
+        )
         if "cpes" in data:
             data["cpes"] = norm.normCpes(data["cpes"])
         return data
 
     # ---- Streaming ----
 
-    async def stream(self, kind: str = "banners", values=None, query: str | None = None,
-                     aid: str | None = None, limit: int = 100, timeout: float = 60,
-                     apikey=None) -> AsyncIterator[dict]:
+    async def stream(
+        self,
+        kind: str = "banners",
+        values=None,
+        query: str | None = None,
+        aid: str | None = None,
+        limit: int = 100,
+        timeout: float = 60,
+        apikey=None,
+    ) -> AsyncIterator[dict]:
         """Read normalized banners from a Shodan Streaming API endpoint.
 
         ``kind`` is one of ``STREAM_KINDS``. ``values`` is required for the list
@@ -490,7 +607,9 @@ class ShodanSvc(s_cell.Cell):
         """
 
         if kind not in STREAM_KINDS:
-            raise ShodanApiError(f"Unknown stream type {kind}, expected one of: {', '.join(STREAM_KINDS)}")
+            raise ShodanApiError(
+                f"Unknown stream type {kind}, expected one of: {', '.join(STREAM_KINDS)}"
+            )
 
         params = {}
         path = f"/shodan/{kind}"
@@ -507,6 +626,7 @@ class ShodanSvc(s_cell.Cell):
         elif kind == "alert" and aid:
             path = f"{path}/{_seg(aid)}"
 
-        async for banner in self.client.stream(path, apikey=self.getApiKey(apikey), params=params,
-                                               limit=limit, timeout=timeout):
+        async for banner in self.client.stream(
+            path, apikey=self.getApiKey(apikey), params=params, limit=limit, timeout=timeout
+        ):
             yield norm.normBanner(banner)

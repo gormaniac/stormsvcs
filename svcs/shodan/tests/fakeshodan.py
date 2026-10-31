@@ -5,7 +5,6 @@ Serves canned responses for every Shodan API under a per-API path prefix (ex.
 request so tests can assert exactly what the service sent.
 """
 
-
 import contextlib
 import json
 from typing import Any
@@ -51,8 +50,12 @@ HOST_8888 = {
                 "CVE-2021-44228": {"cvss": 10.0, "verified": False, "summary": "Log4Shell"},
             },
             "location": {
-                "city": "Mountain View", "region_code": "CA", "country_code": "US",
-                "country_name": "United States", "latitude": 37.4056, "longitude": -122.0775,
+                "city": "Mountain View",
+                "region_code": "CA",
+                "country_code": "US",
+                "country_name": "United States",
+                "latitude": 37.4056,
+                "longitude": -122.0775,
             },
             "http": {"title": "Google DNS", "server": "nginx", "status": 200},
             "ssl": {
@@ -132,11 +135,19 @@ GHSA_LOG4SHELL = {
     "cve": {
         "id": "CVE-2021-44228",
         "summary": "Apache Log4j2 JNDI features do not protect against attacker controlled LDAP.",
-        "cvss": 10.0, "cvss_version": 3.0, "cvss_v2": 9.3, "cvss_v3": 10.0, "cvss_v4": None,
-        "epss": 0.99999, "ranking_epss": 1.0, "kev": True,
-        "propose_action": None, "ransomware_campaign": "Known",
+        "cvss": 10.0,
+        "cvss_version": 3.0,
+        "cvss_v2": 9.3,
+        "cvss_v3": 10.0,
+        "cvss_v4": None,
+        "epss": 0.99999,
+        "ranking_epss": 1.0,
+        "kev": True,
+        "propose_action": None,
+        "ransomware_campaign": "Known",
         "references": ["https://logging.apache.org/log4j/2.x/security.html"],
-        "published_time": "2021-12-10T10:15:09", "cpes": ["cpe:2.3:a:apache:log4j:2.0:-:*:*:*:*:*:*"],
+        "published_time": "2021-12-10T10:15:09",
+        "cpes": ["cpe:2.3:a:apache:log4j:2.0:-:*:*:*:*:*:*"],
     },
     "euvd": {"id": "EUVD-2021-34768", "description": "Apache Log4j2 JNDI features..."},
 }
@@ -179,77 +190,186 @@ DNS_DOMAIN = {
     "subdomains": ["www", "api"],
     "more": False,
     "data": [
-        {"subdomain": "", "type": "A", "value": "1.2.3.4", "last_seen": "2026-10-01T00:00:00.000000"},
-        {"subdomain": "www", "type": "CNAME", "value": "vertex.link", "last_seen": "2026-10-01T00:00:00.000000"},
-        {"subdomain": "", "type": "MX", "value": "mx.vertex.link", "last_seen": "2026-10-01T00:00:00.000000"},
-        {"subdomain": "", "type": "NS", "value": "ns1.vertex.link", "last_seen": "2026-10-01T00:00:00.000000"},
-        {"subdomain": "", "type": "TXT", "value": "v=spf1 -all", "last_seen": "2026-10-01T00:00:00.000000"},
-        {"subdomain": "api", "type": "AAAA", "value": "2001:db8::1", "last_seen": "2026-10-01T00:00:00.000000"},
+        {
+            "subdomain": "",
+            "type": "A",
+            "value": "1.2.3.4",
+            "last_seen": "2026-10-01T00:00:00.000000",
+        },
+        {
+            "subdomain": "www",
+            "type": "CNAME",
+            "value": "vertex.link",
+            "last_seen": "2026-10-01T00:00:00.000000",
+        },
+        {
+            "subdomain": "",
+            "type": "MX",
+            "value": "mx.vertex.link",
+            "last_seen": "2026-10-01T00:00:00.000000",
+        },
+        {
+            "subdomain": "",
+            "type": "NS",
+            "value": "ns1.vertex.link",
+            "last_seen": "2026-10-01T00:00:00.000000",
+        },
+        {
+            "subdomain": "",
+            "type": "TXT",
+            "value": "v=spf1 -all",
+            "last_seen": "2026-10-01T00:00:00.000000",
+        },
+        {
+            "subdomain": "api",
+            "type": "AAAA",
+            "value": "2001:db8::1",
+            "last_seen": "2026-10-01T00:00:00.000000",
+        },
     ],
 }
 
 API_INFO = {
-    "plan": "dev", "query_credits": 99, "scan_credits": 98, "monitored_ips": 1,
-    "unlocked": True, "unlocked_left": 99, "https": True, "telnet": False,
+    "plan": "dev",
+    "query_credits": 99,
+    "scan_credits": 98,
+    "monitored_ips": 1,
+    "unlocked": True,
+    "unlocked_left": 99,
+    "https": True,
+    "telnet": False,
     "usage_limits": {"query_credits": 100, "scan_credits": 100, "monitored_ips": 16},
 }
 
 ALERT = {
-    "id": "ALERT1", "name": "corp", "created": "2026-10-01T00:00:00", "expires": 0, "expired": False,
-    "filters": {"ip": ["1.2.3.0/24"]}, "triggers": {"new_service": {}}, "notifiers": [{"id": "default"}],
+    "id": "ALERT1",
+    "name": "corp",
+    "created": "2026-10-01T00:00:00",
+    "expires": 0,
+    "expired": False,
+    "filters": {"ip": ["1.2.3.0/24"]},
+    "triggers": {"new_service": {}},
+    "notifiers": [{"id": "default"}],
 }
 
 # Canned responses keyed by (method, path). Values are (status, body) or a callable(request) -> (status, body).
 ROUTES: dict[tuple[str, str], Any] = {
     ("GET", "/api/shodan/host/8.8.8.8"): (200, HOST_8888),
     ("GET", "/api/shodan/host/10.0.0.1"): (404, {"error": "No information available for that IP."}),
-    ("GET", "/api/shodan/host/count"): (200, {"total": 1234, "facets": {"port": [{"value": 443, "count": 1000}]}}),
+    ("GET", "/api/shodan/host/count"): (
+        200,
+        {"total": 1234, "facets": {"port": [{"value": 443, "count": 1000}]}},
+    ),
     ("GET", "/api/shodan/host/search"): (200, SEARCH_PAGE),
     ("GET", "/api/shodan/host/search/facets"): (200, ["country", "port"]),
     ("GET", "/api/shodan/host/search/filters"): (200, ["port", "product"]),
-    ("GET", "/api/shodan/host/search/tokens"): (200, {"filters": ["port"], "string": "nginx", "attributes": {"ports": [80]}}),
+    ("GET", "/api/shodan/host/search/tokens"): (
+        200,
+        {"filters": ["port"], "string": "nginx", "attributes": {"ports": [80]}},
+    ),
     ("GET", "/api/shodan/ports"): (200, [22, 80, 443]),
     ("GET", "/api/shodan/protocols"): (200, {"https": "HTTPS banner grabber"}),
     ("GET", "/api/shodan/services"): (200, {"22": "SSH", "443": "HTTPS"}),
     ("POST", "/api/shodan/scan"): (200, {"id": "SCAN1", "count": 1, "credits_left": 97}),
     ("POST", "/api/shodan/scan/internet"): (200, {"id": "ISCAN1"}),
-    ("GET", "/api/shodan/scans"): (200, {"total": 1, "matches": [{"id": "SCAN1", "status": "DONE", "size": 1, "credits_left": 97, "created": "2026-10-01"}]}),
-    ("GET", "/api/shodan/scan/SCAN1"): (200, {"id": "SCAN1", "status": "DONE", "count": 1, "created": "2026-10-01"}),
+    ("GET", "/api/shodan/scans"): (
+        200,
+        {
+            "total": 1,
+            "matches": [
+                {
+                    "id": "SCAN1",
+                    "status": "DONE",
+                    "size": 1,
+                    "credits_left": 97,
+                    "created": "2026-10-01",
+                }
+            ],
+        },
+    ),
+    ("GET", "/api/shodan/scan/SCAN1"): (
+        200,
+        {"id": "SCAN1", "status": "DONE", "count": 1, "created": "2026-10-01"},
+    ),
     ("POST", "/api/shodan/alert"): (200, ALERT),
     ("POST", "/api/shodan/alert/ALERT1"): (200, ALERT),
     ("GET", "/api/shodan/alert/info"): (200, [ALERT]),
     ("GET", "/api/shodan/alert/ALERT1/info"): (200, ALERT),
     ("DELETE", "/api/shodan/alert/ALERT1"): (200, {"success": True}),
-    ("GET", "/api/shodan/alert/triggers"): (200, [{"name": "new_service", "rule": "*", "description": "New service"}]),
+    ("GET", "/api/shodan/alert/triggers"): (
+        200,
+        [{"name": "new_service", "rule": "*", "description": "New service"}],
+    ),
     ("PUT", "/api/shodan/alert/ALERT1/trigger/new_service"): (200, {"success": True}),
     ("PUT", "/api/shodan/alert/ALERT1/trigger/malware"): (200, {"success": True}),
     ("DELETE", "/api/shodan/alert/ALERT1/trigger/new_service"): (200, {"success": True}),
-    ("PUT", "/api/shodan/alert/ALERT1/trigger/open_database/ignore/1.2.3.4:9200"): (200, {"success": True}),
-    ("DELETE", "/api/shodan/alert/ALERT1/trigger/open_database/ignore/1.2.3.4:9200"): (200, {"success": True}),
+    ("PUT", "/api/shodan/alert/ALERT1/trigger/open_database/ignore/1.2.3.4:9200"): (
+        200,
+        {"success": True},
+    ),
+    ("DELETE", "/api/shodan/alert/ALERT1/trigger/open_database/ignore/1.2.3.4:9200"): (
+        200,
+        {"success": True},
+    ),
     ("PUT", "/api/shodan/alert/ALERT1/notifier/default"): (200, {"success": True}),
     ("DELETE", "/api/shodan/alert/ALERT1/notifier/default"): (200, {"success": True}),
-    ("GET", "/api/notifier"): (200, {"total": 1, "matches": [{"id": "default", "provider": "email", "description": None}]}),
+    ("GET", "/api/notifier"): (
+        200,
+        {"total": 1, "matches": [{"id": "default", "provider": "email", "description": None}]},
+    ),
     ("GET", "/api/notifier/provider"): (200, {"slack": {"required": ["webhook_url"]}}),
     ("POST", "/api/notifier"): (200, {"success": True, "id": "NOTIF1"}),
     ("GET", "/api/notifier/NOTIF1"): (200, {"id": "NOTIF1", "provider": "slack", "args": {}}),
     ("PUT", "/api/notifier/NOTIF1"): (200, {"success": True, "id": "NOTIF1"}),
     ("DELETE", "/api/notifier/NOTIF1"): (200, {"success": True}),
-    ("GET", "/api/shodan/query"): (200, {"total": 1, "matches": [{"votes": 5, "title": "Webcams", "query": "webcam"}]}),
-    ("GET", "/api/shodan/query/search"): (200, {"total": 1, "matches": [{"votes": 5, "title": "Webcams", "query": "webcam"}]}),
-    ("GET", "/api/shodan/query/tags"): (200, {"total": 1, "matches": [{"value": "webcam", "count": 10}]}),
+    ("GET", "/api/shodan/query"): (
+        200,
+        {"total": 1, "matches": [{"votes": 5, "title": "Webcams", "query": "webcam"}]},
+    ),
+    ("GET", "/api/shodan/query/search"): (
+        200,
+        {"total": 1, "matches": [{"votes": 5, "title": "Webcams", "query": "webcam"}]},
+    ),
+    ("GET", "/api/shodan/query/tags"): (
+        200,
+        {"total": 1, "matches": [{"value": "webcam", "count": 10}]},
+    ),
     ("GET", "/api/shodan/data"): (200, [{"name": "raw-daily", "description": "Daily data"}]),
-    ("GET", "/api/shodan/data/raw-daily"): (200, [{"name": "2026-10-01.json.gz", "size": 1, "timestamp": 1, "url": "https://example.com/f"}]),
-    ("GET", "/api/org"): (200, {"id": "ORG1", "name": "Vertex", "upgrade_type": "corp", "domains": ["vertex.link"], "admins": [], "members": []}),
+    ("GET", "/api/shodan/data/raw-daily"): (
+        200,
+        [{"name": "2026-10-01.json.gz", "size": 1, "timestamp": 1, "url": "https://example.com/f"}],
+    ),
+    ("GET", "/api/org"): (
+        200,
+        {
+            "id": "ORG1",
+            "name": "Vertex",
+            "upgrade_type": "corp",
+            "domains": ["vertex.link"],
+            "admins": [],
+            "members": [],
+        },
+    ),
     ("PUT", "/api/org/member/visi"): (200, {"success": True}),
     ("DELETE", "/api/org/member/visi"): (200, {"success": True}),
-    ("GET", "/api/account/profile"): (200, {"member": True, "credits": 0, "display_name": "visi", "created": "2020-01-01"}),
+    ("GET", "/api/account/profile"): (
+        200,
+        {"member": True, "credits": 0, "display_name": "visi", "created": "2020-01-01"},
+    ),
     ("GET", "/api/api-info"): (200, API_INFO),
     ("GET", "/api/tools/myip"): (200, "5.6.7.8"),
     ("GET", "/api/tools/httpheaders"): (200, {"User-Agent": "test"}),
     ("GET", "/api/dns/domain/vertex.link"): (200, DNS_DOMAIN),
     ("GET", "/api/dns/resolve"): (200, {"vertex.link": "1.2.3.4"}),
     ("GET", "/api/dns/reverse"): (200, {"8.8.8.8": ["dns.google"]}),
-    ("GET", "/trends/api/v1/search"): (200, {"total": 10, "matches": [{"month": "2026-09", "count": 10}], "facets": {"version": [{"key": "2026-09", "values": [{"value": "9.6", "count": 10}]}]}}),
+    ("GET", "/trends/api/v1/search"): (
+        200,
+        {
+            "total": 10,
+            "matches": [{"month": "2026-09", "count": 10}],
+            "facets": {"version": [{"key": "2026-09", "values": [{"value": "9.6", "count": 10}]}]},
+        },
+    ),
     ("GET", "/trends/api/v1/search/facets"): (200, ["version"]),
     ("GET", "/trends/api/v1/search/filters"): (200, ["product"]),
     ("GET", "/internetdb/1.1.1.1"): (200, INTERNETDB_1111),
@@ -294,13 +414,15 @@ class FakeShodan:
                 except ValueError:
                     body = raw.decode()
 
-        self.requests.append({
-            "method": request.method,
-            "path": request.path,
-            "query": dict(request.query),
-            "json": body,
-            "form": form,
-        })
+        self.requests.append(
+            {
+                "method": request.method,
+                "path": request.path,
+                "query": dict(request.query),
+                "json": body,
+                "form": form,
+            }
+        )
 
         if request.path.startswith("/stream/"):
             return await self._stream(request)
@@ -315,7 +437,9 @@ class FakeShodan:
 
         route = self.routes.get((request.method, request.path))
         if route is None:
-            return web.json_response({"error": f"No fake route for {request.method} {request.path}"}, status=404)
+            return web.json_response(
+                {"error": f"No fake route for {request.method} {request.path}"}, status=404
+            )
         if callable(route):
             route = route(request)
 
@@ -341,7 +465,9 @@ class FakeShodan:
         await site.start()
         port = self._runner.addresses[0][1]
         base = f"http://127.0.0.1:{port}"
-        self.urls = {name: f"{base}/{name}" for name in ("api", "stream", "trends", "internetdb", "cvedb")}
+        self.urls = {
+            name: f"{base}/{name}" for name in ("api", "stream", "trends", "internetdb", "cvedb")
+        }
         return self
 
     async def __aexit__(self, *args):
@@ -351,7 +477,9 @@ class FakeShodan:
         """The most recent request (to ``path``, with ``method``, if given)."""
 
         for req in reversed(self.requests):
-            if (path is None or req["path"] == path) and (method is None or req["method"] == method):
+            if (path is None or req["path"] == path) and (
+                method is None or req["method"] == method
+            ):
                 return req
         raise AssertionError(f"No request was made to {path}")
 

@@ -31,7 +31,6 @@ async def certIds(core, query, opts=None) -> list[int]:
 
 
 class TestCrtshStormCert(s_tests.SynTest):
-
     async def test_model(self):
         async with crtshSvc(self) as (core, svc, fake):
             msgs = await core.stormlist("slib.crtsh.cert 10 --yield")
@@ -47,9 +46,11 @@ class TestCrtshStormCert(s_tests.SynTest):
             assert leaf.get("sha1") == hashlib.sha1(PKI.row(10)["der"]).hexdigest()
             assert leaf.get("md5") == hashlib.md5(PKI.row(10)["der"]).hexdigest()
             assert leaf.get("file") == f"sha256:{SHA[10]}"
-            assert int(leaf.get("serial"), 16) == 0x5a0b1c2d3e4f  # Synapse zero pads serials.
+            assert int(leaf.get("serial"), 16) == 0x5A0B1C2D3E4F  # Synapse zero pads serials.
             assert leaf.get("version") == 2
-            assert leaf.get("subject") == "CN=www.vertex.link,OU=Engineering,O=The Vertex Project,C=US"
+            assert (
+                leaf.get("subject") == "CN=www.vertex.link,OU=Engineering,O=The Vertex Project,C=US"
+            )
             assert leaf.get("issuer") == "CN=Test Issuing CA 1,O=Test Trust,C=US"
             assert leaf.get("validity:notbefore") == details["notbefore"]
             assert leaf.get("validity:notafter") == details["notafter"]
@@ -101,9 +102,13 @@ class TestCrtshStormCert(s_tests.SynTest):
 
             revoked = (await core.nodes(CERT[11]))[0]
             assert "rep.crtsh.revoked" in revoked.tags
-            nodes = await core.nodes(f"crypto:x509:revoked:cert={revoked.ndef[1]} :crl -> crypto:x509:crl")
+            nodes = await core.nodes(
+                f"crypto:x509:revoked:cert={revoked.ndef[1]} :crl -> crypto:x509:crl"
+            )
             assert len(nodes) == 1 and nodes[0].get("url") == CRL_URL
-            assert len(await core.nodes(f"meta:source={SVC_GUID} -(seen)> crypto:x509:revoked")) == 1
+            assert (
+                len(await core.nodes(f"meta:source={SVC_GUID} -(seen)> crypto:x509:revoked")) == 1
+            )
 
             expired = (await core.nodes(CERT[12]))[0]
             assert not expired.tags and expired.get(".seen") is None
@@ -134,9 +139,9 @@ class TestCrtshStormCert(s_tests.SynTest):
             self.stormIsInPrint("null", msgs)
 
             # A revoked certificate without a CRL distribution point is on its issuer's CRL.
-            q = '''$model = $lib.import(slib.crtsh.model)
+            q = """$model = $lib.import(slib.crtsh.model)
                 $crl = $model.crlNode(({"crls": [], "crtsh": {"issuer": {"id": 2}}}))
-                $lib.print($crl.value())'''
+                $lib.print($crl.value())"""
             msgs = await core.stormlist(q)
             self.stormHasNoErr(msgs)
             self.stormIsInPrint(s_common.guid(("slib.crtsh", "crl", 2)), msgs)
@@ -148,17 +153,31 @@ class TestCrtshStormCert(s_tests.SynTest):
             assert await certIds(core, f"slib.crtsh.cert 10 {SHA[1]} {sha1} --yield") == [10, 2, 1]
             # Any identifier type.
             # crt.sh applies the limit, the precert and cert tie so either may be returned.
-            assert len(await certIds(core, "slib.crtsh.cert 5a0b1c2d3e4f --type serial --limit 1 --yield")) == 1
-            assert fake.last("certs") == {"lookups": {"serial": [b"\x5a\x0b\x1c\x2d\x3e\x4f"]}, "limit": 1}
+            assert (
+                len(
+                    await certIds(
+                        core, "slib.crtsh.cert 5a0b1c2d3e4f --type serial --limit 1 --yield"
+                    )
+                )
+                == 1
+            )
+            assert fake.last("certs") == {
+                "lookups": {"serial": [b"\x5a\x0b\x1c\x2d\x3e\x4f"]},
+                "limit": 1,
+            }
 
             msgs = await core.stormlist("slib.crtsh.cert 999")
             self.stormIsInWarn("crt.sh has no certificates for: 999", msgs)
             msgs = await core.stormlist("slib.crtsh.cert nope")
-            self.stormIsInWarn("slib.crtsh: Lookup failed: Unable to tell what kind of identifier nope", msgs)
+            self.stormIsInWarn(
+                "slib.crtsh: Lookup failed: Unable to tell what kind of identifier nope", msgs
+            )
 
             # Inbound nodes pass through, unless --yield.
             await core.nodes(f"[ hash:sha256={SHA[2]} hash:sha1={sha1} inet:fqdn=vertex.link ]")
-            msgs = await core.stormlist(f"hash:sha256={SHA[2]} hash:sha1={sha1} inet:fqdn=vertex.link | slib.crtsh.cert")
+            msgs = await core.stormlist(
+                f"hash:sha256={SHA[2]} hash:sha1={sha1} inet:fqdn=vertex.link | slib.crtsh.cert"
+            )
             self.stormIsInWarn("Unable to look up inet:fqdn vertex.link", msgs)
             assert [m[1][0][0] for m in msgs if m[0] == "node"] == ["hash:sha256", "hash:sha1"]
             assert await certIds(core, f"hash:sha256={SHA[2]} | slib.crtsh.cert --yield") == [2]
@@ -166,8 +185,12 @@ class TestCrtshStormCert(s_tests.SynTest):
 
             # crypto:x509:cert nodes are looked up by :sha256, or :sha1.
             assert await certIds(core, f"{CERT[2]} | slib.crtsh.cert --yield") == [2]
-            await core.nodes(f"[ crypto:x509:cert=* :sha1={hashlib.sha1(PKI.row(4)['der']).hexdigest()} ]")
-            assert await certIds(core, "crypto:x509:cert:sha1 -:sha256 | slib.crtsh.cert --yield") == [4]
+            await core.nodes(
+                f"[ crypto:x509:cert=* :sha1={hashlib.sha1(PKI.row(4)['der']).hexdigest()} ]"
+            )
+            assert await certIds(
+                core, "crypto:x509:cert:sha1 -:sha256 | slib.crtsh.cert --yield"
+            ) == [4]
             await core.nodes("[ crypto:x509:cert=* :serial=00 ]")
             msgs = await core.stormlist("crypto:x509:cert:serial=00 | slib.crtsh.cert")
             self.stormIsInWarn("it needs a SHA-256 or SHA-1", msgs)
@@ -186,12 +209,16 @@ class TestCrtshStormCert(s_tests.SynTest):
 
 
 class TestCrtshStormSearch(s_tests.SynTest):
-
     async def test_search(self):
         async with crtshSvc(self) as (core, svc, fake):
             assert await certIds(core, "slib.crtsh.search --dns vertex.link") == [10, 9, 15, 11, 12]
-            assert await certIds(core, "slib.crtsh.search --dns www.vertex.link --exact --no-precerts") == [10, 15]
-            assert await certIds(core, "slib.crtsh.search --dns vertex.link --valid --limit 2") == [10, 9]
+            assert await certIds(
+                core, "slib.crtsh.search --dns www.vertex.link --exact --no-precerts"
+            ) == [10, 15]
+            assert await certIds(core, "slib.crtsh.search --dns vertex.link --valid --limit 2") == [
+                10,
+                9,
+            ]
             assert await certIds(core, "slib.crtsh.search --cn old --org vertex --ou '' ") == [11]
             assert await certIds(core, "slib.crtsh.search --ou Engineering") == [10, 9, 15]
             assert await certIds(core, "slib.crtsh.search --email visi") == [10, 9]
@@ -206,7 +233,9 @@ class TestCrtshStormSearch(s_tests.SynTest):
             assert await certIds(core, "slib.crtsh.search --dns vertex.link --caid 1") == []
 
             # Times are anything Synapse can parse.
-            await core.nodes("slib.crtsh.search --dns vertex.link --since 2000-01-01 --until '+1 day'")
+            await core.nodes(
+                "slib.crtsh.search --dns vertex.link --since 2000-01-01 --until '+1 day'"
+            )
             call = fake.last("certsByIdentity")
             assert call["since"] == 946684800000 and call["until"] > call["since"]
             await core.nodes("slib.crtsh.search --dns vertex.link --since ''")
@@ -229,7 +258,10 @@ class TestCrtshStormSearch(s_tests.SynTest):
             assert await certIds(core, "inet:ipv6 | slib.crtsh.search") == [10, 9]
             assert await certIds(core, "inet:url | slib.crtsh.search") == [10, 9]
             assert await certIds(core, "ou:name='example inc' | slib.crtsh.search") == [14]
-            assert await certIds(core, "ou:org:name | slib.crtsh.search --valid --no-precerts") == [10, 11]
+            assert await certIds(core, "ou:org:name | slib.crtsh.search --valid --no-precerts") == [
+                10,
+                11,
+            ]
 
             msgs = await core.stormlist("ou:org -:name inet:asn | slib.crtsh.search")
             self.stormIsInWarn("Unable to search for ou:org", msgs)
@@ -253,13 +285,17 @@ class TestCrtshStormSearch(s_tests.SynTest):
 
 
 class TestCrtshStormPivot(s_tests.SynTest):
-
     async def test_pivot(self):
         async with crtshSvc(self) as (core, svc, fake):
             await core.nodes("slib.crtsh.cert 4 10 13")
 
-            assert await certIds(core, f"{CERT[4]} | slib.crtsh.pivot --by issued --limit 2") == [14, 13]
-            assert await certIds(core, f"{CERT[10]} | slib.crtsh.pivot --by siblings --valid --no-precerts") == [14, 11]
+            assert await certIds(core, f"{CERT[4]} | slib.crtsh.pivot --by issued --limit 2") == [
+                14,
+                13,
+            ]
+            assert await certIds(
+                core, f"{CERT[10]} | slib.crtsh.pivot --by siblings --valid --no-precerts"
+            ) == [14, 11]
             assert await certIds(core, f"{CERT[10]} | slib.crtsh.pivot --by key") == [9, 15]
             assert await certIds(core, f"{CERT[10]} | slib.crtsh.pivot --by subject") == [9, 15]
             assert await certIds(core, f"{CERT[10]} | slib.crtsh.pivot --by serial") == [9]
@@ -275,13 +311,14 @@ class TestCrtshStormPivot(s_tests.SynTest):
 
             await core.nodes("[ inet:fqdn=vertex.link ]")
             await core.nodes("[ crypto:x509:cert=* :serial=00 ]")
-            msgs = await core.stormlist("inet:fqdn=vertex.link crypto:x509:cert:serial=00 | slib.crtsh.pivot --by key")
+            msgs = await core.stormlist(
+                "inet:fqdn=vertex.link crypto:x509:cert:serial=00 | slib.crtsh.pivot --by key"
+            )
             self.stormIsInWarn("Unable to pivot from inet:fqdn vertex.link", msgs)
             self.stormIsInWarn("Unable to pivot from crypto:x509:cert", msgs)
 
 
 class TestCrtshStormChain(s_tests.SynTest):
-
     async def test_chain(self):
         async with crtshSvc(self) as (core, svc, fake):
             await core.nodes("slib.crtsh.cert 10")
@@ -308,7 +345,9 @@ class TestCrtshStormChain(s_tests.SynTest):
             assert len([m for m in msgs if m[0] == "node"]) == 2
 
             msgs = await core.stormlist("slib.crtsh.chain --cert 999")
-            self.stormIsInWarn("slib.crtsh: Building the chain of 999 failed: crt.sh has no certificate", msgs)
+            self.stormIsInWarn(
+                "slib.crtsh: Building the chain of 999 failed: crt.sh has no certificate", msgs
+            )
 
             await core.nodes("[ inet:fqdn=vertex.link ]")
             msgs = await core.stormlist("inet:fqdn=vertex.link | slib.crtsh.chain")
@@ -316,7 +355,6 @@ class TestCrtshStormChain(s_tests.SynTest):
 
 
 class TestCrtshStormCa(s_tests.SynTest):
-
     async def test_ca(self):
         async with crtshSvc(self) as (core, svc, fake):
             msgs = await core.stormlist("slib.crtsh.ca Test")
@@ -326,8 +364,11 @@ class TestCrtshStormCa(s_tests.SynTest):
             assert await certIds(core, "slib.crtsh.ca --id 2 --id 1 --certs") == [1, 2, 4]
             assert await certIds(core, "slib.crtsh.ca 'Root E2' --issued --chain") == [4, 3]
             assert await crtshIds(await core.nodes(f"{CERT[4]} :issuer:cert -> *")) == [3]
-            ids = await certIds(core, "slib.crtsh.ca --id 2 --issued --valid --no-precerts --limit 2 "
-                                      "--since 2000-01-01 --until '+1 day'")
+            ids = await certIds(
+                core,
+                "slib.crtsh.ca --id 2 --issued --valid --no-precerts --limit 2 "
+                "--since 2000-01-01 --until '+1 day'",
+            )
             assert ids == [14, 10]
             assert fake.last("certsByIssuer")["since"] == 946684800000
 
@@ -348,7 +389,9 @@ class TestCrtshStormCa(s_tests.SynTest):
             # Errors from generators end them with a warning.
             q = "for $n in $lib.import(slib.crtsh.lib).issued() { $lib.print($n) }"
             msgs = await core.stormlist(q)
-            self.stormIsInWarn("Listing issued certificates failed: A CA ID or certificate is required.", msgs)
+            self.stormIsInWarn(
+                "Listing issued certificates failed: A CA ID or certificate is required.", msgs
+            )
 
             q = "for $n in $lib.import(slib.crtsh.lib).issued(valu=10) { $lib.print($n) }"
             msgs = await core.stormlist(q)
@@ -362,7 +405,6 @@ class TestCrtshStormCa(s_tests.SynTest):
 
 
 class TestCrtshStormAdmin(s_tests.SynTest):
-
     async def test_tags(self):
         async with crtshSvc(self) as (core, svc, fake):
             msgs = await core.stormlist("slib.crtsh.admin.tags")
@@ -376,7 +418,9 @@ class TestCrtshStormAdmin(s_tests.SynTest):
 
     async def test_sql(self):
         async with crtshSvc(self) as (core, svc, fake):
-            msgs = await core.stormlist("slib.crtsh.admin.sql 'SELECT id FROM ca WHERE id = $1' --args ((1),)")
+            msgs = await core.stormlist(
+                "slib.crtsh.admin.sql 'SELECT id FROM ca WHERE id = $1' --args ((1),)"
+            )
             self.stormIsInPrint("1 rows", msgs)
             self.stormIsInPrint('"key": "0102"', msgs)
             assert fake.last("raw")["sql"] == "SELECT id FROM ca WHERE id = $1"
@@ -387,7 +431,6 @@ class TestCrtshStormAdmin(s_tests.SynTest):
 
 
 class TestCrtshStormPerms(s_tests.SynTest):
-
     async def _addUser(self, core, name, *perms):
         user = await core.auth.addUser(name)
         for perm in perms:
@@ -401,9 +444,13 @@ class TestCrtshStormPerms(s_tests.SynTest):
             noperms = await self._addUser(core, "noperms", ("node",))
             admin = await self._addUser(core, "admin", ("slib", "crtsh", "admin"))
 
-            for query in ("slib.crtsh.cert 10 --chain", "slib.crtsh.search --dns vertex.link",
-                          "slib.crtsh.cert 10 | slib.crtsh.pivot --by key",
-                          "slib.crtsh.chain --cert 10", "slib.crtsh.ca Test --certs"):
+            for query in (
+                "slib.crtsh.cert 10 --chain",
+                "slib.crtsh.search --dns vertex.link",
+                "slib.crtsh.cert 10 | slib.crtsh.pivot --by key",
+                "slib.crtsh.chain --cert 10",
+                "slib.crtsh.ca Test --certs",
+            ):
                 msgs = await core.stormlist(query, opts={"user": user})
                 self.stormHasNoWarnErr(msgs)
                 msgs = await core.stormlist(query, opts={"user": noperms})
@@ -415,5 +462,7 @@ class TestCrtshStormPerms(s_tests.SynTest):
                 msgs = await core.stormlist(query, opts={"user": admin})
                 self.stormHasNoWarnErr(msgs)
 
-            msgs = await core.stormlist('$lib.service.get("slib.crtsh").get(10)', opts={"user": user})
+            msgs = await core.stormlist(
+                '$lib.service.get("slib.crtsh").get(10)', opts={"user": user}
+            )
             self.stormIsInErr("must have permission service.get", msgs)

@@ -1,50 +1,109 @@
 """The CellApi implementation for slib.abusech."""
 
-
 from collections.abc import AsyncIterator, Awaitable
 
-from stormlibpp.telepath import BoolRetn, TelepathRetn
-from stormlibpp.utils import normver
 import synapse.lib.cell as s_cell
 import synapse.lib.stormsvc as s_stormsvc
+from stormlibpp.telepath import BoolRetn, TelepathRetn
+from stormlibpp.utils import normver
 
 from .client import AbuseChApiError
-from .defs import SVC_EVTS, PKGDEFS, SVC_NAME, SVC_VER
-
+from .defs import PKGDEFS, SVC_EVTS, SVC_NAME, SVC_VER
 
 # AbuseChSvc methods that are exposed over Telepath as-is, wrapped in a TelepathRetn.
 # See AbuseChSvc for each method's arguments and the abuse.ch endpoint it calls.
 RETN_METHS = (
-    "rawRequest", "maxSize",
+    "rawRequest",
+    "maxSize",
     # Bulk imports
-    "bulkExports", "bulkStart", "bulkStage", "bulkDone",
+    "bulkExports",
+    "bulkStart",
+    "bulkStage",
+    "bulkDone",
     # MalwareBazaar
-    "bazaarQuery", "bazaarInfo", "normBazaarInfo", "bazaarSearch", "normBazaarSearch",
-    "bazaarRecent", "normBazaarRecent", "bazaarDetections", "normBazaarDetections", "bazaarCscb", "normBazaarCscb", "bazaarFile",
-    "bazaarUpload", "bazaarUpdate", "bazaarComment",
+    "bazaarQuery",
+    "bazaarInfo",
+    "normBazaarInfo",
+    "bazaarSearch",
+    "normBazaarSearch",
+    "bazaarRecent",
+    "normBazaarRecent",
+    "bazaarDetections",
+    "normBazaarDetections",
+    "bazaarCscb",
+    "normBazaarCscb",
+    "bazaarFile",
+    "bazaarUpload",
+    "bazaarUpdate",
+    "bazaarComment",
     # URLhaus
-    "urlhausUrl", "urlhausUrlId", "normUrlhausUrl", "urlhausHost", "normUrlhausHost",
-    "urlhausPayload", "normUrlhausPayload", "urlhausTag", "urlhausSignature", "normUrlhausSearch",
-    "urlhausRecentUrls", "urlhausRecentPayloads", "normUrlhausRecent", "urlhausDownload", "urlhausSubmit",
+    "urlhausUrl",
+    "urlhausUrlId",
+    "normUrlhausUrl",
+    "urlhausHost",
+    "normUrlhausHost",
+    "urlhausPayload",
+    "normUrlhausPayload",
+    "urlhausTag",
+    "urlhausSignature",
+    "normUrlhausSearch",
+    "urlhausRecentUrls",
+    "urlhausRecentPayloads",
+    "normUrlhausRecent",
+    "urlhausDownload",
+    "urlhausSubmit",
     # ThreatFox
-    "threatfoxQuery", "threatfoxRecent", "threatfoxIoc", "threatfoxSearch", "threatfoxHash",
-    "threatfoxTag", "threatfoxMalware", "normThreatfox", "threatfoxTypes", "threatfoxTagList",
-    "threatfoxMalwareList", "threatfoxLabel", "threatfoxSubmit",
+    "threatfoxQuery",
+    "threatfoxRecent",
+    "threatfoxIoc",
+    "threatfoxSearch",
+    "threatfoxHash",
+    "threatfoxTag",
+    "threatfoxMalware",
+    "normThreatfox",
+    "threatfoxTypes",
+    "threatfoxTagList",
+    "threatfoxMalwareList",
+    "threatfoxLabel",
+    "threatfoxSubmit",
     # YARAify
-    "yaraifyQuery", "yaraifyHash", "normYaraifyHash", "yaraifySearch", "normYaraifySearch",
-    "yaraifyRecentRules", "normYaraifyRecentRules", "yaraifyResults", "normYaraifyResults",
-    "yaraifyTasks", "normYaraifyTasks", "yaraifyIdentifier", "yaraifyRescan", "yaraifyScan",
-    "yaraifyDeploy", "yaraifyRule", "yaraifyFile", "yaraifyDeployedRules", "normYaraifyDeployedRules",
-    "yaraifyDeleteRule", "yaraifyUnpacked",
+    "yaraifyQuery",
+    "yaraifyHash",
+    "normYaraifyHash",
+    "yaraifySearch",
+    "normYaraifySearch",
+    "yaraifyRecentRules",
+    "normYaraifyRecentRules",
+    "yaraifyResults",
+    "normYaraifyResults",
+    "yaraifyTasks",
+    "normYaraifyTasks",
+    "yaraifyIdentifier",
+    "yaraifyRescan",
+    "yaraifyScan",
+    "yaraifyDeploy",
+    "yaraifyRule",
+    "yaraifyFile",
+    "yaraifyDeployedRules",
+    "normYaraifyDeployedRules",
+    "yaraifyDeleteRule",
+    "yaraifyUnpacked",
     # Hunting
-    "fplist", "normFplist",
+    "fplist",
+    "normFplist",
 )
 
 # AbuseChSvc async generators that are exposed over Telepath, each item wrapped in a TelepathRetn.
 GENR_METHS = (
-    "bulkPull", "bulkBuild", "bulkNodes",
-    "bazaarExport", "urlhausExport", "threatfoxExport", "yaraifyRulesExport",
-    "feodoBlocklist", "sslblBlocklist",
+    "bulkPull",
+    "bulkBuild",
+    "bulkNodes",
+    "bazaarExport",
+    "urlhausExport",
+    "threatfoxExport",
+    "yaraifyRulesExport",
+    "feodoBlocklist",
+    "sslblBlocklist",
 )
 
 

@@ -8,7 +8,6 @@ handles those differences (and abuse.ch's ``query_status`` error convention) so 
 rest of the service can call any endpoint the same way.
 """
 
-
 import asyncio
 import io
 import json
@@ -19,7 +18,6 @@ from urllib.parse import quote
 
 import aiohttp
 import pyzipper
-
 
 BASE_URLS = {
     # MalwareBazaar
@@ -43,23 +41,42 @@ BASE_URLS = {
 }
 """The base URL of every abuse.ch API and dataset host, keyed by the name used throughout the service."""
 
-KEYED_APIS = frozenset((
-    "bazaar", "bazaar:export", "urlhaus", "urlhaus:submit", "urlhaus:export", "threatfox", "threatfox:export",
-    "yaraify", "hunting",
-))
+KEYED_APIS = frozenset(
+    (
+        "bazaar",
+        "bazaar:export",
+        "urlhaus",
+        "urlhaus:submit",
+        "urlhaus:export",
+        "threatfox",
+        "threatfox:export",
+        "yaraify",
+        "hunting",
+    )
+)
 """The APIs that require an abuse.ch Auth-Key. The other datasets send one when it's available."""
 
 EXPORT_APIS = frozenset(("bazaar:export", "urlhaus:export", "threatfox:export"))
 """The exports that take the Auth-Key in the URL path (``<base>/<Auth-Key>/<file>``)."""
 
-OK_STATUSES = frozenset((
-    "ok", "queued", "inserted", "updated", "success", "processing",
-    # Harmless outcomes of writes: the sample/value was already there.
-    "exists", "file_already_known",
-))
+OK_STATUSES = frozenset(
+    (
+        "ok",
+        "queued",
+        "inserted",
+        "updated",
+        "success",
+        "processing",
+        # Harmless outcomes of writes: the sample/value was already there.
+        "exists",
+        "file_already_known",
+    )
+)
 """``query_status`` values that mean a request succeeded."""
 
-AUTH_STATUSES = frozenset(("unknown_auth_key", "invalid_auth_key", "auth_key_required", "unauthorized"))
+AUTH_STATUSES = frozenset(
+    ("unknown_auth_key", "invalid_auth_key", "auth_key_required", "unauthorized")
+)
 """``query_status`` values that mean the Auth-Key was missing or rejected."""
 
 MAX_RETRIES = 3
@@ -93,7 +110,12 @@ def isNotFound(status: str | None) -> bool:
     if not status:
         return False
     status = status.lower()
-    if status in AUTH_STATUSES or status in ("unknown_query", "unknown_selector", "unknown_operation", "unknown_key"):
+    if status in AUTH_STATUSES or status in (
+        "unknown_query",
+        "unknown_selector",
+        "unknown_operation",
+        "unknown_key",
+    ):
         return False
     return status.startswith(("no_result", "unknown_")) or status.endswith("not_found")
 
@@ -108,7 +130,9 @@ def checkStatus(base: str, code: int, data: Any, text: str, notfound: bool) -> b
     status = data.get("query_status") if isinstance(data, dict) else None
     if code in (401, 403) or (status and str(status).lower() in AUTH_STATUSES):
         mesg = errMesg(code, data, text) if code >= 400 else statusMesg(data)
-        raise AbuseChApiError(f"abuse.ch {base}: {mesg} (check your Auth-Key)", code=code, status=status)
+        raise AbuseChApiError(
+            f"abuse.ch {base}: {mesg} (check your Auth-Key)", code=code, status=status
+        )
 
     if isNotFound(status):
         if notfound:
@@ -182,7 +206,9 @@ def errMesg(code: int, data: Any, text: str) -> str:
     return f"HTTP {code}"
 
 
-def unzip(byts: bytes, password: bytes | None = ZIP_PASSWORD, maxsize: int = 0) -> list[tuple[str, bytes]]:
+def unzip(
+    byts: bytes, password: bytes | None = ZIP_PASSWORD, maxsize: int = 0
+) -> list[tuple[str, bytes]]:
     """Extract every file from a zip, trying abuse.ch's password when one is needed.
 
     MalwareBazaar's zips are AES encrypted, which the standard library can't
@@ -316,7 +342,9 @@ class AbuseChClient:
                     ctype = "application/json" if key == "json_data" else None
                     mpart.add_field(key, valu, content_type=ctype)
                 for key, (name, byts) in files.items():
-                    mpart.add_field(key, byts, filename=name, content_type="application/octet-stream")
+                    mpart.add_field(
+                        key, byts, filename=name, content_type="application/octet-stream"
+                    )
                 kwargs["data"] = mpart
             elif form is not None:
                 kwargs["data"] = normForm(form)
@@ -334,7 +362,7 @@ class AbuseChClient:
                 raise AbuseChApiError(f"Unable to connect to abuse.ch ({base}): {mesg}") from err
 
             if code in (429, 503) and attempt < MAX_RETRIES:
-                await asyncio.sleep(2 ** attempt)
+                await asyncio.sleep(2**attempt)
                 continue
             return code, body, ctype
 
@@ -365,8 +393,16 @@ class AbuseChClient:
             a ``query_status`` that isn't a success or a "not found".
         """
 
-        code, body, _ = await self.send(method, base, path, apikey=apikey, params=params, form=form,
-                                        json_data=json_data, files=files)
+        code, body, _ = await self.send(
+            method,
+            base,
+            path,
+            apikey=apikey,
+            params=params,
+            form=form,
+            json_data=json_data,
+            files=files,
+        )
         text = body.decode("utf-8", "replace")
         try:
             data = json.loads(text) if text.strip() else None
@@ -379,8 +415,9 @@ class AbuseChClient:
             return None
         return data
 
-    async def stream(self, base: str, path: str, *, apikey: str | None = None,
-                     chunk: int = 1024 * 1024) -> AsyncIterator[bytes]:
+    async def stream(
+        self, base: str, path: str, *, apikey: str | None = None, chunk: int = 1024 * 1024
+    ) -> AsyncIterator[bytes]:
         """Stream a (large) dataset's raw bytes, as abuse.ch serves them (zipped or not).
 
         Exports can be hundreds of MB, so the body is read in chunks with only a read timeout
@@ -391,7 +428,9 @@ class AbuseChClient:
         if base in EXPORT_APIS:
             path = f"{quote(apikey, safe='')}/{path.lstrip('/')}"
         url = self.url(base, path)
-        timeout = aiohttp.ClientTimeout(total=None, sock_connect=self.timeout.total, sock_read=self.timeout.total)
+        timeout = aiohttp.ClientTimeout(
+            total=None, sock_connect=self.timeout.total, sock_read=self.timeout.total
+        )
 
         await self.limiter.wait()
         try:
@@ -405,7 +444,9 @@ class AbuseChClient:
                         data = json.loads(body) if body.strip() else None
                     except ValueError:
                         pass
-                    checkStatus(base, resp.status, data, body.decode("utf-8", "replace"), notfound=False)
+                    checkStatus(
+                        base, resp.status, data, body.decode("utf-8", "replace"), notfound=False
+                    )
                     yield body
                     return
                 async for byts in resp.content.iter_chunked(chunk):
@@ -438,8 +479,9 @@ class AbuseChClient:
         returns empty bytes.
         """
 
-        code, body, ctype = await self.send(method, base, path, apikey=apikey, params=params,
-                                            form=form, json_data=json_data)
+        code, body, ctype = await self.send(
+            method, base, path, apikey=apikey, params=params, form=form, json_data=json_data
+        )
 
         data = None
         if "json" in ctype or body[:1] == b"{":

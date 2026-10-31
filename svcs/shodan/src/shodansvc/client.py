@@ -6,14 +6,12 @@ limited, how errors are reported, how streams are read) so the rest of the
 service can call any endpoint the same way.
 """
 
-
 import asyncio
 import json
 from collections.abc import AsyncIterator, Mapping
 from typing import Any
 
 import aiohttp
-
 
 # The base URL of every Shodan API, keyed by the name used throughout the service.
 BASE_URLS = {
@@ -199,15 +197,20 @@ class ShodanClient:
 
             try:
                 async with self.session.request(
-                    method.upper(), url, params=params, json=json_data, data=data, timeout=self.timeout
+                    method.upper(),
+                    url,
+                    params=params,
+                    json=json_data,
+                    data=data,
+                    timeout=self.timeout,
                 ) as resp:
                     text = await resp.text()
                     code = resp.status
-            except (aiohttp.ClientError, asyncio.TimeoutError) as err:
+            except (aiohttp.ClientError, TimeoutError) as err:
                 raise ShodanApiError(f"Unable to connect to Shodan ({base}): {err}") from err
 
             if code == 429 and attempt < MAX_RETRIES:
-                await asyncio.sleep(2 ** attempt)
+                await asyncio.sleep(2**attempt)
                 continue
             break
 
@@ -275,7 +278,7 @@ class ShodanClient:
                     if deadline is not None and loop.time() >= deadline:
                         return
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             # Hitting the read timeout just means the stream went quiet.
             return
         except aiohttp.ClientError as err:
