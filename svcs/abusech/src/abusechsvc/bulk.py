@@ -31,13 +31,12 @@ from collections.abc import Iterator
 from typing import Any
 
 import synapse.common as s_common
-import synapse.exc as s_exc
 import synapse.datamodel as s_datamodel
+import synapse.exc as s_exc
 import synapse.lib.dyndeps as s_dyndeps
 import synapse.lib.modules as s_modules
 
 from .defs import EXT_PROPS, SOURCES
-
 
 NORM_ERRORS = (s_exc.SynErr, ValueError, TypeError)
 """What normalizing a bad value with the data model can raise."""

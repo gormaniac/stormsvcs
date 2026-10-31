@@ -8,7 +8,6 @@ without a Cortex.
 import re
 from typing import Any
 
-
 # The max length of banner text stored in an inet:banner node.
 MAX_BANNER_LEN = 16384
 

@@ -21,7 +21,6 @@ import re
 from collections.abc import Iterable, Iterator
 from typing import Any
 
-
 HEX_RE = re.compile(r"^[0-9a-fA-F]+$")
 TAG_RE = re.compile(r"[^a-z0-9_]+")
 

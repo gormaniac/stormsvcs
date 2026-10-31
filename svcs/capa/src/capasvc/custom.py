@@ -21,7 +21,6 @@ import capa.rules.cache
 
 from .rules import CapaRules, ruleRecord
 
-
 CUSTOM_RULE_TYPE = "capa.custom"
 """The ``meta:rule:type`` of custom capa rules (types below it count too)."""
 

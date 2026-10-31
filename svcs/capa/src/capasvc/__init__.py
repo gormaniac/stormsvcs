@@ -3,4 +3,6 @@
 __version__ = "0.3.0"
 
 
-from .svc import CapaSvc  # noqa: F401
+from .svc import CapaSvc
+
+__all__ = ["CapaSvc"]

@@ -4,7 +4,6 @@ from stormlibpp import StormPkg
 
 from . import __version__
 
-
 SVC_NAME = "slib.shodan"
 SVC_VER = __version__
 SVC_GUID = "5c1b0a3d0e7f4b2e9a8c6d4f2b1e0a97"

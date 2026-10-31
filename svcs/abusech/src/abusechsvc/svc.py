@@ -33,9 +33,8 @@ from typing import Any
 from urllib.parse import quote
 
 import aiohttp
-import synapse.lib.cell as s_cell
-
 import synapse.common as s_common
+import synapse.lib.cell as s_cell
 import synapse.lib.msgpack as s_msgpack
 
 from . import bulk, norm

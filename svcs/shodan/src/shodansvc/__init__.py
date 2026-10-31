@@ -4,3 +4,5 @@ __version__ = "0.3.0"
 
 
 from .svc import ShodanSvc
+
+__all__ = ["ShodanSvc"]

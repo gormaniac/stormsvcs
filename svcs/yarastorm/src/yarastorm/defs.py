@@ -4,7 +4,6 @@ from stormlibpp import StormPkg
 
 from . import __version__
 
-
 SVC_NAME = "slib.yara"
 SVC_VER = __version__
 SVC_GUID = "12bc0c8c1a37a29808d97972875d3913"

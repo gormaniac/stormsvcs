@@ -4,7 +4,6 @@ from stormlibpp import StormPkg
 
 from . import __version__
 
-
 SVC_NAME = "slib.abusech"
 SVC_VER = __version__
 SVC_GUID = "07574885b1dd44518f554cc7356d056a"

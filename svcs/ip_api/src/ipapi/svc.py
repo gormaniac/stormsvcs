@@ -5,11 +5,10 @@ from collections.abc import Mapping
 from typing import NamedTuple, TypedDict
 
 import aiohttp
-from stormlibpp.telepath import TelepathRetn
 import synapse.lib.cell as s_cell
+from stormlibpp.telepath import TelepathRetn
 
 from .api import IpApiCellApi
-
 
 # The ip-api.com response headers that describe the current rate limit window.
 RL_REMAINING_HEADER = "X-Rl"

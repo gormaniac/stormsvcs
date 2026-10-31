@@ -42,7 +42,6 @@ from typing import Any
 
 import asyncpg
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -387,7 +386,7 @@ class CrtshDb:
                     raise CrtshDbError(
                         f"crt.sh canceled the query (statement timeout), try a narrower search: {err}"
                     ) from err
-                except asyncio.TimeoutError as err:
+                except TimeoutError as err:
                     # The connection is mid-query, it can't be reused.
                     await self._drop()
                     raise CrtshDbError(f"crt.sh query timed out after {self.timeout}s.") from err

@@ -19,7 +19,6 @@ from urllib.parse import quote
 import aiohttp
 import pyzipper
 
-
 BASE_URLS = {
     # MalwareBazaar
     "bazaar": "https://mb-api.abuse.ch/api/v1",

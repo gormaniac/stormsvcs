@@ -4,7 +4,6 @@ from stormlibpp import StormPkg
 
 from . import __version__
 
-
 SVC_NAME = "slib.ipapi"
 SVC_VER = __version__
 SVC_GUID = "c177b2a9c0eff5c2984946d439de23ea"

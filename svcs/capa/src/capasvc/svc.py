@@ -30,7 +30,6 @@ from .custom import CustomRules
 from .defs import RULES_URL, RULES_VERSION
 from .rules import CapaRules, CapaRulesError, ruleRecord, rulesSha256, rulesStat
 
-
 logger = logging.getLogger(__name__)
 
 FORMATS = ("auto", "pe", "dotnet", "elf", "sc32", "sc64")

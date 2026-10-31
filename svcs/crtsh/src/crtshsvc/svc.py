@@ -17,7 +17,6 @@ from . import norm
 from .api import CrtshCellApi
 from .db import DEFAULT_DSN, LOOKUPS, NAME_TYPES, CrtshDb, CrtshDbError, likeEscape
 
-
 PIVOTS = ("issued", "siblings", "key", "subject", "serial", "ski")
 """The ways to pivot from a certificate to other certificates, see ``CrtshSvc.pivotGenr``."""
 
@@ -84,8 +83,7 @@ def lookupValu(kind: str, valu: Any) -> list:
             raise CrtshDbError(f"Invalid crt.sh ID: {valu}") from None
 
     text = norm.normHex(str(valu))
-    if text.startswith("0x"):
-        text = text[2:]
+    text = text.removeprefix("0x")
     if not text or not HEXRE.match(text):
         raise CrtshDbError(f"Invalid {kind}, expected a hex string: {valu}")
 
@@ -402,9 +400,8 @@ class CrtshSvc(s_cell.Cell):
             until=until,
             limit=limit if precerts else limit * 2,
         )
-        if not rows and cert and not caids:
+        if not rows and cert and not caids and not (await self._one(kind, valu))["caids"]:
             # Explain why: there's no such certificate, or it isn't a CA certificate.
-            if not (await self._one(kind, valu))["caids"]:
                 raise CrtshDbError(
                     f"crt.sh doesn't know of a CA for certificate {valu}, "
                     "it may not be a CA certificate."

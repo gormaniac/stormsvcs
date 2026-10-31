@@ -2,14 +2,13 @@
 
 from collections.abc import AsyncIterator, Awaitable
 
-from stormlibpp.telepath import BoolRetn, TelepathRetn
-from stormlibpp.utils import normver
 import synapse.lib.cell as s_cell
 import synapse.lib.stormsvc as s_stormsvc
+from stormlibpp.telepath import BoolRetn, TelepathRetn
+from stormlibpp.utils import normver
 
 from .client import ShodanApiError
-from .defs import SVC_EVTS, PKGDEFS, SVC_NAME, SVC_VER
-
+from .defs import PKGDEFS, SVC_EVTS, SVC_NAME, SVC_VER
 
 # ShodanSvc methods that are exposed over Telepath as-is, wrapped in a TelepathRetn.
 # See ShodanSvc for each method's arguments and the Shodan endpoint it calls.

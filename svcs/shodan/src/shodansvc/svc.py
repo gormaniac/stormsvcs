@@ -18,7 +18,6 @@ from . import norm
 from .api import ShodanCellApi
 from .client import ShodanApiError, ShodanClient
 
-
 # Streaming API endpoints and whether they take a comma separated list of values.
 STREAM_KINDS = {
     "banners": False,

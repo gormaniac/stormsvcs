@@ -4,7 +4,6 @@ from stormlibpp import StormPkg
 
 from . import __version__
 
-
 SVC_NAME = "slib.capa"
 SVC_VER = __version__
 SVC_GUID = "ee5999b4059645168272e22d7cd087e3"

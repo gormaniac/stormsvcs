@@ -2,12 +2,12 @@
 
 from collections.abc import AsyncIterator, Awaitable
 
-from stormlibpp.telepath import TelepathRetn
-from stormlibpp.utils import normver
 import synapse.lib.cell as s_cell
 import synapse.lib.stormsvc as s_stormsvc
+from stormlibpp.telepath import TelepathRetn
+from stormlibpp.utils import normver
 
-from .defs import SVC_EVTS, PKGDEFS, SVC_NAME, SVC_VER
+from .defs import PKGDEFS, SVC_EVTS, SVC_NAME, SVC_VER
 from .rules import CapaRulesError
 
 

@@ -4,7 +4,6 @@ from stormlibpp import StormPkg
 
 from . import __version__
 
-
 SVC_NAME = "slib.crtsh"
 SVC_VER = __version__
 SVC_GUID = "c7357722661f45a4b81c91ccfbbb37c0"

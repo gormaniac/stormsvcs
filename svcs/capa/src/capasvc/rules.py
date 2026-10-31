@@ -16,7 +16,6 @@ import capa.rules.cache
 import synapse.common as s_common
 import synapse.lib.types as s_types
 
-
 RULE_TYPE = "capa"
 """The ``meta:rule:type`` of capa rules."""
 

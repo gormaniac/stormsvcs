@@ -22,7 +22,6 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import dsa, ec, ed448, ed25519, rsa
 from cryptography.x509.oid import ExtensionOID, NameOID
 
-
 CRTSH_URL = "https://crt.sh/"
 """The crt.sh web UI, used to build a link to each certificate."""
 
@@ -73,7 +72,7 @@ def toMillis(valu: datetime.datetime | None) -> int | None:
     if valu is None:
         return None
     if valu.tzinfo is None:
-        valu = valu.replace(tzinfo=datetime.timezone.utc)
+        valu = valu.replace(tzinfo=datetime.UTC)
     return int(valu.timestamp() * 1000)
 
 
@@ -102,8 +101,7 @@ def serialBytes(serial: str | int) -> bytes:
     if isinstance(serial, int):
         serial = serialHex(serial)
     serial = serial.strip().lower().replace(":", "").replace(" ", "")
-    if serial.startswith("0x"):
-        serial = serial[2:]
+    serial = serial.removeprefix("0x")
     if len(serial) % 2:
         serial = "0" + serial
     return binascii.unhexlify(serial)
@@ -307,8 +305,7 @@ def identities(sans: list, subject: dict) -> dict:
 
     def addFqdn(valu: str):
         valu = valu.strip().lower().rstrip(".")
-        if valu.startswith("*."):
-            valu = valu[2:]
+        valu = valu.removeprefix("*.")
         if valu and "." in valu and " " not in valu and "*" not in valu:
             fqdns.add(valu)
 
@@ -360,7 +357,7 @@ def _sigAlgo(cert: x509.Certificate) -> dict:
     try:
         if cert.signature_hash_algorithm is not None:
             hashalg = cert.signature_hash_algorithm.name
-    except Exception:
+    except Exception:  # noqa: S110
         pass
     return {"oid": oid.dotted_string, "name": _oidName(oid), "hash": hashalg}
 
@@ -484,7 +481,7 @@ def matches(details: dict, field: str, valu: str, mode: str = "contains") -> boo
         if mode == "contains" and valu in cand:
             return True
         if mode == "suffix":
-            base = cand[2:] if cand.startswith("*.") else cand
+            base = cand.removeprefix("*.")
             if cand == valu or base == valu or base.endswith("." + valu):
                 return True
     return False

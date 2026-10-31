@@ -13,7 +13,6 @@ from typing import Any
 
 import aiohttp
 
-
 # The base URL of every Shodan API, keyed by the name used throughout the service.
 BASE_URLS = {
     "api": "https://api.shodan.io",
@@ -207,7 +206,7 @@ class ShodanClient:
                 ) as resp:
                     text = await resp.text()
                     code = resp.status
-            except (aiohttp.ClientError, asyncio.TimeoutError) as err:
+            except (aiohttp.ClientError, TimeoutError) as err:
                 raise ShodanApiError(f"Unable to connect to Shodan ({base}): {err}") from err
 
             if code == 429 and attempt < MAX_RETRIES:
@@ -279,7 +278,7 @@ class ShodanClient:
                     if deadline is not None and loop.time() >= deadline:
                         return
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             # Hitting the read timeout just means the stream went quiet.
             return
         except aiohttp.ClientError as err:
