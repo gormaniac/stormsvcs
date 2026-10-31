@@ -179,6 +179,19 @@ class TestIpApiSvcQueryHttp(s_tests.SynTest):
                 assert headers["X-Rl"] == "44"
                 assert headers["X-Ttl"] == "60"
 
+    async def test_query_returns_failure_response(self):
+        """An HTTP 200 "fail" body has no "as" key - _query() must return it
+        intact (no KeyError) so _processQuery() can report the failure."""
+
+        with self.getTestDir() as dirn:
+            async with await IpApiSvc.anit(dirn) as svc:
+                with vcr.use_cassette(str(CASSETTE_DIR / "ipapi_query_fail.yaml")):
+                    data, headers = await svc._query("134744072")
+
+                assert data["status"] == "fail"
+                assert data["message"] == "invalid query"
+                assert "as_" not in data
+
     async def test_query_raises_on_429(self):
         with self.getTestDir() as dirn:
             async with await IpApiSvc.anit(dirn) as svc:

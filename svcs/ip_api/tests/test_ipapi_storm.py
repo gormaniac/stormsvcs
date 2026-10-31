@@ -108,6 +108,9 @@ class TestIpApiStorm(s_tests.SynTest):
             await core.nodes("[ inet:ipv4=8.8.8.8 ]")
 
             async def fake_query(ipaddr):
+                # The command must send the printable address, not the
+                # normalized integer value (134744072) of the inet:ipv4 node.
+                assert ipaddr == "8.8.8.8"
                 return dict(SUCCESS_DATA), {}
 
             with mock.patch.object(svc, "_query", fake_query):
@@ -177,6 +180,7 @@ class TestIpApiStorm(s_tests.SynTest):
             data["query"] = "2001:4860:4860::8888"
 
             async def fake_query(ipaddr):
+                assert ipaddr == "2001:4860:4860::8888"
                 return data, {}
 
             with mock.patch.object(svc, "_query", fake_query):

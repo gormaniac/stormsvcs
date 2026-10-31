@@ -19,10 +19,12 @@ else {
     // TODO - Make this shorter somehow, one line...
     switch $node.form() {
         "inet:ipv4": {
-            $query = $node.value()
+            // Use repr() not value() - ip-api.com needs the printable address,
+            // not the normalized integer form that value() returns for inet:ipv4.
+            $query = $node.repr()
         }
         "inet:ipv6": {
-            $query = $node.value()
+            $query = $node.repr()
         }
         *: {
             $lib.warn(`The node form "{$node.form()}" is not supported by the slib.ipapi.query command.`)

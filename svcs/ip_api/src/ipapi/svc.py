@@ -114,7 +114,12 @@ class IpApiSvc(s_cell.Cell):
 
                 data = await resp.json()
 
-                return IpData(as_=data.pop('as'), **data), resp.headers
+                if data.get("status") != "success":
+                    # Failure responses only carry status/message/query - no "as"
+                    # key to rename. Return as-is for _processQuery() to handle.
+                    return data, resp.headers
+
+                return IpData(as_=data.pop("as"), **data), resp.headers
 
     async def _sleepTtl(self, ttl_raw: str | None):
         """Sleep for the duration given by an X-Ttl header value, falling back
