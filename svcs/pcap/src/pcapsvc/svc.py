@@ -34,6 +34,21 @@ CHUNK = 1024 * 1024
 """The size of the chunks files are uploaded to the Axon in."""
 
 
+def normSha256(valu) -> str:
+    """Normalize a SHA-256 (or a file:bytes ``sha256:<sha256>`` value) to lowercase hex.
+
+    Raises
+    ------
+    PcapSvcError
+        If it isn't a SHA-256.
+    """
+
+    sha256 = str(valu).strip().lower().removeprefix("sha256:")
+    if not SHA256RE.match(sha256):
+        raise PcapSvcError(f"Invalid SHA-256: {sha256}")
+    return sha256
+
+
 class PcapSvcError(Exception):
     """An error that is returned to Storm as a failed ``TelepathRetn``."""
 
@@ -117,6 +132,12 @@ class PcapSvc(s_cell.Cell):
                 "on a non-standard port."
             ),
         },
+        "tshark:keylog:maxsize": {
+            "type": "integer",
+            "default": 16 * 1024 * 1024,
+            "minimum": 0,
+            "description": "The largest TLS key log, in bytes, read from the Axon, 0 for no limit.",
+        },
         "tshark:timeout": {
             "type": "number",
             "default": 600,
@@ -194,12 +215,35 @@ class PcapSvc(s_cell.Cell):
             count += 1
         return count
 
-    async def _tshark(self, path: str) -> tuple[dict, dict]:
+    async def _keylog(self, axon, keylogs: list[str], path: str) -> int:
+        """Download TLS key logs from the Axon into one file, returning how many there were."""
+
+        maxsize = self.conf.get("tshark:keylog:maxsize")
+        with open(path, "wb") as fd:
+            for sha256 in keylogs:
+                shabyts = binascii.unhexlify(sha256)
+                size = await axon.size(shabyts)
+                if size is None:
+                    raise PcapSvcError(
+                        f"The TLS key log file:bytes:sha256={sha256} is not in the Axon."
+                    )
+                if maxsize and size > maxsize:
+                    raise PcapSvcError(
+                        f"The TLS key log file:bytes:sha256={sha256} is {size} bytes, larger than "
+                        f"the tshark:keylog:maxsize of {maxsize} bytes."
+                    )
+                async for byts in axon.get(shabyts):
+                    fd.write(byts)
+                fd.write(b"\n")
+        return len(keylogs)
+
+    async def _tshark(self, path: str, keylog: str | None,
+                      decode: list[str]) -> tuple[dict, dict]:
         """Run tshark over a capture, returning (frames, info). Failures are in the info."""
 
         info = {"enabled": True, "version": None, "error": None}
         try:
-            frames, tsinfo = await self.tshark.frames(path)
+            frames, tsinfo = await self.tshark.frames(path, keylog=keylog, decode=decode)
         except p_tshark.TsharkError as err:
             info["error"] = err.mesg
             return {}, info
@@ -208,7 +252,8 @@ class PcapSvc(s_cell.Cell):
 
     async def analyze(self, sha256: str, timeout: int | None = None, limit: int | None = None,
                       handshake: int | None = None, tshark: bool | None = None,
-                      files: bool | None = None) -> tuple[list[dict], dict]:
+                      files: bool | None = None, keylogs: list[str] | None = None,
+                      decode: list[str] | None = None) -> tuple[list[dict], dict]:
         """Read a capture file from the Axon and return its flows and a summary of it.
 
         See ``pcapsvc.flows.analyze`` for what the flows and summary contain. The summary
@@ -218,12 +263,16 @@ class PcapSvc(s_cell.Cell):
         Raises
         ------
         PcapSvcError
-            If the file isn't in the Axon, is too big, or isn't a capture file.
+            If the file (or a key log) isn't in the Axon or is too big, the file isn't a
+            capture file, or a Decode As rule is invalid.
         """
 
-        sha256 = str(sha256).strip().lower().removeprefix("sha256:")
-        if not SHA256RE.match(sha256):
-            raise PcapSvcError(f"Invalid SHA-256: {sha256}")
+        sha256 = normSha256(sha256)
+        keylogs = [normSha256(k) for k in (keylogs or ())]
+        try:
+            decode = p_tshark.checkDecodeAs(decode)
+        except (p_tshark.TsharkError, TypeError) as err:
+            raise PcapSvcError(getattr(err, "mesg", str(err))) from None
 
         timeout, limit, handshake = self._opts(timeout, limit, handshake)
         tshark = self.conf.get("tshark:enabled") if tshark is None else bool(tshark)
@@ -246,7 +295,13 @@ class PcapSvc(s_cell.Cell):
                 if tshark and not self.tshark.available:
                     tsinfo["error"] = "tshark is not installed"
                 elif tshark:
-                    frames, tsinfo = await self._tshark(path)
+                    keylog = None
+                    if keylogs:
+                        keylog = os.path.join(tmp, "keylog")
+                        await self._keylog(axon, keylogs, keylog)
+                    frames, tsinfo = await self._tshark(path, keylog, decode)
+                tsinfo["keylogs"] = len(keylogs)
+                tsinfo["decode"] = decode
 
                 store = None
                 if files and tsinfo["enabled"] and not tsinfo["error"]:
@@ -273,9 +328,21 @@ class PcapSvc(s_cell.Cell):
         summary.setdefault("files", None)
         return flows, summary
 
+    def checkDecodeAs(self, rules: list[str]) -> TelepathRetn:
+        """Validate tshark "Decode As" rules, see ``pcapsvc.tshark.checkDecodeAs``.
+
+        The ``TelepathRetn``'s data is the normalized rules.
+        """
+
+        try:
+            return TelepathRetn(status=True, mesg="", data=p_tshark.checkDecodeAs(rules))
+        except p_tshark.TsharkError as err:
+            return TelepathRetn(status=False, mesg=err.mesg, data=None)
+
     async def flows(self, sha256: str, timeout: int | None = None, limit: int | None = None,
                     handshake: int | None = None, tshark: bool | None = None,
-                    files: bool | None = None) -> AsyncIterator[TelepathRetn]:
+                    files: bool | None = None, keylogs: list[str] | None = None,
+                    decode: list[str] | None = None) -> AsyncIterator[TelepathRetn]:
         """Yield the flows in a capture file in the Axon, each wrapped in a ``TelepathRetn``.
 
         The first item's data is ``{"summary": <summary>}``, every item after it is
@@ -299,11 +366,18 @@ class PcapSvc(s_cell.Cell):
         files : bool | None
             Extract the files sent in flows into the Axon (needs tshark). Defaults to the
             ``pcap:files`` config.
+        keylogs : list[str] | None
+            SHA-256s of NSS key logs (SSLKEYLOGFILE) in the Axon, to decrypt TLS 1.2 and 1.3
+            with (needs tshark).
+        decode : list[str] | None
+            tshark "Decode As" rules, ex. ``["tcp.port==8443,tls"]``, see
+            ``pcapsvc.tshark.checkDecodeAs``.
         """
 
         try:
             flows, summary = await self.analyze(sha256, timeout=timeout, limit=limit,
-                                                handshake=handshake, tshark=tshark, files=files)
+                                                handshake=handshake, tshark=tshark, files=files,
+                                                keylogs=keylogs, decode=decode)
         except PcapSvcError as err:
             yield TelepathRetn(status=False, mesg=err.mesg, data=None)
             return

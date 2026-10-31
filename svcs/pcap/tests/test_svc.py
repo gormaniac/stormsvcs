@@ -176,7 +176,8 @@ class TestPcapSvcTshark(s_tests.SynTest):
                 retns = await collect(prox.flows(sha.hex()))
                 summary = retns[0]["data"]["summary"]
                 assert summary["tshark"] == {"frames": 0, "matched": 0, "enabled": False,
-                                             "version": None, "error": "tshark is not installed"}
+                                             "version": None, "error": "tshark is not installed",
+                                             "keylogs": 0, "decode": ()}
                 assert summary["files"] is None
                 # Flows still have every key, just empty.
                 assert retns[1]["data"]["flow"]["src"]["txfiles"] == ()
@@ -189,7 +190,7 @@ class TestPcapSvcTshark(s_tests.SynTest):
             _, sha = await axon.put(g.pcap(g.session()))
             conf = {"axon:url": axon.getLocalUrl()}
             async with self.getTestCoreProxSvc(PcapSvc, ssvc_conf=conf) as (_, _, svc):
-                async def broken(path):
+                async def broken(path, **kwargs):
                     raise p_tshark.TsharkError("boom")
                 svc.tshark.path = "/bin/true"
                 svc.tshark.frames = broken
@@ -236,3 +237,52 @@ class TestPcapSvcTshark(s_tests.SynTest):
                 assert not retns[0]["data"]["summary"]["tshark"]["enabled"]
                 retns = await collect(prox.flows(sha.hex(), tshark=True))
                 assert retns[0]["data"]["summary"]["tshark"]["enabled"]
+
+
+class TestPcapSvcOptions(s_tests.SynTest):
+
+    async def test_keylogs_decode(self):
+        async with self.getTestAxon() as axon:
+            _, sha = await axon.put(g.pcap(g.session()))
+            _, keylog = await axon.put(b"CLIENT_RANDOM 00 00\n")
+            conf = {"axon:url": axon.getLocalUrl(), "tshark:path": "/nonexistent/tshark"}
+            async with self.getTestCoreProxSvc(PcapSvc, ssvc_conf=conf) as (_, _, svc):
+                prox = SvcProx(svc)
+                missing = hashlib.sha256(b"missing").hexdigest()
+                for kwargs, mesg in (
+                    ({"keylogs": ["nope"]}, "Invalid SHA-256: nope"),
+                    ({"decode": ["-X lua_script:evil.lua"]}, "Invalid Decode As rule"),
+                    ({"decode": "tcp.port==1,tls"}, "must be a list"),
+                ):
+                    retns = await collect(prox.flows(sha.hex(), **kwargs))
+                    assert not retns[0]["status"] and mesg in retns[0]["mesg"], retns[0]["mesg"]
+
+                # Without tshark the key logs and rules aren't used, but are still reported.
+                retns = await collect(prox.flows(sha.hex(), keylogs=[keylog.hex()],
+                                                 decode=["TCP.port==8443,tls"]))
+                tsinfo = retns[0]["data"]["summary"]["tshark"]
+                assert tsinfo["keylogs"] == 1 and tsinfo["decode"] == ("tcp.port==8443,tls",)
+
+                # With tshark, key logs have to be in the Axon and under the size limit.
+                svc.tshark.path = "/bin/true"
+                async def frames(path, keylog=None, decode=()):
+                    assert open(keylog, "rb").read() == b"CLIENT_RANDOM 00 00\n\n" * 2
+                    assert decode == ["tcp.port==8443,tls"]
+                    return {}, {"version": "fake", "error": None}
+                svc.tshark.frames = frames
+                retns = await collect(prox.flows(sha.hex(), keylogs=[keylog.hex(), keylog.hex()],
+                                                 decode=["tcp.port==8443,tls"]))
+                assert retns[0]["status"] and retns[0]["data"]["summary"]["tshark"]["keylogs"] == 2
+
+                retns = await collect(prox.flows(sha.hex(), keylogs=[missing]))
+                assert retns[0]["mesg"] == \
+                    f"The TLS key log file:bytes:sha256={missing} is not in the Axon."
+                svc.conf["tshark:keylog:maxsize"] = 5
+                retns = await collect(prox.flows(sha.hex(), keylogs=[keylog.hex()]))
+                assert "larger than the tshark:keylog:maxsize of 5 bytes" in retns[0]["mesg"]
+
+                async with svc.getLocalProxy() as sprox:
+                    retn = await sprox.checkDecodeAs(["TCP.port==22,ssh"])
+                    assert retn == {"status": True, "mesg": "", "data": ("tcp.port==22,ssh",)}
+                    retn = await sprox.checkDecodeAs(["bad"])
+                    assert not retn["status"] and "Invalid Decode As rule" in retn["mesg"]

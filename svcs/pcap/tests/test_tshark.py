@@ -235,3 +235,72 @@ class TestTsharkFake:
         assert frames == {3: {"imf": ["imf"]}}
         assert info == {"version": "TShark (Wireshark) 9.9", "error": None}
         assert os.path.exists(ts.path)
+
+
+class TestDecodeAs:
+
+    def test_checkDecodeAs(self):
+        assert p_tshark.checkDecodeAs(None) == []
+        assert p_tshark.checkDecodeAs(["TCP.port==8443,TLS ", "tcp.port==8443,tls",
+                                       "udp.port==5000-5010,rtp"]) == \
+            ["tcp.port==8443,tls", "udp.port==5000-5010,rtp"]
+        for bad in ("tcp.port==8443", "-X lua_script:x.lua", "tcp.port==8443,tls;rm",
+                    "tcp.port==abc,tls", "tcp.port==1,", "", "tcp.port == 1,tls"):
+            with pytest.raises(p_tshark.TsharkError, match="Invalid Decode As rule"):
+                p_tshark.checkDecodeAs([bad])
+        with pytest.raises(p_tshark.TsharkError, match="must be a list"):
+            p_tshark.checkDecodeAs("tcp.port==1,tls")
+
+
+@needsTshark
+class TestDecrypt:
+
+    async def test_decode(self):
+        # Decode As rules change what tshark dissects, ex. SSH's port as HTTP.
+        ts = p_tshark.Tshark()
+        frames, _ = await ts.frames(str(DATA / "ssh.pcapng"), decode=["tcp.port==22,http"])
+        assert not any("ssh.protocol" in rec for rec in frames.values())
+        with pytest.raises(p_tshark.TsharkError, match="Invalid Decode As rule"):
+            await ts.frames(str(DATA / "ssh.pcapng"), decode=["nope"])
+        # A valid looking rule tshark doesn't know is a tshark error.
+        with pytest.raises(p_tshark.TsharkError, match="tshark failed"):
+            await ts.frames(str(DATA / "ssh.pcapng"), decode=["tcp.port==22,nosuchproto"])
+
+    async def test_tls13(self, tmp_path):
+        path = str(DATA / "tls13.pcapng")
+        keylog = str(DATA / "tls13.keylog")
+
+        # Without the keys only the ClientHello and ServerHello are readable.
+        frames, _ = await p_tshark.Tshark().frames(path)
+        with open(path, "rb") as fd:
+            flows, _ = p_flows.analyze(fd, frames=frames,
+                                       files=p_enrich.FileStore(str(tmp_path)))
+        h1, h2 = flows
+        assert h1["tls"]["sni"] == ["secure.vertex.link"]
+        assert h1["tls"]["ja4"][0].startswith("t13")
+        assert h1["dst"]["ssl:cert"] is None
+        assert h1["http"] is None and h1["dst"]["txfiles"] == []
+
+        frames, _ = await p_tshark.Tshark().frames(path, keylog=keylog)
+        with open(path, "rb") as fd:
+            flows, summary = p_flows.analyze(fd, frames=frames,
+                                             files=p_enrich.FileStore(str(tmp_path)))
+        h1, h2 = flows
+        assert h1["dst"]["ssl:cert"]["subject"] == "CN=secure.vertex.link,O=Test"
+        assert h2["dst"]["ssl:cert"]["subject"] == "CN=secure.vertex.link,O=Test"
+
+        # HTTP/1.1 inside TLS 1.3.
+        assert h1["src"]["softnames"] == ["curl/8.5.0"]
+        assert h1["http"]["requests"] == [{"method": "GET", "uri": "/files/sample.bin"}]
+        (dl,) = h1["dst"]["txfiles"]
+        assert dl["sha256"] == DOWNLOAD and dl["name"] == "sample.bin" and dl["proto"] == "http"
+
+        # HTTP/2 inside TLS 1.3.
+        assert h2["http"] == {"hosts": ["secure.vertex.link"],
+                              "requests": [{"method": "POST", "uri": "/upload/report.txt"}]}
+        assert h2["src"]["softnames"] == ["curl/8.5.0"]
+        assert h2["dst"]["softnames"] == ["hypercorn-h11"]
+        (up,) = h2["src"]["txfiles"]
+        assert up["sha256"] == UPLOAD and up["name"] == "report.txt" and up["proto"] == "http2"
+        (resp,) = h2["dst"]["txfiles"]
+        assert resp["sha256"] == hashlib.sha256(b"thanks").hexdigest() and resp["name"] is None

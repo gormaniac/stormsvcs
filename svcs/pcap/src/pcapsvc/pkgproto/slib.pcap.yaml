@@ -21,12 +21,18 @@ perms:
   - perm: [ slib, pcap, user ]
     gate: cortex
     desc: Analyze PCAP files in the Axon and model their flows.
+  - perm: [ slib, pcap, admin ]
+    gate: cortex
+    desc: Manage the tshark "Decode As" rules slib.pcap uses for every run.
 
 modules:
   # Privileged module - the only module that talks to the service.
   - name: slib.pcap.priv
     asroot:perms:
       - [ slib, pcap, user ]
+  - name: slib.pcap.priv.admin
+    asroot:perms:
+      - [ slib, pcap, admin ]
 
   # Unprivileged modules - node edits here run as the calling user.
   - name: slib.pcap.lib
@@ -63,6 +69,9 @@ commands:
 
         file:bytes=sha256:<sha256> | slib.pcap.flows --yield --timeout 60 --tag cno.case.x
 
+        // Decrypt TLS (1.2 and 1.3) with a key log in the Axon, and decode TLS on port 8443.
+        file:bytes=sha256:<sha256> | slib.pcap.flows --keylog <sha256> --decode-as "tcp.port==8443,tls"
+
         slib.pcap.flows <sha256> --yield | +inet:flow:dst:port=443
     cmdargs:
       - - sha256s
@@ -93,6 +102,16 @@ commands:
         - type: str
           default: null
           help: The file:bytes a sandbox ran to make the PCAP, set as each flow's :sandbox:file.
+      - - --keylog
+        - type: str
+          action: append
+          default: []
+          help: The SHA-256 of a TLS key log (SSLKEYLOGFILE) in the Axon to decrypt TLS with (needs tshark). May be used multiple times.
+      - - --decode-as
+        - type: str
+          action: append
+          default: []
+          help: A tshark Decode As rule, <selector>==<value>[-<value>],<protocol> (ex. "tcp.port==8443,tls", quoted). May be used multiple times.
       - - --no-tshark
         - default: false
           action: store_true
@@ -108,3 +127,34 @@ commands:
     cmdinputs:
       - form: file:bytes
         help: PCAP files to analyze, by :sha256.
+
+  - name: slib.pcap.admin.decode
+    perms:
+      - [ slib, pcap, admin ]
+    descr: |
+      Manage the tshark "Decode As" rules slib.pcap uses for every run, on top of the
+      --decode-as rules of each run. Prints the rules without options.
+
+      Rules are <selector>==<value>[-<value>],<protocol>, ex. "tcp.port==8443,tls". Quote
+      them, Storm can't parse them unquoted.
+
+      Examples:
+
+        slib.pcap.admin.decode --add "tcp.port==8443,tls" --add "tcp.port==2222,ssh"
+
+        slib.pcap.admin.decode --del "tcp.port==2222,ssh"
+    cmdargs:
+      - - --add
+        - type: str
+          action: append
+          default: []
+          help: A rule to add. May be used multiple times.
+      - - --del
+        - type: str
+          action: append
+          default: []
+          help: A rule to remove. May be used multiple times.
+      - - --clear
+        - default: false
+          action: store_true
+          help: Remove every rule (before any --add).

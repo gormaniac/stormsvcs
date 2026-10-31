@@ -145,6 +145,70 @@ def scenario_tls(tmp: pathlib.Path) -> None:
     server.kill()
 
 
+def scenario_tls13(tmp: pathlib.Path) -> None:
+    """HTTPS over TLS 1.3 (HTTP/1.1 then HTTP/2), with the client's TLS key log.
+
+    Writes ``tls13.keylog`` (the NSS key log curl wrote) next to the capture, everything in
+    the connections (certificates included) is only readable with it.
+    """
+
+    import asyncio
+
+    from hypercorn.asyncio import serve
+    from hypercorn.config import Config
+
+    subprocess.run(["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt",
+                    "ec_paramgen_curve:prime256v1", "-nodes", "-days", "3650",
+                    "-subj", "/O=Test/CN=secure.vertex.link",
+                    "-addext", "subjectAltName=DNS:secure.vertex.link",
+                    "-keyout", str(tmp / "key.pem"), "-out", str(tmp / "cert.pem")],
+                   check=True, capture_output=True)
+
+    async def app(scope, receive, send):
+        if scope["type"] != "http":
+            return
+        body = b""
+        while True:
+            event = await receive()
+            body += event.get("body", b"")
+            if not event.get("more_body"):
+                break
+        resp = DOWNLOAD if scope["method"] == "GET" else b"thanks"
+        await send({"type": "http.response.start", "status": 200, "headers": [
+            (b"content-type", b"application/octet-stream"), (b"server", b"hypercorn-h11"),
+            (b"content-length", str(len(resp)).encode())]})
+        await send({"type": "http.response.body", "body": resp})
+
+    config = Config()
+    config.bind = ["127.0.0.1:443"]
+    config.certfile, config.keyfile = str(tmp / "cert.pem"), str(tmp / "key.pem")
+    config.alpn_protocols = ["h2", "http/1.1"]
+    config.include_server_header = False
+    loop = asyncio.new_event_loop()
+    stop = asyncio.Event()
+    thread = threading.Thread(target=loop.run_until_complete,
+                              args=(serve(app, config, shutdown_trigger=stop.wait),), daemon=True)
+    thread.start()
+    waitPort(443)
+
+    keylog = HERE / "tls13.keylog"
+    keylog.unlink(missing_ok=True)
+    env = {**os.environ, "SSLKEYLOGFILE": str(keylog)}
+    upload = tmp / "upload.txt"
+    upload.write_bytes(UPLOAD)
+    url = "https://secure.vertex.link/files/sample.bin"
+    resolve = ["--noproxy", "*", "--resolve", "secure.vertex.link:443:127.0.0.1", "-k", "-s",
+               "-o", "/dev/null",
+               "--tlsv1.3", "-A", "curl/8.5.0"]
+    with Capture("tls13", "tcp port 443"):
+        subprocess.run(["curl", *resolve, "--http1.1", url], check=True, env=env)
+        subprocess.run(["curl", *resolve, "--http2", "--data-binary", f"@{upload}",
+                        "https://secure.vertex.link/upload/report.txt"], check=True, env=env)
+    loop.call_soon_threadsafe(stop.set)
+    thread.join(5)
+    os.chmod(keylog, 0o644)
+
+
 def scenario_ssh(tmp: pathlib.Path) -> None:
     """An SSH key exchange (authentication fails, the host key is sent before that)."""
 

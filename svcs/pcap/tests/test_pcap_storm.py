@@ -316,7 +316,7 @@ class TestPcapStormTshark(s_tests.SynTest):
             msgs = await core.stormlist(f"slib.pcap.flows {sha}")
             self.stormIsInWarn("2 files in", msgs)
 
-            async def broken(path):
+            async def broken(path, **kwargs):
                 raise p_tshark.TsharkError("boom")
             svc.tshark.frames = broken
             msgs = await core.stormlist(f"slib.pcap.flows {sha}")
@@ -327,3 +327,89 @@ class TestPcapStormTshark(s_tests.SynTest):
             self.stormHasNoWarnErr(msgs)
             msgs = await core.stormlist(f"slib.pcap.flows {sha}", opts={"debug": True})
             self.stormIsInPrint("No tshark details", msgs)
+
+
+class TestPcapStormSettings(s_tests.SynTest):
+
+    async def test_admin_decode(self):
+        async with pcapCore(self, g.pcap(g.session())) as (core, svc, (sha,)):
+            msgs = await core.stormlist("slib.pcap.admin.decode")
+            self.stormIsInPrint("slib.pcap has no Decode As rules for every run.", msgs)
+
+            q = "slib.pcap.admin.decode --add 'TCP.port==8443,tls' --add 'tcp.port==2222,ssh'"
+            msgs = await core.stormlist(q)
+            self.stormHasNoWarnErr(msgs)
+            self.stormIsInPrint("    tcp.port==8443,tls", msgs)
+            assert await core.callStorm('return($lib.globals.get("slib:pcap:decode"))') == \
+                ("tcp.port==8443,tls", "tcp.port==2222,ssh")
+
+            msgs = await core.stormlist("slib.pcap.admin.decode --del 'tcp.port==2222,ssh' "
+                                        "--add 'tcp.port==8443,tls'")
+            self.stormNotInPrint("2222", msgs)
+
+            # Invalid rules aren't saved.
+            msgs = await core.stormlist("slib.pcap.admin.decode --add '-X lua_script:x.lua'")
+            self.stormIsInWarn("Invalid Decode As rule", msgs)
+            assert await core.callStorm('return($lib.globals.get("slib:pcap:decode"))') == \
+                ("tcp.port==8443,tls",)
+
+            # Every run uses the admin's rules, plus its own.
+            seen = []
+            async def frames(path, keylog=None, decode=()):
+                seen.append(list(decode))
+                return {}, {"version": "fake", "error": None}
+            svc.tshark.path = "/bin/true"
+            svc.tshark.frames = frames
+            msgs = await core.stormlist(f"slib.pcap.flows {sha} --decode-as 'udp.port==5000,rtp' "
+                                        "--decode-as 'tcp.port==8443,tls'")
+            self.stormHasNoWarnErr(msgs)
+            assert seen == [["tcp.port==8443,tls", "udp.port==5000,rtp"]]
+
+            msgs = await core.stormlist(f"slib.pcap.flows {sha} --decode-as bad")
+            self.stormIsInWarn("Invalid Decode As rule 'bad'", msgs)
+
+            msgs = await core.stormlist("slib.pcap.admin.decode --clear")
+            self.stormIsInPrint("no Decode As rules", msgs)
+
+            # Only admins manage the rules, users can still set their own per run.
+            user = await core.auth.addUser("analyst")
+            await user.allow(("slib", "pcap", "user"))
+            await user.allow(("node",))
+            msgs = await core.stormlist("slib.pcap.admin.decode", opts={"user": user.iden})
+            self.stormIsInErr("slib.pcap.admin", msgs)
+            seen.clear()
+            msgs = await core.stormlist(f"slib.pcap.flows {sha} --decode-as 'tcp.port==22,ssh'",
+                                        opts={"user": user.iden})
+            self.stormHasNoWarnErr(msgs)
+            assert seen == [["tcp.port==22,ssh"]]
+
+    async def test_keylog_no_tshark(self):
+        async with pcapCore(self, g.pcap(g.session()), b"CLIENT_RANDOM 00 00\n") as \
+                (core, svc, (sha, keylog)):
+            msgs = await core.stormlist(f"slib.pcap.flows {sha} --keylog {keylog} --no-tshark")
+            self.stormIsInWarn(f"slib.pcap: TLS key logs need tshark, {sha} wasn't decrypted.", msgs)
+
+
+@needsTshark
+class TestPcapStormDecrypt(s_tests.SynTest):
+
+    async def test_keylog(self):
+        blobs = ((DATA / "tls13.pcapng").read_bytes(), (DATA / "tls13.keylog").read_bytes())
+        async with pcapCore(self, *blobs) as (core, _, (sha, keylog)):
+            msgs = await core.stormlist(f"slib.pcap.flows {sha}")
+            self.stormHasNoWarnErr(msgs)
+            self.len(0, await core.nodes("inet:flow +:dst:ssl:cert"))
+
+            msgs = await core.stormlist(f"slib.pcap.flows {sha} --keylog sha256:{keylog}")
+            self.stormHasNoWarnErr(msgs)
+            self.len(2, await core.nodes("inet:flow +:dst:ssl:cert"))
+            cert = await core.nodes("inet:flow :dst:ssl:cert -> crypto:x509:cert")
+            assert {n.get("subject") for n in cert} == {"CN=secure.vertex.link,O=Test"}
+            download = hashlib.sha256(bytes(range(256)) * 64).hexdigest()
+            upload = hashlib.sha256(b"uploaded file contents\n" * 100).hexdigest()
+            self.len(1, await core.nodes(
+                f"inet:flow :dst:txfiles -> file:attachment +:file=sha256:{download}"))
+            self.len(1, await core.nodes(
+                f"inet:flow :src:txfiles -> file:attachment +:name=report.txt "
+                f"+:file=sha256:{upload}"))
+            self.len(2, await core.nodes("inet:flow +:src:softnames*[=curl/8.5.0]"))

@@ -351,3 +351,46 @@ class TestEnrich:
     ])
     def test_sshSoftware(self, banner, soft):
         assert p_enrich.sshSoftware(banner) == soft
+
+
+class TestHttp2:
+
+    def test_streams(self, tmp_path):
+        files = p_enrich.FileStore(str(tmp_path))
+        flow = apply([
+            # Two requests in one packet: HEADERS on streams 1 and 3, then a DATA on 3.
+            (True, {"http2.type": ["4", "1", "1", "0"], "http2.streamid": ["0", "1", "3", "3"],
+                    "http2.headers.method": ["GET", "POST"],
+                    "http2.headers.path": ["/a/one.bin", "/up/two.txt"],
+                    "http2.headers.authority": ["Vertex.Link"],
+                    "http2.headers.user_agent": ["curl/8.5.0"],
+                    "http2.data.data": [b"upload".hex()]}),
+            # The responses: stream 1's body over two DATA frames, stream 3's reassembled.
+            (False, {"http2.type": ["1", "0"], "http2.streamid": ["1", "1"],
+                     "http2.headers.content_type": ["application/x-thing"],
+                     "http2.headers.server": ["nginx/1.25.3"],
+                     "http2.data.data": [b"one-".hex()]}),
+            (False, {"http2.type": ["0"], "http2.streamid": ["1"],
+                     "http2.data.data": [b"body".hex()]}),
+            (False, {"http2.type": ["0"], "http2.streamid": ["3"], "http2.data.data": ["00"],
+                     "http2.body.reassembled.data": [b"ok".hex()]}),
+            # Mismatched lists are skipped rather than guessed at.
+            (False, {"http2.type": ["0", "0"], "http2.streamid": ["5"]}),
+            (False, {"http2.type": ["0", "0"], "http2.streamid": ["5", "5"],
+                     "http2.data.data": ["00"]}),
+        ], files=files)
+        assert flow["http"]["hosts"] == ["vertex.link"]
+        assert flow["http"]["requests"] == [{"method": "GET", "uri": "/a/one.bin"},
+                                            {"method": "POST", "uri": "/up/two.txt"}]
+        assert flow["src"]["softnames"] == ["curl/8.5.0"]
+        assert flow["dst"]["cpes"] == ["cpe:2.3:a:f5:nginx:1.25.3:*:*:*:*:*:*:*"]
+
+        (up,) = flow["src"]["txfiles"]
+        assert up["sha256"] == hashlib.sha256(b"upload").hexdigest()
+        assert up["name"] == "two.txt" and up["proto"] == "http2"
+        dst = {f["sha256"]: f for f in flow["dst"]["txfiles"]}
+        one = dst[hashlib.sha256(b"one-body").hexdigest()]
+        assert one["name"] == "one.bin" and one["mime"] == "application/x-thing"
+        # A POST's response isn't the file at its path.
+        assert dst[hashlib.sha256(b"ok").hexdigest()]["name"] is None
+        assert len(dst) == 2

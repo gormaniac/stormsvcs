@@ -212,6 +212,9 @@ class Enricher:
         self.http = {"hosts": [], "requests": []}
         self.ftp: dict[bool, dict] = {}
         self.responses = 0
+        # HTTP/2 streams, by (sent by the client, stream ID), and their requests by stream ID.
+        self.h2: dict[tuple[bool, str], dict] = {}
+        self.h2reqs: dict[str, dict] = {}
 
     @staticmethod
     def _side() -> dict:
@@ -268,12 +271,14 @@ class Enricher:
         if layout := rec.get("rdp.keyboardLayout"):
             side["rdp:keyboard:layout"] = keyboardLayout(int(layout[0]))
 
-        for field in ("http.user_agent", "http.server", "sip.User-Agent", "sip.Server",
-                      "imf.user_agent", "imf.ext.mailer", "gquic.tag.uaid"):
+        for field in ("http.user_agent", "http.server", "http2.headers.user_agent",
+                      "http2.headers.server", "sip.User-Agent", "sip.Server", "imf.user_agent",
+                      "imf.ext.mailer", "gquic.tag.uaid"):
             for valu in rec.get(field, ()):
                 self._soft(side, valu)
 
         self._addHttp(side, rec)
+        self._addHttp2(client, rec)
         self._addFtp(client, rec)
         if raw := rec.get("imf.raw"):
             self._addEmail(side, bytes.fromhex(raw[0]))
@@ -304,14 +309,73 @@ class Enricher:
             if method in (None, "GET"):
                 name = uriName((rec.get("http.response_for.uri") or [None])[0])
 
+        self._httpBody(side, data, (rec.get("http.content_type") or [None])[0], name, "http")
+
+    def _httpBody(self, side: dict, data: bytes, ctype: str | None, name: str | None,
+                  proto: str) -> None:
+        """Extract an HTTP body, or the files in it if it's a multipart upload."""
+
+        mime = mimeType(ctype)
         if mime and mime.startswith("multipart/"):
-            ctype = rec["http.content_type"][0]
             parts = self._mimeFiles(b"Content-Type: " + ctype.encode() + b"\r\n\r\n" + data)
             if parts:
                 for part, pname, pmime in parts:
-                    self._file(side, part, "http", name=pname, mime=pmime)
+                    self._file(side, part, proto, name=pname, mime=pmime)
                 return
-        self._file(side, data, "http", name=name, mime=mime)
+        self._file(side, data, proto, name=name, mime=mime)
+
+    def _addHttp2(self, client: bool, rec: dict) -> None:
+        """Collect HTTP/2 requests and the DATA frames of each stream.
+
+        A packet can hold several HTTP/2 frames. ``http2.type`` and ``http2.streamid`` have
+        one value per frame, the header and data fields only one per frame that has them, so
+        they're matched to streams through the frame types (1 is HEADERS, 0 is DATA).
+        """
+
+        for host in rec.get("http2.headers.authority", ()):
+            _addUniq(self.http["hosts"], host.lower())
+
+        types, sids = rec.get("http2.type", ()), rec.get("http2.streamid", ())
+        if not types or len(types) != len(sids):
+            return
+        headers = [sid for ftype, sid in zip(types, sids) if ftype == "1"]
+        datas = [sid for ftype, sid in zip(types, sids) if ftype == "0"]
+
+        methods = rec.get("http2.headers.method", ())
+        paths = rec.get("http2.headers.path", ())
+        if methods and len(methods) == len(paths) == len(headers):
+            for sid, method, path in zip(headers, methods, paths):
+                self.h2reqs[sid] = {"method": method, "uri": path}
+                self.http["requests"].append({"method": method, "uri": path})
+
+        ctypes = rec.get("http2.headers.content_type", ())
+        if ctypes and len(ctypes) == len(headers):
+            for sid, ctype in zip(headers, ctypes):
+                self._h2stream(client, sid)["ctype"] = ctype
+
+        payloads = rec.get("http2.data.data", ())
+        if len(payloads) == len(datas):
+            for sid, data in zip(datas, payloads):
+                self._h2stream(client, sid)["data"] += bytes.fromhex(data.replace(":", ""))
+        if (body := rec.get("http2.body.reassembled.data")) and datas:
+            # The complete body of the stream whose DATA frame ended it.
+            self._h2stream(client, datas[-1])["body"] = bytes.fromhex(body[0].replace(":", ""))
+
+    def _h2stream(self, client: bool, sid: str) -> dict:
+        return self.h2.setdefault((client, sid), {"data": bytearray(), "body": None,
+                                                  "ctype": None})
+
+    def _finishHttp2(self) -> None:
+        for (client, sid), stream in self.h2.items():
+            data = stream["body"] if stream["body"] is not None else bytes(stream["data"])
+            if not data:
+                continue
+            req = self.h2reqs.get(sid, {})
+            name = None
+            # Only a GET's response body is the file its path names (see _addHttp).
+            if client or req.get("method") in (None, "GET"):
+                name = uriName(req.get("uri"))
+            self._httpBody(self.sides[client], data, stream["ctype"], name, "http2")
 
     def _addFtp(self, client: bool, rec: dict) -> None:
         cmd = rec.get("ftp-data.command")
@@ -369,6 +433,7 @@ class Enricher:
         """Add the collected details to a flow dict (see ``pcapsvc.flows.Flow.asdict``)."""
 
         self._finishFtp()
+        self._finishHttp2()
         for client, key in ((True, "src"), (False, "dst")):
             flow[key].update(self.sides[client])
         flow["tls"] = self.tls if any(self.tls.values()) else None

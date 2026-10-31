@@ -21,9 +21,16 @@ class PcapCellApi(s_cell.CellApi, s_stormsvc.StormSvc):
 
     async def flows(self, sha256: str, timeout: int | None = None, limit: int | None = None,
                     handshake: int | None = None, tshark: bool | None = None,
-                    files: bool | None = None) -> AsyncIterator[TelepathRetn]:
+                    files: bool | None = None, keylogs: list[str] | None = None,
+                    decode: list[str] | None = None) -> AsyncIterator[TelepathRetn]:
         """Yield the flows in a capture file in the Axon, see ``PcapSvc.flows``."""
 
         async for retn in self.cell.flows(sha256, timeout=timeout, limit=limit,
-                                          handshake=handshake, tshark=tshark, files=files):
+                                          handshake=handshake, tshark=tshark, files=files,
+                                          keylogs=keylogs, decode=decode):
             yield retn
+
+    async def checkDecodeAs(self, rules: list[str]) -> TelepathRetn:
+        """Validate tshark "Decode As" rules, returning them normalized (see ``PcapSvc``)."""
+
+        return self.cell.checkDecodeAs(rules)

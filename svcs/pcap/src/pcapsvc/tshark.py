@@ -13,6 +13,7 @@ with fewer details (ex. ``tls.handshake.ja4`` needs Wireshark 4.2).
 import asyncio
 import json
 import os
+import re
 import shutil
 from collections.abc import Iterable
 
@@ -50,6 +51,18 @@ FIELDS = (
     "http.server",
     "http.content_type",
     "http.file_data",
+    # HTTP/2 (only readable with TLS keys, see Tshark.frames).
+    "http2.streamid",
+    "http2.type",
+    "http2.headers.method",
+    "http2.headers.path",
+    "http2.headers.authority",
+    "http2.headers.status",
+    "http2.headers.user_agent",
+    "http2.headers.server",
+    "http2.headers.content_type",
+    "http2.data.data",
+    "http2.body.reassembled.data",
     # FTP data connections.
     "ftp-data.command",
     "tcp.seq",
@@ -69,9 +82,45 @@ FILTER = (
     "tls.handshake.certificate", "tls.handshake.extensions_server_name", "tls.handshake.ja3",
     "tls.handshake.ja3s", "tls.handshake.ja4", "ssh.protocol", "ssh.host_key.type",
     "rdp.client.name", "rdp.keyboardLayout", "http.request.method", "http.response_for.uri",
+    "http2.headers.method", "http2.headers.status", "http2.data.data",
     "ftp-data.command", "sip.User-Agent", "sip.Server", "imf", "gquic.tag.uaid",
 )
 """Fields (or protocols) that make a frame worth returning, the display filter ORs them."""
+
+
+DECODE_AS = re.compile(
+    r"^[a-z][a-z0-9_.-]{0,63}==[0-9]{1,10}(-[0-9]{1,10})?,[a-z][a-z0-9_.-]{0,63}$"
+)
+"""A valid "Decode As" rule (tshark's -d), ex. ``tcp.port==8443,tls`` or ``udp.port==5000-5010,rtp``.
+
+Rules are the only tshark option Storm users can set per run, so they're strictly validated.
+"""
+
+
+def checkDecodeAs(rules) -> list[str]:
+    """Validate "Decode As" rules (see ``DECODE_AS``), returning them without duplicates.
+
+    Raises
+    ------
+    TsharkError
+        If a rule isn't valid.
+    """
+
+    if rules is None:
+        return []
+    if isinstance(rules, str) or not isinstance(rules, (list, tuple)):
+        raise TsharkError(f"Decode As rules must be a list, not {rules!r}")
+    valid = []
+    for rule in rules:
+        rule = str(rule).strip().lower()
+        if not DECODE_AS.match(rule):
+            raise TsharkError(
+                f"Invalid Decode As rule {rule!r}, expected <selector>==<value>[-<value>],"
+                "<protocol>, ex. tcp.port==8443,tls"
+            )
+        if rule not in valid:
+            valid.append(rule)
+    return valid
 
 
 class TsharkError(Exception):
@@ -156,7 +205,18 @@ class Tshark:
     def _filter(self) -> str:
         return " or ".join(f for f in FILTER if f in self.supported)
 
-    async def frames(self, path: str) -> tuple[dict[int, dict], dict]:
+    def _args(self, keylog: str | None, decode: list[str]) -> list[str]:
+        """The tshark arguments for one run: the configured ones, the key log, and decode rules."""
+
+        args = list(self.args)
+        if keylog:
+            args.extend(("-o", f"tls.keylog_file:{keylog}"))
+        for rule in decode:
+            args.extend(("-d", rule))
+        return args
+
+    async def frames(self, path: str, keylog: str | None = None,
+                     decode: list[str] = ()) -> tuple[dict[int, dict], dict]:
         """Run tshark over a capture and return ({frame number: fields}, info).
 
         Fields are keyed by their tshark name (ex. ``http.user_agent``) and are always lists
@@ -165,11 +225,23 @@ class Tshark:
 
         ``info`` has the tshark ``version`` and, when tshark exits with an error after reading
         part of the capture (ex. it's truncated), its ``error``.
+
+        Parameters
+        ----------
+        path : str
+            The capture file.
+        keylog : str | None
+            An NSS key log file (SSLKEYLOGFILE) with the TLS secrets to decrypt TLS 1.2 and 1.3
+            with, which also makes HTTP and HTTP/2 inside TLS readable. Secrets embedded in a
+            pcapng file (Decryption Secrets Blocks) are always used.
+        decode : list[str]
+            "Decode As" rules (see ``checkDecodeAs``), ex. ``["tcp.port==8443,tls"]``.
         """
 
         await self.load()
         fields = self._fields()
-        args = ["-n", "-r", path, *self.args, "-Y", self._filter(), "-T", "ek",
+        extra = self._args(keylog, checkDecodeAs(list(decode)))
+        args = ["-n", "-r", path, *extra, "-Y", self._filter(), "-T", "ek",
                 "-e", "frame.number"]
         for field in fields:
             args.extend(("-e", field))
@@ -193,15 +265,15 @@ class Tshark:
                 raise TsharkError(f"tshark failed: {info['error']}")
 
         if any("imf" in rec for rec in records.values()):
-            for num, raw in (await self._emails(path)).items():
+            for num, raw in (await self._emails(path, extra)).items():
                 records.setdefault(num, {})["imf.raw"] = [raw]
 
         return records, info
 
-    async def _emails(self, path: str) -> dict[int, str]:
+    async def _emails(self, path: str, extra: list[str]) -> dict[int, str]:
         """The raw bytes (hex) of every email (IMF) in a capture, keyed by frame number."""
 
-        code, out, err = await self._run("-n", "-r", path, *self.args, "-Y", "imf",
+        code, out, err = await self._run("-n", "-r", path, *extra, "-Y", "imf",
                                          "-T", "json", "-x", "-J", "frame imf")
         try:
             packets = json.loads(out or b"[]")

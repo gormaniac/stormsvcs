@@ -1,14 +1,23 @@
-// Privileged (asroot) wrappers around the slib.pcap service.
+// Privileged (asroot) wrappers around the slib.pcap service for slib.pcap.user.
 // Emits the service's {status, mesg, data} dicts, see pcapsvc.svc.PcapSvc.flows.
 
 init {
     $svc = $lib.service.get("slib.pcap")
 }
 
+// The "Decode As" rules an admin set for every run (see slib.pcap.admin.decode).
+function decodeDefaults() {
+    $rules = $lib.globals.get("slib:pcap:decode")
+    if ($rules = $lib.null) { return(([])) }
+    return($rules)
+}
+
 function flows(sha256, timeout=$lib.null, limit=$lib.null, handshake=$lib.null, tshark=$lib.null,
-               files=$lib.null) {
+               files=$lib.null, keylogs=$lib.null, decode=$lib.null) {
     for $retn in $svc.flows($sha256, timeout=$timeout, limit=$limit, handshake=$handshake,
-                            tshark=$tshark, files=$files) {
+                            tshark=$tshark, files=$files, keylogs=$keylogs, decode=$decode) {
         emit $retn
     }
 }
+
+function checkDecodeAs(rules) { return($svc.checkDecodeAs($rules)) }
