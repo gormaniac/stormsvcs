@@ -20,15 +20,19 @@ changes), Landlock needs a host kernel with it enabled (5.13+, 6.7+ to block TCP
 import asyncio
 import contextlib
 import json
+import logging
 import os
 import pwd
 import shutil
 import signal
+import stat
 import sys
 from dataclasses import dataclass, field
 from typing import Any
 
 from . import _sbxexec
+
+logger = logging.getLogger(__name__)
 
 MODES = ("best-effort", "strict", "off")
 """The sandbox modes."""
@@ -118,6 +122,7 @@ class Sandbox:
         self.seccomp = seccomp
         self.script = os.path.abspath(_sbxexec.__file__)
         self._probe: dict[str, Any] | None = None
+        self._reached: set[str] = set()
 
     def ids(self) -> tuple[int, int] | None:
         """The (uid, gid) engines run as, or None if they run as the service's user."""
@@ -189,12 +194,50 @@ class Sandbox:
         for path in paths:
             if not os.path.exists(path):
                 continue
+            self.reach(path)
             os.chown(path, uid, gid)
             if os.path.isdir(path):
                 for root, dirs, files in os.walk(path):
                     for name in dirs + files:
                         with contextlib.suppress(OSError):
                             os.chown(os.path.join(root, name), uid, gid, follow_symlinks=False)
+
+    def reach(self, *paths: str) -> None:
+        """Let the engine's user get to ``paths``: give it search (only) permission on the
+        directories (and the directories above them) that it can't search, ex. a 0700 cell
+        directory.
+
+        Only the search bit is added, so the engine's user can't list those directories.
+        """
+
+        ids = self.ids()
+        if ids is None:
+            return
+        uid, gid = ids
+        for path in paths:
+            path = os.path.abspath(path)
+            parent = path if os.path.isdir(path) else os.path.dirname(path)
+            while parent not in self._reached:
+                try:
+                    info = os.stat(parent)
+                except OSError:
+                    break
+                if info.st_uid == uid:
+                    need = stat.S_IXUSR
+                elif info.st_gid == gid:
+                    need = stat.S_IXGRP
+                else:
+                    need = stat.S_IXOTH
+                if not info.st_mode & need:
+                    if info.st_uid != os.geteuid():
+                        logger.warning("The sandbox user %s can't get to %s, and the service "
+                                       "doesn't own it to fix that.", self.user, parent)
+                        break
+                    os.chmod(parent, stat.S_IMODE(info.st_mode) | need)
+                self._reached.add(parent)
+                if parent == os.path.dirname(parent):
+                    break
+                parent = os.path.dirname(parent)
 
     async def run(self, argv: list[str], read: list[str] = (), write: list[str] = (),
                   execs: list[str] = (), env: dict[str, str] | None = None,
@@ -237,6 +280,9 @@ class Sandbox:
         if env is None:
             env = {"PATH": os.path.dirname(binpath) + ":/usr/bin:/bin", "LANG": "C.UTF-8"}
         execs = [os.path.dirname(binpath), *execs]
+        # The engine's user has to get to what it runs, reads, and writes, ex. a capture in a
+        # 0700 directory.
+        self.reach(*read, *write, *execs)
 
         if self.mode == "off":
             cmd = [binpath, *argv[1:]]

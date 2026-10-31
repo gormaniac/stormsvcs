@@ -82,9 +82,12 @@ def applyEve(enr: Any, flow: dict, events: list[dict], filestore: str | None) ->
                 enr._uniq(enr.tls["ja4"], body["ja4"])
             if body.get("version"):
                 enr._uniq(enr.tls.setdefault("versions", []), body["version"])
-            for side, key in ((server, "chain"), (client, "client_chain")):
-                if body.get(key) and not side["ssl:certs"]:
-                    for b64 in body[key]:
+            # Suricata 8 puts the client's chain in client.chain (older, client_chain).
+            cinfo = body.get("client") if isinstance(body.get("client"), dict) else {}
+            for side, chain in ((server, body.get("chain")),
+                                (client, cinfo.get("chain") or body.get("client_chain"))):
+                if chain and not side["ssl:certs"]:
+                    for b64 in chain:
                         try:
                             der = base64.b64decode(b64)
                         except ValueError:
@@ -209,6 +212,13 @@ def _fileinfo(enr: Any, flow: dict, ev: dict, txs: dict[int, dict],
 
     info = ev.get("fileinfo") or {}
     sha256 = info.get("sha256")
+    if info.get("state") == "TRUNCATED":
+        # Over the body limit (pcap:files:maxsize), it's only part of the file.
+        if enr.files is not None:
+            enr.files.skipped += 1
+        elif sha256:
+            enr.unsaved += 1
+        return
     if not sha256 or not info.get("stored") or enr.files is None or filestore is None:
         if sha256 and enr.files is None:
             enr.unsaved += 1

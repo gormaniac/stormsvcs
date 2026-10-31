@@ -226,8 +226,7 @@ class Suricata:
             {"eve-log": {"enabled": True, "filetype": "regular", "filename": "eve.json",
                          "community-id": True, "community-id-seed": 0, "types": types}},
             {"file-store": {"version": 2, "enabled": bool(filestore), "dir": "filestore",
-                            "force-filestore": True, "write-fileinfo": False,
-                            "stream-depth": maxbody}},
+                            "force-filestore": True, "write-fileinfo": False}},
         ]
         conf["logging"] = {"default-log-level": "notice",
                            "outputs": [{"console": {"enabled": True}}]}
@@ -242,8 +241,10 @@ class Suricata:
         protos["tls"]["ja3-fingerprints"] = True
         protos["tls"]["ja4-fingerprints"] = True
         htp = protos["http"].setdefault("libhtp", {}).setdefault("default-config", {})
-        htp["request-body-limit"] = maxbody
-        htp["response-body-limit"] = maxbody
+        # Suricata logs a body cut off at the limit as a whole (CLOSED) file, so the limit is
+        # one byte over: a file over maxbody is one that was cut off (see FileStore.addPath).
+        htp["request-body-limit"] = maxbody + 1 if maxbody else 0
+        htp["response-body-limit"] = maxbody + 1 if maxbody else 0
         smtp = protos["smtp"]
         if not isinstance(smtp.get("mime"), dict):
             smtp["mime"] = {}
@@ -269,7 +270,9 @@ class Suricata:
         stream["checksum-validation"] = False
         stream["midstream"] = True
         reasm = stream.setdefault("reassembly", {})
-        reasm["depth"] = maxbody
+        # Reassemble whole streams (bounded by Suricata's memcaps), a smaller depth would
+        # starve the parsers. Files over the body limits are logged as TRUNCATED.
+        reasm["depth"] = 0
         reasm["randomize-chunk-size"] = False
 
         conf["pcap-file"] = {"checksum-checks": "no"}

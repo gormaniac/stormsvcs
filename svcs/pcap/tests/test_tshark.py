@@ -46,7 +46,8 @@ def fakeTshark(tmp_path, script: str) -> str:
 
     path = tmp_path / "tshark"
     path.write_text("#!/bin/sh\n" + script)
-    path.chmod(path.stat().st_mode | stat.S_IEXEC)
+    # Runnable by the sandbox's user too, the tests can run as root.
+    path.chmod(0o755)
     return str(path)
 
 

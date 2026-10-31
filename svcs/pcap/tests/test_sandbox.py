@@ -27,6 +27,8 @@ def dirs(tmp_path):
 
 async def runPy(sbx, code, dirs, **kwargs):
     py = os.path.realpath(sys.executable)
+    # Hands the directories to the engine's user, when it runs as one (as root).
+    sbx.prepare(str(dirs / "allowed"), str(dirs / "out"))
     return await sbx.run([py, "-I", "-S", "-c", code], read=[str(dirs / "allowed")],
                          write=[str(dirs / "out")], execs=[sys.prefix, sys.base_prefix],
                          **kwargs)

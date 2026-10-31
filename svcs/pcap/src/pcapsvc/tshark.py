@@ -47,7 +47,11 @@ FIELDS = (
     # HTTP.
     "http.request.method",
     "http.request.uri",
+    # The URI a response is for: tshark < 4.6 has http.response_for.uri, newer only has the
+    # request's frame number (see _responseUris).
     "http.response_for.uri",
+    "http.response",
+    "http.request_in",
     "http.host",
     "http.user_agent",
     "http.server",
@@ -83,7 +87,7 @@ FIELDS = (
 FILTER = (
     "tls.handshake.certificate", "tls.handshake.extensions_server_name", "tls.handshake.ja3",
     "tls.handshake.ja3s", "tls.handshake.ja4", "ssh.protocol", "ssh.host_key.type",
-    "rdp.client.name", "rdp.keyboardLayout", "http.request.method", "http.response_for.uri",
+    "rdp.client.name", "rdp.keyboardLayout", "http.request.method", "http.response",
     "http2.headers.method", "http2.headers.status", "http2.data.data",
     "ftp-data.command", "sip.User-Agent", "sip.Server", "imf", "gquic.tag.uaid",
 )
@@ -349,6 +353,7 @@ class Tshark:
                 if not records:
                     raise TsharkError(f"tshark failed: {info['error']}")
 
+            _responseUris(records)
             if any("imf" in rec for rec in records.values()):
                 for num, raw in (await self._emails(path, extra, work, read)).items():
                     records.setdefault(num, {})["imf.raw"] = [raw]
@@ -375,3 +380,17 @@ class Tshark:
             if raw and num:
                 emails[int(num)] = raw[0] if isinstance(raw[0], str) else raw[0][0]
         return emails
+
+
+def _responseUris(records: dict[int, dict]) -> None:
+    """Give HTTP responses the URI of their request (``http.response_for.uri``), from the
+    request's frame (``http.request_in``), for tshark versions that don't add it."""
+
+    for rec in records.values():
+        if "http.response_for.uri" in rec or not rec.get("http.request_in"):
+            continue
+        uris = []
+        for num in rec["http.request_in"]:
+            with contextlib.suppress(ValueError):
+                uris.extend((records.get(int(num)) or {}).get("http.request.uri", ()))
+        rec["http.response_for.uri"] = uris[:1]

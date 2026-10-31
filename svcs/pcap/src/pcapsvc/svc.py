@@ -413,6 +413,8 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
         self.runsema = asyncio.Semaphore(self.conf.get("pcap:workers"))
 
         await self._initRules()
+        # The engines run as the sandbox's user, which has to get to their files.
+        self.sandbox.reach(self.tmpdir, self.rulesdir, self.snort.workdir, self.suricata.workdir)
 
         self.session = aiohttp.ClientSession(trust_env=True)
         self.onfini(self.session.close)

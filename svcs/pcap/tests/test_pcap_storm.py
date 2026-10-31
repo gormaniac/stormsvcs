@@ -298,7 +298,7 @@ class TestPcapStormTshark(s_tests.SynTest):
     async def test_options(self):
         async with pcapCore(self, (DATA / "http.pcapng").read_bytes()) as (core, svc, (sha,)):
             await core.nodes("[ file:bytes=sha256:" + "a" * 64 + " ]")
-            msgs = await core.stormlist(f"slib.pcap.flows {sha} --no-tshark --sandbox-file {'a' * 64}")
+            msgs = await core.stormlist(f"slib.pcap.flows {sha} --no-tshark --no-suricata --sandbox-file {'a' * 64}")
             self.stormHasNoWarnErr(msgs)
             nodes = await core.nodes("inet:flow")
             assert all(n.get("src:softnames") is None for n in nodes)
@@ -313,6 +313,7 @@ class TestPcapStormTshark(s_tests.SynTest):
             svc.conf["pcap:files:maxsize"] = 100
             msgs = await core.stormlist(f"slib.pcap.flows {sha}")
             self.stormIsInWarn("2 files in", msgs)
+            svc.conf["pcap:files:maxsize"] = 0
 
             async def broken(path, **kwargs):
                 raise p_tshark.TsharkError("boom")
