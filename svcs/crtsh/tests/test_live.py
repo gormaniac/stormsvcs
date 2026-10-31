@@ -15,7 +15,7 @@ import os
 import pytest
 import synapse.tests.utils as s_tests
 
-from crtshsvc import CrtshSvc
+from crtshsvc import CrtshSvc, norm
 
 
 LIVE = os.environ.get("SLIB_CRTSH_LIVE") == "1"
@@ -45,7 +45,9 @@ class TestLive(s_tests.SynTest):
             assert "Sectigo" in cert["crtsh"]["issuer"]["name"]
             assert cert["crtsh"]["ctlog"], "Every certificate in crt.sh was logged somewhere."
             assert cert["crtsh"]["logged"]
-            assert any(v == "www.comodo.com" for k, v in cert["sans"] if k == "dns")
+            # crt.sh found it searching for www.comodo.com, a DNS SAN or CN, or a subdomain of it.
+            names = norm.fieldValues(cert, "dns")
+            assert norm.matches(cert, "dns", "www.comodo.com", "suffix"), names
 
             for kind, valu in (
                 ("sha256", cert["sha256"]),
@@ -64,8 +66,7 @@ class TestLive(s_tests.SynTest):
             assert CERTID in ids
             async for details in svc.searchGenr(dns="comodo.com", valid=True, precerts=False, limit=20):
                 assert not details["precert"]
-                assert any(v == "comodo.com" or v.endswith(".comodo.com")
-                           for v in [v for k, v in details["sans"] if k == "dns"] + details["subject"]["attrs"].get("cn", []))
+                assert norm.matches(details, "dns", "comodo.com", "suffix"), norm.fieldValues(details, "dns")
 
             # ---- CAs, issued, and chains ----
             cas = await svc.cas(name="Sectigo Public Server Authentication CA OV R36")
@@ -93,8 +94,8 @@ class TestLive(s_tests.SynTest):
             self.stormHasNoWarnErr(msgs)
             nodes = await core.nodes(f"crypto:x509:cert:sha256={cert['sha256']} :issuer:cert -> crypto:x509:cert")
             assert len(nodes) == 1
-            assert "www.comodo.com" in (await core.nodes(
-                f"crypto:x509:cert:sha256={cert['sha256']}"))[0].get("identities:fqdns")
+            fqdns = (await core.nodes(f"crypto:x509:cert:sha256={cert['sha256']}"))[0].get("identities:fqdns")
+            assert any(f == "comodo.com" or f.endswith(".comodo.com") for f in fqdns), fqdns
 
             msgs = await core.stormlist("slib.crtsh.search --dns www.comodo.com --exact --valid --limit 5")
             self.stormHasNoWarnErr(msgs)
