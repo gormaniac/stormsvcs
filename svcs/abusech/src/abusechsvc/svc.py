@@ -264,7 +264,7 @@ class AbuseChSvc(s_cell.Cell):
             for stream in streams:
                 for num, line in enumerate(stream):
                     # Retired datasets are replaced with a comment saying so (ex. SSLBL's IP lists).
-                    if num < 20 and line.startswith("#") and re.search(r"\bhas been deprecated\b", line, re.I):
+                    if num < 20 and line.startswith("#") and re.search(r"\bhas been deprecated\b", line, re.IGNORECASE):
                         raise AbuseChApiError(f"abuse.ch {base}: {path} {line.strip('#').strip()}")
                     yield line.rstrip("\r\n")
                     if num % 1000 == 999:

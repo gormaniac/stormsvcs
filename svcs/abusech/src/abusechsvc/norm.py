@@ -17,7 +17,6 @@ code short, and lets it be unit tested without a Cortex. The shapes are:
 
 
 import csv
-import io
 import re
 from collections.abc import Iterable, Iterator
 from typing import Any
