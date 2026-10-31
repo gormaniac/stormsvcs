@@ -1,0 +1,99 @@
+// Privileged (asroot) wrappers around the slib.hatching service for slib.hatching.user.
+// Every function returns the service's {status, mesg, data} dict, or emits them for generators.
+//
+// The calling user's own API key (a user scoped "hatching" vault) is passed to the service,
+// otherwise the service falls back to its stored/configured key. Only the user scope is
+// read so this module never exposes another user's or role's secrets.
+
+init {
+    $svc = $lib.service.get("slib.hatching")
+}
+
+function userKey() {
+    $vault = $lib.vault.bytype(hatching, scope=user)
+    if ($vault = $lib.null) { return($lib.null) }
+    $secrets = $vault.secrets
+    if ($secrets = $lib.null) { return($lib.null) }
+    return($secrets.apikey)
+}
+
+function hasKey() {
+    if $userKey() { return((true)) }
+    return($svc.hasApiKey().data)
+}
+
+function tagPrefix() {
+    if $lib.globals.get("slib:hatching:tag:enabled") {
+        return($lib.globals.get("slib:hatching:tag:prefix"))
+    }
+    return($lib.null)
+}
+
+// Samples
+
+function resolve(sample) { return($svc.resolve($sample, apikey=$userKey())) }
+function search(query, limit=(20)) { return($svc.search($query, limit=$limit, apikey=$userKey())) }
+function samples(subset=owned, limit=(20)) { return($svc.samples(subset=$subset, limit=$limit, apikey=$userKey())) }
+function sample(sample) { return($svc.sample($sample, apikey=$userKey())) }
+function summary(sample) { return($svc.summary($sample, apikey=$userKey())) }
+function wait(sample, timeout=(600)) { return($svc.wait($sample, timeout=$timeout, apikey=$userKey())) }
+
+function events(sample=$lib.null, limit=(100), timeout=(600)) {
+    for $retn in $svc.sampleEvents(sample=$sample, limit=$limit, timeout=$timeout, apikey=$userKey()) {
+        emit $retn
+    }
+}
+
+// Reports
+
+function overview(sample) { return($svc.overview($sample, apikey=$userKey())) }
+function staticReport(sample) { return($svc.staticReport($sample, apikey=$userKey())) }
+function taskReport(sample, task) { return($svc.taskReport($sample, $task, apikey=$userKey())) }
+function dumpedFiles(sample) { return($svc.dumpedFiles($sample, apikey=$userKey())) }
+
+function normSample(sample, tasks=(false)) {
+    return($svc.normSample($sample, tasks=$tasks, apikey=$userKey()))
+}
+
+function kernelReport(sample, task, log=$lib.null, limit=(1000)) {
+    for $retn in $svc.kernelReport($sample, $task, log=$log, limit=$limit, apikey=$userKey()) {
+        emit $retn
+    }
+}
+
+// Profiles and Yara rules (read only)
+
+function profiles() { return($svc.profiles(apikey=$userKey())) }
+function profile(profile) { return($svc.profile($profile, apikey=$userKey())) }
+function rules() { return($svc.rules(apikey=$userKey())) }
+function rule(name) { return($svc.rule($name, apikey=$userKey())) }
+
+// Downloads into the Axon. Each returns {"status", "mesg", "data": {"sha256", "size"}}.
+
+function _bytes(genr) {
+    for $retn in $genr {
+        if (not $retn.status) { $lib.raise(HatchingError, $retn.mesg) }
+        emit $retn.data
+    }
+}
+
+function _upload(genr) {
+    try {
+        ($size, $sha256) = $lib.axon.upload($_bytes($genr))
+    } catch HatchingError as err {
+        return(({"status": (false), "mesg": $err.mesg, "data": $lib.null}))
+    }
+    return(({"status": (true), "mesg": "", "data": ({"sha256": $sha256, "size": $size})}))
+}
+
+function downloadSample(sample) {
+    return($_upload($svc.downloadSample($sample, apikey=$userKey())))
+}
+
+function downloadTaskFile(sample, task, name) {
+    return($_upload($svc.downloadTaskFile($sample, $task, $name, apikey=$userKey())))
+}
+
+function downloadArchive(sample, fmt=tar) {
+    return($_upload($svc.downloadArchive($sample, fmt=$fmt, apikey=$userKey())))
+}

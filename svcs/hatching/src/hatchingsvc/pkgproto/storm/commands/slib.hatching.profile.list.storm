@@ -1,0 +1,13 @@
+init {
+    $priv = $lib.import(slib.hatching.priv.user)
+    $util = $lib.import(slib.hatching.util)
+
+    $retn = $priv.profiles()
+    if (not $util.failed($retn, "Listing profiles")) {
+        $rows = ([])
+        for $p in $retn.data {
+            $rows.append(($p.name, $p.network, $p.timeout, (",").join($p.tags), $p.id))
+        }
+        $util.table((("name", 24), ("network", 10), ("timeout", 8), ("tags", 32), ("id", 36)), $rows)
+    }
+}

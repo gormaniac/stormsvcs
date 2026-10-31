@@ -1,0 +1,11 @@
+init {
+    $padmin = $lib.import(slib.hatching.priv.admin)
+    $util = $lib.import(slib.hatching.util)
+
+    for $user in $cmdopts.user {
+        $retn = $padmin.delUser($user)
+        if (not $util.failed($retn, `Deleting user {$user}`)) {
+            $lib.print("slib.hatching.admin.user.del: Deleted user {user}.", user=$user)
+        }
+    }
+}

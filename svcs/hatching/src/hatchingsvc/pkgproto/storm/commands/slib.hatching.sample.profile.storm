@@ -1,0 +1,15 @@
+init {
+    $psub = $lib.import(slib.hatching.priv.submit)
+    $util = $lib.import(slib.hatching.util)
+
+    if ((not $cmdopts.auto) and (not $cmdopts.profile)) {
+        $lib.warn("slib.hatching.sample.profile: Use --profile at least once, or --auto.")
+    }
+    else {
+        $retn = $psub.setProfile($cmdopts.sample, profiles=$cmdopts.profile, auto=$cmdopts.auto, pick=$cmdopts.pick)
+        if (not $util.failed($retn, `Setting the profiles of {$cmdopts.sample}`)) {
+            $lib.print("slib.hatching.sample.profile: Set the profiles of sample {id}, it will now be analyzed.",
+                       id=$cmdopts.sample)
+        }
+    }
+}

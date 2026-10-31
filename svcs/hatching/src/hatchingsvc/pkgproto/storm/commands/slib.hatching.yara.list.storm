@@ -1,0 +1,15 @@
+init {
+    $priv = $lib.import(slib.hatching.priv.user)
+    $util = $lib.import(slib.hatching.util)
+
+    $retn = $priv.rules()
+    if (not $util.failed($retn, "Listing Yara rules")) {
+        $rows = ([])
+        for $r in $retn.data {
+            $warnings = (0)
+            if $r.warnings { $warnings = $lib.len($r.warnings) }
+            $rows.append(($r.name, $warnings))
+        }
+        $util.table((("name", 48), ("warnings", 8)), $rows)
+    }
+}

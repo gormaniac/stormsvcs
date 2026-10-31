@@ -55,6 +55,8 @@ Each service must have the following:
   - Every Shodan API: host lookups, search, scanning, alerts, DNS, streaming, InternetDB, CVEDB, exploits, and trends.
 - `abusech`
   - Every abuse.ch platform: MalwareBazaar, URLhaus, ThreatFox, YARAify, Feodo Tracker, SSL Blacklist, and the false positive list.
+- `hatching`
+  - The whole Hatching Triage Sandbox API: submit files and URLs, model analyses (configs, processes, network, dropped files), download samples/pcaps/dropped files, and manage profiles, Yara rules, and users.
 
 
 ## Services Wish List/Plan
@@ -67,8 +69,6 @@ This is a ToDo/wish list, check `services.toml` for the current list of develope
   - Process files with Capa.
 - `enrich`
   - Enrich any supported node from all possible enrichment sources.
-- `hatching`
-  - Enrich from and submit to Hatching Triage Sandbox (tria.ge).
 - `ipinfo`
   - Enrich from ipinfo.io.
 - `mandiant`

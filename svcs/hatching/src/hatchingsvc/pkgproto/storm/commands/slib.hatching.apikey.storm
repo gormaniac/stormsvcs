@@ -1,0 +1,28 @@
+init {
+    $vault = $lib.vault.bytype(hatching, scope=user)
+
+    if $cmdopts.clear {
+        if $vault {
+            $vault.delete()
+            $lib.print("slib.hatching: Deleted your Hatching Triage API key.")
+        } else {
+            $lib.print("slib.hatching: You don't have a Hatching Triage API key set.")
+        }
+    }
+    elif (not $cmdopts.apikey) {
+        if $vault {
+            $lib.print("slib.hatching: Your Hatching Triage API key is set in vault {name}.", name=$vault.name)
+        } else {
+            $lib.print("slib.hatching: You don't have a Hatching Triage API key set.")
+        }
+    }
+    elif $vault {
+        $vault.secrets.apikey = $cmdopts.apikey
+        $lib.print("slib.hatching: Updated your Hatching Triage API key.")
+    }
+    else {
+        $name = `hatching:{$lib.user.name()}`
+        $lib.vault.add($name, hatching, user, $lib.user.iden, ({"apikey": $cmdopts.apikey}), ({}))
+        $lib.print("slib.hatching: Saved your Hatching Triage API key in vault {name}.", name=$name)
+    }
+}

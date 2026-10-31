@@ -1,0 +1,11 @@
+init {
+    $pman = $lib.import(slib.hatching.priv.manage)
+    $util = $lib.import(slib.hatching.util)
+
+    for $name in $cmdopts.name {
+        $retn = $pman.delRule($name)
+        if (not $util.failed($retn, `Deleting Yara rule {$name}`)) {
+            $lib.print("slib.hatching.yara.del: Deleted Yara rule {name}.", name=$name)
+        }
+    }
+}

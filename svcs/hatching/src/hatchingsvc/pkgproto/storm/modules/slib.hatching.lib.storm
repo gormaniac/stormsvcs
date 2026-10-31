@@ -1,0 +1,188 @@
+// The slib.hatching user API. Functions query Hatching Triage, model the results,
+// and return the resulting node(s). Errors are reported as warnings.
+//
+// Usable directly from Storm, ex:
+//     $hatching = $lib.import(slib.hatching.lib)
+//     $file = $hatching.model("261031-a1b2c3d4e5", tasks=(true))
+
+init {
+    $priv = $lib.import(slib.hatching.priv.user)
+    $hmodel = $lib.import(slib.hatching.model)
+    $util = $lib.import(slib.hatching.util)
+}
+
+// Model a reported sample (by ID or hash). With tasks, also models its behavioral tasks
+// (processes, network activity, and dropped files). Returns the sample's node, or null.
+function model(sample, tasks=(false)) {
+    $retn = $priv.normSample($sample, tasks=$tasks)
+    if $util.failed($retn, `Modeling sample {$sample}`) { return($lib.null) }
+    $data = $retn.data
+    for $err in $data.errors { $lib.warn("slib.hatching: {err}", err=$err) }
+
+    $snode = $hmodel.sample($data, prefix=$priv.tagPrefix())
+    if ($snode = $lib.null) {
+        $lib.warn("slib.hatching: Sample {id} has no file hash or URL to model it by.", id=$data.id)
+        return($lib.null)
+    }
+
+    $fams = $lib.null
+    if $data.families { $fams = (",").join($data.families) }
+    $lib.print("slib.hatching: Modeled sample {id} (score={score} families={fams} tasks={tasks}).",
+               id=$data.id, score=$data.score, fams=$fams, tasks=$lib.len($data.tasks))
+    return($snode)
+}
+
+// The newest reported sample matching a search query, or null.
+function findSample(query) {
+    $retn = $priv.search($query, limit=(20))
+    if $util.failed($retn, `Searching for {$query}`) { return($lib.null) }
+    for $sample in $retn.data {
+        if ($sample.status = "reported") { return($sample.id) }
+    }
+    return($lib.null)
+}
+
+// The Triage search query for a node: file:bytes/hash:* by hash, inet:url by URL. Null if unsupported.
+function nodeQuery(node) {
+    if ($node.form() = "inet:url") { return(`url:"{$node.repr()}"`) }
+    $hash = $util.nodeHash($node)
+    if ($hash = $lib.null) { return($lib.null) }
+    return(`{$util.hashType($hash)}:{$hash}`)
+}
+
+// Find the newest reported sample for a file:bytes, hash:*, or inet:url node and model it.
+// Returns the sample's node, or null.
+function enrich(node, tasks=(false)) {
+    $query = $nodeQuery($node)
+    if ($query = $lib.null) {
+        $lib.warn("slib.hatching: {form} {repr} has no hash or URL to look up.", form=$node.form(), repr=$node.repr())
+        return($lib.null)
+    }
+    $sid = $findSample($query)
+    if ($sid = $lib.null) {
+        $lib.warn("slib.hatching: Hatching Triage has no reported sample for {repr}.", repr=$node.repr())
+        return($lib.null)
+    }
+    return($model($sid, tasks=$tasks))
+}
+
+// Save a download result ({status, mesg, data: {sha256, size}}) as a file:bytes node. Returns it, or null.
+function _saved(retn, what, name=$lib.null) {
+    if $util.failed($retn, `Downloading {$what}`) { return($lib.null) }
+    $info = $retn.data
+    $lib.print("slib.hatching: Saved {what} ({size} bytes, {sha}) to the Axon.", what=$what, size=$info.size,
+               sha=$info.sha256)
+    return($hmodel.axonFile($info.sha256, size=$info.size, name=$name))
+}
+
+// Download a sample's file into the Axon. Returns the file:bytes node, or null.
+function downloadSample(sample) {
+    $retn = $priv.sample($sample)
+    if $util.failed($retn, `Getting sample {$sample}`) { return($lib.null) }
+    if ($retn.data.kind = "url") {
+        $lib.warn("slib.hatching: Sample {id} is a URL, there is no file to download.", id=$retn.data.id)
+        return($lib.null)
+    }
+    return($_saved($priv.downloadSample($retn.data.id), `sample {$retn.data.id}`, name=$retn.data.filename))
+}
+
+// Download a file from one of a sample's tasks (ex. dump.pcap) into the Axon.
+function downloadTaskFile(sample, task, name) {
+    return($_saved($priv.downloadTaskFile($sample, $task, $name), `{$sample}/{$task}/{$name}`,
+                   name=$util.basename($name)))
+}
+
+// Download an archive (tar or zip) of a sample's reports and files into the Axon.
+function downloadArchive(sample, fmt=tar) {
+    return($_saved($priv.downloadArchive($sample, fmt=$fmt), `the {$fmt} archive of {$sample}`,
+                   name=`{$sample}.{$fmt}`))
+}
+
+// Download the network captures of a sample's behavioral tasks (or one task). Returns a list of nodes.
+function downloadPcaps(sample, task=$lib.null, pcapng=(false)) {
+    if $pcapng { $name = "dump.pcapng" } else { $name = "dump.pcap" }
+    if $task { $tasks = ($task,) }
+    else {
+        $retn = $priv.sample($sample)
+        if $util.failed($retn, `Getting sample {$sample}`) { return(([])) }
+        $tasks = $util.behavioralTasks($retn.data)
+    }
+    $nodes = ([])
+    for $t in $tasks {
+        $n = $downloadTaskFile($sample, $t, $name)
+        if $n { $nodes.append($n) }
+    }
+    return($nodes)
+}
+
+// Download the files dropped during a sample's behavioral tasks. Returns a list of nodes.
+function downloadDumped(sample) {
+    $retn = $priv.dumpedFiles($sample)
+    if $util.failed($retn, `Listing the dropped files of {$sample}`) { return(([])) }
+    $nodes = ([])
+    for $item in $retn.data {
+        $dl = $priv.downloadTaskFile($sample, $item.task, $item.name)
+        $n = $_saved($dl, `{$sample}/{$item.task}/{$item.name}`, name=$util.basename($item.path))
+        if $n {
+            if ($dl.data.sha256 != $item.sha256) {
+                $lib.warn("slib.hatching: Downloaded {got} but expected {sha}.", got=$dl.data.sha256, sha=$item.sha256)
+            }
+            $nodes.append($n)
+        }
+    }
+    return($nodes)
+}
+
+// ---- Submissions (require slib.hatching.submit) ----
+
+// Handle a submission result: print the new sample, and with opts.wait, wait for it to be
+// reported and model it. Returns the sample's node when it was modeled, otherwise the sample's metadata.
+function _submitted(retn, what, opts) {
+    if $util.failed($retn, `Submitting {$what}`) { return($lib.null) }
+    $sample = $retn.data
+    $lib.print("slib.hatching: Submitted {what} as sample {id} ({status}).", what=$what, id=$sample.id,
+               status=$sample.status)
+    if (not $opts.wait) { return($sample) }
+    if $opts.interactive {
+        $lib.warn("slib.hatching: Not waiting on interactive sample {id}, pick its profiles with slib.hatching.sample.profile.",
+                  id=$sample.id)
+        return($sample)
+    }
+
+    $retn = $priv.wait($sample.id, timeout=$opts.wait)
+    if $util.failed($retn, `Waiting for sample {$sample.id}`) { return($sample) }
+    if ($retn.data.status != "reported") {
+        $lib.warn("slib.hatching: Sample {id} is still {status} after {secs}s, model it later with slib.hatching.enrich --sample {id}.",
+                  id=$sample.id, status=$retn.data.status, secs=$opts.wait)
+        return($retn.data)
+    }
+    return($model($sample.id, tasks=$opts.tasks))
+}
+
+// Submit a file:bytes (from the Axon) or inet:url node. opts are the slib.hatching.submit options.
+// Returns the modeled sample's node (with opts.wait), the sample's metadata, or null.
+function submitNode(node, opts) {
+    $psub = $lib.import(slib.hatching.priv.submit)
+    switch $node.form() {
+        "inet:url": { return($submitUrl($node.repr(), $opts)) }
+        "file:bytes": {
+            $sha256 = $node.props.sha256
+            if ($sha256 = $lib.null) {
+                $lib.warn("slib.hatching: {repr} has no SHA256, so it can't be read from the Axon.", repr=$node.repr())
+                return($lib.null)
+            }
+            $name = $opts.name
+            if (not $name) { $name = $node.props.name }
+            if (not $name) { $name = $sha256 }
+            return($_submitted($psub.submitFile($sha256, $node.props.size, $name, $opts), $sha256, $opts))
+        }
+    }
+    $lib.warn("slib.hatching: The node form {form} can't be submitted.", form=$node.form())
+    return($lib.null)
+}
+
+// Submit a URL to analyze (or, with opts.fetch, a URL the sandbox downloads a file from).
+function submitUrl(url, opts) {
+    $psub = $lib.import(slib.hatching.priv.submit)
+    return($_submitted($psub.submitUrl($url, $opts), $url, $opts))
+}

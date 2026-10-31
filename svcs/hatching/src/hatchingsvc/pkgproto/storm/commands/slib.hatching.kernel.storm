@@ -1,0 +1,9 @@
+init {
+    $priv = $lib.import(slib.hatching.priv.user)
+    $util = $lib.import(slib.hatching.util)
+
+    for $retn in $priv.kernelReport($cmdopts.sample, $cmdopts.task, log=$cmdopts.log, limit=$cmdopts.limit) {
+        if $util.failed($retn, `Reading the kernel log of {$cmdopts.sample}/{$cmdopts.task}`) { break }
+        $lib.print($lib.json.save($retn.data))
+    }
+}

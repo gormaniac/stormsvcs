@@ -1,0 +1,17 @@
+init {
+    $priv = $lib.import(slib.hatching.priv.user)
+    $util = $lib.import(slib.hatching.util)
+}
+
+spin |
+for $name in $cmdopts.name {
+    $retn = $priv.rule($name)
+    if (not $util.failed($retn, `Getting Yara rule {$name}`)) {
+        $rule = $retn.data
+        for $w in $rule.warnings { $lib.warn("slib.hatching.yara.get: {name}: {warning}", name=$name, warning=$w) }
+        if $cmdopts.yield {
+            [ it:app:yara:rule=({"name": $rule.name, "text": $rule.rule}) :name=$rule.name :text=$rule.rule ]
+        }
+        else { $lib.print($rule.rule) }
+    }
+}

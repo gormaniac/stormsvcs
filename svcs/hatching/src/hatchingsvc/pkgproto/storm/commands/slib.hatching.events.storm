@@ -1,0 +1,9 @@
+init {
+    $priv = $lib.import(slib.hatching.priv.user)
+    $util = $lib.import(slib.hatching.util)
+
+    for $retn in $priv.events(sample=$cmdopts.sample, limit=$cmdopts.limit, timeout=$cmdopts.timeout) {
+        if $util.failed($retn, "Reading sample events") { break }
+        $lib.print("slib.hatching.events: {id} {status}", id=$retn.data.id, status=$retn.data.status)
+    }
+}
