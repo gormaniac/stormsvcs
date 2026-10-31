@@ -1,6 +1,6 @@
 """Read packets from PCAP files and aggregate them into bidirectional network flows.
 
-This module is pure Python with no Synapse dependencies, so it can be used on its own.
+This module has no Synapse dependencies, so it can be used on its own.
 
 ``readPackets`` streams packets out of a pcap, pcapng, or gzip compressed capture file
 (every interface of a pcapng file keeps its own link type and timestamp resolution).
@@ -18,6 +18,8 @@ from collections.abc import Iterator
 from typing import Any, BinaryIO, NamedTuple
 
 import dpkt
+
+from . import enrich as p_enrich
 
 
 class PcapError(Exception):
@@ -40,6 +42,15 @@ class Packet(NamedTuple):
     """The link-layer header type (a LINKTYPE_* value) of the packet's interface."""
     data: bytes
     """The captured bytes, starting with the link-layer header."""
+    num: int = 0
+    """The packet's frame number, its position in the capture starting at 1 (like tshark's)."""
+
+
+def _frame(state: dict) -> int:
+    """Count a packet record in the capture and return its frame number."""
+
+    state["frames"] = state.get("frames", 0) + 1
+    return state["frames"]
 
 
 PCAP_MAGICS = {
@@ -184,7 +195,7 @@ def _readPcap(fd: BinaryIO, header: bytes, state: dict) -> Iterator[Packet]:
         data = _readExact(fd, caplen) if caplen else b""
         if data is None:
             raise EOFError("Truncated packet record")
-        yield Packet(sec * 1_000_000_000 + frac * nsunit, linktype, data)
+        yield Packet(sec * 1_000_000_000 + frac * nsunit, linktype, data, _frame(state))
 
 
 def _pcapngOptions(buf: bytes, endian: str) -> Iterator[tuple[int, bytes]]:
@@ -263,19 +274,21 @@ def _readPcapng(fd: BinaryIO, header: bytes, state: dict) -> Iterator[Packet]:
             else:
                 ifid, _, tshi, tslo, caplen = struct.unpack_from(endian + "HHIII", body, 0)
                 data = body[20:20 + caplen]
+            num = _frame(state)
             if ifid >= len(ifaces):
                 state["skipped"]["badiface"] = state["skipped"].get("badiface", 0) + 1
                 continue
             linktype, resol, offs = ifaces[ifid]
             lastts = tsToNs((tshi << 32) | tslo, resol) + offs
-            yield Packet(lastts, linktype, data)
+            yield Packet(lastts, linktype, data, num)
 
         elif blktype == 3:  # Simple Packet Block, always interface 0 and has no timestamp.
+            num = _frame(state)
             if not ifaces:
                 state["skipped"]["badiface"] = state["skipped"].get("badiface", 0) + 1
                 continue
             origlen = struct.unpack_from(endian + "I", body, 0)[0]
-            yield Packet(lastts, ifaces[0][0], body[4:4 + origlen])
+            yield Packet(lastts, ifaces[0][0], body[4:4 + origlen], num)
 
         # Every other block type (stats, name resolution, custom, etc.) is ignored.
 
@@ -437,7 +450,7 @@ class Flow:
     """A bidirectional network flow, the packets sent between a client and a server."""
 
     __slots__ = ("vers", "ipproto", "client", "server", "start", "last", "flags",
-                 "fins", "reset", "syn", "icmptypes", "index")
+                 "fins", "reset", "syn", "icmptypes", "index", "frames")
 
     def __init__(self, vers: int, ipproto: int, client: Side, server: Side, ts: int,
                  index: int) -> None:
@@ -453,6 +466,7 @@ class Flow:
         self.syn = False
         self.icmptypes: set[int] = set()
         self.index = index
+        self.frames: list[tuple[bool, dict]] = []
 
     @property
     def closed(self) -> bool:
@@ -566,12 +580,17 @@ class FlowTable:
         self.skipped: dict[str, int] = {}
         self.first: int | None = None
         self.last: int | None = None
+        self.fromClient = False
 
     def _skip(self, reason: str) -> None:
         self.skipped[reason] = self.skipped.get(reason, 0) + 1
 
-    def add(self, pkt: Packet) -> Flow | None:
-        """Add a captured packet to its flow, returning the flow (or None if it was skipped)."""
+    def add(self, pkt: Packet, rec: dict | None = None) -> Flow | None:
+        """Add a captured packet to its flow, returning the flow (or None if it was skipped).
+
+        ``rec`` is what tshark found in the packet (see ``pcapsvc.tshark``), it's kept with the
+        flow along with which side sent it, see ``Flow.frames``.
+        """
 
         self.packets += 1
         if self.first is None or pkt.ts < self.first:
@@ -592,7 +611,10 @@ class FlowTable:
             self._skip("nonip")
             return None
 
-        return self.addIp(pkt.ts, ip)
+        flow = self.addIp(pkt.ts, ip)
+        if flow is not None and rec is not None:
+            flow.frames.append((self.fromClient, rec))
+        return flow
 
     def addIp(self, ts: int, ip: dpkt.ip.IP | dpkt.ip6.IP6) -> Flow | None:
         """Add a decoded IP packet, captured at ts (nanoseconds), to its flow."""
@@ -653,6 +675,7 @@ class FlowTable:
             self.active[key] = flow
 
         side = flow.side(src, sport)
+        self.fromClient = side is flow.client
         side.pkts += 1
         side.bytes += wirelen
         side.payload += len(payload)
@@ -730,7 +753,8 @@ class FlowTable:
 
 
 def analyze(fd: BinaryIO, timeout: int = DEFAULT_TIMEOUT, limit: int = 0,
-            handshake: int = DEFAULT_HANDSHAKE, seed: Any = None) -> tuple[list[dict], dict]:
+            handshake: int = DEFAULT_HANDSHAKE, seed: Any = None, frames: dict | None = None,
+            files: p_enrich.FileStore | None = None) -> tuple[list[dict], dict]:
     """Read a capture file and return its flows (see ``Flow.asdict``) and a summary of it.
 
     Parameters
@@ -745,6 +769,11 @@ def analyze(fd: BinaryIO, timeout: int = DEFAULT_TIMEOUT, limit: int = 0,
         The max number of characters of each side's first text payload to include.
     seed : Any
         A value (ex. the capture's SHA-256) used to make flow idens unique to the capture.
+    frames : dict | None
+        What tshark found in the capture, by frame number (see ``pcapsvc.tshark``). The details
+        are added to the flows the frames belong to (see ``pcapsvc.enrich``).
+    files : FileStore | None
+        Where to write the files found in the flows, None to not extract files.
 
     Raises
     ------
@@ -752,10 +781,15 @@ def analyze(fd: BinaryIO, timeout: int = DEFAULT_TIMEOUT, limit: int = 0,
         If the file isn't a capture file this can read.
     """
 
+    frames = frames or {}
     state: dict = {}
     table = FlowTable(timeout=timeout, limit=limit)
+    matched = 0
     for pkt in readPackets(fd, state):
-        table.add(pkt)
+        rec = frames.get(pkt.num)
+        flow = table.add(pkt, rec)
+        if rec is not None and flow is not None:
+            matched += 1
 
     summary = table.summary()
     skipped = dict(state["skipped"])
@@ -770,7 +804,16 @@ def analyze(fd: BinaryIO, timeout: int = DEFAULT_TIMEOUT, limit: int = 0,
         "skipped": skipped,
         "truncated": state["truncated"],
         "error": state["error"],
+        "tshark": {"frames": len(frames), "matched": matched},
     })
 
-    flows = [flow.asdict(handshake=handshake, seed=seed) for flow in table.flows()]
+    flows = []
+    for flow in table.flows():
+        enricher = p_enrich.Enricher(files)
+        for client, rec in flow.frames:
+            enricher.add(client, rec)
+        flows.append(enricher.apply(flow.asdict(handshake=handshake, seed=seed)))
+
+    if files is not None:
+        summary["files"] = {"count": len(files.files), "skipped": files.skipped}
     return flows, summary

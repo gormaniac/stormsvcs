@@ -588,6 +588,7 @@ name = "pcapsvc"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "cryptography" },
     { name = "dpkt" },
     { name = "stormlibpp" },
 ]
@@ -601,6 +602,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "cryptography", specifier = ">=43.0.0" },
     { name = "dpkt", specifier = ">=1.9.8" },
     { name = "stormlibpp", specifier = ">=0.10.1" },
 ]

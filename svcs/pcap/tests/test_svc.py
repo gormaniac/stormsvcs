@@ -4,13 +4,16 @@
 import gzip
 import hashlib
 import pathlib
+import shutil
 import tomllib
+import unittest
 
 import synapse.tests.utils as s_tests
 import yaml
 
 import pcapsvc
 from pcapsvc import PcapSvc
+from pcapsvc import tshark as p_tshark
 from pcapsvc.defs import SVC_NAME
 
 from . import pcapgen as g
@@ -155,3 +158,81 @@ class TestPcapSvc(s_tests.SynTest):
                 retns = await collect(prox.flows(sha.hex()))
                 assert not retns[0]["status"]
                 assert "is not in the Axon" in retns[0]["mesg"]
+
+
+DATA = pathlib.Path(__file__).parent / "data"
+# A unittest skip, SynTest's async test wrappers drop pytest marks on methods.
+needsTshark = unittest.skipIf(shutil.which("tshark") is None, "tshark isn't installed")
+
+
+class TestPcapSvcTshark(s_tests.SynTest):
+
+    async def test_no_tshark(self):
+        async with self.getTestAxon() as axon:
+            _, sha = await axon.put(g.pcap(g.session()))
+            conf = {"axon:url": axon.getLocalUrl(), "tshark:path": "/nonexistent/tshark"}
+            async with self.getTestCoreProxSvc(PcapSvc, ssvc_conf=conf) as (_, _, svc):
+                prox = SvcProx(svc)
+                retns = await collect(prox.flows(sha.hex()))
+                summary = retns[0]["data"]["summary"]
+                assert summary["tshark"] == {"frames": 0, "matched": 0, "enabled": False,
+                                             "version": None, "error": "tshark is not installed"}
+                assert summary["files"] is None
+                # Flows still have every key, just empty.
+                assert retns[1]["data"]["flow"]["src"]["txfiles"] == ()
+
+                retns = await collect(prox.flows(sha.hex(), tshark=False))
+                assert retns[0]["data"]["summary"]["tshark"]["error"] is None
+
+    async def test_tshark_fails(self):
+        async with self.getTestAxon() as axon:
+            _, sha = await axon.put(g.pcap(g.session()))
+            conf = {"axon:url": axon.getLocalUrl()}
+            async with self.getTestCoreProxSvc(PcapSvc, ssvc_conf=conf) as (_, _, svc):
+                async def broken(path):
+                    raise p_tshark.TsharkError("boom")
+                svc.tshark.path = "/bin/true"
+                svc.tshark.frames = broken
+                retns = await collect(SvcProx(svc).flows(sha.hex()))
+                summary = retns[0]["data"]["summary"]
+                assert summary["tshark"]["enabled"] and summary["tshark"]["error"] == "boom"
+                assert summary["files"] is None
+                assert len(retns) == 5
+
+    @needsTshark
+    async def test_files(self):
+        async with self.getTestAxon() as axon:
+            _, sha = await axon.put((DATA / "http.pcapng").read_bytes())
+            conf = {"axon:url": axon.getLocalUrl()}
+            async with self.getTestCoreProxSvc(PcapSvc, ssvc_conf=conf) as (_, _, svc):
+                prox = SvcProx(svc)
+                download = hashlib.sha256(bytes(range(256)) * 64).digest()
+                assert not await axon.has(download)
+
+                retns = await collect(prox.flows(sha.hex(), files=False))
+                assert retns[0]["data"]["summary"]["files"] is None
+                assert not await axon.has(download)
+
+                retns = await collect(prox.flows(sha.hex()))
+                summary = retns[0]["data"]["summary"]
+                assert summary["tshark"]["enabled"] and summary["tshark"]["error"] is None
+                assert summary["tshark"]["version"].startswith("TShark")
+                assert summary["files"] == {"count": 3, "skipped": 0, "uploaded": 3}
+                assert await axon.has(download)
+                assert b"".join([b async for b in axon.get(download)]) == bytes(range(256)) * 64
+
+                # Files already in the Axon aren't uploaded again.
+                retns = await collect(prox.flows(sha.hex()))
+                assert retns[0]["data"]["summary"]["files"]["uploaded"] == 0
+
+                # Only the 6 byte response fits.
+                svc.conf["pcap:files:maxsize"] = 100
+                retns = await collect(prox.flows(sha.hex()))
+                assert retns[0]["data"]["summary"]["files"] == {"count": 1, "skipped": 2,
+                                                                "uploaded": 0}
+
+                svc.conf["tshark:enabled"] = False
+                retns = await collect(prox.flows(sha.hex()))
+                assert not retns[0]["data"]["summary"]["tshark"]["enabled"]
+                retns = await collect(prox.flows(sha.hex(), tshark=True))
+                assert retns[0]["data"]["summary"]["tshark"]["enabled"]

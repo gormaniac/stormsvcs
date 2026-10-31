@@ -18,4 +18,6 @@ jobs:
     uses: ./.github/workflows/_service.yml
     with:
       service: pcap
+      # The tshark tests are skipped without it.
+      apt-packages: tshark
     secrets: inherit

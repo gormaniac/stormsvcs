@@ -1,4 +1,5 @@
-// Model the flows the slib.pcap service finds (see pcapsvc.flows.Flow.asdict) in Synapse.
+// Model the flows the slib.pcap service finds (see pcapsvc.flows.Flow.asdict and
+// pcapsvc.enrich) in Synapse.
 //
 // Node edits here run as the calling user. Every flow is linked to the slib.pcap
 // meta:source node with a -(seen)> edge.
@@ -6,6 +7,46 @@
 init {
     $sourceGuid = "cae9b5f5923a48b9a1a691f851a77429"
 }
+
+// ---- Helpers ----
+//
+// NOTE: A for loop that runs while a node is in a function's pipeline sends the node
+// downstream after its first iteration, reaching return() and ending the function early.
+// So functions that loop never have a node in their pipeline, they call helpers that
+// yield and edit the node in their own runtime instead.
+
+function setProp(n, prop, valu) {
+    yield $n
+    [ :$prop ?= $valu ]
+    return($node)
+}
+
+// Add a value to an array prop, skipping values that don't norm.
+function addValu(n, prop, valu) {
+    yield $n
+    [ :$prop ?+= $valu ]
+    return($node)
+}
+
+function addValus(n, prop, valus) {
+    for $valu in $valus { $addValu($n, $prop, $valu) }
+    return($n)
+}
+
+function refs(n, other) {
+    yield $n
+    [ +(refs)> { yield $other } ]
+    return($node)
+}
+
+// Link a node to an inet:fqdn with a -(refs)> edge, skipping values that aren't FQDNs.
+function refsFqdn(n, fqdn) {
+    yield $n
+    [ +(refs)> { [ inet:fqdn ?= $fqdn ] } ]
+    return($node)
+}
+
+// ---- Nodes ----
 
 // The file:bytes node for a PCAP's SHA-256, created if needed.
 function fileNode(sha256) {
@@ -18,7 +59,76 @@ function fromGuid(sha256) {
     return($lib.guid(slib.pcap, pcap, $sha256))
 }
 
-// Set the props for one side (src or dst) of a flow.
+// A file the service extracted into the Axon (see pcapsvc.enrich.Enricher._file).
+function txFileNode(t) {
+    [ file:bytes=$t.sha256 :size=$t.size ]
+    if ($t.mime and not :mime) { [ :mime ?= $t.mime ] }
+    return($node)
+}
+
+// The file:attachment for a file sent in a flow, unique to the flow, side, file, and name.
+function attachmentNode(flowIden, side, t) {
+    $file = $txFileNode($t)
+    [ file:attachment=$lib.guid(slib.pcap, attachment, $flowIden, $side, $t.sha256, $t.name)
+        :file=$file
+        :name ?= $t.name
+        :text ?= $t.text
+    ]
+    return($node)
+}
+
+// A crypto:x509:cert from a TLS handshake (see pcapsvc.x509.parseCert), deconflicted by
+// SHA-256 like slib.crtsh models them.
+function certNode(c) {
+    [ crypto:x509:cert=({"sha256": $c.sha256}) ]
+    [
+        :sha1 = $c.sha1
+        :md5 = $c.md5
+        :file = `sha256:{$c.sha256}`
+    ]
+    if (not $c.error) {
+        [
+            :serial ?= $c.serial
+            :version ?= $c.version
+            :subject ?= $c.subject
+            :issuer ?= $c.issuer
+            :validity:notbefore ?= $c.notbefore
+            :validity:notafter ?= $c.notafter
+            :algo ?= $c.algo
+            :signature ?= $c.signature
+            :selfsigned = $c.selfsigned
+        ]
+        if $c.pubkey.rsa { [ :rsa:key ?= ($c.pubkey.rsa.mod, $c.pubkey.rsa.exp) ] }
+    }
+    return($node)
+}
+
+function cert(c) {
+    $n = $certNode($c)
+    if $c.error { return($n) }
+    $addValus($n, "ext:sans", $c.sans)
+    $addValus($n, "identities:fqdns", $c.identities.fqdns)
+    $addValus($n, "identities:emails", $c.identities.emails)
+    $addValus($n, "identities:ipv4s", $c.identities.ipv4s)
+    $addValus($n, "identities:ipv6s", $c.identities.ipv6s)
+    $addValus($n, "identities:urls", $c.identities.urls)
+    return($n)
+}
+
+// An SSH public key (see pcapsvc.enrich.sshKey), deconflicted by the SHA-256 of its blob.
+function sshKeyNode(k) {
+    [ crypto:key=({"public:sha256": $k.sha256})
+        :algorithm ?= $k.algo
+        :public ?= $k.blob
+        :public:sha1 ?= $k.sha1
+        :public:md5 ?= $k.md5
+    ]
+    return($node)
+}
+
+// ---- Flows ----
+
+// Set the packet level props for one side (src or dst) of a flow.
 function side(n, name, s, proto) {
     $txcount = `{$name}:txcount`
     $txbytes = `{$name}:txbytes`
@@ -38,12 +148,31 @@ function side(n, name, s, proto) {
     return($node)
 }
 
-// Create (or update) the inet:flow node for a flow and return it.
-//
-// f is a flow from the service, file is the PCAP's file:bytes node, and opts may have
-// a "tag" to add and a "host" (it:host) to set as the :capture:host.
-function flow(f, file, opts=$lib.null) {
-    if ($opts = $lib.null) { $opts = ({}) }
+// Model what tshark found for one side (src or dst) of a flow.
+function enrichSide(n, name, s) {
+    if $s."ssl:cert" {
+        $leaf = $cert($s."ssl:cert")
+        $setProp($n, `{$name}:ssl:cert`, $leaf.value())
+        // The rest of the chain the side sent.
+        for $c in $s."ssl:certs" { $refs($n, $cert($c)) }
+    }
+    if $s."ssh:key" {
+        $setProp($n, `{$name}:ssh:key`, $sshKeyNode($s."ssh:key").value())
+    }
+    if $s."rdp:hostname" { $setProp($n, `{$name}:rdp:hostname`, $s."rdp:hostname") }
+    if $s."rdp:keyboard:layout" {
+        $setProp($n, `{$name}:rdp:keyboard:layout`, $s."rdp:keyboard:layout")
+    }
+    $addValus($n, `{$name}:softnames`, $s.softnames)
+    $addValus($n, `{$name}:cpes`, $s.cpes)
+    for $t in $s.txfiles {
+        $addValu($n, `{$name}:txfiles`, $attachmentNode($n.value(), $name, $t).value())
+    }
+    return($n)
+}
+
+// The inet:flow node with its packet level props.
+function flowNode(f, file, opts) {
     $sha256 = $file.props.sha256
     [ inet:flow=$f.iden
         :time=$f.time
@@ -63,6 +192,24 @@ function flow(f, file, opts=$lib.null) {
     if $f.src.addr { [ :src=$f.src.addr ] }
     if $f.dst.addr { [ :dst=$f.dst.addr ] }
     if $opts.host { [ :capture:host=$opts.host ] }
+    if $opts.sandbox { [ :sandbox:file=$opts.sandbox ] }
     if $opts.tag { [ +#$opts.tag ] }
     return($node)
+}
+
+// Create (or update) the inet:flow node for a flow, with everything tshark found, and return it.
+//
+// f is a flow from the service, file is the PCAP's file:bytes node, and opts may have a "tag"
+// to add, a "host" (it:host) to set as the :capture:host, and a "sandbox" (file:bytes) to set
+// as the :sandbox:file.
+function flow(f, file, opts=$lib.null) {
+    if ($opts = $lib.null) { $opts = ({}) }
+    $n = $flowNode($f, $file, $opts)
+    $enrichSide($n, src, $f.src)
+    $enrichSide($n, dst, $f.dst)
+    if $f.tls {
+        // The server names clients asked for.
+        for $sni in $f.tls.sni { $refsFqdn($n, $sni) }
+    }
+    return($n)
 }

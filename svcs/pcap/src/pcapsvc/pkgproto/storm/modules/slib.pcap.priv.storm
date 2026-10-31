@@ -5,8 +5,10 @@ init {
     $svc = $lib.service.get("slib.pcap")
 }
 
-function flows(sha256, timeout=$lib.null, limit=$lib.null, handshake=$lib.null) {
-    for $retn in $svc.flows($sha256, timeout=$timeout, limit=$limit, handshake=$handshake) {
+function flows(sha256, timeout=$lib.null, limit=$lib.null, handshake=$lib.null, tshark=$lib.null,
+               files=$lib.null) {
+    for $retn in $svc.flows($sha256, timeout=$timeout, limit=$limit, handshake=$handshake,
+                            tshark=$tshark, files=$files) {
         emit $retn
     }
 }

@@ -20,9 +20,10 @@ class PcapCellApi(s_cell.CellApi, s_stormsvc.StormSvc):
     _storm_svc_pkgs = PKGDEFS
 
     async def flows(self, sha256: str, timeout: int | None = None, limit: int | None = None,
-                    handshake: int | None = None) -> AsyncIterator[TelepathRetn]:
+                    handshake: int | None = None, tshark: bool | None = None,
+                    files: bool | None = None) -> AsyncIterator[TelepathRetn]:
         """Yield the flows in a capture file in the Axon, see ``PcapSvc.flows``."""
 
         async for retn in self.cell.flows(sha256, timeout=timeout, limit=limit,
-                                          handshake=handshake):
+                                          handshake=handshake, tshark=tshark, files=files):
             yield retn

@@ -11,7 +11,7 @@ author:
   url: https://github.com/gormaniac
   name: John Gorman
 
-desc: A Storm Service that reads PCAP files from an Axon and models their network flows as inet:flow nodes.
+desc: A Storm Service that reads PCAP files from an Axon and models their network flows as inet:flow nodes, with application layer details (certificates, SSH keys, software, transferred files) from tshark.
 
 docs:
   - title: README
@@ -51,6 +51,12 @@ commands:
       new TCP connection reuses its ports. Each flow is linked to its PCAP's file:bytes with
       a -(refs)> edge and shares an inet:flow:from with every other flow from that PCAP.
 
+      When the service has tshark, flows also get the TLS certificates (:src/:dst:ssl:cert),
+      SSH host keys (:dst:ssh:key), RDP client details (:src:rdp:*), software names and CPEs
+      (:src/:dst:softnames/cpes), and files sent (:src/:dst:txfiles, extracted into the
+      Axon from HTTP, FTP, and email) they carry. Flows link to the TLS server names (SNI)
+      clients asked for with -(refs)> edges.
+
       Examples:
 
         file:bytes:mime=application/vnd.tcpdump.pcap | slib.pcap.flows
@@ -83,6 +89,18 @@ commands:
         - type: str
           default: null
           help: The it:host that captured the traffic, set as each flow's :capture:host.
+      - - --sandbox-file
+        - type: str
+          default: null
+          help: The file:bytes a sandbox ran to make the PCAP, set as each flow's :sandbox:file.
+      - - --no-tshark
+        - default: false
+          action: store_true
+          help: Skip tshark, only model packet level details.
+      - - --no-files
+        - default: false
+          action: store_true
+          help: Don't extract the files sent in flows into the Axon.
       - - --yield
         - default: false
           action: store_true
