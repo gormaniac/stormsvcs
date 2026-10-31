@@ -121,6 +121,18 @@ class TestShodanStormHost(s_tests.SynTest):
             assert fake.last()["query"]["history"] == "true"
             assert fake.last()["query"]["minify"] == "true"
 
+    async def test_host_unsupported_node(self):
+        # An unsupported inbound node only warns: it isn't sent to Shodan and doesn't stop the others.
+        async with shodanSvc(self) as (core, svc, fake):
+            await core.nodes("[ inet:ipv4=8.8.8.8 inet:fqdn=vertex.link ]")
+            msgs = await core.stormlist("inet:fqdn=vertex.link inet:ipv4=8.8.8.8 | slib.shodan.host --yield")
+            self.stormHasNoErr(msgs)
+            self.stormIsInWarn("inet:fqdn is not supported", msgs)
+            paths = [r["path"] for r in fake.requests]
+            assert "/api/shodan/host/vertex.link" not in paths
+            assert "/api/shodan/host/8.8.8.8" in paths
+            assert [m[1][0][0] for m in msgs if m[0] == "node"] == ["inet:ipv4"]
+
     async def test_host_errors(self):
         async with shodanSvc(self) as (core, svc, fake):
             msgs = await core.stormlist("slib.shodan.host --ip 10.0.0.1 --yield")
@@ -230,6 +242,23 @@ class TestShodanStormDns(s_tests.SynTest):
             # Inbound nodes pass through without --yield.
             msgs = await core.stormlist("inet:fqdn=vertex.link | slib.shodan.dns.domain")
             assert [m[1][0] for m in msgs if m[0] == "node"] == [("inet:fqdn", "vertex.link")]
+
+    async def test_dns_domain_unsupported_node(self):
+        # An unsupported inbound node only warns: it isn't sent to Shodan and doesn't stop the others.
+        async with shodanSvc(self) as (core, svc, fake):
+            await core.nodes("[ inet:ipv4=8.8.8.8 inet:fqdn=vertex.link ]")
+            msgs = await core.stormlist("inet:ipv4=8.8.8.8 inet:fqdn=vertex.link | slib.shodan.dns.domain --yield")
+            self.stormHasNoErr(msgs)
+            self.stormIsInWarn("inet:ipv4 is not supported", msgs)
+            paths = [r["path"] for r in fake.requests]
+            assert not [p for p in paths if "8.8.8.8" in p]
+            assert "/api/dns/domain/vertex.link" in paths
+            assert {m[1][0][1] for m in msgs if m[0] == "node"} == {"www.vertex.link", "api.vertex.link"}
+
+            # Without --yield, the unsupported node still passes through.
+            msgs = await core.stormlist("inet:ipv4=8.8.8.8 | slib.shodan.dns.domain")
+            self.stormHasNoErr(msgs)
+            assert [m[1][0] for m in msgs if m[0] == "node"] == [("inet:ipv4", 134744072)]
 
     async def test_dns_lookup(self):
         async with shodanSvc(self) as (core, svc, fake):
@@ -342,6 +371,7 @@ class TestShodanStormVulns(s_tests.SynTest):
             """)
             self.stormHasNoErr(msgs)
             self.stormIsInWarn("inet:email is not supported", msgs)
+            assert not [r for r in fake.requests if "visi@vertex.link" in r["path"]]
             forms = {m[1][0][0] for m in msgs if m[0] == "node"}
             assert forms == {"inet:ipv4", "inet:fqdn", "risk:vuln"}
             assert len(await core.nodes("inet:ipv4=8.8.8.8 -> inet:server")) == 2
