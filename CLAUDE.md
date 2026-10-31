@@ -10,8 +10,8 @@ Every change to a service under `svcs/` must bump that service's version, in the
 - **Minor** (`0.1.0` → `0.2.0`): most other changes, ex. new commands, options, or features.
 - **Major** (`0.1.0` → `1.0.0`): major overhauls of the API, breaking changes, or when the maintainer asks for one.
 
-The version lives in several places per service, and they must all match (only shodan's tests
-check this so far, see `test_versions_match`):
+The version lives in several places per service, and they must all match (each service's
+`test_versions_match` checks the first three):
 
 - `svcs/<svc>/pyproject.toml` - `version`
 - `svcs/<svc>/src/<pkg>/__init__.py` - `__version__`
