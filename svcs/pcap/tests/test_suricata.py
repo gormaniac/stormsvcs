@@ -106,6 +106,18 @@ def test_bad_base(tmp_path):
         suri.config(str(tmp_path))
 
 
+def test_from_client():
+    from pcapsvc import eve as p_eve
+
+    # Suricata writes IPv6 addresses fully expanded.
+    flow = {"src": {"ip": "2001:db8::1", "port": 50000}}
+    ev = {"src_ip": "2001:0db8:0000:0000:0000:0000:0000:0001", "src_port": 50000}
+    assert p_eve.fromClient(flow, ev)
+    assert not p_eve.fromClient(flow, {**ev, "src_port": 80})
+    assert not p_eve.fromClient(flow, {"src_ip": "nope", "src_port": 50000})
+    assert p_eve.fromClient({"src": {"ip": "10.0.0.1", "port": None}}, {"src_ip": "10.0.0.1"})
+
+
 def test_iter_eve(tmp_path):
     path = tmp_path / "eve.json"
     path.write_text('{"event_type": "flow"}\n\nnot json\n{"event_type": "dns"}\n')

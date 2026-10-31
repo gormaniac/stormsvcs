@@ -37,7 +37,10 @@ function _upload(sha256, kind) {
         $byts = $lib.axon.read($sha256, offs=$offs, size=$chunk)
         if (not $byts) { break }
         $retn = $svc.uploadChunk($iden, $byts)
-        if (not $retn.status) { return($retn) }
+        if (not $retn.status) {
+            $svc.uploadCancel($iden)
+            return($retn)
+        }
         $offs = ($offs + $lib.len($byts))
         if ($lib.len($byts) < $chunk) { break }
     }
@@ -69,6 +72,7 @@ function flows(sha256, opts) {
             $retn = $_upload($keylog, keylog)
             if (not $retn.status) {
                 $svc.uploadCancel($upload)
+                for $kiden in $keyuploads { $svc.uploadCancel($kiden) }
                 emit $retn
                 stop
             }

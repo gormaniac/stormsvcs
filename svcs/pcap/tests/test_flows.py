@@ -527,3 +527,28 @@ class TestIdentity:
         assert http["iden"] == s_common.guid((
             "slib.pcap.flow", p_flows.FLOW_IDEN_VERSION, "abc", 6, "10.0.0.1", 50000,
             "93.184.216.34", 80, [], g.BASE * 1_000_000_000))
+
+
+class TestOwnEvents:
+    def test_misplaced(self):
+        # Suricata events logged on another flow's packet are re-matched by Community ID.
+        mine, other = "1:mine", "1:other"
+        rec = {
+            "_eve": [{"community_id": mine, "event_type": "dns"},
+                     {"community_id": other, "event_type": "fileinfo",
+                      "timestamp": "2024-01-01T00:00:00.000000+0000"},
+                     {"event_type": "stats"}],
+            "_alerts": [("suricata", {"community_id": other}), ("snort", {"gid": 1})],
+            "http.host": ["x"],
+        }
+        misplaced = []
+        kept = p_flows._ownEvents(rec, mine, misplaced)
+        assert [e["event_type"] for e in kept["_eve"]] == ["dns", "stats"]
+        assert kept["_alerts"] == [("snort", {"gid": 1})]
+        assert kept["http.host"] == ["x"]
+        assert [(m[0], m[2]) for m in misplaced] == [(other, "eve"), (other, "suricata")]
+        assert misplaced[0][1] == 1704067200000
+        # The original record isn't changed, and records with only their own events are kept.
+        assert len(rec["_eve"]) == 3
+        assert p_flows._ownEvents(kept, mine, []) is kept
+

@@ -10,7 +10,7 @@ init {
         $opts.$name = $lib.null
         if $off { $opts.$name = (false) }
     }
-    $yieldit = ($cmdopts.yield or $cmdopts.hits)
+    $yieldit = $cmdopts.yield
 }
 
 if $cmdopts.sha256s {

@@ -20,6 +20,7 @@ import synapse.common as s_common
 
 from . import communityid as p_communityid
 from . import enrich as p_enrich
+from . import eve as p_eve
 
 
 class PcapError(Exception):
@@ -864,6 +865,36 @@ class FlowTable:
         }
 
 
+def _ownEvents(rec: dict, cid: str, misplaced: list) -> dict:
+    """A frame's record without the Suricata events (and alerts) of another flow (by Community
+    ID), which are added to ``misplaced`` as ``matchLoose`` records."""
+
+    evs = rec.get("_eve") or ()
+    alerts = rec.get("_alerts") or ()
+    if not any(e.get("community_id") not in (None, cid) for e in evs) and not any(
+        engine == "suricata" and a.get("community_id") not in (None, cid) for engine, a in alerts
+    ):
+        return rec
+
+    rec = dict(rec)
+    keep = []
+    for ev in evs:
+        if ev.get("community_id") in (None, cid):
+            keep.append(ev)
+        else:
+            misplaced.append((ev["community_id"], p_eve.eveTime(ev.get("timestamp")), "eve", ev))
+    rec["_eve"] = keep
+    keepalerts = []
+    for engine, alert in alerts:
+        if engine != "suricata" or alert.get("community_id") in (None, cid):
+            keepalerts.append((engine, alert))
+        else:
+            tick = p_eve.alertTime(engine, alert)
+            misplaced.append((alert["community_id"], tick, engine, alert))
+    rec["_alerts"] = keepalerts
+    return rec
+
+
 def matchLoose(
     flows: list[dict], loose: list[tuple[str, int | None, str, Any]]
 ) -> tuple[dict[str, list[tuple[str, Any]]], int]:
@@ -993,7 +1024,17 @@ def analyze(
 
     counts: dict[str, dict[str, int]] = {}
     base = [(flow, flow.asdict(handshake=handshake, seed=seed)) for flow in table.flows()]
-    extra, unmatched = matchLoose([d for _, d in base], loose or [])
+
+    # Suricata logs some events on a later packet (ex. when a flow times out), which can be
+    # another flow's. Those are matched like the events without a packet.
+    owned: dict[str, list[tuple[bool, dict]]] = {}
+    misplaced: list = []
+    for flow, fdict in base:
+        owned[fdict["iden"]] = [
+            (client, _ownEvents(rec, fdict["community_id"], misplaced))
+            for client, rec in flow.frames
+        ]
+    extra, unmatched = matchLoose([d for _, d in base], [*(loose or []), *misplaced])
 
     flows = []
     unsavedcount = 0
@@ -1001,7 +1042,7 @@ def analyze(
         enricher = p_enrich.Enricher(
             files, unsaved=unsaved, rules=rules, counts=counts, filestore=filestore
         )
-        for client, rec in flow.frames:
+        for client, rec in owned[fdict["iden"]]:
             enricher.add(client, rec)
         for kind, rec in extra.get(fdict["iden"], ()):
             if kind == "eve":

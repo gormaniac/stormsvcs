@@ -11,6 +11,7 @@ server's, an HTTP ``User-Agent`` the client's), not by the packet that triggered
 
 import base64
 import datetime
+import ipaddress
 import logging
 import os
 from typing import Any
@@ -46,10 +47,22 @@ def _append(lst: list, valu: Any) -> None:
         lst.append(valu)
 
 
+def normIp(valu: Any) -> str | None:
+    """An IP address in its canonical form, Suricata writes IPv6 addresses fully expanded."""
+
+    try:
+        return str(ipaddress.ip_address(str(valu)))
+    except ValueError:
+        return None
+
+
 def fromClient(flow: dict, ev: dict) -> bool:
     """Whether an EVE event's source (``src_ip``/``src_port``) is the flow's client."""
 
-    return (ev.get("src_ip"), ev.get("src_port")) == (flow["src"]["ip"], flow["src"]["port"])
+    return (normIp(ev.get("src_ip")), ev.get("src_port")) == (
+        flow["src"]["ip"],
+        flow["src"]["port"],
+    )
 
 
 def keyboardLayout(valu: str | None) -> str | None:

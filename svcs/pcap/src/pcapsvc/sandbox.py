@@ -226,6 +226,10 @@ class Sandbox:
         if ids is None:
             return
         uid, gid = ids
+        # Search permission lets the engine's user open any file it can name in a directory, so
+        # it's only given where Landlock limits what engines can read anyway. Without Landlock a
+        # directory like the cell's (cell.yaml has secrets) stays closed to it.
+        confined = bool(self.probe()["landlock"])
         for path in paths:
             path = os.path.abspath(path)
             parent = path if os.path.isdir(path) else os.path.dirname(path)
@@ -241,12 +245,17 @@ class Sandbox:
                 else:
                     need = stat.S_IXOTH
                 if not info.st_mode & need:
-                    if info.st_uid != os.geteuid():
+                    if info.st_uid != os.geteuid() or not confined:
+                        why = "the service doesn't own it"
+                        if info.st_uid == os.geteuid():
+                            why = "the host doesn't support Landlock"
                         logger.warning(
-                            "The sandbox user %s can't get to %s, and the service "
-                            "doesn't own it to fix that.",
+                            "The sandbox user %s can't get to %s, and it isn't opened up "
+                            "because %s. Make it (and the directories above it) searchable "
+                            "by the user.",
                             self.user,
                             parent,
+                            why,
                         )
                         break
                     os.chmod(parent, stat.S_IMODE(info.st_mode) | need)

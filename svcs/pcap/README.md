@@ -86,7 +86,11 @@ of one is sandboxed:
   **capped output**.
 
 Landlock and seccomp are features of the host's kernel (Landlock needs Linux 5.13 or later), not
-the image. `sandbox:mode` `best-effort` (the default) applies every layer the host supports,
+the image. With Landlock the service gives the engine's user search permission on the
+directories above an engine's files (ex. a 0700 storage directory) when it needs it. Without
+Landlock it doesn't, since that would let a compromised engine open any file it can name in
+them, like `cell.yaml`: keep the storage directory's files that hold secrets `0600`, and make
+the directories searchable yourself if the engines can't get to their files. `sandbox:mode` `best-effort` (the default) applies every layer the host supports,
 `strict` refuses to run engines without all of them, and `off` runs them directly.
 `slib.pcap.status` shows what the host supports.
 
@@ -100,6 +104,7 @@ the image. `sandbox:mode` `best-effort` (the default) applies every layer the ho
 | `pcap:handshake` | `1024` | The default max characters kept from each side's first text payload, `0` for none. |
 | `pcap:maxsize` | `1073741824` | The max capture size in bytes (1 GiB), `0` for no limit. |
 | `pcap:workers` | `2` | The max number of captures analyzed at once. |
+| `pcap:uploads` | `16` | The max number of captures and key logs streamed to the service at once (without an Axon). |
 | `pcap:files` | `true` | Extract the files sent in flows by default. |
 | `pcap:files:maxsize` | `67108864` | The largest file extracted from a flow (64 MiB), `0` for no limit. |
 | `pcap:files:limit` | `10000` | The max number of files extracted from one capture, `0` for no limit. |
@@ -168,7 +173,7 @@ file:bytes=sha256:<sha256> -(refs)> (it:app:snort:hit, it:app:suricata:matched)
 | `--no-suricata`, `--no-snort`, `--no-tshark` | | Skip an engine. |
 | `--no-rules` | | Don't match the capture against the rules (Suricata still parses protocols). |
 | `--no-files` | | Don't extract the files sent in flows. |
-| `--hits` | | Yield (with `--yield`) the rule matches instead of the flows. |
+| `--hits` | | With `--yield`, yield the rule matches instead of the flows. |
 | `--yield` | | Yield the `inet:flow` nodes (or the matches) instead of the inbound nodes. |
 
 The command prints how many flows and rule matches were modeled, and warns if the capture was

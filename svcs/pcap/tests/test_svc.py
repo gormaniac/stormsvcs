@@ -257,6 +257,17 @@ class TestPcapSvcUploads(s_tests.SynTest):
             files = retns[0]["data"]["summary"]["files"]
             assert files["count"] == 0 and "unsaved" in files
 
+            # Only so many uploads at once.
+            svc.conf["pcap:uploads"] = 2
+            first = await prox.upload(b"a")
+            await prox.upload(b"b")
+            retn = await prox.call("uploadStart")
+            assert not retn["status"] and "pcap:uploads" in retn["mesg"]
+            await prox.call("uploadCancel", first)
+            assert (await prox.call("uploadStart"))["status"]
+            svc._pruneUploads(idle=-1)
+            svc.conf["pcap:uploads"] = 16
+
             # Unknown options are refused.
             retns = await collect(prox.flows(sha, nope=1))
             assert retns == [{"status": False, "mesg": "Unknown options: nope", "data": None}]

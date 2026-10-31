@@ -1,5 +1,5 @@
 name: slib.pcap
-version: 0.4.1
+version: 0.4.2
 guid: e02a89d21d5b4eb588a03a7156b3b467
 
 synapse_minversion: [2, 234, 0]
@@ -155,7 +155,7 @@ commands:
       - - --hits
         - default: false
           action: store_true
-          help: Yield the rule matches (it:app:snort:hit and it:app:suricata:matched) instead of the inbound nodes.
+          help: With --yield, yield the rule matches (it:app:snort:hit and it:app:suricata:matched) instead of the flows.
     cmdinputs:
       - form: file:bytes
         help: PCAP files to analyze, by :sha256.

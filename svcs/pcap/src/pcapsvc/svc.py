@@ -177,6 +177,15 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
             "minimum": 1,
             "description": "The max number of captures analyzed at once.",
         },
+        "pcap:uploads": {
+            "type": "integer",
+            "default": 16,
+            "minimum": 1,
+            "description": (
+                "The max number of captures and key logs being streamed to the service at once "
+                "(without an Axon), each up to its max size."
+            ),
+        },
         "pcap:files": {
             "type": "boolean",
             "default": True,
@@ -489,6 +498,12 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
         if kind not in UPLOAD_KINDS:
             raise PcapSvcError(
                 f"Invalid upload kind {kind!r}, use one of: {', '.join(UPLOAD_KINDS)}"
+            )
+        self._pruneUploads()
+        if len(self.uploads) >= self.conf.get("pcap:uploads"):
+            raise PcapSvcError(
+                f"The service already has {len(self.uploads)} uploads (pcap:uploads), "
+                "try again once they're analyzed."
             )
         iden = s_common.guid()
         path = os.path.join(self.tmpdir, f"upload-{iden}")
@@ -923,7 +938,10 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
             # Files are saved to the Axon, without one they're only counted.
             saving = opts["files"] and axon is not None
             res = await self._engines(tmp, path, plain, keylog, decode, opts, saving)
-            loose, index = self._correlate(res["frames"], res["suricata"], res["snort"])
+            # Reading the engines' output (EVE can be hundreds of MB) is done in a thread.
+            loose, index = await s_coro.executor(
+                self._correlate, res["frames"], res["suricata"], res["snort"]
+            )
 
             store = None
             if saving:
