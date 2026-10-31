@@ -46,7 +46,6 @@ class TestIpApiSvcQueue(s_tests.SynTest):
     async def test_fifo_order(self):
         with self.getTestDir() as dirn:
             async with await IpApiSvc.anit(dirn) as svc:
-
                 seen = []
 
                 async def fake_query(ipaddr):
@@ -72,7 +71,6 @@ class TestIpApiSvcQueue(s_tests.SynTest):
     async def test_preemptive_throttle_on_zero_remaining(self):
         with self.getTestDir() as dirn:
             async with await IpApiSvc.anit(dirn) as svc:
-
                 call_times = []
 
                 async def fake_query(ipaddr):
@@ -97,7 +95,6 @@ class TestIpApiSvcQueue(s_tests.SynTest):
     async def test_429_retry(self):
         with self.getTestDir() as dirn:
             async with await IpApiSvc.anit(dirn) as svc:
-
                 calls = []
 
                 async def fake_query(ipaddr):
@@ -115,7 +112,6 @@ class TestIpApiSvcQueue(s_tests.SynTest):
     async def test_multiple_429_retries(self):
         with self.getTestDir() as dirn:
             async with await IpApiSvc.anit(dirn) as svc:
-
                 calls = []
 
                 async def fake_query(ipaddr):
@@ -133,7 +129,6 @@ class TestIpApiSvcQueue(s_tests.SynTest):
     async def test_checkratelimit_ignores_non_numeric_header(self):
         with self.getTestDir() as dirn:
             async with await IpApiSvc.anit(dirn) as svc:
-
                 slept = []
                 with mock.patch.object(svc, "_sleepTtl", mock.AsyncMock(side_effect=slept.append)):
                     await svc._checkRateLimit({"X-Rl": "not-a-number", "X-Ttl": "5"})
@@ -178,6 +173,31 @@ class TestIpApiSvcQueryHttp(s_tests.SynTest):
 
                 assert headers["X-Rl"] == "44"
                 assert headers["X-Ttl"] == "60"
+
+    async def test_query_success_without_as_field(self):
+        """A success body missing the "as" field entirely must not KeyError -
+        it falls back to "", ip-api.com's own value for IPs with no ASN."""
+
+        with self.getTestDir() as dirn:
+            async with await IpApiSvc.anit(dirn) as svc:
+                with vcr.use_cassette(str(CASSETTE_DIR / "ipapi_query_success_noas.yaml")):
+                    data, headers = await svc._query("192.0.2.1")
+
+                assert data["status"] == "success"
+                assert data["as_"] == ""
+
+    async def test_query_returns_failure_response(self):
+        """An HTTP 200 "fail" body has no "as" key - _query() must return it
+        intact (no KeyError) so _processQuery() can report the failure."""
+
+        with self.getTestDir() as dirn:
+            async with await IpApiSvc.anit(dirn) as svc:
+                with vcr.use_cassette(str(CASSETTE_DIR / "ipapi_query_fail.yaml")):
+                    data, headers = await svc._query("134744072")
+
+                assert data["status"] == "fail"
+                assert data["message"] == "invalid query"
+                assert "as_" not in data
 
     async def test_query_raises_on_429(self):
         with self.getTestDir() as dirn:

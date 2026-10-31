@@ -34,17 +34,27 @@ async def importNodes(test, query) -> tuple[dict, list]:
 
     async with abusechSvc(test) as (core, svc, fake):
         msgs = await core.stormlist(query)
-        bad = [m for m in msgs if m[0] == "err" or (m[0] == "warn" and "background" not in m[1]["mesg"]
-                                                     and "may take a while" not in m[1]["mesg"])]
+        bad = [
+            m
+            for m in msgs
+            if m[0] == "err"
+            or (
+                m[0] == "warn"
+                and "background" not in m[1]["mesg"]
+                and "may take a while" not in m[1]["mesg"]
+            )
+        ]
         return await dumpNodes(core), bad
 
 
 class TestBuilder(s_tests.SynTest):
-
     def test_model(self):
         model = bulk.buildModel()
         assert model.form("inet:url") is not None
-        assert model.prop("file:bytes:_tlsh") is not None and model.prop("file:bytes:_sha3_384") is not None
+        assert (
+            model.prop("file:bytes:_tlsh") is not None
+            and model.prop("file:bytes:_sha3_384") is not None
+        )
 
     def test_builder(self):
         builder = bulk.NodeBuilder(bulk.buildModel(), "rep.abusech")
@@ -74,7 +84,9 @@ class TestBuilder(s_tests.SynTest):
         # Without a tag prefix, nothing is tagged and families are keyed by name.
         builder = bulk.NodeBuilder(bulk.buildModel(), None)
         builder.tags(("inet:fqdn", "a.com"), "urlhaus", ["x"])
-        tool = builder.family("bazaar", "Emotet", "emotet", ["Heodo"], "win.emotet", "https://malpedia/x")
+        tool = builder.family(
+            "bazaar", "Emotet", "emotet", ["Heodo"], "win.emotet", "https://malpedia/x"
+        )
         nodes = dict(builder.finish())
         assert nodes[tool]["props"]["soft:names"] == ("emotet", "heodo")
         assert nodes[tool]["props"]["id"] == "win.emotet"
@@ -108,13 +120,17 @@ class TestBuilder(s_tests.SynTest):
     def test_time_pair(self):
         assert norm.timePair("2026-02-01", "2026-01-01") == ("2026-01-01", "2026-02-01")
         assert norm.timePair("2026-01-01", None) == ("2026-01-01", None)
-        assert norm.normUrl({"url": "http://a/", "dateadded": "2026-02-01", "last_online": "2026-01-01"})["added"] == "2026-01-01"
+        assert (
+            norm.normUrl(
+                {"url": "http://a/", "dateadded": "2026-02-01", "last_online": "2026-01-01"}
+            )["added"]
+            == "2026-01-01"
+        )
         c2 = norm.normC2("1.2.3.4", 443, first_seen="2026-02-01 10:00:00", last_online="2026-01-01")
         assert c2["first_seen"] < c2["last_online"]
 
 
 class TestBulkSvc(s_tests.SynTest):
-
     async def test_jobs(self):
         async with abusechSvc(self) as (core, svc, fake):
             assert ["threatfox", "full"] in await svc.bulkExports()
@@ -133,6 +149,7 @@ class TestBulkSvc(s_tests.SynTest):
                 await svc.bulkStage("nope", b"x")
 
             import hashlib
+
             jobid = await svc.bulkStart("bazaar", "recent", hashlib.sha256(byts).hexdigest())
             assert await svc.bulkStage(jobid, byts[:100]) == 100
             assert await svc.bulkStage(jobid, byts[100:]) == len(byts)
@@ -140,7 +157,12 @@ class TestBulkSvc(s_tests.SynTest):
             items = [i async for i in svc.bulkBuild(jobid, prefix="rep.abusech", batch=1)]
             assert items[0] == {"rows": 1, "nodes": items[0]["nodes"]}
             done = items[-1]
-            assert done["done"] and done["rows"] == 2 and done["skipped"] == 0 and done["builder"] == bulk.BUILDER_VERSION
+            assert (
+                done["done"]
+                and done["rows"] == 2
+                and done["skipped"] == 0
+                and done["builder"] == bulk.BUILDER_VERSION
+            )
             nodes = b"".join([b async for b in svc.bulkNodes(jobid, chunk=100)])
             assert len(nodes) == done["size"] and "sha256" not in done
             packed = [i for _, i in s_msgpack.Unpk().feed(nodes)]
@@ -179,28 +201,47 @@ class TestBulkSvc(s_tests.SynTest):
 
 
 class TestBulkStorm(s_tests.SynTest):
-
     async def test_parity(self):
         # Bulk imports create exactly the nodes the Storm model does, for every export record shape.
-        for plat, kind in (("bazaar", "recent"), ("urlhaus", "recent"), ("urlhaus", "payloads"),
-                           ("threatfox", "full")):
+        for plat, kind in (
+            ("bazaar", "recent"),
+            ("urlhaus", "recent"),
+            ("urlhaus", "payloads"),
+            ("threatfox", "full"),
+        ):
             storm, sbad = await importNodes(self, f"slib.abusech.{plat}.export {kind}")
             bulked, bbad = await importNodes(self, f"slib.abusech.{plat}.export {kind} --bulk")
             assert not sbad and not bbad, (plat, kind, sbad, bbad)
             assert len(storm) > 10, (plat, kind)
-            assert storm == bulked, (plat, kind, {k for k in set(storm) | set(bulked) if storm.get(k) != bulked.get(k)})
+            assert storm == bulked, (
+                plat,
+                kind,
+                {k for k in set(storm) | set(bulked) if storm.get(k) != bulked.get(k)},
+            )
 
     async def test_datasets(self):
         async with abusechSvc(self) as (core, svc, fake):
             msgs = await core.stormlist("slib.abusech.urlhaus.export recent --bulk")
-            self.stormIsInWarn("run them in the background, ex. background { slib.abusech.urlhaus.export recent --bulk }", msgs)
+            self.stormIsInWarn(
+                "run them in the background, ex. background { slib.abusech.urlhaus.export recent --bulk }",
+                msgs,
+            )
             self.stormIsInPrint("Ingested 5 nodes", msgs)
-            assert await core.count("inet:url=http://csv.example.com/x.exe +#rep.abusech.urlhaus.agenttesla") == 1
+            assert (
+                await core.count(
+                    "inet:url=http://csv.example.com/x.exe +#rep.abusech.urlhaus.agenttesla"
+                )
+                == 1
+            )
 
             sets = await core.callStorm("return($lib.globals.get(slib:abusech:datasets))")
             info = sets["urlhaus:recent"]
             assert info["size"] == len(fd.URLHAUS_CSV) and info["file"] == "urlhaus:recent"
-            assert info["nodes"]["count"] == 5 and info["nodes"]["rows"] == 1 and info["nodes"]["builder"] == 1
+            assert (
+                info["nodes"]["count"] == 5
+                and info["nodes"]["rows"] == 1
+                and info["nodes"]["builder"] == 1
+            )
             assert await core.axon.has(bytes.fromhex(info["sha256"]))
             assert await core.axon.has(bytes.fromhex(info["nodes"]["sha256"]))
             # The job is cleaned up.
@@ -209,7 +250,9 @@ class TestBulkStorm(s_tests.SynTest):
             # Recent exports can't be pulled again within an hour.
             pulls = len(fake.queries("urlhaus_export"))
             msgs = await core.stormlist("slib.abusech.urlhaus.export recent --bulk")
-            self.stormIsInWarn("rerun with --reuse to import that pull again, or --repull to pull a new one", msgs)
+            self.stormIsInWarn(
+                "rerun with --reuse to import that pull again, or --repull to pull a new one", msgs
+            )
             assert len(fake.queries("urlhaus_export")) == pulls
 
             # --reuse imports the last pull again, --repull pulls a new one.
@@ -223,7 +266,9 @@ class TestBulkStorm(s_tests.SynTest):
             # An hour later, recent exports are pulled again.
             sets = await core.callStorm("return($lib.globals.get(slib:abusech:datasets))")
             sets["urlhaus:recent"]["time"] -= 3600001
-            await core.callStorm("$lib.globals.set(slib:abusech:datasets, $s)", opts={"vars": {"s": sets}})
+            await core.callStorm(
+                "$lib.globals.set(slib:abusech:datasets, $s)", opts={"vars": {"s": sets}}
+            )
             msgs = await core.stormlist("slib.abusech.urlhaus.export recent --bulk")
             self.stormIsInPrint("Pulled the recent export", msgs)
             assert len(fake.queries("urlhaus_export")) == pulls + 2
@@ -270,7 +315,9 @@ class TestBulkStorm(s_tests.SynTest):
             # Reused full pulls more than a day old come with a warning.
             sets = await core.callStorm("return($lib.globals.get(slib:abusech:datasets))")
             sets["threatfox:full"]["time"] -= 3 * 86400000
-            await core.callStorm("$lib.globals.set(slib:abusech:datasets, $s)", opts={"vars": {"s": sets}})
+            await core.callStorm(
+                "$lib.globals.set(slib:abusech:datasets, $s)", opts={"vars": {"s": sets}}
+            )
             msgs = await core.stormlist("slib.abusech.threatfox.export full --bulk")
             self.stormIsInWarn("That pull is 3 days old", msgs)
             self.stormIsInPrint("Ingested", msgs)
@@ -295,7 +342,9 @@ class TestBulkStorm(s_tests.SynTest):
             assert not svc.bulkjobs
 
             await user.addRule((True, ("node",)))
-            msgs = await core.stormlist("slib.abusech.urlhaus.export recent --bulk --reuse", opts=opts)
+            msgs = await core.stormlist(
+                "slib.abusech.urlhaus.export recent --bulk --reuse", opts=opts
+            )
             self.stormIsInPrint("Ingested 5 nodes", msgs)
             # The datasets global is written for the user, who can't otherwise set globals.
             msgs = await core.stormlist("$lib.globals.set(x, y)", opts=opts)
@@ -303,7 +352,9 @@ class TestBulkStorm(s_tests.SynTest):
 
             # The bulk module only exposes run(), which does every step itself.
             for name in ("setDataset", "stage", "bulk"):
-                msgs = await core.stormlist(f"$lib.import(slib.abusech.priv.bulk).{name}()", opts=opts)
+                msgs = await core.stormlist(
+                    f"$lib.import(slib.abusech.priv.bulk).{name}()", opts=opts
+                )
                 assert [m for m in msgs if m[0] == "err"], name
             msgs = await core.stormlist("$lib.import(slib.abusech.bulk)", opts=opts)
             self.stormIsInErr("slib.abusech.bulk", msgs)

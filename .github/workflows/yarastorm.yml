@@ -8,6 +8,7 @@ on:
       - "svcs/yarastorm/**"
       - ".github/workflows/yarastorm.yml"
       - ".github/workflows/_service.yml"
+      - "pyproject.toml" # The root ruff config, used by the ruff steps in _service.yml
 
 permissions:
   contents: read

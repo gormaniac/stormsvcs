@@ -13,7 +13,6 @@ Queries that return certificates are wrapped to print a row count and the DER si
 instead of the DER itself.
 """
 
-
 import asyncio
 import re
 import sys
@@ -28,20 +27,36 @@ CRTSH = {
     "cacert": 4267304698,  # The certificate of CA 204411.
     "caname": "Sectigo Public Server Authentication CA OV R36",
     "samples": {
-        "dns": "www.comodo.com", "cn": "www.comodo.com", "org": "Sectigo Limited",
-        "ou": "Domain Control Validated", "email": "comodo.com", "ip": "8.8.8.8",
-        "uri": "comodo.com", "identity": "comodo.com", "subject": "O=Sectigo Limited",
+        "dns": "www.comodo.com",
+        "cn": "www.comodo.com",
+        "org": "Sectigo Limited",
+        "ou": "Domain Control Validated",
+        "email": "comodo.com",
+        "ip": "8.8.8.8",
+        "uri": "comodo.com",
+        "identity": "comodo.com",
+        "subject": "O=Sectigo Limited",
         "domain": "comodo.com",
     },
 }
 """The values queries are run with against crt.sh."""
 
 STUB = {
-    "certid": 10, "issuer": 2, "cacert": 2, "caname": "Issuing CA",
+    "certid": 10,
+    "issuer": 2,
+    "cacert": 2,
+    "caname": "Issuing CA",
     "samples": {
-        "dns": "www.vertex.link", "cn": "www.vertex.link", "org": "The Vertex Project",
-        "ou": "Engineering", "email": "vertex.link", "ip": "1.2.3.4", "uri": "vertex.link",
-        "identity": "vertex.link", "subject": "O=The Vertex Project", "domain": "vertex.link",
+        "dns": "www.vertex.link",
+        "cn": "www.vertex.link",
+        "org": "The Vertex Project",
+        "ou": "Engineering",
+        "email": "vertex.link",
+        "ip": "1.2.3.4",
+        "uri": "vertex.link",
+        "identity": "vertex.link",
+        "subject": "O=The Vertex Project",
+        "domain": "vertex.link",
     },
 }
 """The values queries are run with against the PostgreSQL stub of crt.sh (see tests.pgstub)."""
@@ -105,8 +120,10 @@ class Recorder(CrtshDb):
     async def fetch(self, sql: str, *args) -> list[dict]:
         sql = render(sql, args)
         if re.search(r"\bAS der\b", sql):
-            sql = (f"SELECT count(*) AS certs, sum(length(q.der)) AS der_bytes, "
-                   f"count(q.ctlog) AS with_ctlog, count(q.issuer_name) AS with_issuer FROM ({sql}) q")
+            sql = (
+                f"SELECT count(*) AS certs, sum(length(q.der)) AS der_bytes, "
+                f"count(q.ctlog) AS with_ctlog, count(q.issuer_name) AS with_issuer FROM ({sql}) q"
+            )
         self.queries.append((self.title, sql))
         return []
 
@@ -122,44 +139,77 @@ async def record(samples: dict, caname: str) -> Recorder:
     await q("Lookup by crt.sh ID", db.certs({"id": [IntVar("certid")]}, limit=1))
     for kind in ("sha256", "sha1", "ski", "spki", "spkisha1", "subjectsha1"):
         await q(f"Lookup by {kind}", db.certs({kind: [Var(kind)]}, limit=100))
-    await q("Lookup by serial (with and without the DER sign byte)",
-            db.certs({"serial": [Var("serial"), Var("serial00")]}, limit=100))
-    await q("Lookup by several kinds at once (crt.sh ID and SHA-256)",
-            db.certs({"id": [IntVar("certid")], "sha256": [Var("sha256")]}, limit=100))
+    await q(
+        "Lookup by serial (with and without the DER sign byte)",
+        db.certs({"serial": [Var("serial"), Var("serial00")]}, limit=100),
+    )
+    await q(
+        "Lookup by several kinds at once (crt.sh ID and SHA-256)",
+        db.certs({"id": [IntVar("certid")], "sha256": [Var("sha256")]}, limit=100),
+    )
 
     # Searches, one per field, using the same patterns the service builds.
     for field in NAME_TYPES:
         text, like = identityQuery(field, samples[field])
         valu = samples[field]
-        await q(f"Search --{field} {valu}",
-                db.certsByIdentity(text, like=like, nametypes=NAME_TYPES[field], limit=500))
+        await q(
+            f"Search --{field} {valu}",
+            db.certsByIdentity(text, like=like, nametypes=NAME_TYPES[field], limit=500),
+        )
 
     text, like = identityQuery("dns", samples["dns"], exact=True)
-    await q(f"Search --dns {samples['dns']} --exact",
-            db.certsByIdentity(text, like=like, nametypes=NAME_TYPES["dns"], limit=500))
+    await q(
+        f"Search --dns {samples['dns']} --exact",
+        db.certsByIdentity(text, like=like, nametypes=NAME_TYPES["dns"], limit=500),
+    )
     text, like = identityQuery("ip", "2606:4700:4700::1111")
-    await q("Search --ip 2606:4700:4700::1111",
-            db.certsByIdentity(text, like=like, nametypes=NAME_TYPES["ip"], limit=500))
-    await q(f"Search --identity {samples['identity']}",
-            db.certsByIdentity(samples["identity"], like=f"%{samples['identity']}%", limit=500))
+    await q(
+        "Search --ip 2606:4700:4700::1111",
+        db.certsByIdentity(text, like=like, nametypes=NAME_TYPES["ip"], limit=500),
+    )
+    await q(
+        f"Search --identity {samples['identity']}",
+        db.certsByIdentity(samples["identity"], like=f"%{samples['identity']}%", limit=500),
+    )
     text, _ = identityQuery("subject", samples["subject"])
-    await q(f"Search --subject '{samples['subject']}' (full text only)", db.certsByIdentity(text, limit=500))
+    await q(
+        f"Search --subject '{samples['subject']}' (full text only)",
+        db.certsByIdentity(text, limit=500),
+    )
 
     text, like = identityQuery("dns", samples["domain"])
-    await q(f"Search --dns {samples['domain']} --valid --since 2025-01-01 --until 2027-01-01 --caid",
-            db.certsByIdentity(text, like=like, nametypes=NAME_TYPES["dns"],
-                               caids=[IntVar("issuer")], valid=True, since=SINCE, until=UNTIL,
-                               limit=500))
-    await q(f"Search --dns {samples['domain']} --issuer '{caname}' (the CA name is a subquery)",
-            db.certsByIdentity(text, like=like, nametypes=NAME_TYPES["dns"], issuer=caname, limit=500))
+    await q(
+        f"Search --dns {samples['domain']} --valid --since 2025-01-01 --until 2027-01-01 --caid",
+        db.certsByIdentity(
+            text,
+            like=like,
+            nametypes=NAME_TYPES["dns"],
+            caids=[IntVar("issuer")],
+            valid=True,
+            since=SINCE,
+            until=UNTIL,
+            limit=500,
+        ),
+    )
+    await q(
+        f"Search --dns {samples['domain']} --issuer '{caname}' (the CA name is a subquery)",
+        db.certsByIdentity(text, like=like, nametypes=NAME_TYPES["dns"], issuer=caname, limit=500),
+    )
 
     # Issued certificates, every CA source is one query.
-    await q("Issued by a CA ID (ca --issued, search --caid)", db.certsByIssuer(caids=[IntVar("issuer")], limit=100))
-    await q("Issued by a CA ID, --valid --since",
-            db.certsByIssuer(caids=[IntVar("issuer")], valid=True, since=SINCE, limit=100))
+    await q(
+        "Issued by a CA ID (ca --issued, search --caid)",
+        db.certsByIssuer(caids=[IntVar("issuer")], limit=100),
+    )
+    await q(
+        "Issued by a CA ID, --valid --since",
+        db.certsByIssuer(caids=[IntVar("issuer")], valid=True, since=SINCE, limit=100),
+    )
     await q("Issued by a CA name (search --issuer)", db.certsByIssuer(issuer=caname, limit=100))
-    await q("Issued by the CA of a CA certificate (pivot --by issued)",
-            db.certsByIssuer(cert={"id": [IntVar("cacert")]}, limit=100))
+    await q(
+        "Issued by the CA of a CA certificate (pivot --by issued)",
+        db.certsByIssuer(cert={"id": [IntVar("cacert")]}, limit=100),
+    )
 
     # Pivots, the source certificate is a subquery.
     for by in ("siblings", "key", "subject", "serial", "ski"):
@@ -171,7 +221,9 @@ async def record(samples: dict, caname: str) -> Recorder:
     # CAs.
     await q("CAs by ID (ca --id)", db.cas(caids=[IntVar("issuer")]))
     await q(f"CAs by name (ca '{caname}')", db.cas(name=caname))
-    await q("CAs with their certificates (ca --certs)", db.cas(caids=[IntVar("issuer")], certs=True))
+    await q(
+        "CAs with their certificates (ca --certs)", db.cas(caids=[IntVar("issuer")], certs=True)
+    )
     return db
 
 

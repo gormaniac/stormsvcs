@@ -16,7 +16,6 @@ Every layer works in a default Docker container (no extra capabilities or seccom
 changes), Landlock needs a host kernel with it enabled (5.13+, 6.7+ to block TCP).
 """
 
-
 import asyncio
 import contextlib
 import json
@@ -42,9 +41,9 @@ DEFAULT_USER = "slib-pcap-engine"
 as root."""
 
 DEFAULT_RLIMITS = {
-    "as": 8 * 1024 ** 3,
+    "as": 8 * 1024**3,
     "cpu": 3600,
-    "fsize": 4 * 1024 ** 3,
+    "fsize": 4 * 1024**3,
     "nofile": 4096,
     "core": 0,
 }
@@ -94,6 +93,7 @@ def _readLimited(maxsize: int):
                 over.set()
                 return
             buf.extend(chunk)
+
     return read
 
 
@@ -112,8 +112,13 @@ class Sandbox:
         Apply the seccomp filter that refuses IP and packet sockets.
     """
 
-    def __init__(self, mode: str = "best-effort", user: str | None = DEFAULT_USER,
-                 rlimits: dict[str, int] | None = None, seccomp: bool = True) -> None:
+    def __init__(
+        self,
+        mode: str = "best-effort",
+        user: str | None = DEFAULT_USER,
+        rlimits: dict[str, int] | None = None,
+        seccomp: bool = True,
+    ) -> None:
         if mode not in MODES:
             raise SandboxError(f"Invalid sandbox mode {mode!r}, use one of: {', '.join(MODES)}")
         self.mode = mode
@@ -149,7 +154,8 @@ class Sandbox:
                 "root": os.geteuid() == 0,
                 "landlock": abi,
                 "landlock:tcp": abi >= 4,
-                "seccomp": self.seccomp and _sbxexec.AUDIT_ARCHES.get(os.uname().machine) is not None,
+                "seccomp": self.seccomp
+                and _sbxexec.AUDIT_ARCHES.get(os.uname().machine) is not None,
                 "missing": [],
             }
             missing = self._probe["missing"]
@@ -161,8 +167,14 @@ class Sandbox:
                 missing.append(f"user {self.user}")
         return self._probe
 
-    def spec(self, read: list[str], write: list[str], execs: list[str], env: dict[str, str],
-             cwd: str | None) -> dict[str, Any]:
+    def spec(
+        self,
+        read: list[str],
+        write: list[str],
+        execs: list[str],
+        env: dict[str, str],
+        cwd: str | None,
+    ) -> dict[str, Any]:
         """The ``_sbxexec`` spec of a run."""
 
         ids = self.ids()
@@ -230,8 +242,12 @@ class Sandbox:
                     need = stat.S_IXOTH
                 if not info.st_mode & need:
                     if info.st_uid != os.geteuid():
-                        logger.warning("The sandbox user %s can't get to %s, and the service "
-                                       "doesn't own it to fix that.", self.user, parent)
+                        logger.warning(
+                            "The sandbox user %s can't get to %s, and the service "
+                            "doesn't own it to fix that.",
+                            self.user,
+                            parent,
+                        )
                         break
                     os.chmod(parent, stat.S_IMODE(info.st_mode) | need)
                 self._reached.add(parent)
@@ -239,10 +255,18 @@ class Sandbox:
                     break
                 parent = os.path.dirname(parent)
 
-    async def run(self, argv: list[str], read: list[str] = (), write: list[str] = (),
-                  execs: list[str] = (), env: dict[str, str] | None = None,
-                  cwd: str | None = None, timeout: float | None = None, maxoutput: int = 0,
-                  stdout: str | None = None) -> Result:
+    async def run(
+        self,
+        argv: list[str],
+        read: list[str] = (),
+        write: list[str] = (),
+        execs: list[str] = (),
+        env: dict[str, str] | None = None,
+        cwd: str | None = None,
+        timeout: float | None = None,
+        maxoutput: int = 0,
+        stdout: str | None = None,
+    ) -> Result:
         """Run an engine in the sandbox and wait for it.
 
         Parameters
@@ -288,18 +312,29 @@ class Sandbox:
             cmd = [binpath, *argv[1:]]
         else:
             spec = self.spec(list(read), list(write), list(execs), env, cwd)
-            cmd = [sys.executable, "-I", "-S", self.script, json.dumps(spec), "--", binpath,
-                   *argv[1:]]
+            cmd = [
+                sys.executable,
+                "-I",
+                "-S",
+                self.script,
+                json.dumps(spec),
+                "--",
+                binpath,
+                *argv[1:],
+            ]
 
         outfd = None
         if stdout is not None:
-            outfd = open(stdout, "wb")  # noqa: SIM115 - closed below
+            # Opening the file is cheap, the engine does the writing.
+            outfd = open(stdout, "wb")  # noqa: SIM115, ASYNC230 - closed below
         try:
             try:
                 proc = await asyncio.create_subprocess_exec(
-                    *cmd, stdin=asyncio.subprocess.DEVNULL,
+                    *cmd,
+                    stdin=asyncio.subprocess.DEVNULL,
                     stdout=outfd if outfd is not None else asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE, start_new_session=True,
+                    stderr=asyncio.subprocess.PIPE,
+                    start_new_session=True,
                     cwd=cwd if self.mode == "off" else None,
                     env=env if self.mode == "off" else {"LANG": "C.UTF-8"},
                 )
@@ -317,8 +352,9 @@ class Sandbox:
                 done = asyncio.gather(*tasks)
                 overt = asyncio.create_task(over.wait())
                 try:
-                    finished, _ = await asyncio.wait({done, overt},
-                                                     return_when=asyncio.FIRST_COMPLETED)
+                    finished, _ = await asyncio.wait(
+                        {done, overt}, return_when=asyncio.FIRST_COMPLETED
+                    )
                     if overt in finished:
                         raise SandboxError(f"{argv[0]} wrote more than {maxoutput} bytes.")
                     await proc.wait()
@@ -348,7 +384,7 @@ class Sandbox:
         prefix = _sbxexec.PREFIX.encode()
         for line in stderr.splitlines(keepends=True):
             if line.startswith(prefix):
-                warnings.append(line[len(prefix):].decode(errors="replace").strip())
+                warnings.append(line[len(prefix) :].decode(errors="replace").strip())
             else:
                 lines.append(line)
         stderr = b"".join(lines)

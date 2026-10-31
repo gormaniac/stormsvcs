@@ -1,4 +1,7 @@
 function setTagPrefix (prefix) {
+    if ( $prefix = '' ) {
+        $lib.raise(BadArg, "slib.ipapi.admin.settag requires a non-empty tag prefix.")
+    }
     $lib.globals.set("slib:ipapi:tag:prefix", $prefix)
 }
 

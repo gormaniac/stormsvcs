@@ -327,8 +327,12 @@ class Snort:
         return ["-c", self.conf, "--include-path", self.incpath]
 
     async def _exec(
-        self, argv: list[str], cwd: str, timeout: float | None = None,
-        read: Iterable[str] = (), write: Iterable[str] = (),
+        self,
+        argv: list[str],
+        cwd: str,
+        timeout: float | None = None,
+        read: Iterable[str] = (),
+        write: Iterable[str] = (),
     ) -> tuple[int, str, str]:
         """Run snort (or snort2lua) in the sandbox. It can read its configs, the paths in
         ``read``, and write to ``cwd`` and the paths in ``write``."""
@@ -348,8 +352,14 @@ class Snort:
         }
         try:
             res = await self.sandbox.run(
-                [binpath, *argv[1:]], read=readable, write=[cwd, *write], execs=[prefix],
-                env=env, cwd=cwd, timeout=timeout or self.timeout, maxoutput=64 * 1024 * 1024,
+                [binpath, *argv[1:]],
+                read=readable,
+                write=[cwd, *write],
+                execs=[prefix],
+                env=env,
+                cwd=cwd,
+                timeout=timeout or self.timeout,
+                maxoutput=64 * 1024 * 1024,
             )
         except p_sandbox.SandboxError as err:
             raise SnortError(err.mesg) from None
@@ -448,7 +458,8 @@ class Snort:
 
             rc, stdout, stderr = await self._exec(
                 [self.binpath, *self._confArgs(), "-R", path, "-T", "-q", *self.args],
-                cwd=os.path.dirname(path), read=[path],
+                cwd=os.path.dirname(path),
+                read=[path],
             )
             if rc == 0:
                 return keys, errors
@@ -531,7 +542,8 @@ class Snort:
                     f"alert_json = {{ file = true, fields = '{fields}' }}",
                     *self.args,
                 ],
-                cwd=logdir, read=[rulespath, pcappath],
+                cwd=logdir,
+                read=[rulespath, pcappath],
             )
             output = stdout + "\n" + stderr
             # Snort exits 0 when the DAQ can't open the PCAP.

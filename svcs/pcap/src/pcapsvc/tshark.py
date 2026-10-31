@@ -9,7 +9,6 @@ Only the fields the installed tshark supports are requested, so older versions s
 with fewer details (ex. ``tls.handshake.ja4`` needs Wireshark 4.2).
 """
 
-
 import contextlib
 import json
 import os
@@ -17,6 +16,8 @@ import re
 import shutil
 import tempfile
 from collections.abc import Iterable, Iterator
+
+import synapse.lib.coro as s_coro
 
 from . import sandbox as p_sandbox
 
@@ -85,11 +86,25 @@ FIELDS = (
 """The tshark fields extracted from every capture (the ones the installed tshark supports)."""
 
 FILTER = (
-    "tls.handshake.certificate", "tls.handshake.extensions_server_name", "tls.handshake.ja3",
-    "tls.handshake.ja3s", "tls.handshake.ja4", "ssh.protocol", "ssh.host_key.type",
-    "rdp.client.name", "rdp.keyboardLayout", "http.request.method", "http.response",
-    "http2.headers.method", "http2.headers.status", "http2.data.data",
-    "ftp-data.command", "sip.User-Agent", "sip.Server", "imf", "gquic.tag.uaid",
+    "tls.handshake.certificate",
+    "tls.handshake.extensions_server_name",
+    "tls.handshake.ja3",
+    "tls.handshake.ja3s",
+    "tls.handshake.ja4",
+    "ssh.protocol",
+    "ssh.host_key.type",
+    "rdp.client.name",
+    "rdp.keyboardLayout",
+    "http.request.method",
+    "http.response",
+    "http2.headers.method",
+    "http2.headers.status",
+    "http2.data.data",
+    "ftp-data.command",
+    "sip.User-Agent",
+    "sip.Server",
+    "imf",
+    "gquic.tag.uaid",
 )
 """Fields (or protocols) that make a frame worth returning, the display filter ORs them."""
 
@@ -150,12 +165,56 @@ def ekName(field: str) -> str:
 
 
 PROTOCOLS = (
-    "frame", "eth", "ethertype", "vlan", "sll", "ppp", "pppoes", "null", "loop", "gre",
-    "ip", "ipv6", "ipv6.hopopts", "ipv6.routing", "ipv6.fraghdr", "ipv6.dstopts", "icmp",
-    "icmpv6", "tcp", "udp", "data", "tls", "x509af", "x509ce", "x509if", "x509sat", "pkcs-1",
-    "pkix1explicit", "pkix1implicit", "ber", "ssh", "tpkt", "cotp", "t124", "t125", "rdp",
-    "http", "http2", "data-text-lines", "media", "mime_multipart", "urlencoded-form", "ftp",
-    "ftp-data", "smtp", "imf", "sip", "sdp", "gquic", "quic",
+    "frame",
+    "eth",
+    "ethertype",
+    "vlan",
+    "sll",
+    "ppp",
+    "pppoes",
+    "null",
+    "loop",
+    "gre",
+    "ip",
+    "ipv6",
+    "ipv6.hopopts",
+    "ipv6.routing",
+    "ipv6.fraghdr",
+    "ipv6.dstopts",
+    "icmp",
+    "icmpv6",
+    "tcp",
+    "udp",
+    "data",
+    "tls",
+    "x509af",
+    "x509ce",
+    "x509if",
+    "x509sat",
+    "pkcs-1",
+    "pkix1explicit",
+    "pkix1implicit",
+    "ber",
+    "ssh",
+    "tpkt",
+    "cotp",
+    "t124",
+    "t125",
+    "rdp",
+    "http",
+    "http2",
+    "data-text-lines",
+    "media",
+    "mime_multipart",
+    "urlencoded-form",
+    "ftp",
+    "ftp-data",
+    "smtp",
+    "imf",
+    "sip",
+    "sdp",
+    "gquic",
+    "quic",
 )
 """The only dissectors tshark runs (``--only-protocols``), what ``FIELDS`` needs and the link
 layers and tunnels under them. Every other dissector is off, less code parsing untrusted input.
@@ -181,9 +240,15 @@ class Tshark:
         Where each run's scratch directory (tshark's config dir and output) is made.
     """
 
-    def __init__(self, path: str = "tshark", args: Iterable[str] = (), timeout: float = 0,
-                 sandbox: p_sandbox.Sandbox | None = None,
-                 protocols: Iterable[str] | None = PROTOCOLS, tmpdir: str | None = None) -> None:
+    def __init__(
+        self,
+        path: str = "tshark",
+        args: Iterable[str] = (),
+        timeout: float = 0,
+        sandbox: p_sandbox.Sandbox | None = None,
+        protocols: Iterable[str] | None = PROTOCOLS,
+        tmpdir: str | None = None,
+    ) -> None:
         self.path = shutil.which(path) or (path if os.path.isfile(path) else None)
         self.args = list(args)
         self.timeout = timeout or None
@@ -215,8 +280,9 @@ class Tshark:
         finally:
             shutil.rmtree(path, ignore_errors=True)
 
-    async def _run(self, args: list[str], workdir: str, read: list[str] = (),
-                   stdout: str | None = None) -> tuple[int, bytes, bytes]:
+    async def _run(
+        self, args: list[str], workdir: str, read: list[str] = (), stdout: str | None = None
+    ) -> tuple[int, bytes, bytes]:
         """Run tshark in the sandbox, returning (exit code, stdout, stderr)."""
 
         if self.path is None:
@@ -232,8 +298,15 @@ class Tshark:
         }
         try:
             res = await self.sandbox.run(
-                [self.path, *args], read=[*read], write=[workdir], execs=[prefix], env=env,
-                cwd=workdir, timeout=self.timeout, maxoutput=64 * 1024 * 1024, stdout=stdout,
+                [self.path, *args],
+                read=[*read],
+                write=[workdir],
+                execs=[prefix],
+                env=env,
+                cwd=workdir,
+                timeout=self.timeout,
+                maxoutput=64 * 1024 * 1024,
+                stdout=stdout,
             )
         except p_sandbox.SandboxError as err:
             raise TsharkError(err.mesg) from None
@@ -256,25 +329,22 @@ class Tshark:
             fpath = os.path.join(work, "fields.txt")
             code, _, err = await self._run(["-G", "fields"], work, stdout=fpath)
             if code != 0:
-                raise TsharkError(f"tshark -G fields failed: {err.decode(errors='replace').strip()}")
-            known, protos = set(), set()
-            with open(fpath, encoding="utf-8", errors="replace") as fd:
-                for line in fd:
-                    parts = line.rstrip("\r\n").split("\t")
-                    if len(parts) > 2 and parts[0] in ("F", "P"):
-                        known.add(parts[2])
-                        if parts[0] == "P":
-                            protos.add(parts[2])
+                raise TsharkError(
+                    f"tshark -G fields failed: {err.decode(errors='replace').strip()}"
+                )
+            known, protos = await s_coro.executor(_readFields, fpath)
         self.supported = known
         self.known = protos
 
     def _fields(self, gaps: bool = False) -> list[str]:
-        return [f for f in FIELDS if f in self.supported
-                and (not gaps or f.startswith(GAP_PREFIXES))]
+        return [
+            f for f in FIELDS if f in self.supported and (not gaps or f.startswith(GAP_PREFIXES))
+        ]
 
     def _filter(self, gaps: bool = False) -> str:
-        return " or ".join(f for f in FILTER if f in self.supported
-                           and (not gaps or f.startswith(GAP_PREFIXES)))
+        return " or ".join(
+            f for f in FILTER if f in self.supported and (not gaps or f.startswith(GAP_PREFIXES))
+        )
 
     def _args(self, keylog: str | None, decode: list[str]) -> list[str]:
         """The tshark arguments for one run: the configured ones, the dissectors to run, the
@@ -294,8 +364,9 @@ class Tshark:
             args.extend(("-d", rule))
         return args
 
-    async def frames(self, path: str, keylog: str | None = None,
-                     decode: list[str] = (), gaps: bool = False) -> tuple[dict[int, dict], dict]:
+    async def frames(
+        self, path: str, keylog: str | None = None, decode: list[str] = (), gaps: bool = False
+    ) -> tuple[dict[int, dict], dict]:
         """Run tshark over a capture and return ({frame number: fields}, info).
 
         Fields are keyed by their tshark name (ex. ``http.user_agent``) and are always lists
@@ -326,26 +397,27 @@ class Tshark:
         keylog = os.path.abspath(keylog) if keylog else None
         fields = self._fields(gaps)
         extra = self._args(keylog, checkDecodeAs(list(decode)))
-        args = ["-n", "-r", path, *extra, "-Y", self._filter(gaps), "-T", "ek",
-                "-e", "frame.number"]
+        args = [
+            "-n",
+            "-r",
+            path,
+            *extra,
+            "-Y",
+            self._filter(gaps),
+            "-T",
+            "ek",
+            "-e",
+            "frame.number",
+        ]
         for field in fields:
             args.extend(("-e", field))
 
         read = [path] + ([keylog] if keylog else [])
-        records = {}
         names = {ekName(f): f for f in fields}
         with self._workdir() as work:
             opath = os.path.join(work, "frames.json")
             code, _, err = await self._run(args, work, read=read, stdout=opath)
-            with open(opath, "rb") as fd:
-                for line in fd:
-                    if not line.startswith(b'{"timestamp"'):
-                        continue
-                    layers = json.loads(line).get("layers", {})
-                    num = layers.pop("frame_number", None)
-                    if not num:
-                        continue
-                    records[int(num[0])] = {names.get(k, k): v for k, v in layers.items()}
+            records = await s_coro.executor(_readFrames, opath, names)
 
             info = {"version": self.version, "error": None}
             if code != 0:
@@ -360,26 +432,68 @@ class Tshark:
 
         return records, info
 
-    async def _emails(self, path: str, extra: list[str], work: str,
-                      read: list[str]) -> dict[int, str]:
+    async def _emails(
+        self, path: str, extra: list[str], work: str, read: list[str]
+    ) -> dict[int, str]:
         """The raw bytes (hex) of every email (IMF) in a capture, keyed by frame number."""
 
         opath = os.path.join(work, "emails.json")
-        await self._run(["-n", "-r", path, *extra, "-Y", "imf", "-T", "json", "-x",
-                         "-J", "frame imf"], work, read=read, stdout=opath)
-        try:
-            with open(opath, "rb") as fd:
-                packets = json.load(fd)
-        except (OSError, ValueError):
-            return {}
-        emails = {}
-        for pkt in packets:
-            layers = pkt.get("_source", {}).get("layers", {})
-            raw = layers.get("imf_raw")
-            num = layers.get("frame", {}).get("frame.number")
-            if raw and num:
-                emails[int(num)] = raw[0] if isinstance(raw[0], str) else raw[0][0]
-        return emails
+        await self._run(
+            ["-n", "-r", path, *extra, "-Y", "imf", "-T", "json", "-x", "-J", "frame imf"],
+            work,
+            read=read,
+            stdout=opath,
+        )
+        return await s_coro.executor(_readEmails, opath)
+
+
+def _readFields(path: str) -> tuple[set[str], set[str]]:
+    """The (fields and protocols, protocols) in ``tshark -G fields`` output."""
+
+    known, protos = set(), set()
+    with open(path, encoding="utf-8", errors="replace") as fd:
+        for line in fd:
+            parts = line.rstrip("\r\n").split("\t")
+            if len(parts) > 2 and parts[0] in ("F", "P"):
+                known.add(parts[2])
+                if parts[0] == "P":
+                    protos.add(parts[2])
+    return known, protos
+
+
+def _readFrames(path: str, names: dict[str, str]) -> dict[int, dict]:
+    """{frame number: fields} from ``tshark -T ek`` output, ``names`` maps EK field names back
+    to tshark's."""
+
+    records = {}
+    with open(path, "rb") as fd:
+        for line in fd:
+            if not line.startswith(b'{"timestamp"'):
+                continue
+            layers = json.loads(line).get("layers", {})
+            num = layers.pop("frame_number", None)
+            if not num:
+                continue
+            records[int(num[0])] = {names.get(k, k): v for k, v in layers.items()}
+    return records
+
+
+def _readEmails(path: str) -> dict[int, str]:
+    """{frame number: raw email hex} from ``tshark -T json -x`` output of IMF frames."""
+
+    try:
+        with open(path, "rb") as fd:
+            packets = json.load(fd)
+    except (OSError, ValueError):
+        return {}
+    emails = {}
+    for pkt in packets:
+        layers = pkt.get("_source", {}).get("layers", {})
+        raw = layers.get("imf_raw")
+        num = layers.get("frame", {}).get("frame.number")
+        if raw and num:
+            emails[int(num)] = raw[0] if isinstance(raw[0], str) else raw[0][0]
+    return emails
 
 
 def _responseUris(records: dict[int, dict]) -> None:

@@ -9,7 +9,6 @@ server's, an HTTP ``User-Agent`` the client's), not by the packet that triggered
 (``fileinfo``) are attributed to the side that sent them.
 """
 
-
 import base64
 import datetime
 import logging
@@ -84,8 +83,10 @@ def applyEve(enr: Any, flow: dict, events: list[dict], filestore: str | None) ->
                 enr._uniq(enr.tls.setdefault("versions", []), body["version"])
             # Suricata 8 puts the client's chain in client.chain (older, client_chain).
             cinfo = body.get("client") if isinstance(body.get("client"), dict) else {}
-            for side, chain in ((server, body.get("chain")),
-                                (client, cinfo.get("chain") or body.get("client_chain"))):
+            for side, chain in (
+                (server, body.get("chain")),
+                (client, cinfo.get("chain") or body.get("client_chain")),
+            ):
                 if chain and not side["ssl:certs"]:
                     for b64 in chain:
                         try:
@@ -133,10 +134,15 @@ def applyEve(enr: Any, flow: dict, events: list[dict], filestore: str | None) ->
             for key in ("x_mailer", "user_agent"):
                 enr._soft(client, email.get(key))
             enr.extra.setdefault("smtp", [])
-            _append(enr.extra["smtp"], {
-                "helo": body.get("helo"), "from": body.get("mail_from"),
-                "to": body.get("rcpt_to"), "subject": email.get("subject"),
-            })
+            _append(
+                enr.extra["smtp"],
+                {
+                    "helo": body.get("helo"),
+                    "from": body.get("mail_from"),
+                    "to": body.get("rcpt_to"),
+                    "subject": email.get("subject"),
+                },
+            )
 
         elif etype == "quic":
             if body.get("sni"):
@@ -147,8 +153,14 @@ def applyEve(enr: Any, flow: dict, events: list[dict], filestore: str | None) ->
                 enr._uniq(enr.tls["ja3"], body["ja3"]["hash"])
             enr._soft(client, body.get("ua"))
             enr.extra.setdefault("quic", [])
-            _append(enr.extra["quic"], {k: body.get(k) for k in ("version", "sni", "ua", "cyu")
-                                         if body.get(k) is not None})
+            _append(
+                enr.extra["quic"],
+                {
+                    k: body.get(k)
+                    for k in ("version", "sni", "ua", "cyu")
+                    if body.get(k) is not None
+                },
+            )
 
         elif etype == "dns":
             enr.extra.setdefault("dns", [])
@@ -156,15 +168,25 @@ def applyEve(enr: Any, flow: dict, events: list[dict], filestore: str | None) ->
 
         elif etype == "smb":
             enr.extra.setdefault("smb", [])
-            keep = {k: body.get(k) for k in ("command", "status", "dialect", "share",
-                                             "share_type", "filename", "disposition",
-                                             "client_dialects", "server_guid")
-                    if body.get(k) not in (None, "", [])}
+            keep = {
+                k: body.get(k)
+                for k in (
+                    "command",
+                    "status",
+                    "dialect",
+                    "share",
+                    "share_type",
+                    "filename",
+                    "disposition",
+                    "client_dialects",
+                    "server_guid",
+                )
+                if body.get(k) not in (None, "", [])
+            }
             if body.get("ntlmssp"):
                 keep["ntlmssp"] = body["ntlmssp"]
             if body.get("request") or body.get("response"):
-                keep["native"] = {"request": body.get("request"),
-                                  "response": body.get("response")}
+                keep["native"] = {"request": body.get("request"), "response": body.get("response")}
             _append(enr.extra["smb"], keep)
             for key in ("request", "response"):
                 info = body.get(key) or {}
@@ -174,27 +196,55 @@ def applyEve(enr: Any, flow: dict, events: list[dict], filestore: str | None) ->
 
         elif etype == "krb5":
             enr.extra.setdefault("krb5", [])
-            _append(enr.extra["krb5"], {k: body.get(k) for k in (
-                "msg_type", "cname", "realm", "sname", "encryption", "weak_encryption",
-                "error_code", "failed_request", "ticket_encryption", "ticket_weak_encryption",
-            ) if body.get(k) is not None})
+            _append(
+                enr.extra["krb5"],
+                {
+                    k: body.get(k)
+                    for k in (
+                        "msg_type",
+                        "cname",
+                        "realm",
+                        "sname",
+                        "encryption",
+                        "weak_encryption",
+                        "error_code",
+                        "failed_request",
+                        "ticket_encryption",
+                        "ticket_weak_encryption",
+                    )
+                    if body.get(k) is not None
+                },
+            )
 
         elif etype == "sip":
             enr.extra.setdefault("sip", [])
-            _append(enr.extra["sip"], {k: body.get(k) for k in (
-                "method", "uri", "version", "code", "reason") if body.get(k) is not None})
+            _append(
+                enr.extra["sip"],
+                {
+                    k: body.get(k)
+                    for k in ("method", "uri", "version", "code", "reason")
+                    if body.get(k) is not None
+                },
+            )
 
         elif etype == "ftp":
             if body.get("command"):
                 enr.extra.setdefault("ftp", [])
-                _append(enr.extra["ftp"], {"command": body.get("command"),
-                                           "data": body.get("command_data"),
-                                           "codes": body.get("completion_code")})
+                _append(
+                    enr.extra["ftp"],
+                    {
+                        "command": body.get("command"),
+                        "data": body.get("command_data"),
+                        "codes": body.get("completion_code"),
+                    },
+                )
 
         elif etype == "anomaly":
             enr.extra.setdefault("anomalies", [])
-            _append(enr.extra["anomalies"], {k: body.get(k) for k in ("type", "event", "layer")
-                                             if body.get(k) is not None})
+            _append(
+                enr.extra["anomalies"],
+                {k: body.get(k) for k in ("type", "event", "layer") if body.get(k) is not None},
+            )
 
         elif etype == "flow":
             if ev.get("app_proto") and ev["app_proto"] != "failed":
@@ -204,8 +254,7 @@ def applyEve(enr: Any, flow: dict, events: list[dict], filestore: str | None) ->
         _fileinfo(enr, flow, ev, txs, filestore)
 
 
-def _fileinfo(enr: Any, flow: dict, ev: dict, txs: dict[int, dict],
-              filestore: str | None) -> None:
+def _fileinfo(enr: Any, flow: dict, ev: dict, txs: dict[int, dict], filestore: str | None) -> None:
     """Add a file Suricata extracted (a ``fileinfo`` event) to the side that sent it."""
 
     from .enrich import mimeType, uriName
@@ -247,8 +296,16 @@ def _fileinfo(enr: Any, flow: dict, ev: dict, txs: dict[int, dict],
     if proto == "ftp-data":
         proto = "ftp"
 
-    enr._storedFile(side, path, sha256, info.get("size") or os.path.getsize(path), proto,
-                    name=name, mime=mime, complete=not info.get("gaps"))
+    enr._storedFile(
+        side,
+        path,
+        sha256,
+        info.get("size") or os.path.getsize(path),
+        proto,
+        name=name,
+        mime=mime,
+        complete=not info.get("gaps"),
+    )
 
 
 def dnsQueries(events: list[dict] | None) -> list[dict] | None:
@@ -261,8 +318,7 @@ def dnsQueries(events: list[dict] | None) -> list[dict] | None:
 
     if not events:
         return None
-    rcodes = {"NOERROR": 0, "FORMERR": 1, "SERVFAIL": 2, "NXDOMAIN": 3, "NOTIMP": 4,
-              "REFUSED": 5}
+    rcodes = {"NOERROR": 0, "FORMERR": 1, "SERVFAIL": 2, "NXDOMAIN": 3, "NOTIMP": 4, "REFUSED": 5}
     queries: dict[tuple, dict] = {}
     for ev in events:
         qlist = ev.get("queries") or []
@@ -270,19 +326,29 @@ def dnsQueries(events: list[dict] | None) -> list[dict] | None:
             qlist = [{"rrname": ev.get("rrname"), "rrtype": ev.get("rrtype")}]
         for q in qlist:
             key = (ev.get("id"), str(q.get("rrname") or "").lower(), q.get("rrtype"))
-            item = queries.setdefault(key, {
-                "id": ev.get("id"), "rrname": key[1] or None, "rrtype": q.get("rrtype"),
-                "rcode": None, "time": ev.get("time"), "answers": [],
-            })
+            item = queries.setdefault(
+                key,
+                {
+                    "id": ev.get("id"),
+                    "rrname": key[1] or None,
+                    "rrtype": q.get("rrtype"),
+                    "rcode": None,
+                    "time": ev.get("time"),
+                    "answers": [],
+                },
+            )
             if ev.get("time") is not None and (item["time"] is None or ev["time"] < item["time"]):
                 item["time"] = ev["time"]
             if ev.get("type") == "response" or ev.get("rcode") is not None:
                 if ev.get("rcode") is not None:
                     item["rcode"] = rcodes.get(str(ev["rcode"]).upper(), item["rcode"])
                 for ans in ev.get("answers") or []:
-                    rec = {"rrname": str(ans.get("rrname") or "").lower() or None,
-                           "rrtype": ans.get("rrtype"), "ttl": ans.get("ttl"),
-                           "rdata": ans.get("rdata")}
+                    rec = {
+                        "rrname": str(ans.get("rrname") or "").lower() or None,
+                        "rrtype": ans.get("rrtype"),
+                        "ttl": ans.get("ttl"),
+                        "rdata": ans.get("rdata"),
+                    }
                     if rec not in item["answers"]:
                         item["answers"].append(rec)
     return list(queries.values())
@@ -310,14 +376,27 @@ def alertKey(engine: str, alert: dict) -> tuple[int, int, int, str | None, str |
 
     if engine == "suricata":
         info = alert.get("alert") or {}
-        return (int(info.get("gid", 1)), int(info.get("signature_id", 0)),
-                int(info.get("rev", 0)), info.get("signature"), info.get("action"))
-    return (int(alert.get("gid", 1)), int(alert.get("sid", 0)), int(alert.get("rev", 0)),
-            alert.get("msg"), alert.get("action"))
+        return (
+            int(info.get("gid", 1)),
+            int(info.get("signature_id", 0)),
+            int(info.get("rev", 0)),
+            info.get("signature"),
+            info.get("action"),
+        )
+    return (
+        int(alert.get("gid", 1)),
+        int(alert.get("sid", 0)),
+        int(alert.get("rev", 0)),
+        alert.get("msg"),
+        alert.get("action"),
+    )
 
 
-def hits(alerts: list[tuple[str, dict]], index: dict[str, dict[str, dict]],
-         counts: dict[str, dict[str, int]]) -> list[dict]:
+def hits(
+    alerts: list[tuple[str, dict]],
+    index: dict[str, dict[str, dict]],
+    counts: dict[str, dict[str, int]],
+) -> list[dict]:
     """Group a flow's alerts into hits, one per engine and rule.
 
     Parameters
@@ -347,8 +426,15 @@ def hits(alerts: list[tuple[str, dict]], index: dict[str, dict[str, dict]],
         hit = grouped.get((engine, key))
         if hit is None:
             grouped[(engine, key)] = {
-                "engine": engine, "rule": rinfo["guid"], "key": key, "rev": rev or rinfo["rev"],
-                "msg": msg, "action": action, "count": 1, "time": tick, "last": tick,
+                "engine": engine,
+                "rule": rinfo["guid"],
+                "key": key,
+                "rev": rev or rinfo["rev"],
+                "msg": msg,
+                "action": action,
+                "count": 1,
+                "time": tick,
+                "last": tick,
             }
             continue
         hit["count"] += 1

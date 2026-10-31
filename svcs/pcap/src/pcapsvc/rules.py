@@ -11,8 +11,20 @@ import re
 from collections.abc import Iterator
 from typing import Any, TypedDict
 
-ACTIONS = ("alert", "block", "drop", "log", "pass", "react", "reject", "rejectboth",
-           "rejectdst", "rejectsrc", "rewrite", "sdrop")
+ACTIONS = (
+    "alert",
+    "block",
+    "drop",
+    "log",
+    "pass",
+    "react",
+    "reject",
+    "rejectboth",
+    "rejectdst",
+    "rejectsrc",
+    "rewrite",
+    "sdrop",
+)
 """The rule actions Snort 2.x, Snort 3, and Suricata support."""
 
 ENGINE_SNORT2 = "snort2"
@@ -79,6 +91,7 @@ def ruleEngine(form: str, engine: Any = None) -> str:
         if eng in SNORT_ENGINES:
             return eng
     raise RuleError(f"{form} rules (with :engine {engine!r}) can't be run by the service.")
+
 
 _RULE_START = re.compile(r"^\s*(#+\s*)?(" + "|".join(ACTIONS) + r")\s", re.IGNORECASE)
 _DATE = re.compile(r"^(\d{4})[_-](\d{2})[_-](\d{2})$")

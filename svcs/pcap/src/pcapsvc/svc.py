@@ -21,7 +21,6 @@ Captures are read from the Axon (``axon:url``) or streamed to the service by Sto
 in the flows are uploaded to the Axon, when the service has one.
 """
 
-
 import asyncio
 import binascii
 import contextlib
@@ -210,7 +209,7 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
             "additionalProperties": {"type": "string"},
             "default": {},
             "description": (
-                "Secrets feed URLs reference as ${name}, ex. {\"talos:oinkcode\": \"...\"}. "
+                'Secrets feed URLs reference as ${name}, ex. {"talos:oinkcode": "..."}. '
                 "Only the service's operator can see them."
             ),
         },
@@ -314,8 +313,8 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
             "items": {"type": "string"},
             "default": [],
             "description": (
-                "Extra tshark arguments for every run (operator only), ex. [\"-d\", "
-                "\"tcp.port==2222,ssh\"]. Users set Decode As rules with --decode-as."
+                'Extra tshark arguments for every run (operator only), ex. ["-d", '
+                '"tcp.port==2222,ssh"]. Users set Decode As rules with --decode-as.'
             ),
         },
         "tshark:protocols": {
@@ -449,8 +448,11 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
             ("snort", self.snort.available(), self.conf.get("snort:enabled")),
             ("tshark", self.tshark.available, self.conf.get("tshark:enabled")),
         ):
-            engines[name] = {"available": avail, "enabled": enabled,
-                             "version": await self._version(name) if avail else None}
+            engines[name] = {
+                "available": avail,
+                "enabled": enabled,
+                "version": await self._version(name) if avail else None,
+            }
         return {
             "engines": engines,
             "sandbox": self.sandbox.probe(),
@@ -485,14 +487,21 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
         """
 
         if kind not in UPLOAD_KINDS:
-            raise PcapSvcError(f"Invalid upload kind {kind!r}, use one of: "
-                               f"{', '.join(UPLOAD_KINDS)}")
+            raise PcapSvcError(
+                f"Invalid upload kind {kind!r}, use one of: {', '.join(UPLOAD_KINDS)}"
+            )
         iden = s_common.guid()
         path = os.path.join(self.tmpdir, f"upload-{iden}")
         open(path, "wb").close()  # noqa: ASYNC230 - creates an empty file
         maxsize = self.conf.get("pcap:maxsize" if kind == "capture" else "tshark:keylog:maxsize")
-        self.uploads[iden] = {"path": path, "kind": kind, "size": 0, "maxsize": maxsize,
-                              "sha256": hashlib.sha256(), "touched": s_common.now()}
+        self.uploads[iden] = {
+            "path": path,
+            "kind": kind,
+            "size": 0,
+            "maxsize": maxsize,
+            "sha256": hashlib.sha256(),
+            "touched": s_common.now(),
+        }
         return iden
 
     def _reqUpload(self, iden: str, kind: str | None = None) -> dict[str, Any]:
@@ -515,8 +524,10 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
         upload["size"] += len(byts)
         if upload["maxsize"] and upload["size"] > upload["maxsize"]:
             self._dropUpload(iden)
-            raise PcapSvcError(f"The {upload['kind']} is larger than the service's max size of "
-                               f"{upload['maxsize']} bytes.")
+            raise PcapSvcError(
+                f"The {upload['kind']} is larger than the service's max size of "
+                f"{upload['maxsize']} bytes."
+            )
         upload["sha256"].update(byts)
         with open(upload["path"], "ab") as fd:  # noqa: ASYNC230 - a small append per chunk
             fd.write(byts)
@@ -543,8 +554,9 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
 
     # ---- The Axon ----
 
-    def _opts(self, timeout: int | None, limit: int | None,
-              handshake: int | None) -> tuple[int, int, int]:
+    def _opts(
+        self, timeout: int | None, limit: int | None, handshake: int | None
+    ) -> tuple[int, int, int]:
         """The analysis options to use, filling in (and capping) them from the config."""
 
         maxlimit = self.conf.get("pcap:limit")
@@ -558,8 +570,9 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
 
         return timeout, min(limit, maxlimit), handshake
 
-    async def _download(self, axon, sha256: str, path: str, maxsize: int,
-                        what: str = "capture") -> int:
+    async def _download(
+        self, axon, sha256: str, path: str, maxsize: int, what: str = "capture"
+    ) -> int:
         """Append a file from the Axon to ``path``, returning its size."""
 
         shabyts = binascii.unhexlify(sha256)
@@ -567,15 +580,18 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
         if size is None:
             raise PcapSvcError(f"The {what} file:bytes:sha256={sha256} is not in the Axon.")
         if maxsize and size > maxsize:
-            raise PcapSvcError(f"The {what} file:bytes:sha256={sha256} is {size} bytes, larger "
-                               f"than the max size of {maxsize} bytes.")
+            raise PcapSvcError(
+                f"The {what} file:bytes:sha256={sha256} is {size} bytes, larger "
+                f"than the max size of {maxsize} bytes."
+            )
         try:
             with open(path, "ab") as fd:  # noqa: ASYNC230 - a write per Axon chunk
                 async for byts in axon.get(shabyts):
                     fd.write(byts)
         except s_exc.NoSuchFile:
-            raise PcapSvcError(f"The {what} file:bytes:sha256={sha256} is not in the Axon.") \
-                from None
+            raise PcapSvcError(
+                f"The {what} file:bytes:sha256={sha256} is not in the Axon."
+            ) from None
         return size
 
     async def _upload(self, axon, files: p_enrich.FileStore) -> int:
@@ -603,28 +619,34 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
 
     # ---- Engines ----
 
-    async def _runTshark(self, path: str, keylog: str | None, decode: list[str],
-                         gaps: bool) -> tuple[dict, dict]:
+    async def _runTshark(
+        self, path: str, keylog: str | None, decode: list[str], gaps: bool
+    ) -> tuple[dict, dict]:
         info = {"enabled": True, "version": None, "error": None, "gaps": gaps and not keylog}
         try:
-            frames, tsinfo = await self.tshark.frames(path, keylog=keylog, decode=decode,
-                                                      gaps=gaps)
+            frames, tsinfo = await self.tshark.frames(path, keylog=keylog, decode=decode, gaps=gaps)
         except p_tshark.TsharkError as err:
             info["error"] = err.mesg
             return {}, info
         info.update(tsinfo)
         return frames, info
 
-    async def _runSuricata(self, path: str, outdir: str, decode: list[str], files: bool,
-                           rules: bool) -> tuple[dict | None, dict]:
+    async def _runSuricata(
+        self, path: str, outdir: str, decode: list[str], files: bool, rules: bool
+    ) -> tuple[dict | None, dict]:
         info: dict[str, Any] = {"enabled": True, "error": None, "rules": 0, "warnings": []}
         active = self._acquire("suricata") if rules else None
         try:
             if active is not None:
                 info["rules"] = len(active[1])
             res = await self.suricata.run(
-                path, outdir, rulespath=active[0] if active else None, decode=decode,
-                filestore=files, maxbody=self.conf.get("pcap:files:maxsize"))
+                path,
+                outdir,
+                rulespath=active[0] if active else None,
+                decode=decode,
+                filestore=files,
+                maxbody=self.conf.get("pcap:files:maxsize"),
+            )
             info["warnings"] = res["warnings"]
             return {**res, "index": active[1] if active else {}}, info
         except p_suricata.SuricataError as err:
@@ -687,23 +709,38 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
                 num = alert.get("pkt_num")
                 if num:
                     frames.setdefault(int(num), {}).setdefault("_alerts", []).append(
-                        ("snort", alert))
+                        ("snort", alert)
+                    )
                     continue
-                cid = alertCommunityId(alert.get("proto"), alert.get("src_addr"),
-                                       alert.get("src_port"), alert.get("dst_addr"),
-                                       alert.get("dst_port"))
+                cid = alertCommunityId(
+                    alert.get("proto"),
+                    alert.get("src_addr"),
+                    alert.get("src_port"),
+                    alert.get("dst_addr"),
+                    alert.get("dst_port"),
+                )
                 if cid:
                     loose.append((cid, p_eve.alertTime("snort", alert), "snort", alert))
         return loose, index
 
     # ---- Analysis ----
 
-    async def analyze(self, sha256: str, timeout: int | None = None, limit: int | None = None,
-                      handshake: int | None = None, tshark: bool | None = None,
-                      files: bool | None = None, keylogs: list[str] | None = None,
-                      decode: list[str] | None = None, suricata: bool | None = None,
-                      snort: bool | None = None, rules: bool = True, upload: str | None = None,
-                      keyloguploads: list[str] | None = None) -> tuple[list[dict], dict]:
+    async def analyze(
+        self,
+        sha256: str,
+        timeout: int | None = None,
+        limit: int | None = None,
+        handshake: int | None = None,
+        tshark: bool | None = None,
+        files: bool | None = None,
+        keylogs: list[str] | None = None,
+        decode: list[str] | None = None,
+        suricata: bool | None = None,
+        snort: bool | None = None,
+        rules: bool = True,
+        upload: str | None = None,
+        keyloguploads: list[str] | None = None,
+    ) -> tuple[list[dict], dict]:
         """Analyze a capture and return its flows and a summary of it.
 
         See ``pcapsvc.flows.analyze`` for what the flows and summary contain. The summary also
@@ -756,11 +793,28 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
 
         async with self.runsema:
             with tempfile.TemporaryDirectory(dir=self.tmpdir) as tmp:
-                return await self._analyze(tmp, sha256, upload, keylogs, keyloguploads, decode,
-                                           timeout, limit, handshake, opts)
+                return await self._analyze(
+                    tmp,
+                    sha256,
+                    upload,
+                    keylogs,
+                    keyloguploads,
+                    decode,
+                    timeout,
+                    limit,
+                    handshake,
+                    opts,
+                )
 
-    async def _fetch(self, axon, tmp: str, sha256: str, upload: str | None, keylogs: list[str],
-                     keyloguploads: list[str]) -> tuple[str, int, str | None]:
+    async def _fetch(
+        self,
+        axon,
+        tmp: str,
+        sha256: str,
+        upload: str | None,
+        keylogs: list[str],
+        keyloguploads: list[str],
+    ) -> tuple[str, int, str | None]:
         """Get the capture (and the key logs, joined into one) into the run's directory.
 
         Returns (the capture's path, its size, the key log's path or None).
@@ -782,22 +836,32 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
                     shutil.copyfileobj(ifd, ofd)
                     ofd.write(b"\n")
             for ksha in keylogs:
-                await self._download(axon, ksha, keylog, self.conf.get("tshark:keylog:maxsize"),
-                                     what="TLS key log")
+                await self._download(
+                    axon, ksha, keylog, self.conf.get("tshark:keylog:maxsize"), what="TLS key log"
+                )
                 with open(keylog, "ab") as fd:  # noqa: ASYNC230 - one byte
                     fd.write(b"\n")
         return path, size, keylog
 
-    async def _engines(self, tmp: str, path: str, plain: str, keylog: str | None,
-                       decode: list[str], opts: dict, saving: bool) -> dict[str, Any]:
+    async def _engines(
+        self,
+        tmp: str,
+        path: str,
+        plain: str,
+        keylog: str | None,
+        decode: list[str],
+        opts: dict,
+        saving: bool,
+    ) -> dict[str, Any]:
         """Run the engines (concurrently). Returns their results and how each went."""
 
         suridir = os.path.join(tmp, "suricata")
         os.makedirs(suridir)
         self.sandbox.prepare(tmp)
 
-        info: dict[str, dict] = {name: {"enabled": False, "error": None}
-                                 for name in ("suricata", "snort", "tshark")}
+        info: dict[str, dict] = {
+            name: {"enabled": False, "error": None} for name in ("suricata", "snort", "tshark")
+        }
         tasks: dict[str, Any] = {}
         if opts["suricata"] and self.suricata.available():
             tasks["suricata"] = self._runSuricata(plain, suridir, decode, saving, opts["rules"])
@@ -820,20 +884,30 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
 
         if out["suricata"] is None and info["tshark"].get("gaps"):
             # Suricata failed, so tshark has to do everything.
-            out["frames"], info["tshark"] = await self._runTshark(path, keylog, decode,
-                                                                  gaps=False)
+            out["frames"], info["tshark"] = await self._runTshark(path, keylog, decode, gaps=False)
         out["info"] = info
         return out
 
-    async def _analyze(self, tmp: str, sha256: str, upload: str | None, keylogs: list[str],
-                       keyloguploads: list[str], decode: list[str], timeout: int, limit: int,
-                       handshake: int, opts: dict) -> tuple[list[dict], dict]:
+    async def _analyze(
+        self,
+        tmp: str,
+        sha256: str,
+        upload: str | None,
+        keylogs: list[str],
+        keyloguploads: list[str],
+        decode: list[str],
+        timeout: int,
+        limit: int,
+        handshake: int,
+        opts: dict,
+    ) -> tuple[list[dict], dict]:
         filesdir = os.path.join(tmp, "files")
         os.makedirs(filesdir)
 
         async with self._axon() as axon:
-            path, size, keylog = await self._fetch(axon, tmp, sha256, upload, keylogs,
-                                                   keyloguploads)
+            path, size, keylog = await self._fetch(
+                axon, tmp, sha256, upload, keylogs, keyloguploads
+            )
 
             # Snort and Suricata only read plain captures, dpkt and tshark read either.
             plain = path
@@ -842,8 +916,9 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
                 try:
                     await s_coro.executor(_gunzip, path, plain)
                 except (OSError, EOFError, gzip.BadGzipFile) as err:
-                    raise PcapSvcError(f"file:bytes:sha256={sha256}: Unable to decompress the "
-                                       f"capture: {err}") from None
+                    raise PcapSvcError(
+                        f"file:bytes:sha256={sha256}: Unable to decompress the capture: {err}"
+                    ) from None
 
             # Files are saved to the Axon, without one they're only counted.
             saving = opts["files"] and axon is not None
@@ -852,15 +927,26 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
 
             store = None
             if saving:
-                store = p_enrich.FileStore(filesdir, maxsize=self.conf.get("pcap:files:maxsize"),
-                                           limit=self.conf.get("pcap:files:limit"))
+                store = p_enrich.FileStore(
+                    filesdir,
+                    maxsize=self.conf.get("pcap:files:maxsize"),
+                    limit=self.conf.get("pcap:files:limit"),
+                )
             suri = res["suricata"]
             with open(path, "rb") as fd:  # noqa: ASYNC230 - read in the executor
                 try:
                     flows, summary = await s_coro.executor(
-                        p_flows.analyze, fd, timeout=timeout, limit=limit, handshake=handshake,
-                        seed=sha256, frames=res["frames"], files=store,
-                        unsaved=opts["files"] and not saving, rules=index, loose=loose,
+                        p_flows.analyze,
+                        fd,
+                        timeout=timeout,
+                        limit=limit,
+                        handshake=handshake,
+                        seed=sha256,
+                        frames=res["frames"],
+                        files=store,
+                        unsaved=opts["files"] and not saving,
+                        rules=index,
+                        loose=loose,
                         filestore=suri["filestore"] if suri else None,
                     )
                 except p_flows.PcapError as err:

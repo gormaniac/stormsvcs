@@ -4,7 +4,6 @@ The dicts only hold Telepath (msgpack) safe values: bytes are hex encoded and ti
 millis. Field names follow the ``crypto:x509:cert`` props they're modeled as.
 """
 
-
 import datetime
 import hashlib
 import ipaddress
@@ -81,8 +80,9 @@ def _pubkey(cert: x509.Certificate) -> dict:
     elif isinstance(key, ed448.Ed448PublicKey):
         retn.update(algo="ed448", size=456)
 
-    spki = key.public_bytes(serialization.Encoding.DER,
-                            serialization.PublicFormat.SubjectPublicKeyInfo)
+    spki = key.public_bytes(
+        serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
+    )
     retn["spki"] = spki.hex()
     retn["sha256"] = hashlib.sha256(spki).hexdigest()
     retn["sha1"] = hashlib.sha1(spki).hexdigest()
@@ -128,8 +128,11 @@ def identities(sans: list[tuple[str, str]], cert: x509.Certificate) -> dict:
             addFqdn(valu)
 
     return {
-        "fqdns": sorted(fqdns), "emails": sorted(emails), "ipv4s": sorted(ipv4s),
-        "ipv6s": sorted(ipv6s), "urls": sorted(urls),
+        "fqdns": sorted(fqdns),
+        "emails": sorted(emails),
+        "ipv4s": sorted(ipv4s),
+        "ipv6s": sorted(ipv6s),
+        "urls": sorted(urls),
     }
 
 
@@ -160,30 +163,34 @@ def parseCert(der: bytes) -> dict:
         ski = aki = None
         try:
             ski = cert.extensions.get_extension_for_class(
-                x509.SubjectKeyIdentifier).value.digest.hex()
+                x509.SubjectKeyIdentifier
+            ).value.digest.hex()
         except x509.ExtensionNotFound:
             pass
         try:
             akival = cert.extensions.get_extension_for_class(
-                x509.AuthorityKeyIdentifier).value.key_identifier
+                x509.AuthorityKeyIdentifier
+            ).value.key_identifier
             aki = akival.hex() if akival else None
         except x509.ExtensionNotFound:
             pass
 
-        retn.update({
-            "version": cert.version.value,
-            "serial": serialHex(cert.serial_number),
-            "subject": subject,
-            "issuer": issuer,
-            "notbefore": toMillis(notbefore),
-            "notafter": toMillis(notafter),
-            "algo": cert.signature_algorithm_oid.dotted_string,
-            "signature": cert.signature.hex(),
-            "selfsigned": subject == issuer and (aki is None or aki == ski),
-            "sans": sans,
-            "identities": identities(sans, cert),
-            "pubkey": _pubkey(cert),
-        })
+        retn.update(
+            {
+                "version": cert.version.value,
+                "serial": serialHex(cert.serial_number),
+                "subject": subject,
+                "issuer": issuer,
+                "notbefore": toMillis(notbefore),
+                "notafter": toMillis(notafter),
+                "algo": cert.signature_algorithm_oid.dotted_string,
+                "signature": cert.signature.hex(),
+                "selfsigned": subject == issuer and (aki is None or aki == ski),
+                "sans": sans,
+                "identities": identities(sans, cert),
+                "pubkey": _pubkey(cert),
+            }
+        )
     except Exception as err:
         retn["error"] = f"Unable to parse the certificate: {err}"
 

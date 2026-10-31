@@ -55,6 +55,8 @@ Each service must have the following:
   - Every Shodan API: host lookups, search, scanning, alerts, DNS, streaming, InternetDB, CVEDB, exploits, and trends.
 - `abusech`
   - Every abuse.ch platform: MalwareBazaar, URLhaus, ThreatFox, YARAify, Feodo Tracker, SSL Blacklist, and the false positive list.
+- `capa`
+  - Run Mandiant's capa against files in the Axon, model the matched rules, and tag files with the rule namespaces.
 - `pcap`
   - Read PCAPs (pcap, pcapng, gzip) from an Axon and model their network flows as `inet:flow` nodes, with certificates, SSH keys, software, and transferred files from tshark.
 
@@ -65,8 +67,6 @@ This is a ToDo/wish list, check `services.toml` for the current list of develope
 
 - `bytes`
   - Search various sources for available bytes for a given `hash:*` node.
-- `capa`
-  - Process files with Capa.
 - `enrich`
   - Enrich any supported node from all possible enrichment sources.
 - `hatching`

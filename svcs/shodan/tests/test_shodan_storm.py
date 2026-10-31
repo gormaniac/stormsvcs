@@ -59,7 +59,6 @@ class TestShodanStormPkg(s_tests.SynTest):
 
 
 class TestShodanStormHost(s_tests.SynTest):
-
     async def test_host(self):
         async with shodanSvc(self) as (core, svc, fake):
             msgs = await core.stormlist("slib.shodan.host --ip 8.8.8.8 --yield")
@@ -83,16 +82,22 @@ class TestShodanStormHost(s_tests.SynTest):
             assert len(await core.nodes("inet:asn=15169 :owner -> ou:org +:name='google llc'")) == 1
             assert len(await core.nodes("inet:dns:a=(dns.google, 8.8.8.8)")) == 1
 
-            nodes = await core.nodes("inet:server=tcp://8.8.8.8:443 -(uses)> it:prod:softver +:name")
+            nodes = await core.nodes(
+                "inet:server=tcp://8.8.8.8:443 -(uses)> it:prod:softver +:name"
+            )
             assert len(nodes) == 1
             assert nodes[0].get("cpe") == "cpe:2.3:a:f5:nginx:1.25.3:*:*:*:*:*:*:*"
             assert nodes[0].get("vers") == "1.25.3"
             # The banner's product/version aren't applied to its other CPEs.
-            nodes = await core.nodes("it:prod:softver:cpe='cpe:2.3:o:linux:linux_kernel:*:*:*:*:*:*:*:*'")
+            nodes = await core.nodes(
+                "it:prod:softver:cpe='cpe:2.3:o:linux:linux_kernel:*:*:*:*:*:*:*:*'"
+            )
             assert len(nodes) == 1
             assert nodes[0].get("name") is None and nodes[0].get("vers") is None
 
-            nodes = await core.nodes("inet:tls:servercert:server=tcp://8.8.8.8:443 -> crypto:x509:cert")
+            nodes = await core.nodes(
+                "inet:tls:servercert:server=tcp://8.8.8.8:443 -> crypto:x509:cert"
+            )
             assert len(nodes) == 1
             assert nodes[0].get("sha256") == "a" * 64
             assert nodes[0].get("identities:fqdns") == ("dns.google",)
@@ -121,7 +126,9 @@ class TestShodanStormHost(s_tests.SynTest):
             await core.nodes("[ inet:ipv4=8.8.8.8 inet:fqdn=vertex.link ]")
 
             # Inbound nodes pass through without --yield.
-            msgs = await core.stormlist("inet:ipv4=8.8.8.8 inet:fqdn=vertex.link | slib.shodan.host")
+            msgs = await core.stormlist(
+                "inet:ipv4=8.8.8.8 inet:fqdn=vertex.link | slib.shodan.host"
+            )
             self.stormIsInWarn("inet:fqdn is not supported", msgs)
             nodes = [m[1][0][0] for m in msgs if m[0] == "node"]
             assert nodes == ["inet:ipv4"]
@@ -135,7 +142,9 @@ class TestShodanStormHost(s_tests.SynTest):
         # An unsupported inbound node only warns: it isn't sent to Shodan and doesn't stop the others.
         async with shodanSvc(self) as (core, svc, fake):
             await core.nodes("[ inet:ipv4=8.8.8.8 inet:fqdn=vertex.link ]")
-            msgs = await core.stormlist("inet:fqdn=vertex.link inet:ipv4=8.8.8.8 | slib.shodan.host --yield")
+            msgs = await core.stormlist(
+                "inet:fqdn=vertex.link inet:ipv4=8.8.8.8 | slib.shodan.host --yield"
+            )
             self.stormHasNoErr(msgs)
             self.stormIsInWarn("inet:fqdn is not supported", msgs)
             paths = [r["path"] for r in fake.requests]
@@ -184,7 +193,6 @@ class TestShodanStormHost(s_tests.SynTest):
 
 
 class TestShodanStormSearch(s_tests.SynTest):
-
     async def test_search(self):
         async with shodanSvc(self) as (core, svc, fake):
             msgs = await core.stormlist('slib.shodan.search "product:nginx" --facets country')
@@ -221,7 +229,9 @@ class TestShodanStormSearch(s_tests.SynTest):
 
     async def test_stream(self):
         async with shodanSvc(self) as (core, svc, fake):
-            msgs = await core.stormlist("slib.shodan.stream ports --value 443 --value 53 --limit 0 --timeout 5")
+            msgs = await core.stormlist(
+                "slib.shodan.stream ports --value 443 --value 53 --limit 0 --timeout 5"
+            )
             self.stormHasNoErr(msgs)
             assert fake.last()["path"] == "/stream/shodan/ports/443,53"
             assert [m[1][0] for m in msgs if m[0] == "node"] == [("inet:ipv4", 134744072)]
@@ -232,14 +242,18 @@ class TestShodanStormSearch(s_tests.SynTest):
 
 
 class TestShodanStormDns(s_tests.SynTest):
-
     async def test_dns_domain(self):
         async with shodanSvc(self) as (core, svc, fake):
-            msgs = await core.stormlist("slib.shodan.dns.domain --domain vertex.link --yield --type A --history")
+            msgs = await core.stormlist(
+                "slib.shodan.dns.domain --domain vertex.link --yield --type A --history"
+            )
             self.stormHasNoErr(msgs)
             assert fake.last()["query"]["type"] == "A"
             assert fake.last()["query"]["history"] == "true"
-            assert {m[1][0][1] for m in msgs if m[0] == "node"} == {"www.vertex.link", "api.vertex.link"}
+            assert {m[1][0][1] for m in msgs if m[0] == "node"} == {
+                "www.vertex.link",
+                "api.vertex.link",
+            }
 
             assert len(await core.nodes("inet:dns:a=(vertex.link, 1.2.3.4)")) == 1
             assert len(await core.nodes("inet:dns:cname=(www.vertex.link, vertex.link)")) == 1
@@ -257,13 +271,18 @@ class TestShodanStormDns(s_tests.SynTest):
         # An unsupported inbound node only warns: it isn't sent to Shodan and doesn't stop the others.
         async with shodanSvc(self) as (core, svc, fake):
             await core.nodes("[ inet:ipv4=8.8.8.8 inet:fqdn=vertex.link ]")
-            msgs = await core.stormlist("inet:ipv4=8.8.8.8 inet:fqdn=vertex.link | slib.shodan.dns.domain --yield")
+            msgs = await core.stormlist(
+                "inet:ipv4=8.8.8.8 inet:fqdn=vertex.link | slib.shodan.dns.domain --yield"
+            )
             self.stormHasNoErr(msgs)
             self.stormIsInWarn("inet:ipv4 is not supported", msgs)
             paths = [r["path"] for r in fake.requests]
             assert not [p for p in paths if "8.8.8.8" in p]
             assert "/api/dns/domain/vertex.link" in paths
-            assert {m[1][0][1] for m in msgs if m[0] == "node"} == {"www.vertex.link", "api.vertex.link"}
+            assert {m[1][0][1] for m in msgs if m[0] == "node"} == {
+                "www.vertex.link",
+                "api.vertex.link",
+            }
 
             # Without --yield, the unsupported node still passes through.
             msgs = await core.stormlist("inet:ipv4=8.8.8.8 | slib.shodan.dns.domain")
@@ -274,7 +293,9 @@ class TestShodanStormDns(s_tests.SynTest):
         async with shodanSvc(self) as (core, svc, fake):
             await core.nodes("[ inet:fqdn=vertex.link inet:ipv4=8.8.8.8 ]")
 
-            msgs = await core.stormlist("inet:fqdn=vertex.link inet:ipv4=8.8.8.8 | slib.shodan.dns.lookup --yield")
+            msgs = await core.stormlist(
+                "inet:fqdn=vertex.link inet:ipv4=8.8.8.8 | slib.shodan.dns.lookup --yield"
+            )
             self.stormHasNoErr(msgs)
             assert {m[1][0] for m in msgs if m[0] == "node"} == {
                 ("inet:ipv4", 16909060),
@@ -286,7 +307,6 @@ class TestShodanStormDns(s_tests.SynTest):
 
 
 class TestShodanStormVulns(s_tests.SynTest):
-
     async def test_cve(self):
         async with shodanSvc(self) as (core, svc, fake):
             msgs = await core.stormlist("slib.shodan.cve --cve cve-2021-44228 --yield --cpes")
@@ -298,7 +318,9 @@ class TestShodanStormVulns(s_tests.SynTest):
             assert vuln.get("cvss:v3_1:score") == 10.0
             assert vuln.get("cvss:v2_0:score") == 9.3
             assert vuln.get("cve:desc").startswith("Apache Log4j2")
-            assert vuln.get("cve:references") == ("https://logging.apache.org/log4j/2.x/security.html",)
+            assert vuln.get("cve:references") == (
+                "https://logging.apache.org/log4j/2.x/security.html",
+            )
             assert vuln.get("timeline:published") is not None
             assert "rep.shodan.kev" in vuln.tags
 
@@ -310,7 +332,9 @@ class TestShodanStormVulns(s_tests.SynTest):
 
     async def test_cve_inbound_and_search(self):
         async with shodanSvc(self) as (core, svc, fake):
-            await core.nodes("[ it:sec:cve=cve-2021-44228 it:sec:cpe='cpe:2.3:a:apache:log4j:2.0:-:*:*:*:*:*:*' ]")
+            await core.nodes(
+                "[ it:sec:cve=cve-2021-44228 it:sec:cpe='cpe:2.3:a:apache:log4j:2.0:-:*:*:*:*:*:*' ]"
+            )
 
             msgs = await core.stormlist("it:sec:cve | slib.shodan.cve")
             self.stormHasNoErr(msgs)
@@ -342,7 +366,9 @@ class TestShodanStormVulns(s_tests.SynTest):
 
     async def test_cve_advisories(self):
         async with shodanSvc(self) as (core, svc, fake):
-            msgs = await core.stormlist("slib.shodan.cve --cve ghsa-jfh8-c2jp-5v3q --cve EUVD-2099-0001 --yield")
+            msgs = await core.stormlist(
+                "slib.shodan.cve --cve ghsa-jfh8-c2jp-5v3q --cve EUVD-2099-0001 --yield"
+            )
             self.stormHasNoErr(msgs)
             assert len([m for m in msgs if m[0] == "node"]) == 2
 
@@ -394,8 +420,14 @@ class TestShodanStormPrinting(s_tests.SynTest):
     async def test_print_cmds(self):
         async with shodanSvc(self) as (core, svc, fake):
             cases = (
-                ("slib.shodan.info", ("Name: visi", "API plan: dev", "slib.shodan service IP: 5.6.7.8")),
-                ("slib.shodan.trends product:openssh --facets version", ("Total results: 10", "2026-09", "9.6")),
+                (
+                    "slib.shodan.info",
+                    ("Name: visi", "API plan: dev", "slib.shodan service IP: 5.6.7.8"),
+                ),
+                (
+                    "slib.shodan.trends product:openssh --facets version",
+                    ("Total results: 10", "2026-09", "9.6"),
+                ),
                 ("slib.shodan.trends --filters", ("Filters: product", "Facets: version")),
                 ("slib.shodan.queries", ("Total saved queries: 1", "Webcams")),
                 ("slib.shodan.queries --search webcam", ("Webcams",)),
@@ -419,12 +451,13 @@ class TestShodanStormPrinting(s_tests.SynTest):
 
 
 class TestShodanStormScanAlerts(s_tests.SynTest):
-
     async def test_scan(self):
         async with shodanSvc(self) as (core, svc, fake):
             await core.nodes("[ inet:ipv4=8.8.8.8 inet:cidr4=1.2.3.0/24 ]")
 
-            msgs = await core.stormlist("inet:ipv4=8.8.8.8 inet:cidr4 | slib.shodan.scan --ip 9.9.9.9 --wait 30")
+            msgs = await core.stormlist(
+                "inet:ipv4=8.8.8.8 inet:cidr4 | slib.shodan.scan --ip 9.9.9.9 --wait 30"
+            )
             self.stormHasNoErr(msgs)
             self.stormIsInPrint("Submitted scan SCAN1 for 1 IPs, 97 scan credits left", msgs)
             self.stormIsInPrint("Scan SCAN1 is done", msgs)
@@ -500,7 +533,9 @@ class TestShodanStormScanAlerts(s_tests.SynTest):
             msgs = await core.stormlist("slib.shodan.notifier.list --id NOTIF1")
             self.stormIsInPrint('"provider": "slack"', msgs)
 
-            msgs = await core.stormlist('slib.shodan.notifier.add slack --desc soc --arg "webhook_url=https://x?a=b"')
+            msgs = await core.stormlist(
+                'slib.shodan.notifier.add slack --desc soc --arg "webhook_url=https://x?a=b"'
+            )
             self.stormIsInPrint("Created notifier NOTIF1", msgs)
             # Shodan only reads POST /notifier's arguments from a form body.
             form = fake.last("/api/notifier", "POST")["form"]
@@ -518,7 +553,6 @@ class TestShodanStormScanAlerts(s_tests.SynTest):
 
 
 class TestShodanStormAdmin(s_tests.SynTest):
-
     async def test_admin(self):
         async with shodanSvc(self, apikey=None) as (core, svc, fake):
             msgs = await core.stormlist("slib.shodan.admin.apikey")
@@ -542,10 +576,14 @@ class TestShodanStormAdmin(s_tests.SynTest):
             msgs = await core.stormlist("slib.shodan.admin.data raw-daily")
             self.stormIsInPrint("2026-10-01.json.gz", msgs)
 
-            msgs = await core.stormlist('slib.shodan.admin.request /shodan/host/count --params ({"query": "x"})')
+            msgs = await core.stormlist(
+                'slib.shodan.admin.request /shodan/host/count --params ({"query": "x"})'
+            )
             self.stormIsInPrint('"total": 1234', msgs)
             assert fake.last()["query"]["query"] == "x"
-            msgs = await core.stormlist("slib.shodan.admin.request /api/v1/search/facets --base trends")
+            msgs = await core.stormlist(
+                "slib.shodan.admin.request /api/v1/search/facets --base trends"
+            )
             self.stormIsInPrint("version", msgs)
 
             msgs = await core.stormlist("slib.shodan.admin.apikey --clear")
@@ -581,12 +619,18 @@ class TestShodanStormPerms(s_tests.SynTest):
                 msgs = await core.stormlist(query, opts={"user": noperms})
                 self.stormIsInErr("requires permission: slib.shodan.user", msgs)
 
-            for query in ("slib.shodan.scan --ip 1.2.3.4", "slib.shodan.alert.list",
-                          "slib.shodan.admin.apikey foo", "slib.shodan.admin.request /org"):
+            for query in (
+                "slib.shodan.scan --ip 1.2.3.4",
+                "slib.shodan.alert.list",
+                "slib.shodan.admin.apikey foo",
+                "slib.shodan.admin.request /org",
+            ):
                 msgs = await core.stormlist(query, opts={"user": useriden})
                 self.stormIsInErr("requires permission", msgs)
 
-            msgs = await core.stormlist('$lib.service.get("slib.shodan").setApiKey(foo)', opts={"user": useriden})
+            msgs = await core.stormlist(
+                '$lib.service.get("slib.shodan").setApiKey(foo)', opts={"user": useriden}
+            )
             self.stormIsInErr("must have permission service.get", msgs)
 
     async def test_scoped_perms(self):
@@ -625,7 +669,9 @@ class TestShodanStormPerms(s_tests.SynTest):
             assert fake.last()["query"]["key"] == "testkey"
 
             # Another user can't pull the key out of the privileged module.
-            msgs = await core.stormlist("$lib.print($lib.import(slib.shodan.priv.user).userKey())", opts={"user": other})
+            msgs = await core.stormlist(
+                "$lib.print($lib.import(slib.shodan.priv.user).userKey())", opts={"user": other}
+            )
             self.stormIsInPrint("$lib.null", msgs)
 
             msgs = await core.stormlist("slib.shodan.apikey visikey2", opts={"user": visi})

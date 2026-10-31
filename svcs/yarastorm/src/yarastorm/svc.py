@@ -1,17 +1,17 @@
 """The yarastorm service."""
 
-
 import binascii
 import os
-from typing import AsyncGenerator, TypedDict
+from collections.abc import AsyncGenerator
+from typing import TypedDict
 
-from stormlibpp import utils
-from stormlibpp.node import NodeTuple, StormNode
-from stormlibpp.telepath import BoolRetn, TelepathRetn
 import synapse.exc as s_exc
 import synapse.lib.cell as s_cell
 import synapse.telepath as s_telepath
 import yara_x
+from stormlibpp import utils
+from stormlibpp.node import NodeTuple, StormNode
+from stormlibpp.telepath import BoolRetn, TelepathRetn
 
 from .api import YaraApi
 
@@ -45,7 +45,7 @@ class YaraRules:
 
     def load(self) -> None:
         """Load all compiled Yara rules from the ruledir into this object.
-        
+
         Walks the ``ruledir`` and calls ``load_rule`` on each path.
         """
 
@@ -55,7 +55,7 @@ class YaraRules:
 
     def load_rule(self, rpath: str) -> None:
         """Load a Yara rule into this object.
-        
+
         A loaded rule is stored in ``rules`` with a key of the file's basename.
         This should equate to the Yara rule's Synapse guid.
 
@@ -215,20 +215,17 @@ class YaraSvc(s_cell.Cell):
     async def __anit__(self, dirn, *args, **kwargs):
         await s_cell.Cell.__anit__(self, dirn, *args, **kwargs)
         self.axonurl = self.conf.get("axon_url")
-        self.rules = YaraRules(
-            utils.absjoin(self.dirn, self.conf.get("rule_dir"))
-        )
+        self.rules = YaraRules(utils.absjoin(self.dirn, self.conf.get("rule_dir")))
 
     async def _getBytes(self, sha256: str) -> bytes | None:
         buffer = b""
 
-        async with s_telepath.withTeleEnv():
-            async with await s_telepath.openurl(self.axonurl) as axon:
-                try:
-                    async for part in axon.get(binascii.unhexlify(sha256)):
-                        buffer += part
-                except s_exc.NoSuchFile:
-                    return None
+        async with s_telepath.withTeleEnv(), await s_telepath.openurl(self.axonurl) as axon:
+            try:
+                async for part in axon.get(binascii.unhexlify(sha256)):
+                    buffer += part
+            except s_exc.NoSuchFile:
+                return None
 
         if len(buffer) == 0:
             return None

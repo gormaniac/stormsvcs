@@ -27,18 +27,16 @@ Known differences from the Storm model, because bulk ingest can only add and set
   where Storm would reuse an existing node with that hash.
 """
 
-
 from collections.abc import Iterator
 from typing import Any
 
 import synapse.common as s_common
-import synapse.exc as s_exc
 import synapse.datamodel as s_datamodel
+import synapse.exc as s_exc
 import synapse.lib.dyndeps as s_dyndeps
 import synapse.lib.modules as s_modules
 
 from .defs import EXT_PROPS, SOURCES
-
 
 NORM_ERRORS = (s_exc.SynErr, ValueError, TypeError)
 """What normalizing a bad value with the data model can raise."""
@@ -70,7 +68,11 @@ def buildModel() -> s_datamodel.Model:
         defs.extend(s_dyndeps.getDynLocal(path).getModelDefs(None))
     model.addDataModels(defs)
     for prop, (ptype, doc) in EXT_PROPS.items():
-        tdef = ("hex", {"size": 96}) if ptype == "hash:sha3_384" else ("str", {"strip": True, "lower": True})
+        tdef = (
+            ("hex", {"size": 96})
+            if ptype == "hash:sha3_384"
+            else ("str", {"strip": True, "lower": True})
+        )
         model.addFormProp("file:bytes", prop, tdef, {"doc": doc})
     return model
 
@@ -173,7 +175,9 @@ class NodeBuilder:
         times = [t for t in (first, last) if t]
         if times:
             try:
-                ival, _ = self.model.type("ival").norm(tuple(times) if len(times) == 2 else times[0])
+                ival, _ = self.model.type("ival").norm(
+                    tuple(times) if len(times) == 2 else times[0]
+                )
             except NORM_ERRORS:
                 # Like Storm's +?#tag=ival, a tag with an invalid interval isn't added.
                 return
@@ -184,7 +188,9 @@ class NodeBuilder:
         elif ival != (None, None):
             tags[name] = (min(old[0], ival[0]), max(old[1], ival[1]))
 
-    def tags(self, ndef: Ndef | None, plat: str, tags: Any, first: Any = None, last: Any = None) -> None:
+    def tags(
+        self, ndef: Ndef | None, plat: str, tags: Any, first: Any = None, last: Any = None
+    ) -> None:
         """Apply abuse.ch tags as ``<prefix>.<plat>.<tag>`` (see the Storm model's ``tagNode()``)."""
 
         if self.prefix is None or not tags or ndef is None:
@@ -198,7 +204,9 @@ class NodeBuilder:
             return
         self._info(n1)["edges"].add((verb, n2))
 
-    def seen(self, ndef: Ndef | None, plat: str, first: Any = None, last: Any = None) -> Ndef | None:
+    def seen(
+        self, ndef: Ndef | None, plat: str, first: Any = None, last: Any = None
+    ) -> Ndef | None:
         """Link a node to the platform's meta:source and update its .seen (see ``seen()``)."""
 
         if ndef is None:
@@ -260,16 +268,27 @@ class NodeBuilder:
         self.prop(ndef, "_sha3_384", hashes.get("sha3_384"))
         return ndef
 
-    def family(self, plat: str, name: str | None, tagname: str | None = None, aliases: Any = None,
-               id: str | None = None, url: str | None = None) -> Ndef | None:
+    def family(
+        self,
+        plat: str,
+        name: str | None,
+        tagname: str | None = None,
+        aliases: Any = None,
+        id: str | None = None,
+        url: str | None = None,
+    ) -> Ndef | None:
         """A malware family as a risk:tool:software (see ``family()``). Held until ``finish()``."""
 
         if not name:
             return None
         if tagname and self.prefix:
-            ndef = self.guid("risk:tool:software", {"tag": f"{self.prefix}.{plat}.{tagname}"}, hold=True)
+            ndef = self.guid(
+                "risk:tool:software", {"tag": f"{self.prefix}.{plat}.{tagname}"}, hold=True
+            )
         else:
-            ndef = self.guid("risk:tool:software", {"soft:name": name, "reporter:name": "abuse.ch"}, hold=True)
+            ndef = self.guid(
+                "risk:tool:software", {"soft:name": name, "reporter:name": "abuse.ch"}, hold=True
+            )
         if ndef is None:
             return None
         self.prop(ndef, "soft:name", name)
@@ -325,8 +344,13 @@ class NodeBuilder:
         self.prop(file, "name", s.get("name"), ifunset=True)
         if s.get("ssdeep"):
             self.addArray(file, "ssdeeps", s["ssdeep"])
-        for key, prop in (("sha3_384", "_sha3_384"), ("tlsh", "_tlsh"), ("telfhash", "_telfhash"),
-                          ("gimphash", "_gimphash"), ("dhash_icon", "_dhash_icon")):
+        for key, prop in (
+            ("sha3_384", "_sha3_384"),
+            ("tlsh", "_tlsh"),
+            ("telfhash", "_telfhash"),
+            ("gimphash", "_gimphash"),
+            ("dhash_icon", "_dhash_icon"),
+        ):
             self.prop(file, prop, s.get(key))
 
         self.tags(file, plat, s.get("tags"), first, last)
@@ -381,7 +405,12 @@ class NodeBuilder:
         for pay in u.get("payloads") or ():
             file = self.sample(pay, plat)
             if file is not None:
-                self.seen(self.node("inet:urlfile", (urlnode[1], file[1])), plat, pay.get("seen"), pay.get("last"))
+                self.seen(
+                    self.node("inet:urlfile", (urlnode[1], file[1])),
+                    plat,
+                    pay.get("seen"),
+                    pay.get("last"),
+                )
         return urlnode
 
     # ---- ThreatFox ----
@@ -432,8 +461,14 @@ class NodeBuilder:
             self.refNode(i.get("reference"), ind, plat)
 
         if i.get("family"):
-            self.family(plat, i["family"], i.get("family_tag"), i.get("aliases"), i.get("malware"),
-                        i.get("malpedia"))
+            self.family(
+                plat,
+                i["family"],
+                i.get("family_tag"),
+                i.get("aliases"),
+                i.get("malware"),
+                i.get("malpedia"),
+            )
         self.reporter(i.get("reporter"), obs, plat)
 
         for s in i.get("samples") or ():
@@ -462,7 +497,9 @@ class NodeBuilder:
         # Held nodes are kept, but their edges (to this batch's nodes) go out with the batch.
         for ndef, info in self.held.items():
             if info["edges"]:
-                nodes.setdefault(ndef, {"props": {}, "tags": {}, "edges": set()})["edges"] |= info["edges"]
+                nodes.setdefault(ndef, {"props": {}, "tags": {}, "edges": set()})["edges"] |= info[
+                    "edges"
+                ]
                 info["edges"] = set()
         return list(self._pack(nodes))
 

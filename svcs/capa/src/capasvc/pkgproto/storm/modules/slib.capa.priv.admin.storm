@@ -1,0 +1,14 @@
+// Privileged (asroot) wrappers around the slib.capa service for slib.capa.admin.
+
+init {
+    $svc = $lib.service.get("slib.capa")
+}
+
+function setTagPrefix(prefix) { $lib.globals.set("slib:capa:tag:prefix", $prefix) }
+function setTagsEnabled(enabled) { $lib.globals.set("slib:capa:tag:enabled", $enabled) }
+
+// Record what slib.capa.sync imported, kind is "rules" or "tags".
+function setSynced(kind, valu) { $lib.globals.set(`slib:capa:sync:{$kind}`, $valu) }
+
+// Have the service reload its rules from disk.
+function reload() { return($svc.reload()) }

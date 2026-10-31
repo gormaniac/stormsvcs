@@ -5,7 +5,6 @@ Suricata logs one on every EVE event (``community-id: yes``), which is how its e
 matched back to the flows ``pcapsvc.flows`` builds when a frame number can't be used.
 """
 
-
 import base64
 import hashlib
 import struct
@@ -14,8 +13,20 @@ ICMP4_PAIRS = {0: 8, 8: 0, 13: 14, 14: 13, 15: 16, 16: 15, 17: 18, 18: 17, 9: 10
 """ICMPv4 types and the type of their reply/request counterpart (echo, timestamp, info, mask,
 router advertisement/solicitation)."""
 
-ICMP6_PAIRS = {128: 129, 129: 128, 133: 134, 134: 133, 135: 136, 136: 135, 130: 131, 131: 130,
-               144: 145, 145: 144, 146: 147, 147: 146}
+ICMP6_PAIRS = {
+    128: 129,
+    129: 128,
+    133: 134,
+    134: 133,
+    135: 136,
+    136: 135,
+    130: 131,
+    131: 130,
+    144: 145,
+    145: 144,
+    146: 147,
+    147: 146,
+}
 """ICMPv6 types and their counterparts."""
 
 PORT_PROTOS = (6, 17, 132)
@@ -31,8 +42,14 @@ def _icmpPorts(ipproto: int, itype: int, code: int) -> tuple[int, int, bool]:
     return itype, code, True
 
 
-def communityId(ipproto: int, src: bytes, dst: bytes, sport: int | None = None,
-                dport: int | None = None, seed: int = 0) -> str:
+def communityId(
+    ipproto: int,
+    src: bytes,
+    dst: bytes,
+    sport: int | None = None,
+    dport: int | None = None,
+    seed: int = 0,
+) -> str:
     """The Community ID of a flow.
 
     Parameters
@@ -52,8 +69,9 @@ def communityId(ipproto: int, src: bytes, dst: bytes, sport: int | None = None,
     if ipproto in (1, 58) and sport is not None:
         sport, dport, oneway = _icmpPorts(ipproto, sport, dport or 0)
 
-    hasports = sport is not None and dport is not None and (
-        ipproto in PORT_PROTOS or ipproto in (1, 58))
+    hasports = (
+        sport is not None and dport is not None and (ipproto in PORT_PROTOS or ipproto in (1, 58))
+    )
     if not oneway and ((src, sport if hasports else 0) > (dst, dport if hasports else 0)):
         src, dst = dst, src
         sport, dport = dport, sport

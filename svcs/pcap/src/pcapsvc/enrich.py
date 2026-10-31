@@ -14,7 +14,6 @@ that sent it, then ``enrichFlow`` adds what was found to the flow's dict, per si
 And for the flow as a whole: ``tls`` (SNIs, JA3, JA3S, JA4) and ``http`` (hosts, requests).
 """
 
-
 import email
 import email.policy
 import hashlib
@@ -34,24 +33,36 @@ FTP_FILE_CMDS = ("RETR", "STOR", "STOU", "APPE")
 """FTP commands whose data connection transfers a file (not a directory listing)."""
 
 CPES = (
-    (re.compile(r"^openssh[_-](\d+\.\d+)(p\d+)?"),
-     lambda m: f"cpe:2.3:a:openbsd:openssh:{m[1]}:{m[2] or '*'}:*:*:*:*:*:*"),
-    (re.compile(r"^dropbear[_-](\d{4}\.\d+)"),
-     lambda m: f"cpe:2.3:a:dropbear_ssh_project:dropbear_ssh:{m[1]}:*:*:*:*:*:*:*"),
-    (re.compile(r"^nginx/(\d+\.\d+\.\d+)"),
-     lambda m: f"cpe:2.3:a:f5:nginx:{m[1]}:*:*:*:*:*:*:*"),
-    (re.compile(r"^apache/(\d+\.\d+\.\d+)"),
-     lambda m: f"cpe:2.3:a:apache:http_server:{m[1]}:*:*:*:*:*:*:*"),
-    (re.compile(r"^microsoft-iis/(\d+\.\d+)"),
-     lambda m: f"cpe:2.3:a:microsoft:internet_information_services:{m[1]}:*:*:*:*:*:*:*"),
-    (re.compile(r"^lighttpd/(\d+\.\d+\.\d+)"),
-     lambda m: f"cpe:2.3:a:lighttpd:lighttpd:{m[1]}:*:*:*:*:*:*:*"),
-    (re.compile(r"^curl/(\d+\.\d+\.\d+)"),
-     lambda m: f"cpe:2.3:a:haxx:curl:{m[1]}:*:*:*:*:*:*:*"),
-    (re.compile(r"^wget/(\d+\.\d+(?:\.\d+)?)"),
-     lambda m: f"cpe:2.3:a:gnu:wget:{m[1]}:*:*:*:*:*:*:*"),
-    (re.compile(r"^thunderbird/(\d+\.\d+(?:\.\d+)?)"),
-     lambda m: f"cpe:2.3:a:mozilla:thunderbird:{m[1]}:*:*:*:*:*:*:*"),
+    (
+        re.compile(r"^openssh[_-](\d+\.\d+)(p\d+)?"),
+        lambda m: f"cpe:2.3:a:openbsd:openssh:{m[1]}:{m[2] or '*'}:*:*:*:*:*:*",
+    ),
+    (
+        re.compile(r"^dropbear[_-](\d{4}\.\d+)"),
+        lambda m: f"cpe:2.3:a:dropbear_ssh_project:dropbear_ssh:{m[1]}:*:*:*:*:*:*:*",
+    ),
+    (re.compile(r"^nginx/(\d+\.\d+\.\d+)"), lambda m: f"cpe:2.3:a:f5:nginx:{m[1]}:*:*:*:*:*:*:*"),
+    (
+        re.compile(r"^apache/(\d+\.\d+\.\d+)"),
+        lambda m: f"cpe:2.3:a:apache:http_server:{m[1]}:*:*:*:*:*:*:*",
+    ),
+    (
+        re.compile(r"^microsoft-iis/(\d+\.\d+)"),
+        lambda m: f"cpe:2.3:a:microsoft:internet_information_services:{m[1]}:*:*:*:*:*:*:*",
+    ),
+    (
+        re.compile(r"^lighttpd/(\d+\.\d+\.\d+)"),
+        lambda m: f"cpe:2.3:a:lighttpd:lighttpd:{m[1]}:*:*:*:*:*:*:*",
+    ),
+    (re.compile(r"^curl/(\d+\.\d+\.\d+)"), lambda m: f"cpe:2.3:a:haxx:curl:{m[1]}:*:*:*:*:*:*:*"),
+    (
+        re.compile(r"^wget/(\d+\.\d+(?:\.\d+)?)"),
+        lambda m: f"cpe:2.3:a:gnu:wget:{m[1]}:*:*:*:*:*:*:*",
+    ),
+    (
+        re.compile(r"^thunderbird/(\d+\.\d+(?:\.\d+)?)"),
+        lambda m: f"cpe:2.3:a:mozilla:thunderbird:{m[1]}:*:*:*:*:*:*:*",
+    ),
 )
 """(pattern, CPE builder) pairs for well known software names (matched lowercased)."""
 
@@ -239,9 +250,14 @@ class Enricher:
         The directory of the files Suricata extracted.
     """
 
-    def __init__(self, files: FileStore | None, unsaved: bool = False,
-                 rules: dict | None = None, counts: dict | None = None,
-                 filestore: str | None = None) -> None:
+    def __init__(
+        self,
+        files: FileStore | None,
+        unsaved: bool = False,
+        rules: dict | None = None,
+        counts: dict | None = None,
+        filestore: str | None = None,
+    ) -> None:
         self.files = files
         self.countunsaved = unsaved
         self.unsaved = 0
@@ -262,8 +278,16 @@ class Enricher:
 
     @staticmethod
     def _side() -> dict:
-        return {"ssl:cert": None, "ssl:certs": [], "ssh:key": None, "rdp:hostname": None,
-                "rdp:keyboard:layout": None, "softnames": [], "cpes": [], "txfiles": []}
+        return {
+            "ssl:cert": None,
+            "ssl:certs": [],
+            "ssh:key": None,
+            "rdp:hostname": None,
+            "rdp:keyboard:layout": None,
+            "softnames": [],
+            "cpes": [],
+            "txfiles": [],
+        }
 
     @staticmethod
     def _uniq(items: list, valu: Any) -> None:
@@ -301,8 +325,16 @@ class Enricher:
                 return
         side["txfiles"].append(entry)
 
-    def _file(self, side: dict, data: bytes, proto: str, name: str | None = None,
-              mime: str | None = None, text: str | None = None, complete: bool = True) -> None:
+    def _file(
+        self,
+        side: dict,
+        data: bytes,
+        proto: str,
+        name: str | None = None,
+        mime: str | None = None,
+        text: str | None = None,
+        complete: bool = True,
+    ) -> None:
         if not data:
             return
         if self.files is None:
@@ -312,18 +344,46 @@ class Enricher:
         sha256 = self.files.add(data)
         if sha256 is None:
             return
-        self._addEntry(side, {"sha256": sha256, "size": len(data), "name": name, "mime": mime,
-                              "text": text, "proto": proto, "complete": complete})
+        self._addEntry(
+            side,
+            {
+                "sha256": sha256,
+                "size": len(data),
+                "name": name,
+                "mime": mime,
+                "text": text,
+                "proto": proto,
+                "complete": complete,
+            },
+        )
 
-    def _storedFile(self, side: dict, path: str, sha256: str, size: int, proto: str,
-                    name: str | None = None, mime: str | None = None,
-                    complete: bool = True) -> None:
+    def _storedFile(
+        self,
+        side: dict,
+        path: str,
+        sha256: str,
+        size: int,
+        proto: str,
+        name: str | None = None,
+        mime: str | None = None,
+        complete: bool = True,
+    ) -> None:
         """Add a file that's already on disk (Suricata extracted it)."""
 
         if self.files.addPath(path, sha256, size) is None:
             return
-        self._addEntry(side, {"sha256": sha256, "size": size, "name": name, "mime": mime,
-                              "text": None, "proto": proto, "complete": complete})
+        self._addEntry(
+            side,
+            {
+                "sha256": sha256,
+                "size": size,
+                "name": name,
+                "mime": mime,
+                "text": None,
+                "proto": proto,
+                "complete": complete,
+            },
+        )
 
     def add(self, client: bool, rec: dict) -> None:
         """Add the fields of a frame, sent by the client if ``client`` (else the server)."""
@@ -337,9 +397,12 @@ class Enricher:
             for hexder in certs:
                 self._cert(side, bytes.fromhex(hexder.replace(":", "")))
 
-        for field, key in (("tls.handshake.extensions_server_name", "sni"),
-                           ("tls.handshake.ja3", "ja3"), ("tls.handshake.ja3s", "ja3s"),
-                           ("tls.handshake.ja4", "ja4")):
+        for field, key in (
+            ("tls.handshake.extensions_server_name", "sni"),
+            ("tls.handshake.ja3", "ja3"),
+            ("tls.handshake.ja3s", "ja3s"),
+            ("tls.handshake.ja4", "ja4"),
+        ):
             for valu in rec.get(field, ()):
                 _addUniq(self.tls[key], valu.lower() if key == "sni" else valu)
 
@@ -353,9 +416,17 @@ class Enricher:
         if layout := rec.get("rdp.keyboardLayout"):
             side["rdp:keyboard:layout"] = keyboardLayout(int(layout[0]))
 
-        for field in ("http.user_agent", "http.server", "http2.headers.user_agent",
-                      "http2.headers.server", "sip.User-Agent", "sip.Server", "imf.user_agent",
-                      "imf.ext.mailer", "gquic.tag.uaid"):
+        for field in (
+            "http.user_agent",
+            "http.server",
+            "http2.headers.user_agent",
+            "http2.headers.server",
+            "sip.User-Agent",
+            "sip.Server",
+            "imf.user_agent",
+            "imf.ext.mailer",
+            "gquic.tag.uaid",
+        ):
             for valu in rec.get(field, ()):
                 self._soft(side, valu)
 
@@ -392,8 +463,9 @@ class Enricher:
 
         self._httpBody(side, data, (rec.get("http.content_type") or [None])[0], name, "http")
 
-    def _httpBody(self, side: dict, data: bytes, ctype: str | None, name: str | None,
-                  proto: str) -> None:
+    def _httpBody(
+        self, side: dict, data: bytes, ctype: str | None, name: str | None, proto: str
+    ) -> None:
         """Extract an HTTP body, or the files in it if it's a multipart upload."""
 
         mime = mimeType(ctype)
@@ -443,8 +515,7 @@ class Enricher:
             self._h2stream(client, datas[-1])["body"] = bytes.fromhex(body[0].replace(":", ""))
 
     def _h2stream(self, client: bool, sid: str) -> dict:
-        return self.h2.setdefault((client, sid), {"data": bytearray(), "body": None,
-                                                  "ctype": None})
+        return self.h2.setdefault((client, sid), {"data": bytearray(), "body": None, "ctype": None})
 
     def _finishHttp2(self) -> None:
         for (client, sid), stream in self.h2.items():
@@ -466,16 +537,16 @@ class Enricher:
         verb, _, arg = cmd[0].partition(" ")
         if verb.upper() not in FTP_FILE_CMDS:
             return
-        xfer = self.ftp.setdefault(client, {"name": posixpath.basename(arg.strip()) or None,
-                                            "segs": {}})
+        xfer = self.ftp.setdefault(
+            client, {"name": posixpath.basename(arg.strip()) or None, "segs": {}}
+        )
         seq = int(rec.get("tcp.seq", ["0"])[0])
         xfer["segs"].setdefault(seq, bytes.fromhex(payload[0].replace(":", "")))
 
     def _addEmail(self, side: dict, raw: bytes) -> None:
         msg = email.message_from_bytes(raw, policy=email.policy.compat32)
         subject = msg.get("Subject")
-        self._file(side, raw, "imf", mime="message/rfc822",
-                   text=str(subject) if subject else None)
+        self._file(side, raw, "imf", mime="message/rfc822", text=str(subject) if subject else None)
         for part, name, mime in self._mimeFiles(raw):
             self._file(side, part, "imf", name=name, mime=mime)
 
@@ -503,12 +574,11 @@ class Enricher:
             for seq in sorted(segs):
                 offs, seg = seq - base, segs[seq]
                 if offs < len(data):
-                    seg = seg[len(data) - offs:]  # Retransmitted (overlapping) bytes.
+                    seg = seg[len(data) - offs :]  # Retransmitted (overlapping) bytes.
                 elif offs > len(data):
                     complete = False  # Bytes the capture missed.
                 data += seg
-            self._file(self.sides[client], bytes(data), "ftp", name=xfer["name"],
-                       complete=complete)
+            self._file(self.sides[client], bytes(data), "ftp", name=xfer["name"], complete=complete)
 
     def apply(self, flow: dict) -> dict:
         """Add the collected details to a flow dict (see ``pcapsvc.flows.Flow.asdict``)."""

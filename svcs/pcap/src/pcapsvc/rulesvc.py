@@ -14,7 +14,6 @@ any other rule) and then pushes the enabled rules back to the service.
 the ``snort`` and ``suricata`` engines.
 """
 
-
 import asyncio
 import contextlib
 import json
@@ -79,11 +78,15 @@ def _prepare(entries: dict[str, tuple[str, str]]) -> dict[str, Any]:
             # Keep the highest rev, or the first guid (they are sorted) on a tie.
             gidsid = p_rules.ruleKey(*key[1:])
             if meta[prev][2] >= rule["rev"]:
-                errors[guid] = (f"Duplicate {space} gid:sid {gidsid}, rule {prev} "
-                                f"(rev {meta[prev][2]}) is used instead.")
+                errors[guid] = (
+                    f"Duplicate {space} gid:sid {gidsid}, rule {prev} "
+                    f"(rev {meta[prev][2]}) is used instead."
+                )
                 continue
-            errors[prev] = (f"Duplicate {space} gid:sid {gidsid}, rule {guid} "
-                            f"(rev {rule['rev']}) is used instead.")
+            errors[prev] = (
+                f"Duplicate {space} gid:sid {gidsid}, rule {guid} "
+                f"(rev {rule['rev']}) is used instead."
+            )
             for byeng in rules.values():
                 byeng.pop(prev, None)
 
@@ -139,8 +142,9 @@ class RuleMixin:
         # The loaded rules of each engine ("snort", "suricata"): (rules file, gid:sid -> info).
         self.active: dict[str, tuple[str, dict[str, dict]]] = self._loadActive()
 
-        if self.ruleinfo.get("rules:count") and \
-                set(self.ruleinfo.get("rules:active") or ()) - set(self.active):
+        if self.ruleinfo.get("rules:count") and set(self.ruleinfo.get("rules:active") or ()) - set(
+            self.active
+        ):
             # Rules were pushed, but rules files are gone (ex. a new volume), rebuild them.
             self.schedCoro(self._initBuild())
 
@@ -198,8 +202,9 @@ class RuleMixin:
 
     # ---- Building ----
 
-    async def _buildSnort(self, rules: dict[str, dict[str, str]], name: str,
-                          errors: dict[str, str]) -> list[str] | None:
+    async def _buildSnort(
+        self, rules: dict[str, dict[str, str]], name: str, errors: dict[str, str]
+    ) -> list[str] | None:
         """Build the Snort rules file. Returns the valid guids, or None without Snort."""
 
         snort2, snort3 = rules[p_rules.ENGINE_SNORT2], rules[p_rules.ENGINE_SNORT3]
@@ -215,8 +220,9 @@ class RuleMixin:
         errors.update(verrs)
         return valid
 
-    async def _buildSuricata(self, rules: dict[str, dict[str, str]], name: str,
-                             errors: dict[str, str]) -> list[str] | None:
+    async def _buildSuricata(
+        self, rules: dict[str, dict[str, str]], name: str, errors: dict[str, str]
+    ) -> list[str] | None:
         """Build the Suricata rules file. Returns the valid guids, or None without Suricata."""
 
         texts = rules[p_rules.ENGINE_SURICATA]
@@ -240,10 +246,10 @@ class RuleMixin:
 
             built: dict[str, list[str] | None] = {}
             try:
-                built["snort"] = await self._buildSnort(prep["rules"], f"snort-{bid}.rules",
-                                                        errors)
+                built["snort"] = await self._buildSnort(prep["rules"], f"snort-{bid}.rules", errors)
                 built["suricata"] = await self._buildSuricata(
-                    prep["rules"], f"suricata-{bid}.rules", errors)
+                    prep["rules"], f"suricata-{bid}.rules", errors
+                )
             except Exception as err:
                 mesg = getattr(err, "mesg", None) or str(err)
                 self.ruleinfo.set("rules:error", mesg)
@@ -284,8 +290,13 @@ class RuleMixin:
                     self._release(path, drop=True)
 
             summary = self._ruleSummary(True, took)
-            logger.info("Built the rules: %d rules, %d loaded, %d invalid, in %d ms",
-                        summary["rules"], summary["loaded"], summary["invalid"], took)
+            logger.info(
+                "Built the rules: %d rules, %d loaded, %d invalid, in %d ms",
+                summary["rules"],
+                summary["loaded"],
+                summary["invalid"],
+                took,
+            )
             return summary
 
     def _acquire(self, engine: str) -> tuple[str, dict[str, dict]] | None:
@@ -317,8 +328,9 @@ class RuleMixin:
 
         hasrules = next(iter(self.corpus.keys()), None) is not None
         missing = set(self.ruleinfo.get("rules:active") or ()) - set(self.active)
-        return (hasrules and (not self.active or bool(missing))) or \
-            bool(self.ruleinfo.get("rules:error"))
+        return (hasrules and (not self.active or bool(missing))) or bool(
+            self.ruleinfo.get("rules:error")
+        )
 
     # ---- Pushes ----
 
@@ -330,7 +342,8 @@ class RuleMixin:
             guid, form, text, engine = item
         except (TypeError, ValueError) as err:
             raise RuleSvcError(
-                f"Rules must be pushed as (guid, form, text, engine), got: {item!r}") from err
+                f"Rules must be pushed as (guid, form, text, engine), got: {item!r}"
+            ) from err
         if not s_common.isguid(guid):
             raise RuleSvcError(f"Invalid rule guid: {guid!r}")
         if not isinstance(text, str) or not text.strip():
@@ -395,8 +408,9 @@ class RuleMixin:
                 self.corpus.set(guid, (text, engine))
         return await self._build()
 
-    async def ruleUpdate(self, rules: list | None = None,
-                         dels: list | None = None) -> dict[str, Any]:
+    async def ruleUpdate(
+        self, rules: list | None = None, dels: list | None = None
+    ) -> dict[str, Any]:
         """Add/update some (guid, form, text, engine) rules and remove some rules (by guid),
         then rebuild.
 
@@ -517,15 +531,20 @@ class RuleMixin:
         shutil.rmtree(self._snapDir(name), ignore_errors=True)
 
     def _feedOut(self, fdef: p_feeds.FeedDef) -> dict[str, Any]:
-        return {**fdef, "form": p_rules.FORMS[fdef["engine"]],
-                "ruleset": p_feeds.rulesetGuid(fdef["name"])}
+        return {
+            **fdef,
+            "form": p_rules.FORMS[fdef["engine"]],
+            "ruleset": p_feeds.rulesetGuid(fdef["name"]),
+        }
 
     async def feeds(self, view: str | None = None) -> list[dict[str, Any]]:
         """Every feed's definition, its ruleset guid, and the state of its last download (and
         sync into ``view``). URLs keep their ``${secret}`` placeholders."""
 
-        return [{**self._feedOut(fdef), "info": self._feedInfo(name, view)}
-                for name, fdef in self.feeddefs.items()]
+        return [
+            {**self._feedOut(fdef), "info": self._feedInfo(name, view)}
+            for name, fdef in self.feeddefs.items()
+        ]
 
     async def feedAdd(self, fdef: dict[str, Any]) -> dict[str, Any]:
         """Add (or replace) a feed."""
@@ -537,7 +556,10 @@ class RuleMixin:
         prev = self.feeddefs.get(fdef["name"])
         self.feeddefs.set(fdef["name"], dict(fdef))
         if prev is not None and (prev["url"], prev["engine"], prev["exclude"]) != (
-                fdef["url"], fdef["engine"], fdef["exclude"]):
+            fdef["url"],
+            fdef["engine"],
+            fdef["exclude"],
+        ):
             # The feed's content will be different, download it again on the next sync.
             self.feedinfo.pop(fdef["name"])
             self._dropSync(fdef["name"])
@@ -562,8 +584,9 @@ class RuleMixin:
         self.feeddefs.set(fdef["name"], fdef)
         return self._feedOut(fdef)
 
-    async def feedPull(self, name: str, force: bool = False,
-                       view: str | None = None) -> dict[str, Any]:
+    async def feedPull(
+        self, name: str, force: bool = False, view: str | None = None
+    ) -> dict[str, Any]:
         """Download a feed, if it's due (see ``pcap:feeds:interval``) or ``force`` is set.
 
         The feed's parsed rules are saved by the service, Storm reads them with
@@ -592,7 +615,8 @@ class RuleMixin:
         try:
             url = p_feeds.feedUrl(fdef["url"], secrets)
             resp = await p_feeds.download(
-                self.session, url,
+                self.session,
+                url,
                 maxsize=self.conf.get("pcap:feeds:maxsize"),
                 timeout=self.conf.get("pcap:feeds:timeout"),
                 etag=info.get("etag") if have and not force else None,
@@ -614,7 +638,8 @@ class RuleMixin:
 
         try:
             parsed = await s_coro.executor(
-                p_feeds.parseFeed, fdef, resp["byts"], self.conf.get("pcap:feeds:maxsize"))
+                p_feeds.parseFeed, fdef, resp["byts"], self.conf.get("pcap:feeds:maxsize")
+            )
         except p_feeds.FeedError as err:
             info["error"] = err.mesg
             info["failed"] = now
@@ -623,23 +648,30 @@ class RuleMixin:
 
         await s_coro.executor(_writeFeed, self._feedPath(fdef["name"]), parsed["rules"])
 
-        info.update({
-            "sha256": resp["sha256"],
-            "etag": resp["etag"],
-            "modified": resp["modified"],
-            "count": len(parsed["rules"]),
-            "enabled": sum(1 for r in parsed["rules"] if r["enabled"]),
-            "errors": len(parsed["errors"]),
-            "files": len(parsed["files"]),
-        })
+        info.update(
+            {
+                "sha256": resp["sha256"],
+                "etag": resp["etag"],
+                "modified": resp["modified"],
+                "count": len(parsed["rules"]),
+                "enabled": sum(1 for r in parsed["rules"] if r["enabled"]),
+                "errors": len(parsed["errors"]),
+                "files": len(parsed["files"]),
+            }
+        )
         self.feedinfo.set(fdef["name"], info)
         if parsed["errors"]:
-            logger.warning("The %s feed has %d rules that couldn't be parsed, ex. %s",
-                           fdef["name"], len(parsed["errors"]), parsed["errors"][:3])
+            logger.warning(
+                "The %s feed has %d rules that couldn't be parsed, ex. %s",
+                fdef["name"],
+                len(parsed["errors"]),
+                parsed["errors"][:3],
+            )
         return {**self._feedInfo(fdef["name"], view), "skipped": False}
 
-    async def feedChanges(self, name: str, view: str, full: bool = False,
-                          size: int = FEED_BATCH) -> AsyncIterator[dict[str, Any]]:
+    async def feedChanges(
+        self, name: str, view: str, full: bool = False, size: int = FEED_BATCH
+    ) -> AsyncIterator[dict[str, Any]]:
         """Yield the changes to sync into ``view`` from a feed's last download, in batches.
 
         Changes are relative to the last download synced into the view (see ``feedSynced``).
@@ -675,7 +707,7 @@ class RuleMixin:
         yield {"full": full, "upsert": recs[:size], "removed": removed}
         for idx in range(size, len(recs), size):
             await asyncio.sleep(0)
-            yield {"full": full, "upsert": recs[idx: idx + size], "removed": []}
+            yield {"full": full, "upsert": recs[idx : idx + size], "removed": []}
 
     async def feedSynced(self, name: str, sha256: str, view: str) -> dict[str, Any]:
         """Record that a feed's download (by its sha256) was synced into a view."""

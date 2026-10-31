@@ -303,7 +303,7 @@ sdist = { url = "https://files.pythonhosted.org/packages/a4/30/9b907ff7e4af8c64d
 
 [[package]]
 name = "crtshsvc"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "asyncpg" },

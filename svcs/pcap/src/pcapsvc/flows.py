@@ -9,7 +9,6 @@ aggregates them into flows keyed by their protocol and endpoints. ``analyze`` ti
 two together and returns the flows plus a summary of the capture.
 """
 
-
 import gzip
 import ipaddress
 import struct
@@ -129,8 +128,14 @@ TCP_ECE = 0x40
 TCP_CWR = 0x80
 
 TCP_FLAGS = (
-    (TCP_FIN, "fin"), (TCP_SYN, "syn"), (TCP_RST, "rst"), (TCP_PSH, "psh"),
-    (TCP_ACK, "ack"), (TCP_URG, "urg"), (TCP_ECE, "ece"), (TCP_CWR, "cwr"),
+    (TCP_FIN, "fin"),
+    (TCP_SYN, "syn"),
+    (TCP_RST, "rst"),
+    (TCP_PSH, "psh"),
+    (TCP_ACK, "ack"),
+    (TCP_URG, "urg"),
+    (TCP_ECE, "ece"),
+    (TCP_CWR, "cwr"),
 )
 """TCP flag bits and their names."""
 
@@ -207,7 +212,7 @@ def _pcapngOptions(buf: bytes, endian: str) -> Iterator[tuple[int, bytes]]:
         code, size = struct.unpack_from(endian + "HH", buf, offs)
         if code == 0:
             return
-        yield code, buf[offs + 4:offs + 4 + size]
+        yield code, buf[offs + 4 : offs + 4 + size]
         offs += 4 + size + (-size % 4)
 
 
@@ -271,10 +276,10 @@ def _readPcapng(fd: BinaryIO, header: bytes, state: dict) -> Iterator[Packet]:
         elif blktype in (6, 2):  # Enhanced Packet Block, (obsolete) Packet Block
             if blktype == 6:
                 ifid, tshi, tslo, caplen = struct.unpack_from(endian + "IIII", body, 0)
-                data = body[20:20 + caplen]
+                data = body[20 : 20 + caplen]
             else:
                 ifid, _, tshi, tslo, caplen = struct.unpack_from(endian + "HHIII", body, 0)
-                data = body[20:20 + caplen]
+                data = body[20 : 20 + caplen]
             num = _frame(state)
             if ifid >= len(ifaces):
                 state["skipped"]["badiface"] = state["skipped"].get("badiface", 0) + 1
@@ -289,7 +294,7 @@ def _readPcapng(fd: BinaryIO, header: bytes, state: dict) -> Iterator[Packet]:
                 state["skipped"]["badiface"] = state["skipped"].get("badiface", 0) + 1
                 continue
             origlen = struct.unpack_from(endian + "I", body, 0)[0]
-            yield Packet(lastts, ifaces[0][0], body[4:4 + origlen], num)
+            yield Packet(lastts, ifaces[0][0], body[4 : 4 + origlen], num)
 
         # Every other block type (stats, name resolution, custom, etc.) is ignored.
 
@@ -397,8 +402,13 @@ def decodeIp(linktype: int, buf: bytes) -> dpkt.ip.IP | dpkt.ip6.IP6 | None:
 
     if linktype == LINKTYPE_ETHERNET:
         return _unwrapIp(dpkt.ethernet.Ethernet(buf))
-    if linktype in (LINKTYPE_RAW, LINKTYPE_RAW_BSD, LINKTYPE_RAW_OPENBSD,
-                    LINKTYPE_IPV4, LINKTYPE_IPV6):
+    if linktype in (
+        LINKTYPE_RAW,
+        LINKTYPE_RAW_BSD,
+        LINKTYPE_RAW_OPENBSD,
+        LINKTYPE_IPV4,
+        LINKTYPE_IPV6,
+    ):
         return _rawIp(buf)
     if linktype in (LINKTYPE_NULL, LINKTYPE_LOOP):
         # A 4 byte address family, which varies by OS, so go by the IP version instead.
@@ -412,8 +422,9 @@ def decodeIp(linktype: int, buf: bytes) -> dpkt.ip.IP | dpkt.ip6.IP6 | None:
     raise KeyError(linktype)
 
 
-def decodePacket(linktype: int, buf: bytes) -> tuple[dpkt.ip.IP | dpkt.ip6.IP6 | None,
-                                                     tuple[int, ...]]:
+def decodePacket(
+    linktype: int, buf: bytes
+) -> tuple[dpkt.ip.IP | dpkt.ip6.IP6 | None, tuple[int, ...]]:
     """Decode a captured packet's IP packet (see ``decodeIp``) and its VLAN IDs."""
 
     if linktype == LINKTYPE_ETHERNET:
@@ -491,8 +502,16 @@ class Flow:
         "vlans",
     )
 
-    def __init__(self, vers: int, ipproto: int, client: Side, server: Side, ts: int,
-                 index: int, vlans: tuple[int, ...] = ()) -> None:
+    def __init__(
+        self,
+        vers: int,
+        ipproto: int,
+        client: Side,
+        server: Side,
+        ts: int,
+        index: int,
+        vlans: tuple[int, ...] = (),
+    ) -> None:
         self.vers = vers
         self.ipproto = ipproto
         self.vlans = vlans
@@ -544,8 +563,9 @@ class Flow:
             fromclient, itype, code = self.icmpfirst
             src, dst = (self.client, self.server) if fromclient else (self.server, self.client)
             return p_communityid.communityId(self.ipproto, src.ip, dst.ip, itype, code)
-        return p_communityid.communityId(self.ipproto, self.client.ip, self.server.ip,
-                                         self.client.port, self.server.port)
+        return p_communityid.communityId(
+            self.ipproto, self.client.ip, self.server.ip, self.client.port, self.server.port
+        )
 
     def asdict(self, handshake: int = DEFAULT_HANDSHAKE, seed: Any = None) -> dict:
         """The flow as a dict of primitives that can be sent over Telepath.
@@ -579,9 +599,20 @@ class Flow:
             }
 
         client, server = side(self.client), side(self.server)
-        iden = s_common.guid(("slib.pcap.flow", FLOW_IDEN_VERSION, seed, self.ipproto,
-                              client["ip"], client["port"], server["ip"], server["port"],
-                              list(self.vlans), self.start))
+        iden = s_common.guid(
+            (
+                "slib.pcap.flow",
+                FLOW_IDEN_VERSION,
+                seed,
+                self.ipproto,
+                client["ip"],
+                client["port"],
+                server["ip"],
+                server["port"],
+                list(self.vlans),
+                self.start,
+            )
+        )
 
         return {
             "iden": iden,
@@ -677,8 +708,9 @@ class FlowTable:
             flow.frames.append((self.fromClient, rec))
         return flow
 
-    def addIp(self, ts: int, ip: dpkt.ip.IP | dpkt.ip6.IP6,
-              vlans: tuple[int, ...] = ()) -> Flow | None:
+    def addIp(
+        self, ts: int, ip: dpkt.ip.IP | dpkt.ip6.IP6, vlans: tuple[int, ...] = ()
+    ) -> Flow | None:
         """Add a decoded IP packet, captured at ts (nanoseconds), to its flow.
 
         Packets on different VLANs are different flows, even between the same endpoints.
@@ -738,8 +770,7 @@ class FlowTable:
             if self.limit and self.count >= self.limit:
                 self.dropped += 1
                 return None
-            flow = self._newFlow(vers, ipproto, src, sport, dst, dport, ts, flags, icmptype,
-                                 vlans)
+            flow = self._newFlow(vers, ipproto, src, sport, dst, dport, ts, flags, icmptype, vlans)
             self.active[key] = flow
 
         side = flow.side(src, sport)
@@ -776,9 +807,19 @@ class FlowTable:
         # A new connection reusing the ports of a finished one.
         return flow.closed and bool(flags & TCP_SYN) and not flags & TCP_ACK
 
-    def _newFlow(self, vers: int, ipproto: int, src: bytes, sport: int | None, dst: bytes,
-                 dport: int | None, ts: int, flags: int, icmptype: int | None,
-                 vlans: tuple[int, ...] = ()) -> Flow:
+    def _newFlow(
+        self,
+        vers: int,
+        ipproto: int,
+        src: bytes,
+        sport: int | None,
+        dst: bytes,
+        dport: int | None,
+        ts: int,
+        flags: int,
+        icmptype: int | None,
+        vlans: tuple[int, ...] = (),
+    ) -> Flow:
         """Create a flow from its first packet, deciding which side is the client."""
 
         swap = False
@@ -823,8 +864,9 @@ class FlowTable:
         }
 
 
-def matchLoose(flows: list[dict], loose: list[tuple[str, int | None, str, Any]]
-               ) -> tuple[dict[str, list[tuple[str, Any]]], int]:
+def matchLoose(
+    flows: list[dict], loose: list[tuple[str, int | None, str, Any]]
+) -> tuple[dict[str, list[tuple[str, Any]]], int]:
     """Match records that have no frame number to flows, by Community ID and time.
 
     Parameters
@@ -855,20 +897,30 @@ def matchLoose(flows: list[dict], loose: list[tuple[str, int | None, str, Any]]
             continue
         best = cands[0]
         if tick is not None and len(cands) > 1:
+
             def dist(flow: dict, tick: int = tick) -> int:
                 if flow["time"] - 1000 <= tick <= flow["last"] + 1000:
                     return 0
                 return min(abs(tick - flow["time"]), abs(tick - flow["last"]))
+
             best = min(cands, key=dist)
         matched.setdefault(best["iden"], []).append((kind, rec))
     return matched, unmatched
 
 
-def analyze(fd: BinaryIO, timeout: int = DEFAULT_TIMEOUT, limit: int = 0,
-            handshake: int = DEFAULT_HANDSHAKE, seed: Any = None, frames: dict | None = None,
-            files: p_enrich.FileStore | None = None, unsaved: bool = False,
-            rules: dict | None = None, loose: list | None = None,
-            filestore: str | None = None) -> tuple[list[dict], dict]:
+def analyze(
+    fd: BinaryIO,
+    timeout: int = DEFAULT_TIMEOUT,
+    limit: int = 0,
+    handshake: int = DEFAULT_HANDSHAKE,
+    seed: Any = None,
+    frames: dict | None = None,
+    files: p_enrich.FileStore | None = None,
+    unsaved: bool = False,
+    rules: dict | None = None,
+    loose: list | None = None,
+    filestore: str | None = None,
+) -> tuple[list[dict], dict]:
     """Read a capture file and return its flows (see ``Flow.asdict``) and a summary of it.
 
     Parameters
@@ -925,17 +977,19 @@ def analyze(fd: BinaryIO, timeout: int = DEFAULT_TIMEOUT, limit: int = 0,
     skipped = dict(state["skipped"])
     for reason, count in summary["skipped"].items():
         skipped[reason] = skipped.get(reason, 0) + count
-    summary.update({
-        "format": state.get("format"),
-        "compressed": state["compressed"],
-        "linktypes": [
-            {"type": lt, "name": LINKTYPES.get(lt)} for lt in sorted(state["linktypes"])
-        ],
-        "skipped": skipped,
-        "truncated": state["truncated"],
-        "error": state["error"],
-        "tshark": {"frames": len(frames), "matched": matched},
-    })
+    summary.update(
+        {
+            "format": state.get("format"),
+            "compressed": state["compressed"],
+            "linktypes": [
+                {"type": lt, "name": LINKTYPES.get(lt)} for lt in sorted(state["linktypes"])
+            ],
+            "skipped": skipped,
+            "truncated": state["truncated"],
+            "error": state["error"],
+            "tshark": {"frames": len(frames), "matched": matched},
+        }
+    )
 
     counts: dict[str, dict[str, int]] = {}
     base = [(flow, flow.asdict(handshake=handshake, seed=seed)) for flow in table.flows()]
@@ -944,8 +998,9 @@ def analyze(fd: BinaryIO, timeout: int = DEFAULT_TIMEOUT, limit: int = 0,
     flows = []
     unsavedcount = 0
     for flow, fdict in base:
-        enricher = p_enrich.Enricher(files, unsaved=unsaved, rules=rules, counts=counts,
-                                     filestore=filestore)
+        enricher = p_enrich.Enricher(
+            files, unsaved=unsaved, rules=rules, counts=counts, filestore=filestore
+        )
         for client, rec in flow.frames:
             enricher.add(client, rec)
         for kind, rec in extra.get(fdict["iden"], ()):

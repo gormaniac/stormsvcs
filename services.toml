@@ -23,6 +23,11 @@ name = "crt.sh"
 src = "svcs/crtsh/"
 workflow = ".github/workflows/crtsh.yml"
 
+[stormsvcs.capa]
+name = "capa"
+src = "svcs/capa/"
+workflow = ".github/workflows/capa.yml"
+
 [stormsvcs.pcap]
 name = "PCAP"
 src = "svcs/pcap/"

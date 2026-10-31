@@ -1,6 +1,5 @@
 """The Python definition of the slib.pcap Storm package."""
 
-
 from stormlibpp import StormPkg
 
 from . import __version__

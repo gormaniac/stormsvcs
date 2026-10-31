@@ -9,7 +9,6 @@ The dicts returned here only hold Telepath (msgpack) safe values: str, int,
 bool, None, lists, and dicts. Bytes are hex encoded and times are epoch millis.
 """
 
-
 import base64
 import binascii
 import datetime
@@ -22,7 +21,6 @@ from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import dsa, ec, ed448, ed25519, rsa
 from cryptography.x509.oid import ExtensionOID, NameOID
-
 
 CRTSH_URL = "https://crt.sh/"
 """The crt.sh web UI, used to build a link to each certificate."""
@@ -74,7 +72,7 @@ def toMillis(valu: datetime.datetime | None) -> int | None:
     if valu is None:
         return None
     if valu.tzinfo is None:
-        valu = valu.replace(tzinfo=datetime.timezone.utc)
+        valu = valu.replace(tzinfo=datetime.UTC)
     return int(valu.timestamp() * 1000)
 
 
@@ -103,8 +101,7 @@ def serialBytes(serial: str | int) -> bytes:
     if isinstance(serial, int):
         serial = serialHex(serial)
     serial = serial.strip().lower().replace(":", "").replace(" ", "")
-    if serial.startswith("0x"):
-        serial = serial[2:]
+    serial = serial.removeprefix("0x")
     if len(serial) % 2:
         serial = "0" + serial
     return binascii.unhexlify(serial)
@@ -178,8 +175,9 @@ def normPublicKey(cert: x509.Certificate) -> dict:
         # A key type cryptography doesn't support, only the certificate's hashes are known.
         return retn
 
-    spki = key.public_bytes(serialization.Encoding.DER,
-                            serialization.PublicFormat.SubjectPublicKeyInfo)
+    spki = key.public_bytes(
+        serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
+    )
 
     if isinstance(key, rsa.RSAPublicKey):
         nums = key.public_numbers()
@@ -264,11 +262,14 @@ def normExtensions(cert: x509.Certificate) -> dict:
         elif ext.oid == ExtensionOID.CERTIFICATE_POLICIES:
             retn["policies"] = [p.policy_identifier.dotted_string for p in valu]
         elif ext.oid == ExtensionOID.PRECERT_SIGNED_CERTIFICATE_TIMESTAMPS:
-            retn["scts"] = [{
-                "logid": hexBytes(sct.log_id),
-                "time": toMillis(sct.timestamp),
-                "version": sct.version.name,
-            } for sct in valu]
+            retn["scts"] = [
+                {
+                    "logid": hexBytes(sct.log_id),
+                    "time": toMillis(sct.timestamp),
+                    "version": sct.version.name,
+                }
+                for sct in valu
+            ]
         elif ext.oid == ExtensionOID.TLS_FEATURE:
             retn["mustStaple"] = any(f.value == 5 for f in valu)
 
@@ -276,8 +277,15 @@ def normExtensions(cert: x509.Certificate) -> dict:
 
 
 def _keyUsage(valu: x509.KeyUsage) -> list[str]:
-    names = ("digital_signature", "content_commitment", "key_encipherment", "data_encipherment",
-             "key_agreement", "key_cert_sign", "crl_sign")
+    names = (
+        "digital_signature",
+        "content_commitment",
+        "key_encipherment",
+        "data_encipherment",
+        "key_agreement",
+        "key_cert_sign",
+        "crl_sign",
+    )
     usage = [name for name in names if getattr(valu, name)]
     if valu.key_agreement:
         if valu.encipher_only:
@@ -297,8 +305,7 @@ def identities(sans: list, subject: dict) -> dict:
 
     def addFqdn(valu: str):
         valu = valu.strip().lower().rstrip(".")
-        if valu.startswith("*."):
-            valu = valu[2:]
+        valu = valu.removeprefix("*.")
         if valu and "." in valu and " " not in valu and "*" not in valu:
             fqdns.add(valu)
 
@@ -350,7 +357,7 @@ def _sigAlgo(cert: x509.Certificate) -> dict:
     try:
         if cert.signature_hash_algorithm is not None:
             hashalg = cert.signature_hash_algorithm.name
-    except Exception:
+    except Exception:  # noqa: S110
         pass
     return {"oid": oid.dotted_string, "name": _oidName(oid), "hash": hashalg}
 
@@ -368,7 +375,9 @@ def parseCert(der: bytes) -> dict:
     exts = normExtensions(cert)
     pubkey = normPublicKey(cert)
 
-    selfsigned = subject["dn"] == issuer["dn"] and (exts["aki"] is None or exts["aki"] == exts["ski"])
+    selfsigned = subject["dn"] == issuer["dn"] and (
+        exts["aki"] is None or exts["aki"] == exts["ski"]
+    )
 
     return {
         "sha256": hashlib.sha256(der).hexdigest(),
@@ -408,8 +417,8 @@ def certDetails(row: dict) -> dict:
             "sha1": hashlib.sha1(der).hexdigest(),
             "md5": hashlib.md5(der).hexdigest(),
             "pem": "-----BEGIN CERTIFICATE-----\n"
-                   + base64.encodebytes(der).decode()
-                   + "-----END CERTIFICATE-----\n",
+            + base64.encodebytes(der).decode()
+            + "-----END CERTIFICATE-----\n",
             "error": f"Unable to parse certificate: {err}",
         }
 
@@ -472,7 +481,7 @@ def matches(details: dict, field: str, valu: str, mode: str = "contains") -> boo
         if mode == "contains" and valu in cand:
             return True
         if mode == "suffix":
-            base = cand[2:] if cand.startswith("*.") else cand
+            base = cand.removeprefix("*.")
             if cand == valu or base == valu or base.endswith("." + valu):
                 return True
     return False
@@ -505,4 +514,3 @@ def fieldValues(details: dict, field: str) -> list[str]:
         vals = [v for _, v in sans] + [v for vs in attrs.values() for v in vs]
         return vals + [subject["dn"]]
     raise ValueError(f"Unknown search field: {field}")
-

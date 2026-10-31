@@ -1,10 +1,8 @@
 """The Python definition of the slib.abusech Storm package."""
 
-
 from stormlibpp import StormPkg
 
 from . import __version__
-
 
 SVC_NAME = "slib.abusech"
 SVC_VER = __version__
@@ -37,7 +35,9 @@ def _addStorm() -> str:
 
     lines = []
     for plat, (guid, name, url) in SOURCES.items():
-        lines.append(f'[ meta:source={guid} :name="{name.lower()}" :type=slib.abusech.{plat} :url={url} ] | spin |')
+        lines.append(
+            f'[ meta:source={guid} :name="{name.lower()}" :type=slib.abusech.{plat} :url={url} ] | spin |'
+        )
     for prop, (ptype, doc) in EXT_PROPS.items():
         if ptype == "hash:sha3_384":
             # Synapse doesn't have a SHA3 hash type, a 96 char hex string works everywhere.

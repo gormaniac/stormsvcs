@@ -1,16 +1,14 @@
 """The slib.ipapi service."""
 
-
 import asyncio
 from collections.abc import Mapping
 from typing import NamedTuple, TypedDict
 
 import aiohttp
-from stormlibpp.telepath import TelepathRetn
 import synapse.lib.cell as s_cell
+from stormlibpp.telepath import TelepathRetn
 
 from .api import IpApiCellApi
-
 
 # The ip-api.com response headers that describe the current rate limit window.
 RL_REMAINING_HEADER = "X-Rl"
@@ -24,29 +22,29 @@ DEFAULT_RL_TTL = 60.0
 class IpData(TypedDict):
     """The results of a single ip-api.com query, either successful or unsuccessful."""
 
-    query: str          # "24.48.0.1"
-    status: str         # "success"
-    country: str        # "Canada"
-    countryCode: str    # "CA"
-    region: str         # "QC"
-    regionName: str     # "Quebec"
-    city: str           # "Montreal"
-    zip: str            # "H1K"
-    lat: float          # 45.6085
-    lon: float          # -73.5493
-    timezone: str       # "America/Toronto"
-    isp: str            # "Le Groupe Videotron Ltee"
-    org: str            # "Videotron Ltee"
-    as_: str            # "AS5769 Videotron Ltee" - this is really "as" in the data
-    asname: str         # "VIDEOTRON"
-    mobile: bool        # false
-    proxy: bool         # false
-    hosting: bool       # false
+    query: str  # "24.48.0.1"
+    status: str  # "success"
+    country: str  # "Canada"
+    countryCode: str  # "CA"
+    region: str  # "QC"
+    regionName: str  # "Quebec"
+    city: str  # "Montreal"
+    zip: str  # "H1K"
+    lat: float  # 45.6085
+    lon: float  # -73.5493
+    timezone: str  # "America/Toronto"
+    isp: str  # "Le Groupe Videotron Ltee"
+    org: str  # "Videotron Ltee"
+    as_: str  # "AS5769 Videotron Ltee" - this is really "as" in the data
+    asname: str  # "VIDEOTRON"
+    mobile: bool  # false
+    proxy: bool  # false
+    hosting: bool  # false
 
 
 class IpRetn(TelepathRetn):
     """A TelepathRetn that describes the result of an ip-api.com query."""
-    
+
     data: IpData | None
 
 
@@ -76,6 +74,11 @@ class IpApiSvc(s_cell.Cell):
     async def __anit__(self, dirn, *args, **kwargs):
         await s_cell.Cell.__anit__(self, dirn, *args, **kwargs)
 
+        # One session for the cell's lifetime - queries all go to the same
+        # host, so reuse its connection instead of building a session each time.
+        self.sess = aiohttp.ClientSession()
+        self.onfini(self.sess.close)
+
         # Queries are queued here and worked FIFO by _workQueue() so that we
         # never exceed the ip-api.com rate limit of 45 requests/minute.
         self.queue: asyncio.Queue[_QueueItem] = asyncio.Queue()
@@ -104,17 +107,23 @@ class IpApiSvc(s_cell.Cell):
             "regionName,city,zip,lat,lon,timezone,isp,org,as,asname,mobile,proxy,hosting,query"
         )
 
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as resp:
-                if resp.status == 429:
-                    raise _RateLimited(ttl=resp.headers.get(RL_TTL_HEADER))
+        async with self.sess.get(url) as resp:
+            if resp.status == 429:
+                raise _RateLimited(ttl=resp.headers.get(RL_TTL_HEADER))
 
-                if resp.status != 200:
-                    resp.raise_for_status()
+            if resp.status != 200:
+                resp.raise_for_status()
 
-                data = await resp.json()
+            data = await resp.json()
 
-                return IpData(as_=data.pop('as'), **data), resp.headers
+            if data.get("status") != "success":
+                # Failure responses only carry status/message/query - no "as"
+                # key to rename. Return as-is for _processQuery() to handle.
+                return data, resp.headers
+
+            # ip-api.com uses "" for IPs with no ASN, so default to that
+            # rather than crashing if the field is ever absent entirely.
+            return IpData(as_=data.pop("as", ""), **data), resp.headers
 
     async def _sleepTtl(self, ttl_raw: str | None):
         """Sleep for the duration given by an X-Ttl header value, falling back

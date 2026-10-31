@@ -42,6 +42,10 @@ permissions:
   contents: read
   packages: write
 
+env:
+  # The ruff locked in the root uv.lock. Bump it with that lock so local and CI runs agree.
+  RUFF_VERSION: "0.16.0"
+
 jobs:
 
   test:
@@ -58,6 +62,16 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: svcs/${{ inputs.service }}/uv.lock
+
+      # Ruff reads the [tool.ruff] config in the root pyproject.toml, which targets Python 3.11.
+      # Lint and format failures block, and both gates run before the install so syntax, style,
+      # and format issues fail early. Run `uvx ruff check --fix .` and `uvx ruff format .`
+      # locally to fix.
+      - name: Ruff lint gate
+        run: uvx ruff@${{ env.RUFF_VERSION }} check --output-format=github .
+
+      - name: Ruff format gate
+        run: uvx ruff@${{ env.RUFF_VERSION }} format --check .
 
       - name: Install apt packages
         if: inputs.apt-packages != ''

@@ -46,8 +46,14 @@ class FeedDef(TypedDict):
 
 
 def _abusech(name: str, url: str, desc: str) -> FeedDef:
-    return FeedDef(name=name, url=url, engine=s_rules.ENGINE_SURICATA, enabled=False, exclude=[],
-                   desc=f"{desc} from abuse.ch (CC0), Suricata syntax. Off by default.")
+    return FeedDef(
+        name=name,
+        url=url,
+        engine=s_rules.ENGINE_SURICATA,
+        enabled=False,
+        exclude=[],
+        desc=f"{desc} from abuse.ch (CC0), Suricata syntax. Off by default.",
+    )
 
 
 DEFAULT_FEEDS: tuple[FeedDef, ...] = (
@@ -67,14 +73,26 @@ DEFAULT_FEEDS: tuple[FeedDef, ...] = (
         exclude=["emerging-deleted.rules"],
         desc="The Proofpoint Emerging Threats Open ruleset (MIT), Suricata 8 syntax.",
     ),
-    _abusech("abusech-sslbl", "https://sslbl.abuse.ch/blacklist/sslblacklist_tls_cert.tar.gz",
-             "The SSL Blacklist (malicious TLS certificates)"),
-    _abusech("abusech-sslbl-c2", "https://sslbl.abuse.ch/blacklist/sslipblacklist.tar.gz",
-             "The SSL Blacklist botnet C2 IPs"),
-    _abusech("abusech-feodo", "https://feodotracker.abuse.ch/downloads/feodotracker.tar.gz",
-             "The Feodo Tracker botnet C2 IPs"),
-    _abusech("abusech-urlhaus", "https://urlhaus.abuse.ch/downloads/urlhaus_suricata.tar.gz",
-             "The URLhaus malware URLs"),
+    _abusech(
+        "abusech-sslbl",
+        "https://sslbl.abuse.ch/blacklist/sslblacklist_tls_cert.tar.gz",
+        "The SSL Blacklist (malicious TLS certificates)",
+    ),
+    _abusech(
+        "abusech-sslbl-c2",
+        "https://sslbl.abuse.ch/blacklist/sslipblacklist.tar.gz",
+        "The SSL Blacklist botnet C2 IPs",
+    ),
+    _abusech(
+        "abusech-feodo",
+        "https://feodotracker.abuse.ch/downloads/feodotracker.tar.gz",
+        "The Feodo Tracker botnet C2 IPs",
+    ),
+    _abusech(
+        "abusech-urlhaus",
+        "https://urlhaus.abuse.ch/downloads/urlhaus_suricata.tar.gz",
+        "The URLhaus malware URLs",
+    ),
 )
 """The feeds a new service starts with. Admins can add, change, disable, or remove feeds.
 
@@ -98,8 +116,10 @@ def feedUrl(url: str, secrets: dict[str, str] | None = None) -> str:
     def fill(match: re.Match) -> str:
         name = match.group(1)
         if name not in secrets:
-            raise FeedError(f"The feed's URL needs the secret ${{{name}}}, set it in the "
-                            "service's pcap:feeds:secrets config.")
+            raise FeedError(
+                f"The feed's URL needs the secret ${{{name}}}, set it in the "
+                "service's pcap:feeds:secrets config."
+            )
         return str(secrets[name])
 
     return _SECRET.sub(fill, url)
@@ -112,6 +132,7 @@ def redact(text: str, secrets: dict[str, str] | None = None) -> str:
         if valu:
             text = text.replace(str(valu), f"${{{name}}}")
     return text
+
 
 FEED_NAME_CHARS = set("abcdefghijklmnopqrstuvwxyz0123456789-_.")
 

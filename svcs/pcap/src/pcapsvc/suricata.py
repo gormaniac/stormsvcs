@@ -10,7 +10,6 @@ every rule it can't parse by its line number, those rules are dropped and the re
 again until Suricata loads cleanly.
 """
 
-
 import copy
 import json
 import logging
@@ -38,34 +37,93 @@ DEFAULT_VARS = {
 home network is every RFC 1918 network and the external network is anything (like Snort's)."""
 
 TLS_FIELDS = [
-    "subject", "issuer", "session_resumed", "serial", "fingerprint", "sni", "version",
-    "not_before", "not_after", "chain", "ja3", "ja3s", "ja4", "subjectaltname", "client",
-    "client_chain", "client_alpns", "server_alpns",
+    "subject",
+    "issuer",
+    "session_resumed",
+    "serial",
+    "fingerprint",
+    "sni",
+    "version",
+    "not_before",
+    "not_after",
+    "chain",
+    "ja3",
+    "ja3s",
+    "ja4",
+    "subjectaltname",
+    "client",
+    "client_chain",
+    "client_alpns",
+    "server_alpns",
 ]
 """The EVE TLS fields logged (``chain`` has the leaf certificate first)."""
 
-SMTP_FIELDS = ["received", "x-mailer", "x-originating-ip", "relays", "reply-to", "bcc",
-               "user-agent"]
+SMTP_FIELDS = [
+    "received",
+    "x-mailer",
+    "x-originating-ip",
+    "relays",
+    "reply-to",
+    "bcc",
+    "user-agent",
+]
 """The extra email headers EVE SMTP events log."""
 
-APP_PROTOCOLS = ("dns", "ftp", "http", "http2", "krb5", "quic", "rdp", "sip", "smb", "smtp",
-                 "ssh", "tls")
+APP_PROTOCOLS = (
+    "dns",
+    "ftp",
+    "http",
+    "http2",
+    "krb5",
+    "quic",
+    "rdp",
+    "sip",
+    "smb",
+    "smtp",
+    "ssh",
+    "tls",
+)
 """The app-layer parsers turned on (some are off by default, ex. RDP and SIP)."""
 
 DECODE_PROTOCOLS = {
-    "tls": "tls", "ssl": "tls", "http": "http", "http2": "http2", "ssh": "ssh", "ftp": "ftp",
-    "smtp": "smtp", "dns": "dns", "smb": "smb", "rdp": "rdp", "sip": "sip", "kerberos": "krb5",
-    "quic": "quic", "imap": "imap", "pop": "pop3", "ldap": "ldap", "mqtt": "mqtt", "rfb": "rfb",
-    "telnet": "telnet", "tftp": "tftp", "snmp": "snmp", "modbus": "modbus", "dnp3": "dnp3",
-    "nfs": "nfs", "pgsql": "pgsql", "dcerpc": "dcerpc", "ike": "ike", "ntp": "ntp",
+    "tls": "tls",
+    "ssl": "tls",
+    "http": "http",
+    "http2": "http2",
+    "ssh": "ssh",
+    "ftp": "ftp",
+    "smtp": "smtp",
+    "dns": "dns",
+    "smb": "smb",
+    "rdp": "rdp",
+    "sip": "sip",
+    "kerberos": "krb5",
+    "quic": "quic",
+    "imap": "imap",
+    "pop": "pop3",
+    "ldap": "ldap",
+    "mqtt": "mqtt",
+    "rfb": "rfb",
+    "telnet": "telnet",
+    "tftp": "tftp",
+    "snmp": "snmp",
+    "modbus": "modbus",
+    "dnp3": "dnp3",
+    "nfs": "nfs",
+    "pgsql": "pgsql",
+    "dcerpc": "dcerpc",
+    "ike": "ike",
+    "ntp": "ntp",
 }
 """tshark protocol names (in Decode As rules) and the Suricata app-layer parser they map to."""
 
 MAX_VALIDATE_PASSES = 25
 """The max times ``validate`` reloads the rules, each pass removes every reported error."""
 
-_RULE_ERROR = re.compile(r'error parsing signature "(?P<rule>.*)" from file (?P<path>\S+) at line '
-                         r"(?P<line>\d+)")
+_RULE_ERROR = re.compile(
+    r'error parsing signature "(?P<rule>.*)" from file (?P<path>\S+) at line '
+    r"(?P<line>\d+)"
+)
 _ERROR_MESG = re.compile(r"^E: (?P<mod>[\w-]+): (?P<mesg>.*)$")
 
 
@@ -145,9 +203,15 @@ class Suricata:
         The sandbox Suricata runs in, by default a best-effort one.
     """
 
-    def __init__(self, workdir: str, binpath: str = "suricata", conf: str | None = None,
-                 addrvars: dict[str, str] | None = None, timeout: float = 900,
-                 sandbox: p_sandbox.Sandbox | None = None) -> None:
+    def __init__(
+        self,
+        workdir: str,
+        binpath: str = "suricata",
+        conf: str | None = None,
+        addrvars: dict[str, str] | None = None,
+        timeout: float = 900,
+        sandbox: p_sandbox.Sandbox | None = None,
+    ) -> None:
         self.workdir = workdir
         self.binpath = binpath
         self.baseconf = conf
@@ -182,12 +246,14 @@ class Suricata:
                 with open(path, encoding="utf-8") as fd:
                     self._base = yaml.safe_load(fd)
             except (OSError, yaml.YAMLError) as err:
-                raise SuricataError(f"Unable to read the base Suricata config {path}: {err}") \
-                    from err
+                raise SuricataError(
+                    f"Unable to read the base Suricata config {path}: {err}"
+                ) from err
         return self._base
 
-    def config(self, outdir: str, decode: Iterable[str] = (), filestore: bool = True,
-               maxbody: int = 0) -> dict[str, Any]:
+    def config(
+        self, outdir: str, decode: Iterable[str] = (), filestore: bool = True, maxbody: int = 0
+    ) -> dict[str, Any]:
         """The config of a run, the base config with the service's outputs and settings.
 
         Parameters
@@ -211,25 +277,60 @@ class Suricata:
             addrs[name] = valu
 
         types: list[Any] = [
-            {"alert": {"payload": False, "packet": False, "metadata": True,
-                       "tagged-packets": False}},
-            {"anomaly": {"enabled": True,
-                         "types": {"decode": True, "stream": True, "applayer": True}}},
+            {
+                "alert": {
+                    "payload": False,
+                    "packet": False,
+                    "metadata": True,
+                    "tagged-packets": False,
+                }
+            },
+            {
+                "anomaly": {
+                    "enabled": True,
+                    "types": {"decode": True, "stream": True, "applayer": True},
+                }
+            },
             {"http": {"extended": True, "dump-all-headers": "both"}},
             {"dns": {"enabled": True}},
             {"tls": {"extended": True, "custom": TLS_FIELDS}},
             {"files": {"force-magic": False, "force-hash": ["sha256"]}},
             {"smtp": {"extended": True, "custom": SMTP_FIELDS}},
-            "ftp", "rdp", "smb", "krb5", "sip", "quic", "ssh", "http2", "flow",
+            "ftp",
+            "rdp",
+            "smb",
+            "krb5",
+            "sip",
+            "quic",
+            "ssh",
+            "http2",
+            "flow",
         ]
         conf["outputs"] = [
-            {"eve-log": {"enabled": True, "filetype": "regular", "filename": "eve.json",
-                         "community-id": True, "community-id-seed": 0, "types": types}},
-            {"file-store": {"version": 2, "enabled": bool(filestore), "dir": "filestore",
-                            "force-filestore": True, "write-fileinfo": False}},
+            {
+                "eve-log": {
+                    "enabled": True,
+                    "filetype": "regular",
+                    "filename": "eve.json",
+                    "community-id": True,
+                    "community-id-seed": 0,
+                    "types": types,
+                }
+            },
+            {
+                "file-store": {
+                    "version": 2,
+                    "enabled": bool(filestore),
+                    "dir": "filestore",
+                    "force-filestore": True,
+                    "write-fileinfo": False,
+                }
+            },
         ]
-        conf["logging"] = {"default-log-level": "notice",
-                           "outputs": [{"console": {"enabled": True}}]}
+        conf["logging"] = {
+            "default-log-level": "notice",
+            "outputs": [{"console": {"enabled": True}}],
+        }
         conf["stats"] = {"enabled": False}
         conf["default-log-dir"] = outdir
 
@@ -296,8 +397,9 @@ class Suricata:
             yaml.safe_dump(conf, fd, sort_keys=False)
         return path
 
-    async def _exec(self, args: list[str], outdir: str, read: Iterable[str] = (),
-                    timeout: float | None = None) -> tuple[int, str]:
+    async def _exec(
+        self, args: list[str], outdir: str, read: Iterable[str] = (), timeout: float | None = None
+    ) -> tuple[int, str]:
         """Run suricata in the sandbox, returning (exit code, its output)."""
 
         prefix = self._prefix()
@@ -311,8 +413,13 @@ class Suricata:
         }
         try:
             res = await self.sandbox.run(
-                [binpath, *args], read=[*read, self._etcdir()], write=[outdir],
-                execs=[prefix], env=env, cwd=outdir, timeout=timeout or self.timeout,
+                [binpath, *args],
+                read=[*read, self._etcdir()],
+                write=[outdir],
+                execs=[prefix],
+                env=env,
+                cwd=outdir,
+                timeout=timeout or self.timeout,
                 maxoutput=64 * 1024 * 1024,
             )
         except p_sandbox.SandboxError as err:
@@ -358,16 +465,18 @@ class Suricata:
                 keys.append(key)
 
         with tempfile.TemporaryDirectory(dir=self.workdir) as tmpd:
-            conf = self.writeConfig(os.path.join(tmpd, "suricata.yaml"),
-                                    self.config(tmpd, filestore=False))
+            conf = self.writeConfig(
+                os.path.join(tmpd, "suricata.yaml"), self.config(tmpd, filestore=False)
+            )
             self.sandbox.prepare(tmpd)
             for _ in range(MAX_VALIDATE_PASSES):
                 await s_coro.executor(_writeLines, path, [rules[key].strip() for key in keys])
                 if not keys:
                     return keys, errors
 
-                rc, out = await self._exec(["-T", "-c", conf, "-S", path, "-l", tmpd], tmpd,
-                                           read=[path, conf])
+                rc, out = await self._exec(
+                    ["-T", "-c", conf, "-S", path, "-l", tmpd], tmpd, read=[path, conf]
+                )
                 if rc == 0:
                     return keys, errors
 
@@ -385,13 +494,15 @@ class Suricata:
 
                 if not bad:
                     raise SuricataError(
-                        f"Suricata failed to load the rules (rc={rc}): {_errTail(out)}")
+                        f"Suricata failed to load the rules (rc={rc}): {_errTail(out)}"
+                    )
                 for lineno, mesg in bad.items():
                     errors[keys[lineno - 1]] = mesg
                 keys = [key for idx, key in enumerate(keys, start=1) if idx not in bad]
 
         raise SuricataError(
-            f"Suricata still reported rule errors after {MAX_VALIDATE_PASSES} passes.")
+            f"Suricata still reported rule errors after {MAX_VALIDATE_PASSES} passes."
+        )
 
     async def check(self, text: str) -> str | None:
         """Check a single rule. Returns the error, or None if Suricata can load it."""
@@ -402,13 +513,20 @@ class Suricata:
             return err.mesg
         with tempfile.TemporaryDirectory(dir=self.workdir) as tmpd:
             self.sandbox.prepare(tmpd)
-            _, errors = await self.validate({"rule": rule["text"]},
-                                            os.path.join(tmpd, "check.rules"))
+            _, errors = await self.validate(
+                {"rule": rule["text"]}, os.path.join(tmpd, "check.rules")
+            )
         return errors.get("rule")
 
-    async def run(self, capture: str, outdir: str, rulespath: str | None = None,
-                  decode: Iterable[str] = (), filestore: bool = True,
-                  maxbody: int = 0) -> dict[str, Any]:
+    async def run(
+        self,
+        capture: str,
+        outdir: str,
+        rulespath: str | None = None,
+        decode: Iterable[str] = (),
+        filestore: bool = True,
+        maxbody: int = 0,
+    ) -> dict[str, Any]:
         """Analyze a capture (and match it against a rules file, if given).
 
         Returns
@@ -424,9 +542,10 @@ class Suricata:
             If Suricata fails, ex. the capture is corrupt.
         """
 
-        conf = self.writeConfig(os.path.join(outdir, "suricata.yaml"),
-                                self.config(outdir, decode=decode, filestore=filestore,
-                                            maxbody=maxbody))
+        conf = self.writeConfig(
+            os.path.join(outdir, "suricata.yaml"),
+            self.config(outdir, decode=decode, filestore=filestore, maxbody=maxbody),
+        )
         self.sandbox.prepare(outdir)
         args = ["-c", conf, "-r", capture, "-l", outdir, "-k", "none", "--runmode", "single"]
         read = [capture, conf]
@@ -439,8 +558,11 @@ class Suricata:
         rc, out = await self._exec(args, outdir, read=read)
         if rc != 0:
             raise SuricataError(f"Suricata failed to read the capture (rc={rc}): {_errTail(out)}")
-        warnings = [line[3:].strip() for line in out.splitlines()
-                    if line.startswith("W: ") and "output-json-tls" not in line]
+        warnings = [
+            line[3:].strip()
+            for line in out.splitlines()
+            if line.startswith("W: ") and "output-json-tls" not in line
+        ]
         return {
             "eve": os.path.join(outdir, "eve.json"),
             "filestore": os.path.join(outdir, "filestore"),

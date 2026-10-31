@@ -6,7 +6,6 @@ and returns the complete details of every certificate it finds (see
 wraps them in the standard ``TelepathRetn`` convention for Storm.
 """
 
-
 import ipaddress
 import re
 from collections.abc import AsyncIterator, Iterable
@@ -17,7 +16,6 @@ import synapse.lib.cell as s_cell
 from . import norm
 from .api import CrtshCellApi
 from .db import DEFAULT_DSN, LOOKUPS, NAME_TYPES, CrtshDb, CrtshDbError, likeEscape
-
 
 PIVOTS = ("issued", "siblings", "key", "subject", "serial", "ski")
 """The ways to pivot from a certificate to other certificates, see ``CrtshSvc.pivotGenr``."""
@@ -85,8 +83,7 @@ def lookupValu(kind: str, valu: Any) -> list:
             raise CrtshDbError(f"Invalid crt.sh ID: {valu}") from None
 
     text = norm.normHex(str(valu))
-    if text.startswith("0x"):
-        text = text[2:]
+    text = text.removeprefix("0x")
     if not text or not HEXRE.match(text):
         raise CrtshDbError(f"Invalid {kind}, expected a hex string: {valu}")
 
@@ -277,11 +274,26 @@ class CrtshSvc(s_cell.Cell):
 
     # ---- Search ----
 
-    async def searchGenr(self, dns=None, cn=None, org=None, ou=None, email=None, ip=None,
-                         uri=None, subject=None, identity=None, issuer=None, caids=None,
-                         exact: bool = False, valid: bool = False, since: int | None = None,
-                         until: int | None = None, precerts: bool = True,
-                         limit: int = 100) -> AsyncIterator[dict]:
+    async def searchGenr(
+        self,
+        dns=None,
+        cn=None,
+        org=None,
+        ou=None,
+        email=None,
+        ip=None,
+        uri=None,
+        subject=None,
+        identity=None,
+        issuer=None,
+        caids=None,
+        exact: bool = False,
+        valid: bool = False,
+        since: int | None = None,
+        until: int | None = None,
+        precerts: bool = True,
+        limit: int = 100,
+    ) -> AsyncIterator[dict]:
         """Search certificates by their properties, yielding the complete details of each, newest first.
 
         Every given field must match. ``dns`` matches the domain and its subdomains
@@ -294,8 +306,15 @@ class CrtshSvc(s_cell.Cell):
 
         limit = self._limit(limit)
         fields = {
-            "dns": dns, "cn": cn, "org": org, "ou": ou, "email": email, "ip": ip, "uri": uri,
-            "subject": subject, "identity": identity,
+            "dns": dns,
+            "cn": cn,
+            "org": org,
+            "ou": ou,
+            "email": email,
+            "ip": ip,
+            "uri": uri,
+            "subject": subject,
+            "identity": identity,
         }
         fields = {k: str(v) for k, v in fields.items() if v not in (None, "")}
         caids = list(caids or [])
@@ -306,17 +325,33 @@ class CrtshSvc(s_cell.Cell):
 
         if fields:
             # Search crt.sh on the most specific field, then filter on every field.
-            field = next(k for k in ("dns", "email", "ip", "cn", "uri", "org", "ou",
-                                     "subject", "identity") if k in fields)
+            field = next(
+                k
+                for k in ("dns", "email", "ip", "cn", "uri", "org", "ou", "subject", "identity")
+                if k in fields
+            )
             text, like = identityQuery(field, fields[field], exact)
             candidates = min(max(limit * 5, 500), self.conf.get("crtsh:candidates"))
-            rows = await self.db.certsByIdentity(text, like=like, nametypes=NAME_TYPES.get(field),
-                                                 caids=caids or None, issuer=issuer, valid=valid,
-                                                 since=since, until=until, limit=candidates)
+            rows = await self.db.certsByIdentity(
+                text,
+                like=like,
+                nametypes=NAME_TYPES.get(field),
+                caids=caids or None,
+                issuer=issuer,
+                valid=valid,
+                since=since,
+                until=until,
+                limit=candidates,
+            )
         else:
-            rows = await self.db.certsByIssuer(caids=caids or None, issuer=issuer, valid=valid,
-                                               since=since, until=until,
-                                               limit=limit if precerts else limit * 2)
+            rows = await self.db.certsByIssuer(
+                caids=caids or None,
+                issuer=issuer,
+                valid=valid,
+                since=since,
+                until=until,
+                limit=limit if precerts else limit * 2,
+            )
 
         def keep(details: dict) -> bool:
             if not precerts and details.get("precert"):
@@ -332,9 +367,17 @@ class CrtshSvc(s_cell.Cell):
 
     # ---- Pivots ----
 
-    async def issuedGenr(self, caids=None, kind: str | None = None, valu=None,
-                         valid: bool = False, since: int | None = None, until: int | None = None,
-                         precerts: bool = True, limit: int = 100) -> AsyncIterator[dict]:
+    async def issuedGenr(
+        self,
+        caids=None,
+        kind: str | None = None,
+        valu=None,
+        valid: bool = False,
+        since: int | None = None,
+        until: int | None = None,
+        precerts: bool = True,
+        limit: int = 100,
+    ) -> AsyncIterator[dict]:
         """Yield the certificates issued by a CA, newest first.
 
         The CA is given by its crt.sh ``caids``, or by one of its certificates
@@ -349,21 +392,34 @@ class CrtshSvc(s_cell.Cell):
 
         limit = self._limit(limit)
         # Most certificates have a precertificate twin, fetch enough to fill the limit without them.
-        rows = await self.db.certsByIssuer(caids=sorted(set(caids)) or None, cert=cert, valid=valid,
-                                           since=since, until=until,
-                                           limit=limit if precerts else limit * 2)
-        if not rows and cert and not caids:
+        rows = await self.db.certsByIssuer(
+            caids=sorted(set(caids)) or None,
+            cert=cert,
+            valid=valid,
+            since=since,
+            until=until,
+            limit=limit if precerts else limit * 2,
+        )
+        if not rows and cert and not caids and not (await self._one(kind, valu))["caids"]:
             # Explain why: there's no such certificate, or it isn't a CA certificate.
-            if not (await self._one(kind, valu))["caids"]:
-                raise CrtshDbError(f"crt.sh doesn't know of a CA for certificate {valu}, "
-                                   "it may not be a CA certificate.")
+            raise CrtshDbError(
+                f"crt.sh doesn't know of a CA for certificate {valu}, "
+                "it may not be a CA certificate."
+            )
 
         items = [i for i in self._parse(rows) if precerts or not i[1].get("precert")]
         for _, details in self._sort(items)[:limit]:
             yield details
 
-    async def pivotGenr(self, valu, by: str, kind: str | None = None, valid: bool = False,
-                        precerts: bool = True, limit: int = 100) -> AsyncIterator[dict]:
+    async def pivotGenr(
+        self,
+        valu,
+        by: str,
+        kind: str | None = None,
+        valid: bool = False,
+        precerts: bool = True,
+        limit: int = 100,
+    ) -> AsyncIterator[dict]:
         """Yield the certificates related to a certificate, excluding the certificate itself.
 
         ``by`` is one of:
@@ -381,30 +437,37 @@ class CrtshSvc(s_cell.Cell):
             raise CrtshDbError(f"Unknown pivot {by}, expected one of: {', '.join(PIVOTS)}")
 
         if by == "issued":
-            async for details in self.issuedGenr(kind=kind, valu=valu, valid=valid,
-                                                 precerts=precerts, limit=limit):
+            async for details in self.issuedGenr(
+                kind=kind, valu=valu, valid=valid, precerts=precerts, limit=limit
+            ):
                 yield details
             return
 
         limit = self._limit(limit)
-        rows = await self.db.related(by, self._lookups(kind, valu), valid=valid,
-                                     limit=limit if precerts else limit * 2)
+        rows = await self.db.related(
+            by, self._lookups(kind, valu), valid=valid, limit=limit if precerts else limit * 2
+        )
         if not rows:
             # Explain why: there's no such certificate, or nothing to pivot on.
             source = norm.certDetails(await self._one(kind, valu))
             if by != "siblings":
                 if source.get("error"):
                     raise CrtshDbError(f"Unable to pivot by {by}: {source['error']}")
-                if not {"key": source["pubkey"].get("sha256"), "subject": source["subject"]["sha1"],
-                        "serial": source["serial"], "ski": source.get("ski")}[by]:
+                if not {
+                    "key": source["pubkey"].get("sha256"),
+                    "subject": source["subject"]["sha1"],
+                    "serial": source["serial"],
+                    "ski": source.get("ski"),
+                }[by]:
                     raise CrtshDbError(f"The certificate has no {by} to pivot on.")
 
         items = [i for i in self._parse(rows) if precerts or not i[1].get("precert")]
         for _, details in self._sort(items)[:limit]:
             yield details
 
-    async def chain(self, valu, kind: str | None = None, maxdepth: int = 10,
-                    maxcerts: int = 100) -> dict:
+    async def chain(
+        self, valu, kind: str | None = None, maxdepth: int = 10, maxcerts: int = 100
+    ) -> dict:
         """Build every certificate chain from a certificate up to its root(s), in one query.
 
         crt.sh groups certificates by CA (a name and key), so a certificate's issuer
@@ -445,11 +508,13 @@ class CrtshSvc(s_cell.Cell):
             cands = [details[p] for p in parentids]
             preferred = _preferredParent(child, cands)
             for parent in cands:
-                links.append({
-                    "child": child["sha256"],
-                    "parent": parent["sha256"],
-                    "preferred": parent is preferred,
-                })
+                links.append(
+                    {
+                        "child": child["sha256"],
+                        "parent": parent["sha256"],
+                        "preferred": parent is preferred,
+                    }
+                )
 
         leaf = details[rows[0]["id"]]["sha256"]
         return {
@@ -461,8 +526,9 @@ class CrtshSvc(s_cell.Cell):
 
     # ---- CAs ----
 
-    async def cas(self, name: str | None = None, caids=None, certs: bool = False,
-                  limit: int = 100) -> list[dict]:
+    async def cas(
+        self, name: str | None = None, caids=None, certs: bool = False, limit: int = 100
+    ) -> list[dict]:
         """Find crt.sh CAs by name (a substring of the CA's DN) or ID.
 
         Returns ``{"id", "name", "certs"}`` dicts. ``certs`` holds the complete details
@@ -472,12 +538,18 @@ class CrtshSvc(s_cell.Cell):
         if not caids and not name:
             raise CrtshDbError("A CA name or ID is required.")
 
-        rows = await self.db.cas(caids=[int(c) for c in caids] if caids else None, name=name or None, certs=certs,
-                                 limit=self._limit(limit))
+        rows = await self.db.cas(
+            caids=[int(c) for c in caids] if caids else None,
+            name=name or None,
+            certs=certs,
+            limit=self._limit(limit),
+        )
         rows.sort(key=lambda row: (row["ca_id"], row["id"] or 0))
         cas: dict[int, dict] = {}
         for row in rows:
-            ca = cas.setdefault(row["ca_id"], {"id": row["ca_id"], "name": row["ca_name"], "certs": []})
+            ca = cas.setdefault(
+                row["ca_id"], {"id": row["ca_id"], "name": row["ca_name"], "certs": []}
+            )
             if row["id"] is not None:
                 ca["certs"].append(norm.certDetails(row) if certs else row["id"])
         return list(cas.values())

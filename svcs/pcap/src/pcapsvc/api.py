@@ -1,6 +1,5 @@
 """The CellApi implementation for slib.pcap."""
 
-
 from collections.abc import AsyncIterator, Awaitable
 from typing import Any
 
@@ -44,8 +43,20 @@ method's arguments."""
 GENR_METHS = ("feedChanges",)
 """PcapSvc async generators exposed over Telepath, each item wrapped in a TelepathRetn."""
 
-FLOW_OPTS = ("timeout", "limit", "handshake", "tshark", "files", "keylogs", "decode",
-             "suricata", "snort", "rules", "upload", "keyloguploads")
+FLOW_OPTS = (
+    "timeout",
+    "limit",
+    "handshake",
+    "tshark",
+    "files",
+    "keylogs",
+    "decode",
+    "suricata",
+    "snort",
+    "rules",
+    "upload",
+    "keyloguploads",
+)
 """The options ``flows`` takes (see ``PcapSvc.analyze``)."""
 
 

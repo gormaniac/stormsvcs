@@ -7,7 +7,6 @@ records every request so tests can assert exactly what the service sent.
 The canned data is trimmed from (and shaped like) real abuse.ch responses.
 """
 
-
 import contextlib
 import hashlib
 import io
@@ -106,7 +105,10 @@ BAZAAR_INFO = {
             "score": "10",
             "link": "https://tria.ge/reports/1234/",
             "tags": ["family:agenttesla", "keylogger"],
-            "signatures": [{"signature": "AgentTesla", "score": "10"}, {"signature": "Reads local data", "score": None}],
+            "signatures": [
+                {"signature": "AgentTesla", "score": "10"},
+                {"signature": "Reads local data", "score": None},
+            ],
             "malware_config": [
                 {"extraction": "c2", "family": "agenttesla", "c2": "c2.example.org:587"},
                 {"extraction": "c2", "family": "agenttesla", "c2": "9.8.7.6:2929"},
@@ -122,54 +124,119 @@ BAZAAR_INFO = {
         },
         "UnpacMe": [
             # UnpacMe lists the sample itself, then the files it unpacked.
-            {"sha256_hash": SHA256, "md5_hash": MD5, "sha1_hash": SHA1, "detections": [],
-             "link": "https://www.unpac.me/results/1234/"},
-            {"sha256_hash": UNPACKED, "md5_hash": "9" * 32, "sha1_hash": "8" * 40, "detections": ["AgentTesla"],
-             "link": "https://www.unpac.me/results/1234/"},
+            {
+                "sha256_hash": SHA256,
+                "md5_hash": MD5,
+                "sha1_hash": SHA1,
+                "detections": [],
+                "link": "https://www.unpac.me/results/1234/",
+            },
+            {
+                "sha256_hash": UNPACKED,
+                "md5_hash": "9" * 32,
+                "sha1_hash": "8" * 40,
+                "detections": ["AgentTesla"],
+                "link": "https://www.unpac.me/results/1234/",
+            },
         ],
         "YOROI_YOMI": {"detection": "Legit File", "score": "0.10"},
         "Spamhaus_HBL": [{"detection": "suspicious", "link": "https://www.spamhaus.org/hbl/"}],
-        "FileScan-IO": {"verdict": "NO_THREAT", "threatlevel": "0.0", "confidence": "1.0",
-                        "report_link": "https://www.filescan.io/uploads/1/reports/2/overview"},
+        "FileScan-IO": {
+            "verdict": "NO_THREAT",
+            "threatlevel": "0.0",
+            "confidence": "1.0",
+            "report_link": "https://www.filescan.io/uploads/1/reports/2/overview",
+        },
         "CAPE": {"detection": "AgentTesla", "link": "https://www.capesandbox.com/analysis/96328/"},
         "CERT-PL_MWDB": {"detection": None, "link": "https://mwdb.cert.pl/sample/x/"},
-        "Kaspersky": {"verdict": "Malware", "file_type": "exe x64", "first_seen": "2026-10-01T12:00:00Z",
-                      "last_seen": "2026-10-02T00:00:00Z", "hitscount": 10,
-                      "report_link": "https://opentip.kaspersky.com/x/results", "detections": []},
-        "DocGuard": {"verdict": "Malicious", "filetype": "JS File - Malicious", "alertlevel": "0",
-                     "urls": ["http://docguard.example.net/payload.bin"]},
+        "Kaspersky": {
+            "verdict": "Malware",
+            "file_type": "exe x64",
+            "first_seen": "2026-10-01T12:00:00Z",
+            "last_seen": "2026-10-02T00:00:00Z",
+            "hitscount": 10,
+            "report_link": "https://opentip.kaspersky.com/x/results",
+            "detections": [],
+        },
+        "DocGuard": {
+            "verdict": "Malicious",
+            "filetype": "JS File - Malicious",
+            "alertlevel": "0",
+            "urls": ["http://docguard.example.net/payload.bin"],
+        },
     },
     "file_format": "pe",
     "file_arch": "amd64",
     "magika": "pebin",
     "trid": ["44.6% (.EXE) Win64 Executable (generic) (6522/11/2)"],
     "ole_information": {
-        "oleid": {"file_format": "MS Excel 97-2003", "container_format": "OLE", "application_name": "Microsoft Excel",
-                  "author": None, "encrypted": True, "vba_macros": True, "xlm_macros": None, "maldoc_score": 9},
-        "olevba": [{"type": "Suspicious", "keyword": "Hex Strings", "description": "Hex-encoded strings were detected"}],
+        "oleid": {
+            "file_format": "MS Excel 97-2003",
+            "container_format": "OLE",
+            "application_name": "Microsoft Excel",
+            "author": None,
+            "encrypted": True,
+            "vba_macros": True,
+            "xlm_macros": None,
+            "maldoc_score": 9,
+        },
+        "olevba": [
+            {
+                "type": "Suspicious",
+                "keyword": "Hex Strings",
+                "description": "Hex-encoded strings were detected",
+            }
+        ],
     },
     "comments": [
-        {"id": "1", "date_added": "2026-10-01 13:00:00", "twitter_handle": "analyst", "display_name": "Analyst",
-         "comment": "Confirmed AgentTesla."},
+        {
+            "id": "1",
+            "date_added": "2026-10-01 13:00:00",
+            "twitter_handle": "analyst",
+            "display_name": "Analyst",
+            "comment": "Confirmed AgentTesla.",
+        },
     ],
 }
 
 BAZAAR_LIST = [
     {
-        "sha256_hash": SHA256, "sha3_384_hash": SHA3, "sha1_hash": SHA1, "md5_hash": MD5,
-        "first_seen": "2026-10-01 12:00:00", "last_seen": None, "file_name": "invoice.exe",
-        "file_size": 1234567, "file_type_mime": "application/x-dosexec", "file_type": "exe",
-        "reporter": "abuse_ch", "anonymous": 0, "signature": "AgentTesla",
-        "imphash": "f34d5f2d4577ed6d9ceec516c1f5a744", "tlsh": "T1A2B3C4D5E6F7", "telfhash": None,
-        "gimphash": None, "ssdeep": "24576:abcdefg:hijklmn", "dhash_icon": None,
-        "tags": ["AgentTesla", "exe"], "code_sign": [], "intelligence": {"clamav": None, "downloads": "1",
-                                                                           "uploads": "1", "mail": None},
+        "sha256_hash": SHA256,
+        "sha3_384_hash": SHA3,
+        "sha1_hash": SHA1,
+        "md5_hash": MD5,
+        "first_seen": "2026-10-01 12:00:00",
+        "last_seen": None,
+        "file_name": "invoice.exe",
+        "file_size": 1234567,
+        "file_type_mime": "application/x-dosexec",
+        "file_type": "exe",
+        "reporter": "abuse_ch",
+        "anonymous": 0,
+        "signature": "AgentTesla",
+        "imphash": "f34d5f2d4577ed6d9ceec516c1f5a744",
+        "tlsh": "T1A2B3C4D5E6F7",
+        "telfhash": None,
+        "gimphash": None,
+        "ssdeep": "24576:abcdefg:hijklmn",
+        "dhash_icon": None,
+        "tags": ["AgentTesla", "exe"],
+        "code_sign": [],
+        "intelligence": {"clamav": None, "downloads": "1", "uploads": "1", "mail": None},
     },
     {
-        "sha256_hash": "f" * 64, "sha1_hash": "f" * 40, "md5_hash": "f" * 32,
-        "first_seen": "2026-10-03 00:00:00", "file_name": "loader.dll", "file_size": 2048,
-        "file_type_mime": "application/x-dosexec", "file_type": "dll", "reporter": "anonymous",
-        "anonymous": 1, "signature": None, "tags": ["dll"],
+        "sha256_hash": "f" * 64,
+        "sha1_hash": "f" * 40,
+        "md5_hash": "f" * 32,
+        "first_seen": "2026-10-03 00:00:00",
+        "file_name": "loader.dll",
+        "file_size": 2048,
+        "file_type_mime": "application/x-dosexec",
+        "file_type": "dll",
+        "reporter": "anonymous",
+        "anonymous": 1,
+        "signature": None,
+        "tags": ["dll"],
     },
 ]
 
@@ -212,7 +279,11 @@ URLHAUS_URL = {
             "response_sha256": PAYLOAD,
             "urlhaus_download": f"https://urlhaus-api.abuse.ch/v1/download/{PAYLOAD}/",
             "signature": "Mozi",
-            "virustotal": {"result": "10 / 60", "percent": "16.67", "link": "https://www.virustotal.com/gui/file/x"},
+            "virustotal": {
+                "result": "10 / 60",
+                "percent": "16.67",
+                "link": "https://www.virustotal.com/gui/file/x",
+            },
             "imphash": None,
             "ssdeep": "6144:abc:def",
             "tlsh": "T1FFFF",
@@ -279,12 +350,22 @@ URLHAUS_TAG = {
     "lastseen": "2026-10-01 00:00:00 UTC",
     "url_count": "2",
     "urls": [
-        {"url_id": "3000", "url": "http://bad.example.net/a.sh", "url_status": "online",
-         "urlhaus_reference": "https://urlhaus.abuse.ch/url/3000/", "dateadded": "2026-10-01 00:00:00 UTC",
-         "threat": "malware_download"},
-        {"url_id": "3001", "url": "http://bad.example.net/b.sh", "url_status": "offline",
-         "urlhaus_reference": "https://urlhaus.abuse.ch/url/3001/", "dateadded": "2026-09-01 00:00:00 UTC",
-         "threat": "malware_download"},
+        {
+            "url_id": "3000",
+            "url": "http://bad.example.net/a.sh",
+            "url_status": "online",
+            "urlhaus_reference": "https://urlhaus.abuse.ch/url/3000/",
+            "dateadded": "2026-10-01 00:00:00 UTC",
+            "threat": "malware_download",
+        },
+        {
+            "url_id": "3001",
+            "url": "http://bad.example.net/b.sh",
+            "url_status": "offline",
+            "urlhaus_reference": "https://urlhaus.abuse.ch/url/3001/",
+            "dateadded": "2026-09-01 00:00:00 UTC",
+            "threat": "malware_download",
+        },
     ],
 }
 
@@ -295,21 +376,48 @@ URLHAUS_SIGNATURE = {
     "url_count": "1",
     "payload_count": "1",
     "urls": [
-        {"url_id": "105821", "url": "http://evil.example.com/bins/mozi.m", "url_status": "online",
-         "urlhaus_reference": "https://urlhaus.abuse.ch/url/105821/", "filename": "mozi.m",
-         "firstseen": "2026-10-01 10:00:00", "lastseen": None, "file_type": "elf", "file_size": "307960",
-         "md5_hash": PAYLOAD_MD5, "sha256_hash": PAYLOAD,
-         "virustotal": {"result": "0 / 60", "percent": "0.00", "link": "https://www.virustotal.com/gui/file/y"},
-         "imphash": None, "ssdeep": None, "tlsh": None},
+        {
+            "url_id": "105821",
+            "url": "http://evil.example.com/bins/mozi.m",
+            "url_status": "online",
+            "urlhaus_reference": "https://urlhaus.abuse.ch/url/105821/",
+            "filename": "mozi.m",
+            "firstseen": "2026-10-01 10:00:00",
+            "lastseen": None,
+            "file_type": "elf",
+            "file_size": "307960",
+            "md5_hash": PAYLOAD_MD5,
+            "sha256_hash": PAYLOAD,
+            "virustotal": {
+                "result": "0 / 60",
+                "percent": "0.00",
+                "link": "https://www.virustotal.com/gui/file/y",
+            },
+            "imphash": None,
+            "ssdeep": None,
+            "tlsh": None,
+        },
     ],
 }
 
 URLHAUS_RECENT_URLS = {"query_status": "ok", "urls": [dict(URLHAUS_URL, payloads=None)]}
 URLHAUS_RECENT_PAYLOADS = {
     "query_status": "ok",
-    "payloads": [{"md5_hash": PAYLOAD_MD5, "sha256_hash": PAYLOAD, "file_type": "elf", "file_size": "307960",
-                  "signature": "Mozi", "firstseen": "2026-10-01 10:00:00", "urlhaus_download": "x",
-                  "virustotal": None, "imphash": None, "ssdeep": None, "tlsh": None}],
+    "payloads": [
+        {
+            "md5_hash": PAYLOAD_MD5,
+            "sha256_hash": PAYLOAD,
+            "file_type": "elf",
+            "file_size": "307960",
+            "signature": "Mozi",
+            "firstseen": "2026-10-01 10:00:00",
+            "urlhaus_download": "x",
+            "virustotal": None,
+            "imphash": None,
+            "ssdeep": None,
+            "tlsh": None,
+        }
+    ],
 }
 
 THREATFOX_IOC = {
@@ -332,8 +440,12 @@ THREATFOX_IOC = {
     "tags": ["exe", "test"],
     "credits": [{"credits_from": "abuse_ch", "credits_amount": 5}],
     "malware_samples": [
-        {"time_stamp": "2026-10-01 07:00:00 UTC", "md5_hash": MD5, "sha256_hash": SHA256,
-         "malware_bazaar": f"https://bazaar.abuse.ch/sample/{SHA256}/"},
+        {
+            "time_stamp": "2026-10-01 07:00:00 UTC",
+            "md5_hash": MD5,
+            "sha256_hash": SHA256,
+            "malware_bazaar": f"https://bazaar.abuse.ch/sample/{SHA256}/",
+        },
     ],
 }
 
@@ -356,34 +468,77 @@ THREATFOX_IPPORT = {
 }
 
 THREATFOX_URL = {
-    "id": "43", "ioc": "http://c2.example.org/gate.php", "threat_type": "botnet_cc", "ioc_type": "url",
-    "malware": "win.lokipws", "malware_printable": "Loki Password Stealer (PWS)", "malware_alias": "Burkina,Loki",
-    "confidence_level": 75, "first_seen": "2026-10-02 00:00:00 UTC", "last_seen": None, "reporter": "x",
+    "id": "43",
+    "ioc": "http://c2.example.org/gate.php",
+    "threat_type": "botnet_cc",
+    "ioc_type": "url",
+    "malware": "win.lokipws",
+    "malware_printable": "Loki Password Stealer (PWS)",
+    "malware_alias": "Burkina,Loki",
+    "confidence_level": 75,
+    "first_seen": "2026-10-02 00:00:00 UTC",
+    "last_seen": None,
+    "reporter": "x",
     "tags": None,
 }
 
 THREATFOX_HASH = {
-    "id": "44", "ioc": SHA256, "threat_type": "payload", "ioc_type": "sha256_hash",
-    "malware": "win.agent_tesla", "malware_printable": "Agent Tesla", "malware_alias": None,
-    "confidence_level": 100, "first_seen": "2026-10-01 00:00:00 UTC", "last_seen": None, "reporter": "x",
+    "id": "44",
+    "ioc": SHA256,
+    "threat_type": "payload",
+    "ioc_type": "sha256_hash",
+    "malware": "win.agent_tesla",
+    "malware_printable": "Agent Tesla",
+    "malware_alias": None,
+    "confidence_level": 100,
+    "first_seen": "2026-10-01 00:00:00 UTC",
+    "last_seen": None,
+    "reporter": "x",
     "tags": ["AgentTesla"],
 }
 
 THREATFOX_TYPES = {
-    "1": {"ioc_type": "ip:port", "fk_threat_type": "botnet_cc", "description": "ip:port combination"},
+    "1": {
+        "ioc_type": "ip:port",
+        "fk_threat_type": "botnet_cc",
+        "description": "ip:port combination",
+    },
     "2": {"ioc_type": "domain", "fk_threat_type": "botnet_cc", "description": "Domain"},
 }
-THREATFOX_TAGS = {"Emotet": {"first_seen": "2021-03-08 00:00:00", "last_seen": "2026-10-01 00:00:00", "color": "#ff0000"}}
+THREATFOX_TAGS = {
+    "Emotet": {
+        "first_seen": "2021-03-08 00:00:00",
+        "last_seen": "2026-10-01 00:00:00",
+        "color": "#ff0000",
+    }
+}
 THREATFOX_MALWARE = {"win.dridex": {"malware_printable": "Dridex", "malware_alias": None}}
-THREATFOX_LABEL = [{"malware": "win.cobalt_strike", "malware_printable": "Cobalt Strike", "malware_alias": "BEACON"}]
+THREATFOX_LABEL = [
+    {
+        "malware": "win.cobalt_strike",
+        "malware_printable": "Cobalt Strike",
+        "malware_alias": "BEACON",
+    }
+]
 
 YARAIFY_FILE = {
     "metadata": {
-        "file_name": "invoice.exe", "file_size": 1234567, "file_type_mime": "application/x-dosexec",
-        "first_seen": "2026-10-01 12:00:00", "last_seen": "2026-10-02 12:00:00", "sightings": 3,
-        "sha256_hash": SHA256, "md5_hash": MD5, "sha1_hash": SHA1, "sha3_384": SHA3,
-        "imphash": "f34d5f2d4577ed6d9ceec516c1f5a744", "ssdeep": "24576:abcdefg:hijklmn", "tlsh": "T1A2B3C4D5E6F7",
-        "telfhash": None, "gimphash": "abcdef0123", "dhash_icon": None,
+        "file_name": "invoice.exe",
+        "file_size": 1234567,
+        "file_type_mime": "application/x-dosexec",
+        "first_seen": "2026-10-01 12:00:00",
+        "last_seen": "2026-10-02 12:00:00",
+        "sightings": 3,
+        "sha256_hash": SHA256,
+        "md5_hash": MD5,
+        "sha1_hash": SHA1,
+        "sha3_384": SHA3,
+        "imphash": "f34d5f2d4577ed6d9ceec516c1f5a744",
+        "ssdeep": "24576:abcdefg:hijklmn",
+        "tlsh": "T1A2B3C4D5E6F7",
+        "telfhash": None,
+        "gimphash": "abcdef0123",
+        "dhash_icon": None,
     },
     "tasks": [
         {
@@ -421,8 +576,14 @@ YARAIFY_FILE = {
 }
 
 YARAIFY_SEARCH = [
-    {"file_name": "x.exe", "sha256_hash": "a" * 64, "md5_hash": "a" * 32, "sha1_hash": "a" * 40,
-     "first_seen": "2026-10-01 00:00:00", "file_size": 100},
+    {
+        "file_name": "x.exe",
+        "sha256_hash": "a" * 64,
+        "md5_hash": "a" * 32,
+        "sha1_hash": "a" * 40,
+        "first_seen": "2026-10-01 00:00:00",
+        "file_size": 100,
+    },
 ]
 
 YARA_RULE_TEXT = """rule win_agent_tesla_auto {
@@ -456,12 +617,23 @@ YARAIFY_RESULTS = {
 
 # recent_yararules and show_deployed_yara_rules only list rule metadata, never the text.
 YARAIFY_RECENT_RULES = [
-    {"time_stamp": "2026-10-01 00:00:00", "rule_name": "New_Rule_1", "author": "someone",
-     "description": "A new rule", "yarahub_uuid": "11111111-2222-3333-4444-555555555555",
-     "yarahub_rule_matching_tlp": "TLP:WHITE", "yarahub_rule_sharing_tlp": "TLP:WHITE"},
-    {"time_stamp": "2026-10-01 00:00:00", "rule_name": "Private_Rule", "author": "someone",
-     "yarahub_uuid": "99999999-2222-3333-4444-555555555555",
-     "yarahub_rule_matching_tlp": "TLP:WHITE", "yarahub_rule_sharing_tlp": "TLP:RED"},
+    {
+        "time_stamp": "2026-10-01 00:00:00",
+        "rule_name": "New_Rule_1",
+        "author": "someone",
+        "description": "A new rule",
+        "yarahub_uuid": "11111111-2222-3333-4444-555555555555",
+        "yarahub_rule_matching_tlp": "TLP:WHITE",
+        "yarahub_rule_sharing_tlp": "TLP:WHITE",
+    },
+    {
+        "time_stamp": "2026-10-01 00:00:00",
+        "rule_name": "Private_Rule",
+        "author": "someone",
+        "yarahub_uuid": "99999999-2222-3333-4444-555555555555",
+        "yarahub_rule_matching_tlp": "TLP:WHITE",
+        "yarahub_rule_sharing_tlp": "TLP:RED",
+    },
 ]
 
 NEW_RULE_TEXT = """rule New_Rule_1 {
@@ -482,34 +654,94 @@ YARA_RULES = {
 # Shaped like the live list: a flat dict keyed by ID (no query_status/data wrapper), with a
 # sample listed once per hash type on consecutive rows, and some entries without a value.
 FPLIST = {
-    "1": {"time_stamp": "2026-01-01 00:00:00 UTC", "platform": "MalwareBazaar", "entry_type": "md5",
-          "entry_value": "0" * 32, "removed_by": "admin", "removal_notes": "Legitimate installer"},
-    "2": {"time_stamp": "2026-01-01 00:00:00 UTC", "platform": "MalwareBazaar", "entry_type": "sha1",
-          "entry_value": "0" * 40, "removed_by": "admin", "removal_notes": "Legitimate installer"},
-    "3": {"time_stamp": "2026-01-01 00:00:00 UTC", "platform": "MalwareBazaar", "entry_type": "sha256",
-          "entry_value": "0" * 64, "removed_by": "admin", "removal_notes": "Legitimate installer"},
-    "4": {"time_stamp": "2026-01-01 00:00:00 UTC", "platform": "MalwareBazaar", "entry_type": "sha3_384",
-          "entry_value": "0" * 96, "removed_by": "admin", "removal_notes": "Legitimate installer"},
-    "5": {"time_stamp": "2026-01-02 00:00:00 UTC", "platform": "URLhaus", "entry_type": "domain",
-          "entry_value": "legit.example.com", "removed_by": "admin", "removal_notes": None},
-    "6": {"time_stamp": "2026-01-03 00:00:00 UTC", "platform": "ThreatFox", "entry_type": "sha3_384",
-          "entry_value": "1" * 96, "removed_by": "admin", "removal_notes": "Only a SHA3-384"},
-    "7": {"time_stamp": "2026-01-04 00:00:00 UTC", "platform": "URLhaus", "entry_type": "url",
-          "entry_value": "", "removed_by": "admin", "removal_notes": None},
+    "1": {
+        "time_stamp": "2026-01-01 00:00:00 UTC",
+        "platform": "MalwareBazaar",
+        "entry_type": "md5",
+        "entry_value": "0" * 32,
+        "removed_by": "admin",
+        "removal_notes": "Legitimate installer",
+    },
+    "2": {
+        "time_stamp": "2026-01-01 00:00:00 UTC",
+        "platform": "MalwareBazaar",
+        "entry_type": "sha1",
+        "entry_value": "0" * 40,
+        "removed_by": "admin",
+        "removal_notes": "Legitimate installer",
+    },
+    "3": {
+        "time_stamp": "2026-01-01 00:00:00 UTC",
+        "platform": "MalwareBazaar",
+        "entry_type": "sha256",
+        "entry_value": "0" * 64,
+        "removed_by": "admin",
+        "removal_notes": "Legitimate installer",
+    },
+    "4": {
+        "time_stamp": "2026-01-01 00:00:00 UTC",
+        "platform": "MalwareBazaar",
+        "entry_type": "sha3_384",
+        "entry_value": "0" * 96,
+        "removed_by": "admin",
+        "removal_notes": "Legitimate installer",
+    },
+    "5": {
+        "time_stamp": "2026-01-02 00:00:00 UTC",
+        "platform": "URLhaus",
+        "entry_type": "domain",
+        "entry_value": "legit.example.com",
+        "removed_by": "admin",
+        "removal_notes": None,
+    },
+    "6": {
+        "time_stamp": "2026-01-03 00:00:00 UTC",
+        "platform": "ThreatFox",
+        "entry_type": "sha3_384",
+        "entry_value": "1" * 96,
+        "removed_by": "admin",
+        "removal_notes": "Only a SHA3-384",
+    },
+    "7": {
+        "time_stamp": "2026-01-04 00:00:00 UTC",
+        "platform": "URLhaus",
+        "entry_type": "url",
+        "entry_value": "",
+        "removed_by": "admin",
+        "removal_notes": None,
+    },
 }
 
 FEODO_JSON = [
-    {"ip_address": "50.16.16.211", "port": 8080, "status": "online", "hostname": "ec2.example.com",
-     "as_number": 14618, "as_name": "AMAZON-AES", "country": "US", "first_seen": "2026-08-01 00:00:00",
-     "last_online": "2026-10-01", "malware": "QakBot"},
-    {"ip_address": "60.1.2.3", "port": 443, "status": "offline", "hostname": None, "as_number": 4134,
-     "as_name": "CHINANET", "country": "CN", "first_seen": "2026-07-01 00:00:00", "last_online": "2026-08-01",
-     "malware": "Emotet"},
+    {
+        "ip_address": "50.16.16.211",
+        "port": 8080,
+        "status": "online",
+        "hostname": "ec2.example.com",
+        "as_number": 14618,
+        "as_name": "AMAZON-AES",
+        "country": "US",
+        "first_seen": "2026-08-01 00:00:00",
+        "last_online": "2026-10-01",
+        "malware": "QakBot",
+    },
+    {
+        "ip_address": "60.1.2.3",
+        "port": 443,
+        "status": "offline",
+        "hostname": None,
+        "as_number": 4134,
+        "as_name": "CHINANET",
+        "country": "CN",
+        "first_seen": "2026-07-01 00:00:00",
+        "last_online": "2026-08-01",
+        "malware": "Emotet",
+    },
 ]
 FEODO_RECOMMENDED = [FEODO_JSON[0]]
 FEODO_AGGRESSIVE = (
     "################################################################\n"
-    '# first_seen_utc,dst_ip,dst_port,c2_status,last_online,malware\n'
+    "# first_seen_utc,dst_ip,dst_port,c2_status,last_online,malware\n"
     '"2026-01-01 00:00:00","80.1.2.3","447","offline","2026-02-01","TrickBot"\n'
 )
 
@@ -531,15 +763,30 @@ SSLBL_JA3 = (
 )
 
 BAZAAR_YARA_STATS = {
-    "1": [{"sample_cnt": 117065, "yara_rule_name": "unixredflags3", "yara_rule_author": "Tim Brown @timb_machine",
-           "yara_rule_reference": None, "yara_rule_description": "Hunts for UNIX red flags",
-           "last_hit_utc": "2026-10-31 04:27:16"}],
-    "2": [{"sample_cnt": 107053, "yara_rule_name": "pe_imphash", "yara_rule_author": None,
-           "yara_rule_reference": None, "yara_rule_description": None, "last_hit_utc": "2026-10-31 03:27:20"}],
+    "1": [
+        {
+            "sample_cnt": 117065,
+            "yara_rule_name": "unixredflags3",
+            "yara_rule_author": "Tim Brown @timb_machine",
+            "yara_rule_reference": None,
+            "yara_rule_description": "Hunts for UNIX red flags",
+            "last_hit_utc": "2026-10-31 04:27:16",
+        }
+    ],
+    "2": [
+        {
+            "sample_cnt": 107053,
+            "yara_rule_name": "pe_imphash",
+            "yara_rule_author": None,
+            "yara_rule_reference": None,
+            "yara_rule_description": None,
+            "last_hit_utc": "2026-10-31 03:27:20",
+        }
+    ],
 }
 
 BAZAAR_CSV = (
-    '################################################################\n'
+    "################################################################\n"
     '# "first_seen_utc","sha256_hash","md5_hash","sha1_hash","reporter","file_name","file_type_guess",'
     '"mime_type","signature","clamav","vtpercent","imphash","ssdeep","tlsh"\n'
     f'"2026-10-01 12:00:00", "{SHA256}", "{MD5}", "{SHA1}", "abuse_ch", "invoice.exe", "exe", '
@@ -564,10 +811,23 @@ URLHAUS_CSV = (
 )
 
 THREATFOX_EXPORT = {
-    "50": [{"ioc_value": "export.example.com", "ioc_type": "domain", "threat_type": "botnet_cc",
-            "fk_malware": "win.qakbot", "malware_alias": "Qbot,QuakBot", "malware_printable": "QakBot",
-            "first_seen_utc": "2026-10-01 00:00:00", "last_seen_utc": None, "confidence_level": 75,
-            "reference": None, "tags": "QakBot,TA570", "anonymous": "0", "reporter": "abuse_ch"}],
+    "50": [
+        {
+            "ioc_value": "export.example.com",
+            "ioc_type": "domain",
+            "threat_type": "botnet_cc",
+            "fk_malware": "win.qakbot",
+            "malware_alias": "Qbot,QuakBot",
+            "malware_printable": "QakBot",
+            "first_seen_utc": "2026-10-01 00:00:00",
+            "last_seen_utc": None,
+            "confidence_level": 75,
+            "reference": None,
+            "tags": "QakBot,TA570",
+            "anonymous": "0",
+            "reporter": "abuse_ch",
+        }
+    ],
 }
 
 
@@ -576,7 +836,9 @@ def mkzip(files: dict[str, bytes], password: bytes | None = None) -> bytes:
 
     buf = io.BytesIO()
     if password:
-        with pyzipper.AESZipFile(buf, "w", compression=pyzipper.ZIP_DEFLATED, encryption=pyzipper.WZ_AES) as zfd:
+        with pyzipper.AESZipFile(
+            buf, "w", compression=pyzipper.ZIP_DEFLATED, encryption=pyzipper.WZ_AES
+        ) as zfd:
             zfd.setpassword(password)
             for name, byts in files.items():
                 zfd.writestr(name, byts)
@@ -608,8 +870,20 @@ class FakeAbuseCh:
     @property
     def urls(self) -> dict[str, str]:
         base = f"http://127.0.0.1:{self.port}"
-        names = ("bazaar", "bazaar:export", "urlhaus", "urlhaus:submit", "urlhaus:export", "threatfox",
-                 "threatfox:export", "yaraify", "yaraify:export", "hunting", "feodo", "sslbl")
+        names = (
+            "bazaar",
+            "bazaar:export",
+            "urlhaus",
+            "urlhaus:submit",
+            "urlhaus:export",
+            "threatfox",
+            "threatfox:export",
+            "yaraify",
+            "yaraify:export",
+            "hunting",
+            "feodo",
+            "sslbl",
+        )
         return {name: f"{base}/{name.replace(':', '_')}" for name in names}
 
     async def _record(self, request: web.Request) -> dict:
@@ -654,7 +928,13 @@ class FakeAbuseCh:
                 return web.Response(status=status, body=body)
             return self._json(body, status=status)
 
-        if info["authkey"] is None and base in ("bazaar", "urlhaus", "threatfox", "yaraify", "hunting"):
+        if info["authkey"] is None and base in (
+            "bazaar",
+            "urlhaus",
+            "threatfox",
+            "yaraify",
+            "hunting",
+        ):
             return self._json({"query_status": "unauthorized"}, status=401)
         if info["authkey"] == "badkey":
             return self._json({"query_status": "unknown_auth_key"}, status=403)
@@ -671,9 +951,22 @@ class FakeAbuseCh:
                 if form.get("hash") in (SHA256, MD5, SHA1, SHA3):
                     return self._json(ok([BAZAAR_INFO]))
                 return self._json({"query_status": "hash_not_found"})
-            case "get_taginfo" | "get_siginfo" | "get_file_type" | "get_clamavinfo" | "get_imphash" | \
-                 "get_tlsh" | "get_telfhash" | "get_gimphash" | "get_dhash_icon" | "get_yarainfo" | \
-                 "get_issuerinfo" | "get_subjectinfo" | "get_certificate" | "get_recent":
+            case (
+                "get_taginfo"
+                | "get_siginfo"
+                | "get_file_type"
+                | "get_clamavinfo"
+                | "get_imphash"
+                | "get_tlsh"
+                | "get_telfhash"
+                | "get_gimphash"
+                | "get_dhash_icon"
+                | "get_yarainfo"
+                | "get_issuerinfo"
+                | "get_subjectinfo"
+                | "get_certificate"
+                | "get_recent"
+            ):
                 if "nothing" in form.values():
                     return self._json({"query_status": "no_results"})
                 return self._json(ok(BAZAAR_LIST))
@@ -683,8 +976,10 @@ class FakeAbuseCh:
                 return self._json(ok(BAZAAR_LIST[:1]))
             case "get_file":
                 if form.get("sha256_hash") == SAMPLE_SHA256:
-                    return web.Response(body=mkzip({f"{SAMPLE_SHA256}.exe": SAMPLE_BYTES}, b"infected"),
-                                        content_type="application/zip")
+                    return web.Response(
+                        body=mkzip({f"{SAMPLE_SHA256}.exe": SAMPLE_BYTES}, b"infected"),
+                        content_type="application/zip",
+                    )
                 return self._json({"query_status": "file_not_found"})
             case "update" | "add_comment":
                 if form.get("sha256_hash") != SHA256:
@@ -702,7 +997,9 @@ class FakeAbuseCh:
     async def _bazaar_export(self, request, info, path, query):
         name = self._export(info, path)
         if name == "full.csv.zip":
-            return web.Response(body=mkzip({"full.csv": BAZAAR_CSV.encode()}), content_type="application/zip")
+            return web.Response(
+                body=mkzip({"full.csv": BAZAAR_CSV.encode()}), content_type="application/zip"
+            )
         if name == "recent.csv":
             return web.Response(text=BAZAAR_CSV)
         if name == "yara_rules.json":
@@ -716,7 +1013,9 @@ class FakeAbuseCh:
                 return self._json(URLHAUS_URL)
             return self._json({"query_status": "no_results"})
         if path == "urlid/":
-            return self._json(URLHAUS_URL if form.get("urlid") == "105821" else {"query_status": "no_results"})
+            return self._json(
+                URLHAUS_URL if form.get("urlid") == "105821" else {"query_status": "no_results"}
+            )
         if path == "host/":
             if ":" in (form.get("host") or ""):
                 return self._json({"query_status": "invalid_host"})
@@ -738,8 +1037,10 @@ class FakeAbuseCh:
         if path.startswith("download/"):
             sha = path.split("/")[1]
             if sha == SAMPLE_SHA256:
-                return web.Response(body=mkzip({SAMPLE_SHA256: SAMPLE_BYTES}, b"infected"),
-                                    content_type="application/zip")
+                return web.Response(
+                    body=mkzip({SAMPLE_SHA256: SAMPLE_BYTES}, b"infected"),
+                    content_type="application/zip",
+                )
             return web.Response(status=404, text="Not found")
         return self._json({"query_status": "unknown"}, status=404)
 
@@ -749,11 +1050,16 @@ class FakeAbuseCh:
     async def _urlhaus_export(self, request, info, path, query):
         name = self._export(info, path)
         if name == "full.csv.zip":
-            return web.Response(body=mkzip({"csv.txt": URLHAUS_CSV.encode()}), content_type="application/zip")
+            return web.Response(
+                body=mkzip({"csv.txt": URLHAUS_CSV.encode()}), content_type="application/zip"
+            )
         if name in ("recent.csv", "online.csv"):
             return web.Response(text=URLHAUS_CSV)
         if name == "payload.csv.zip":
-            return web.Response(body=mkzip({"payload.txt": URLHAUS_PAYLOAD_CSV.encode()}), content_type="application/zip")
+            return web.Response(
+                body=mkzip({"payload.txt": URLHAUS_PAYLOAD_CSV.encode()}),
+                content_type="application/zip",
+            )
         return self._json({"status": 404, "message": "Invalid export file name"}, status=404)
 
     async def _threatfox(self, request, info, path, query):
@@ -798,7 +1104,9 @@ class FakeAbuseCh:
         name = self._export(info, path)
         text = json.dumps(THREATFOX_EXPORT)
         if name == "full.json.zip":
-            return web.Response(body=mkzip({"full.json": text.encode()}), content_type="application/zip")
+            return web.Response(
+                body=mkzip({"full.json": text.encode()}), content_type="application/zip"
+            )
         if name == "recent.json":
             return web.Response(text=text, content_type="application/json")
         return self._json({"status": 404, "message": "Invalid export file name"}, status=404)
@@ -807,15 +1115,24 @@ class FakeAbuseCh:
         if "yara_file" in info["files"]:
             return self._json({"query_status": "ok", "data": "Rule deployed"})
         if "file" in info["files"]:
-            return self._json(ok({"task_id": "11111111-aaaa-bbbb-cccc-000000000001"}, query_status="queued"))
+            return self._json(
+                ok({"task_id": "11111111-aaaa-bbbb-cccc-000000000001"}, query_status="queued")
+            )
         body = info["json"] or {}
         match query:
             case "lookup_hash":
                 if body.get("search_term") in (SHA256, MD5, SHA1):
                     return self._json(ok(YARAIFY_FILE))
                 return self._json({"query_status": "hash_not_found"})
-            case "get_yara" | "get_clamav" | "get_imphash" | "get_gimphash" | "get_dhash_icon" | "get_tlsh" | \
-                 "get_telfhash":
+            case (
+                "get_yara"
+                | "get_clamav"
+                | "get_imphash"
+                | "get_gimphash"
+                | "get_dhash_icon"
+                | "get_tlsh"
+                | "get_telfhash"
+            ):
                 return self._json(ok(YARAIFY_SEARCH))
             case "recent_yararules":
                 return self._json(ok(YARAIFY_RECENT_RULES))
@@ -836,7 +1153,9 @@ class FakeAbuseCh:
             case "generate_identifier":
                 return self._json(ok({"identifier": "abcdef-identifier"}))
             case "rescan_file":
-                return self._json(ok({"task_id": "22222222-aaaa-bbbb-cccc-000000000002"}, query_status="queued"))
+                return self._json(
+                    ok({"task_id": "22222222-aaaa-bbbb-cccc-000000000002"}, query_status="queued")
+                )
             case "get_yara_rule":
                 text = YARA_RULES.get(body.get("uuid"))
                 if text is None:
@@ -844,21 +1163,29 @@ class FakeAbuseCh:
                 return web.Response(text=text, content_type="text/plain")
             case "get_unpacked":
                 if body.get("sha256_hash") == SAMPLE_SHA256:
-                    return web.Response(body=mkzip({SAMPLE_SHA256: SAMPLE_BYTES}, b"infected"),
-                                        content_type="application/zip")
-                return self._json({"query_status": "not_found", "data": "Unknown file or file not shareable"})
+                    return web.Response(
+                        body=mkzip({SAMPLE_SHA256: SAMPLE_BYTES}, b"infected"),
+                        content_type="application/zip",
+                    )
+                return self._json(
+                    {"query_status": "not_found", "data": "Unknown file or file not shareable"}
+                )
             case "get_file":
                 if body.get("sha256_hash") == SAMPLE_SHA256:
-                    return web.Response(body=mkzip({SAMPLE_SHA256: SAMPLE_BYTES}, b"infected"),
-                                        content_type="application/zip")
+                    return web.Response(
+                        body=mkzip({SAMPLE_SHA256: SAMPLE_BYTES}, b"infected"),
+                        content_type="application/zip",
+                    )
                 return self._json({"query_status": "file_not_found"})
         return self._json({"query_status": "unknown_query"})
 
     async def _yaraify_export(self, request, info, path, query):
         if path != "yarahub/yaraify-rules.zip":
             return web.Response(status=404, text="<html>Not Found</html>", content_type="text/html")
-        return web.Response(body=mkzip({"win_agent_tesla_auto.yar": YARA_RULE_TEXT.encode()}),
-                            content_type="application/zip")
+        return web.Response(
+            body=mkzip({"win_agent_tesla_auto.yar": YARA_RULE_TEXT.encode()}),
+            content_type="application/zip",
+        )
 
     async def _hunting(self, request, info, path, query):
         return self._json(FPLIST)
@@ -884,7 +1211,7 @@ class FakeAbuseCh:
         return web.Response(status=404)
 
     async def __aenter__(self):
-        app = web.Application(client_max_size=1024 ** 3)
+        app = web.Application(client_max_size=1024**3)
         app.router.add_route("*", "/{tail:.*}", self._handle)
         self.runner = web.AppRunner(app)
         await self.runner.setup()
@@ -910,7 +1237,9 @@ class FakeAbuseCh:
         retn = []
         for req in self.requests:
             if req["path"].startswith(f"/{base}"):
-                retn.append(req["form"].get("query") or (req["json"] or {}).get("query") or req["path"])
+                retn.append(
+                    req["form"].get("query") or (req["json"] or {}).get("query") or req["path"]
+                )
         return retn
 
 

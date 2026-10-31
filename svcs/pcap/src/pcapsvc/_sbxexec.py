@@ -16,7 +16,6 @@ A layer the kernel doesn't support is skipped, unless the spec is ``strict``, th
 isn't run. Problems are reported on stderr as ``slib-pcap-sandbox: ...`` lines and exit code 125.
 """
 
-
 import ctypes
 import ctypes.util
 import errno
@@ -101,8 +100,12 @@ class _PathBeneath(ctypes.Structure):
 
 
 class _SockFilter(ctypes.Structure):
-    _fields_ = [("code", ctypes.c_uint16), ("jt", ctypes.c_uint8), ("jf", ctypes.c_uint8),
-                ("k", ctypes.c_uint32)]
+    _fields_ = [
+        ("code", ctypes.c_uint16),
+        ("jt", ctypes.c_uint8),
+        ("jf", ctypes.c_uint8),
+        ("k", ctypes.c_uint32),
+    ]
 
 
 class _SockFprog(ctypes.Structure):
@@ -118,13 +121,18 @@ def landlockAbi(libc: ctypes.CDLL | None = None) -> int:
 
     libc = libc or _libc()
     libc.syscall.restype = ctypes.c_long
-    abi = libc.syscall(SYS_LANDLOCK_CREATE_RULESET, None, ctypes.c_size_t(0),
-                       ctypes.c_uint32(LANDLOCK_CREATE_RULESET_VERSION))
+    abi = libc.syscall(
+        SYS_LANDLOCK_CREATE_RULESET,
+        None,
+        ctypes.c_size_t(0),
+        ctypes.c_uint32(LANDLOCK_CREATE_RULESET_VERSION),
+    )
     return max(0, abi)
 
 
-def applyLandlock(read: list[str], write: list[str], execs: list[str],
-                  libc: ctypes.CDLL | None = None) -> int:
+def applyLandlock(
+    read: list[str], write: list[str], execs: list[str], libc: ctypes.CDLL | None = None
+) -> int:
     """Restrict this process (and what it execs) to the given paths. Returns the ABI used.
 
     Raises
@@ -150,10 +158,13 @@ def applyLandlock(read: list[str], write: list[str], execs: list[str],
     scoped = SCOPE_ABSTRACT_UNIX_SOCKET | SCOPE_SIGNAL if abi >= 6 else 0
     attr = _RulesetAttr(fsall, net, scoped)
     size = 24 if abi >= 6 else (16 if abi >= 4 else 8)
-    fd = libc.syscall(SYS_LANDLOCK_CREATE_RULESET, ctypes.byref(attr), ctypes.c_size_t(size),
-                      ctypes.c_uint32(0))
+    fd = libc.syscall(
+        SYS_LANDLOCK_CREATE_RULESET, ctypes.byref(attr), ctypes.c_size_t(size), ctypes.c_uint32(0)
+    )
     if fd < 0:
-        raise SandboxError(f"Unable to create a Landlock ruleset: {os.strerror(ctypes.get_errno())}")
+        raise SandboxError(
+            f"Unable to create a Landlock ruleset: {os.strerror(ctypes.get_errno())}"
+        )
 
     def allow(path: str, rights: int) -> None:
         if not os.path.exists(path):
@@ -163,10 +174,19 @@ def applyLandlock(read: list[str], write: list[str], execs: list[str],
         pfd = os.open(path, os.O_PATH | os.O_CLOEXEC)
         try:
             rule = _PathBeneath(rights & fsall, pfd)
-            if libc.syscall(SYS_LANDLOCK_ADD_RULE, fd, LANDLOCK_RULE_PATH_BENEATH,
-                            ctypes.byref(rule), ctypes.c_uint32(0)) != 0:
-                raise SandboxError(f"Unable to allow {path} in Landlock: "
-                                   f"{os.strerror(ctypes.get_errno())}")
+            if (
+                libc.syscall(
+                    SYS_LANDLOCK_ADD_RULE,
+                    fd,
+                    LANDLOCK_RULE_PATH_BENEATH,
+                    ctypes.byref(rule),
+                    ctypes.c_uint32(0),
+                )
+                != 0
+            ):
+                raise SandboxError(
+                    f"Unable to allow {path} in Landlock: {os.strerror(ctypes.get_errno())}"
+                )
         finally:
             os.close(pfd)
 
@@ -206,18 +226,18 @@ def applySeccomp(libc: ctypes.CDLL | None = None) -> None:
     ld, jeq, ret = 0x20, 0x15, 0x06  # BPF_LD|BPF_W|BPF_ABS, BPF_JMP|BPF_JEQ|BPF_K, BPF_RET|BPF_K
     deny = SECCOMP_RET_ERRNO | errno.EPERM
     prog = [
-        _bpf(ld, 4),                       # 0: arch
-        _bpf(jeq, audit, 1, 0),            # 1: our arch? -> 3, else -> 2
-        _bpf(ret, SECCOMP_RET_ALLOW),      # 2
-        _bpf(ld, 0),                       # 3: syscall nr
-        _bpf(jeq, nrsocket, 1, 0),         # 4: socket? -> 6, else -> 5
-        _bpf(ret, SECCOMP_RET_ALLOW),      # 5
-        _bpf(ld, 16),                      # 6: args[0], the address family (low 32 bits)
-        _bpf(jeq, AF_INET, 3, 0),          # 7 -> 11
-        _bpf(jeq, AF_INET6, 2, 0),         # 8 -> 11
-        _bpf(jeq, AF_PACKET, 1, 0),        # 9 -> 11
-        _bpf(ret, SECCOMP_RET_ALLOW),      # 10
-        _bpf(ret, deny),                   # 11
+        _bpf(ld, 4),  # 0: arch
+        _bpf(jeq, audit, 1, 0),  # 1: our arch? -> 3, else -> 2
+        _bpf(ret, SECCOMP_RET_ALLOW),  # 2
+        _bpf(ld, 0),  # 3: syscall nr
+        _bpf(jeq, nrsocket, 1, 0),  # 4: socket? -> 6, else -> 5
+        _bpf(ret, SECCOMP_RET_ALLOW),  # 5
+        _bpf(ld, 16),  # 6: args[0], the address family (low 32 bits)
+        _bpf(jeq, AF_INET, 3, 0),  # 7 -> 11
+        _bpf(jeq, AF_INET6, 2, 0),  # 8 -> 11
+        _bpf(jeq, AF_PACKET, 1, 0),  # 9 -> 11
+        _bpf(ret, SECCOMP_RET_ALLOW),  # 10
+        _bpf(ret, deny),  # 11
     ]
     arr = (_SockFilter * len(prog))(*prog)
     fprog = _SockFprog(len(prog), arr)
@@ -296,8 +316,14 @@ def main(argv: list[str]) -> None:
     layer("no_new_privs", noNewPrivs)
 
     if spec.get("landlock"):
-        layer("landlock", applyLandlock, spec.get("read") or [], spec.get("write") or [],
-              spec.get("exec") or [], libc)
+        layer(
+            "landlock",
+            applyLandlock,
+            spec.get("read") or [],
+            spec.get("write") or [],
+            spec.get("exec") or [],
+            libc,
+        )
     if spec.get("seccomp"):
         layer("seccomp", applySeccomp, libc)
 
