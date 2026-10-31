@@ -17,7 +17,8 @@ The service registers the `slib.crtsh` Storm package.
 
 > **Status:** the SQL in `src/crtshsvc/db.py` follows the certwatch schema
 > (https://github.com/crtsh/certwatch_db) and libx509pq sources, every query uses one of crt.sh's
-> indexes, and every query runs against a PostgreSQL stub of crt.sh (see [Testing](#testing)).
+> indexes, every query runs against a PostgreSQL stub of crt.sh, and the live test passes against
+> crt.sh itself (2026-10, about 6.5 minutes). See [Testing](#testing).
 
 crt.sh's database is slow per round trip (often 20s+ even for trivial queries) rather than per
 row, so every operation is a single query: lookups, searches, and pivots return each certificate
