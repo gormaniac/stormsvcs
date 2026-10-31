@@ -1,0 +1,35 @@
+init {
+    $admin = $lib.import(slib.snort.priv.admin)
+    $snort = $lib.import(slib.snort.lib)
+    $util = $lib.import(slib.snort.util)
+
+    if ($cmdopts.enable and $cmdopts.disable) {
+        $lib.warn("slib.snort.admin.schedule: Use --enable or --disable, not both.")
+    } else {
+        if $cmdopts.period {
+            try {
+                $job = $admin.schedule($cmdopts.period)
+                $lib.print("slib.snort.admin.schedule: slib.snort.sync now runs {period} (cron {iden}).",
+                    period=$cmdopts.period, iden=$job.iden)
+            } catch * as err {
+                $lib.warn("slib.snort.admin.schedule: Unable to schedule slib.snort.sync with period {period}: {err}",
+                    period=$cmdopts.period, err=$err.mesg)
+            }
+        }
+        if ($cmdopts.enable or $cmdopts.disable) {
+            if (not $admin.enable(enabled=$cmdopts.enable)) {
+                $lib.warn("slib.snort.admin.schedule: There is no sync cron job, create one with --period.")
+            }
+        }
+
+        $job = $snort.schedule()
+        if $job {
+            $state = disabled
+            if $job.enabled { $state = enabled }
+            $lib.print("slib.snort.admin.schedule: cron {iden} ({state}) runs slib.snort.sync, in view {view}, last run: {last}",
+                iden=$job.iden, state=$state, view=$job.view, last=$util.when($job.laststart))
+        } else {
+            $lib.print("slib.snort.admin.schedule: There is no sync cron job, create one with --period.")
+        }
+    }
+}

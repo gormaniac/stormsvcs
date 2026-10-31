@@ -1,0 +1,27 @@
+init {
+    $snort = $lib.import(slib.snort.lib)
+    $model = $lib.import(slib.snort.model)
+    $util = $lib.import(slib.snort.util)
+
+    $nodes = ([])
+    $errs = $snort.ruleErrors()
+    if ($errs != $lib.null) {
+        if (not $errs) {
+            $lib.print("slib.snort.rule.errors: The service loaded every rule.")
+        } else {
+            $guids = ([])
+            for ($guid, $mesg) in $errs { $guids.append($guid) }
+            $ids = ({})
+            for $rule in $model.rules($guids) {
+                $ids.($rule.repr()) = $rule.props.id
+                $nodes.append($rule)
+            }
+            for ($guid, $mesg) in $errs {
+                $lib.print("it:app:snort:rule={guid} (sid {id}): {err}", guid=$guid, id=$ids.$guid, err=$mesg)
+            }
+            $lib.print("slib.snort.rule.errors: {count} rules couldn't be loaded.", count=$lib.len($guids))
+        }
+    }
+}
+
+divert $cmdopts.yield $model.nodes($nodes)

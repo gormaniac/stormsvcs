@@ -23,6 +23,11 @@ name = "crt.sh"
 src = "svcs/crtsh/"
 workflow = ".github/workflows/crtsh.yml"
 
+[stormsvcs.snort]
+name = "Snort"
+src = "svcs/snort/"
+workflow = ".github/workflows/snort.yml"
+
 # [stormsvcs.report-ingest]
 # name = "Report Ingest"
 # src = "svcs/report-ingest/"

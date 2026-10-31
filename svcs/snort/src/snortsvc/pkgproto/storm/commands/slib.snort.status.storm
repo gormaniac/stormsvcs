@@ -1,0 +1,30 @@
+init {
+    $snort = $lib.import(slib.snort.lib)
+    $util = $lib.import(slib.snort.util)
+
+    $status = $snort.status()
+    if $status {
+        if $status.available {
+            $lib.print("slib.snort: Snort {vers}", vers=$status.snort)
+        } else {
+            $lib.warn("slib.snort: The service can't find the snort binary, scans will fail.")
+        }
+        $lib.print("Rules: {loaded} loaded of {count} pushed ({invalid} invalid, see slib.snort.rule.errors)",
+            loaded=$status.loaded, count=$status.rules, invalid=$status.invalid)
+        $lib.print("Last pushed: {pushed}, last built: {built}", pushed=$util.when($status.pushed), built=$util.when($status.built))
+        if $status.building { $lib.print("The service is building its rules now.") }
+        if $status.error { $lib.warn("slib.snort: The last rule build failed: {err}", err=$status.error) }
+        if $status.axon { $lib.print("PCAPs are read from the Axon by the service.") }
+        else { $lib.print("PCAPs are streamed from the Axon to the service.") }
+    }
+
+    $job = $snort.schedule()
+    if $job {
+        $state = disabled
+        if $job.enabled { $state = enabled }
+        $lib.print("Sync schedule: cron {iden} ({state}), last run: {last}", iden=$job.iden, state=$state,
+            last=$util.when($job.laststart))
+    } else {
+        $lib.print("Sync schedule: none, see slib.snort.admin.schedule.")
+    }
+}

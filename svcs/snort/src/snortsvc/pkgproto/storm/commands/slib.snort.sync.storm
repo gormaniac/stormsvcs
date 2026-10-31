@@ -1,0 +1,44 @@
+init {
+    $sync = $lib.import(slib.snort.priv.sync)
+    $util = $lib.import(slib.snort.util)
+
+    if (not $cmdopts.no_feeds) {
+        $feeds = $util.data($sync.feeds(), "Listing the feeds")
+        $wanted = $lib.set()
+        for $name in $cmdopts.feed { $wanted.add($lib.cast(str, $name).lower()) }
+        $found = $lib.set()
+
+        for $feed in $feeds {
+            if $wanted {
+                if (not $wanted.has($feed.name)) { continue }
+            } elif (not $feed.enabled) {
+                continue
+            }
+            $found.add($feed.name)
+
+            $s = $sync.syncFeed($feed, force=$cmdopts.force)
+            if $s.error {
+                $lib.warn("slib.snort.sync: Syncing the {name} feed failed: {err}", name=$s.name, err=$s.error)
+            } elif ($s.synced and $s.full) {
+                $lib.print("slib.snort.sync: {name}: synced {count} rules ({added} added, {updated} updated, {removed} removed).",
+                    name=$s.name, count=$s.count, added=$s.added, updated=$s.updated, removed=$s.removed)
+            } elif $s.synced {
+                $lib.print("slib.snort.sync: {name}: synced the feed's changes ({added} added, {updated} updated, {removed} removed), it has {count} rules.",
+                    name=$s.name, count=$s.count, added=$s.added, updated=$s.updated, removed=$s.removed)
+            } elif $s.pulled {
+                $lib.print("slib.snort.sync: {name}: downloaded, the feed is unchanged.", name=$s.name)
+            } else {
+                $lib.print("slib.snort.sync: {name}: up to date (the feed isn't due to be downloaded yet).", name=$s.name)
+            }
+        }
+
+        for $name in $wanted {
+            if (not $found.has($name)) { $lib.warn("slib.snort.sync: Unknown feed: {name}", name=$name) }
+        }
+    }
+
+    if (not $cmdopts.no_push) {
+        $summary = $util.data($sync.push(force=$cmdopts.force), "Pushing the rules to the service")
+        if $summary { $util.printBuild("slib.snort.sync", $summary) }
+    }
+}

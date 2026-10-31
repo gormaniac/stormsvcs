@@ -1,0 +1,49 @@
+// The slib.snort user API. Errors are reported as warnings.
+//
+// Usable directly from Storm, ex:
+//     $snort = $lib.import(slib.snort.lib)
+//     file:bytes=sha256:... $hits = $snort.scan($node)
+
+init {
+    $priv = $lib.import(slib.snort.priv.user)
+    $model = $lib.import(slib.snort.model)
+    $util = $lib.import(slib.snort.util)
+}
+
+
+// Scan a PCAP (a file:bytes node) and model the hits.
+// Returns {"hits": <the it:app:snort:hit nodes>, "results": <the service's scan results>}, or null if the scan failed.
+function scan(file) {
+    $sha = $file.props.sha256
+    if (not $sha) {
+        $lib.warn("slib.snort: file:bytes={valu} has no :sha256, so it can't be read from the Axon.", valu=$file.repr())
+        return($lib.null)
+    }
+    $retn = $priv.scan($sha)
+    if $util.failed($retn, `Scanning file:bytes={$file.repr()}`) { return($lib.null) }
+    if ($lib.debug and $retn.data.unknown) {
+        $lib.print("slib.snort: Alerts for rules the service doesn't know about (ex. builtin rules): {unknown}",
+            unknown=$retn.data.unknown)
+    }
+    return(({"hits": $model.scan($file, $retn.data), "results": $retn.data}))
+}
+
+// The service's status.
+function status() {
+    return($util.data($priv.status(), "Getting the service's status"))
+}
+
+// The rule feeds, or null if they couldn't be listed.
+function feeds() {
+    return($util.data($priv.feeds(), "Listing the feeds"))
+}
+
+// The guid -> error of the rules the service couldn't load, or null if they couldn't be listed.
+function ruleErrors(guids=$lib.null) {
+    return($util.data($priv.ruleErrors(guids=$guids), "Listing the rule errors"))
+}
+
+// The sync cron job's details, or null if there isn't one.
+function schedule() {
+    return($priv.schedule())
+}

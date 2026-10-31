@@ -1,0 +1,17 @@
+init {
+    $rules = $lib.import(slib.snort.priv.rules)
+    $util = $lib.import(slib.snort.util)
+    $dels = ([])
+}
+
+if ($node.form() = "it:app:snort:rule") {
+    [ :enabled=(false) ]
+    $dels.append($node.repr())
+}
+
+fini {
+    if $dels {
+        $summary = $util.data($rules.update(dels=$dels), "Removing the rules from the service")
+        if $summary { $util.printBuild("slib.snort.rule.disable", $summary) }
+    }
+}

@@ -1,0 +1,27 @@
+init {
+    $priv = $lib.import(slib.snort.priv.user)
+    $util = $lib.import(slib.snort.util)
+
+    if ($cmdopts.text != $lib.null) {
+        $retn = $priv.ruleCheck($cmdopts.text, engine=$cmdopts.engine)
+        if (not $util.failed($retn, "Checking the rule")) {
+            if ($retn.data = $lib.null) { $lib.print("slib.snort.rule.check: The rule is valid.") }
+            else { $lib.warn("slib.snort.rule.check: The rule is invalid: {err}", err=$retn.data) }
+        }
+    }
+}
+
+if ($node.form() = "it:app:snort:rule") {
+    if (not $node.props.text) {
+        $lib.warn("slib.snort.rule.check: it:app:snort:rule={guid} has no :text.", guid=$node.repr())
+    } else {
+        $retn = $priv.ruleCheck($node.props.text, engine=$node.props.engine)
+        if (not $util.failed($retn, `Checking it:app:snort:rule={$node.repr()}`)) {
+            if ($retn.data = $lib.null) {
+                $lib.print("slib.snort.rule.check: it:app:snort:rule={guid} is valid.", guid=$node.repr())
+            } else {
+                $lib.warn("slib.snort.rule.check: it:app:snort:rule={guid} is invalid: {err}", guid=$node.repr(), err=$retn.data)
+            }
+        }
+    }
+}

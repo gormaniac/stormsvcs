@@ -1,0 +1,41 @@
+// Privileged (asroot) wrappers around the slib.snort service, and the sync cron job, for slib.snort.admin.
+
+init {
+    $svc = $lib.service.get("slib.snort")
+    $cronglobal = "slib:snort:cron"
+}
+
+
+function feedAdd(fdef) { return($svc.feedAdd($fdef)) }
+function feedDel(name) { return($svc.feedDel($name)) }
+function feedEnable(name, enabled=(true)) { return($svc.feedEnable($name, enabled=$enabled)) }
+
+// The sync cron job, or null if there isn't one.
+function cron() {
+    $iden = $lib.globals.get($cronglobal)
+    if (not $iden) { return($lib.null) }
+    try {
+        return($lib.cron.get($iden))
+    } catch (NoSuchIden, StormRuntimeError) as err {
+        return($lib.null)
+    }
+}
+
+// Replace the sync cron job with one on a new schedule (a cron.add --period), in the current view.
+function schedule(period) {
+    $old = $cron()
+    $new = $lib.cron.add(query="slib.snort.sync", period=$period)
+    $new.set(name, "slib.snort.sync")
+    $new.set(doc, "Sync the slib.snort rule feeds into the Cortex and push the enabled it:app:snort:rule nodes to the slib.snort service.")
+    $lib.globals.set($cronglobal, $new.iden)
+    if $old { $lib.cron.del($old.iden) }
+    return($new)
+}
+
+function enable(enabled=(true)) {
+    $job = $cron()
+    if (not $job) { return($lib.null) }
+    if $enabled { $lib.cron.enable($job.iden) }
+    else { $lib.cron.disable($job.iden) }
+    return($lib.cron.get($job.iden))
+}

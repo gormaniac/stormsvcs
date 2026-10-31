@@ -1,0 +1,9 @@
+// Privileged (asroot) wrappers around the slib.snort service for slib.snort.rules.
+
+init {
+    $svc = $lib.service.get("slib.snort")
+}
+
+
+// Add/update (guid, text, engine) rules in the service and remove rules (by guid), then rebuild its rules.
+function update(rules=$lib.null, dels=$lib.null) { return($svc.ruleUpdate(rules=$rules, dels=$dels)) }

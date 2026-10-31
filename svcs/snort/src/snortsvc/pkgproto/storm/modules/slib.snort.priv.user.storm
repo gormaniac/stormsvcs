@@ -1,0 +1,57 @@
+// Privileged (asroot) wrappers around the slib.snort service for slib.snort.user.
+// Every function returns the service's {status, mesg, data} dict.
+
+init {
+    $svc = $lib.service.get("slib.snort")
+    $chunk = (1048576)
+}
+
+
+function status() { return($svc.status()) }
+function feeds() { return($svc.feeds(view=$lib.view.get().iden)) }
+function ruleErrors(guids=$lib.null) { return($svc.ruleErrors(guids=$guids)) }
+function ruleInfo(guid) { return($svc.ruleInfo($guid)) }
+function ruleParse(text) { return($svc.ruleParse($text)) }
+function ruleCheck(text, engine=$lib.null) { return($svc.ruleCheck($text, engine=$engine)) }
+
+// Scan a PCAP in the Axon by its SHA256.
+// The service reads it from the Axon itself if it can (snort:axon), otherwise it's streamed to the service.
+function scan(sha256) {
+    $retn = $svc.hasAxon()
+    if (not $retn.status) { return($retn) }
+    if $retn.data { return($svc.scanAxon($sha256)) }
+
+    if (not $lib.axon.has($sha256)) {
+        return(({"status": (false), "mesg": `file:bytes={$sha256} is not in the Axon.`, "data": $lib.null}))
+    }
+
+    $retn = $svc.scanStart()
+    if (not $retn.status) { return($retn) }
+    $iden = $retn.data
+
+    $offs = (0)
+    while (true) {
+        $byts = $lib.axon.read($sha256, offs=$offs, size=$chunk)
+        if (not $byts) { break }
+        $retn = $svc.scanChunk($iden, $byts)
+        if (not $retn.status) { return($retn) }
+        $offs = ($offs + $lib.len($byts))
+        if ($lib.len($byts) < $chunk) { break }
+    }
+    return($svc.scanRun($iden))
+}
+
+// The sync cron job's details (iden, enabled, view, and the last run), or null if there isn't one.
+function schedule() {
+    $iden = $lib.globals.get("slib:snort:cron")
+    if (not $iden) { return($lib.null) }
+    try {
+        $job = $lib.cron.get($iden)
+    } catch (NoSuchIden, StormRuntimeError) as err {
+        return($lib.null)
+    }
+    $info = $job.pprint()
+    // pprint() has "Y" or "N".
+    $info.enabled = ($info.enabled = "Y")
+    return($info)
+}

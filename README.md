@@ -55,6 +55,8 @@ Each service must have the following:
   - Every Shodan API: host lookups, search, scanning, alerts, DNS, streaming, InternetDB, CVEDB, exploits, and trends.
 - `abusech`
   - Every abuse.ch platform: MalwareBazaar, URLhaus, ThreatFox, YARAify, Feodo Tracker, SSL Blacklist, and the false positive list.
+- `snort`
+  - Match PCAPs in the Axon against the `it:app:snort:rule` nodes in the Cortex with Snort 3, and keep them in sync with open source rule feeds (Snort 3 Community, ET Open).
 
 
 ## Services Wish List/Plan
@@ -79,8 +81,6 @@ This is a ToDo/wish list, check `services.toml` for the current list of develope
   - Enrich from MXToolbox.
 - `scraper`
   - Ingest and scrape a list of configured blogs, websites, social media accounts/searches.
-- `snort`
-  - Match PCAPs stored in `file:bytes` nodes against `rule:snort`/`rule:suricata` nodes.
 - `virustotal`
   - Enrich from VT.
 - `unattrib`

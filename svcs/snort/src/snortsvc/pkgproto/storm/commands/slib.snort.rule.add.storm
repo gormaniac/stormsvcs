@@ -1,0 +1,38 @@
+init {
+    $priv = $lib.import(slib.snort.priv.user)
+    $rules = $lib.import(slib.snort.priv.rules)
+    $model = $lib.import(slib.snort.model)
+    $util = $lib.import(slib.snort.util)
+
+    $nodes = ([])
+    $push = ([])
+    $dels = ([])
+    for $text in $cmdopts.text {
+        $r = $util.data($priv.ruleParse($text), "Parsing the rule")
+        if (not $r) { continue }
+
+        $rule = $model.rule($r, $cmdopts.engine, enabled=(not $cmdopts.disabled))
+        if $r.refs { $model.refs($rule, $r.refs) }
+        $nodes.append($rule)
+
+        if $cmdopts.disabled {
+            $dels.append($rule.repr())
+        } else {
+            $push.append(($rule.repr(), $rule.props.text, $rule.props.engine))
+        }
+        $lib.print("slib.snort.rule.add: it:app:snort:rule={guid} (sid {id}, rev {rev}): {msg}",
+            guid=$rule.repr(), id=$r.id, rev=$r.rev, msg=$r.msg)
+    }
+
+    if ($push or $dels) {
+        $summary = $util.data($rules.update(rules=$push, dels=$dels), "Pushing the rules to the service")
+        if $summary {
+            $util.printBuild("slib.snort.rule.add", $summary)
+            for ($guid, $mesg) in $summary.errors {
+                $lib.warn("slib.snort.rule.add: it:app:snort:rule={guid} couldn't be loaded: {err}", guid=$guid, err=$mesg)
+            }
+        }
+    }
+}
+
+divert $cmdopts.yield $model.nodes($nodes)

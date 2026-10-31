@@ -1,0 +1,23 @@
+init {
+    $snort = $lib.import(slib.snort.lib)
+    $model = $lib.import(slib.snort.model)
+    $util = $lib.import(slib.snort.util)
+}
+
+$hits = ([])
+if ($node.form() = "file:bytes") {
+    $scan = $snort.scan($node)
+    if $scan {
+        $res = $scan.results
+        $lib.print("slib.snort.scan: file:bytes={valu}: {hits} hits on {flows} flows ({alerts} alerts).",
+            valu=$node.repr(), hits=$lib.len($res.hits), flows=$lib.len($res.flows), alerts=$res.alerts)
+        // A loop here would drop the node when there are no warnings, so it's in a function.
+        $util.warnAll(`slib.snort.scan: file:bytes={$node.repr()}`, $res.warnings)
+        $hits = $scan.hits
+    }
+} else {
+    $lib.warn("slib.snort.scan: Skipping {form}={valu}, only file:bytes nodes can be scanned.",
+        form=$node.form(), valu=$node.repr())
+}
+
+divert $cmdopts.yield $model.nodes($hits)

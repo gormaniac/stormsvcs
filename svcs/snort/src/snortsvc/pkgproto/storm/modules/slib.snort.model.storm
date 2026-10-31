@@ -1,0 +1,141 @@
+// Model slib.snort data (see snortsvc.svc.HitGrouper and snortsvc.feeds.ruleRecord) in Synapse.
+//
+// Node edits here run as the calling user (or as root, when called by slib.snort.priv.sync).
+//
+// NOTE: A for loop that runs while a node is in a function's pipeline sends the node
+// downstream after its first iteration, reaching return() and ending the function early.
+// So functions here only yield a node when they don't loop, and loops call helpers that
+// yield/edit the node in their own runtime instead.
+
+init {
+    // The slib.snort meta:source, created when the service is added.
+    $srcguid = "325168602368411eb9fda9657114c085"
+}
+
+
+// ---- Rules ----
+
+// Create or update an it:app:snort:rule from a parsed rule (the service's ruleParse or a feed's rule record).
+// enabled is only set when it isn't null.
+function rule(r, engine, enabled=$lib.null) {
+    [ it:app:snort:rule=$r.guid
+        :id=$r.id
+        :text=$r.text
+        :engine=$engine
+        :version=$lib.cast(str, $r.rev)
+        :name?=$r.msg
+        :family?=$r.family
+        :created?=$r.created
+        :updated?=$r.updated
+    ]
+    if ($enabled != $lib.null) { [ :enabled=$enabled ] }
+    return($node)
+}
+
+// Link a rule to one of its references: the CVE it detects, or the URL or hash it refers to.
+function _ref(rule, scheme, valu) {
+    yield $rule
+    switch $scheme {
+        "cve": {
+            $cve = $lib.cast(str, $valu).lower()
+            if (not $cve.startswith("cve-")) { $cve = `cve-{$cve}` }
+            [ +(detects)> { [ it:sec:cve?=$cve ] } ]
+        }
+        "url": {
+            $url = $lib.cast(str, $valu)
+            if (not $lib.regex.matches("^[a-zA-Z][a-zA-Z0-9+.-]*://", $url)) { $url = `http://{$url}` }
+            [ +(refs)> { [ inet:url?=$url ] } ]
+        }
+        "md5": { [ +(refs)> { [ hash:md5?=$valu ] } ] }
+        "sha256": { [ +(refs)> { [ hash:sha256?=$valu ] } ] }
+    }
+    return($rule)
+}
+
+// Link a rule to its references, a list of (scheme, value).
+function refs(rule, refs) {
+    for ($scheme, $valu) in $refs {
+        $_ref($rule, $scheme, $valu)
+    }
+    return($rule)
+}
+
+// ---- Scan results ----
+
+function _ends(n, e) {
+    yield $n
+    if $e.ipv6 {
+        [ :src:ipv6?=$e.srcip :dst:ipv6?=$e.dstip ]
+    } else {
+        [ :src:ipv4?=$e.srcip :dst:ipv4?=$e.dstip ]
+    }
+    if ($e.srcport != $lib.null) { [ :src:port=$e.srcport ] }
+    if ($e.dstport != $lib.null) { [ :dst:port=$e.dstport ] }
+    if $e.time { [ :time=$e.time .seen?=$e.time ] }
+    if $e.last { [ .seen?=$e.last ] }
+    return($node)
+}
+
+// The inet:flow (client -> server) a hit matched.
+function flow(f) {
+    [ inet:flow=$f.guid :src=$f.src :dst=$f.dst ]
+    if $f.proto { [ :ip:proto=$f.proto ] }
+    return($_ends($node, $f))
+}
+
+// An it:app:snort:hit of a rule on a flow in a PCAP.
+function hit(file, h) {
+    [ it:app:snort:hit=$h.guid
+        :rule=$h.rule
+        :flow=$h.flow
+        :src=$h.src
+        :dst=$h.dst
+        :version=$lib.cast(str, $h.rev)
+        <(seen)+ { meta:source=$srcguid }
+        <(refs)+ { yield $file }
+    ]
+    return($_ends($node, $h))
+}
+
+function _link(file, n) {
+    yield $file
+    [ +(refs)> { yield $n } ]
+    return($n)
+}
+
+// Model a PCAP's scan results. Returns a list of the it:app:snort:hit nodes.
+function scan(file, results) {
+    for $f in $results.flows {
+        $_link($file, $flow($f))
+    }
+    $hits = ([])
+    for $h in $results.hits {
+        $hits.append($hit($file, $h))
+    }
+    return($hits)
+}
+
+// ---- Generators ----
+
+// Yield every node in a list.
+function nodes(items) {
+    for $item in $items {
+        if $item { yield $item }
+    }
+}
+
+// Yield the it:app:snort:rule nodes with these guids (that exist).
+function rules(guids) {
+    for $guid in $guids {
+        it:app:snort:rule=$guid
+        emit $node
+    }
+}
+
+// Yield the meta:ruleset nodes with these guids (that exist).
+function rulesets(guids) {
+    for $guid in $guids {
+        meta:ruleset=$guid
+        emit $node
+    }
+}

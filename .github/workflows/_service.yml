@@ -24,6 +24,14 @@ on:
         required: false
         type: string
         default: docker/prod/Dockerfile
+      docker_tests:
+        description: >-
+          Also run the service's tests in its test image (docker/test/Dockerfile, built on the
+          new production image) before it's published. For services with system dependencies
+          the host test job doesn't have. The test Dockerfile must take a BASE_IMAGE build arg.
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -91,6 +99,17 @@ jobs:
           # Save the built image (with all tags) so later steps can either
           # attach it to the run or push it, without rebuilding.
           outputs: type=docker,dest=/tmp/stormsvcs-${{ inputs.service }}.tar
+
+      - name: Run tests in the test image
+        if: inputs.docker_tests
+        # Built with the default (docker driver) builder, which can see the loaded image.
+        run: |
+          docker load -i /tmp/stormsvcs-${{ inputs.service }}.tar
+          docker buildx build --builder default --load \
+            --build-arg BASE_IMAGE=ghcr.io/gormaniac/stormsvcs/${{ inputs.service }}:${{ github.sha }} \
+            -t stormsvcs-${{ inputs.service }}-test \
+            -f svcs/${{ inputs.service }}/docker/test/Dockerfile svcs/${{ inputs.service }}
+          docker run --rm stormsvcs-${{ inputs.service }}-test
 
       - name: Upload image artifact (pull requests)
         # When not publishing (PRs, manual runs off main), don't touch the registry —

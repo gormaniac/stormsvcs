@@ -1,0 +1,360 @@
+name: slib.snort
+version: 0.1.0
+guid: ad7c5a0f75794351882a62974970e649
+
+synapse_minversion: [2, 234, 0]
+
+genopts:
+    dotstorm: true
+
+author:
+  url: https://github.com/gormaniac
+  name: John Gorman
+
+desc: A Snort 3 Storm Service that matches PCAPs in the Axon against the it:app:snort:rule nodes in the Cortex, and keeps those rules in sync with open source rule feeds.
+
+docs:
+  - title: README
+    path: README.md
+
+perms:
+  - perm: [ slib, snort, user ]
+    gate: cortex
+    desc: Scan PCAPs (and model the hits), check rules, and view the service's status, rule errors, and feeds.
+  - perm: [ slib, snort, rules ]
+    gate: cortex
+    desc: Add, enable, and disable rules, which pushes them to the service.
+  - perm: [ slib, snort, sync ]
+    gate: cortex
+    desc: Sync the rule feeds into the Cortex (creating and editing it:app:snort:rule and meta:ruleset nodes) and push every enabled rule to the service.
+  - perm: [ slib, snort, admin ]
+    gate: cortex
+    desc: Manage the rule feeds and the scheduled sync.
+
+modules:
+  # Privileged modules - these are the only modules that talk to the service (and the Axon).
+  # They run asroot so users don't need the service.get or Axon permissions.
+  - name: slib.snort.priv.user
+    asroot:perms:
+      - [ slib, snort, user ]
+  - name: slib.snort.priv.rules
+    asroot:perms:
+      - [ slib, snort, rules ]
+  - name: slib.snort.priv.sync
+    asroot:perms:
+      - [ slib, snort, sync ]
+  - name: slib.snort.priv.admin
+    asroot:perms:
+      - [ slib, snort, admin ]
+
+  # Unprivileged modules - node edits here run as the calling user.
+  - name: slib.snort.lib
+    perms:
+      - [ slib, snort, user ]
+  - name: slib.snort.model
+  - name: slib.snort.util
+
+commands:
+
+  - name: slib.snort.scan
+    perms:
+      - [ slib, snort, user ]
+    descr: |
+      Match PCAPs (file:bytes nodes with a :sha256, in the Axon) against the service's rules.
+
+      Each rule that matches a flow in the PCAP is modeled as an it:app:snort:hit, with the
+      inet:flow it matched (from the client to the server). The PCAP -(refs)> its hits and
+      flows, and the slib.snort meta:source -(seen)> the hits. A hit's .seen is the time of the
+      first and last packets the rule alerted on. Re-scanning a PCAP updates the same nodes.
+
+      The service's rules are the enabled it:app:snort:rule nodes, see slib.snort.sync.
+
+      Examples:
+
+        // Scan some PCAPs and yield the hits.
+        file:bytes#my.pcaps | slib.snort.scan --yield
+
+        // Which rules matched?
+        file:bytes#my.pcaps | slib.snort.scan --yield | -> it:app:snort:rule
+    cmdargs:
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the it:app:snort:hit nodes instead of the inbound nodes.
+    forms:
+      input:
+        - file:bytes
+      output:
+        - it:app:snort:hit
+
+  - name: slib.snort.sync
+    perms:
+      - [ slib, snort, sync ]
+    descr: |
+      Sync the rule feeds into the Cortex, then push every enabled rule to the service.
+
+      For each enabled feed (see slib.snort.feed.list), the feed is downloaded if it is due
+      (every 24 hours by default) and its rules are modeled as it:app:snort:rule nodes in the
+      feed's meta:ruleset. A rule that joins the feed gets the feed's enabled state (rules that
+      are commented out in the feed are disabled), after that :enabled is up to the Cortex.
+      Rules that leave the feed are disabled and removed from the ruleset. The feed's :text
+      wins over edits made in the Cortex, add custom rules with slib.snort.rule.add.
+
+      Only the feed's changes since its last sync into the current view are synced, so a
+      daily update is quick. The first sync into a view (or one with --force) syncs every rule,
+      and restores any edits to the feed's rules.
+
+      Then every enabled it:app:snort:rule with :text (and an :engine of 2, 3, or none) in the
+      current view is pushed to the service, which loads every rule Snort accepts. See
+      slib.snort.rule.errors for the rules it couldn't load.
+
+      This runs on a schedule (hourly by default), see slib.snort.admin.schedule.
+
+      Examples:
+
+        // Sync now.
+        slib.snort.sync
+
+        // Download and resync every feed, and rebuild the service's rules, even if nothing changed.
+        slib.snort.sync --force
+
+        // Only push the Cortex's enabled rules to the service.
+        slib.snort.sync --no-feeds
+    cmdargs:
+      - - --force
+        - default: false
+          action: store_true
+          help: Download every feed and sync all of its rules (not only its changes), and rebuild the service's rules, even if nothing changed.
+      - - --feed
+        - type: str
+          action: append
+          default: []
+          help: Only sync this feed. May be used multiple times (default is every enabled feed).
+      - - --no-feeds
+        - default: false
+          action: store_true
+          help: Don't sync the feeds, only push the Cortex's enabled rules to the service.
+      - - --no-push
+        - default: false
+          action: store_true
+          help: Only sync the feeds, don't push the Cortex's rules to the service.
+
+  - name: slib.snort.status
+    perms:
+      - [ slib, snort, user ]
+    descr: |
+      Print the service's status: the Snort version, how many rules are loaded, the feeds, and the sync schedule.
+
+  - name: slib.snort.rule.add
+    perms:
+      - [ slib, snort, rules ]
+    descr: |
+      Add custom rules (or update them) and push them to the service.
+
+      The rule's :id, :name (msg), :version (rev), :family, :created, and :updated come from
+      the rule. A rule's node is unique to its gid:sid, adding a rule with the same gid:sid
+      again updates the node. The service loads one rule per gid:sid, the highest rev, so
+      use a new sid (or a higher rev) to replace a feed's rule.
+
+      Examples:
+
+        slib.snort.rule.add 'alert http any any -> any any ( msg:"My rule"; http_uri; content:"/evil"; sid:1000001; rev:1; )'
+
+        // A Snort 2.x rule, converted to Snort 3 by the service.
+        slib.snort.rule.add --engine 2 'alert tcp any any -> any 80 (msg:"Old rule"; content:"/evil"; http_uri; sid:1000002; rev:1;)'
+    cmdargs:
+      - - text
+        - type: str
+          nargs: "+"
+          help: The rule text. May be given multiple times.
+      - - --engine
+        - type: int
+          default: 3
+          choices: [ 2, 3 ]
+          help: "The rule's syntax: 3 for Snort 3 (the default), or 2 for Snort 2.x (converted with snort2lua)."
+      - - --disabled
+        - default: false
+          action: store_true
+          help: Add the rule disabled (it isn't pushed to the service).
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the it:app:snort:rule nodes instead of the inbound nodes.
+    forms:
+      output:
+        - it:app:snort:rule
+
+  - name: slib.snort.rule.enable
+    perms:
+      - [ slib, snort, rules ]
+    descr: |
+      Enable it:app:snort:rule nodes and push them to the service, so scans use them.
+
+      Also pushes a rule's current :text, so this can be used after editing an enabled rule.
+      Prints the error of any rule the service couldn't load.
+
+      Examples:
+
+        it:app:snort:rule:id=2013502 | slib.snort.rule.enable
+    forms:
+      input:
+        - it:app:snort:rule
+
+  - name: slib.snort.rule.disable
+    perms:
+      - [ slib, snort, rules ]
+    descr: |
+      Disable it:app:snort:rule nodes and remove them from the service, so scans skip them.
+
+      Examples:
+
+        it:app:snort:rule:id=2013502 | slib.snort.rule.disable
+    forms:
+      input:
+        - it:app:snort:rule
+
+  - name: slib.snort.rule.check
+    perms:
+      - [ slib, snort, user ]
+    descr: |
+      Check if Snort can load it:app:snort:rule nodes (or rule text), without changing the service's rules.
+
+      Examples:
+
+        it:app:snort:rule:id=1000001 | slib.snort.rule.check
+
+        slib.snort.rule.check --text 'alert tcp any any -> any any ( msg:"test"; content:"abc"; sid:1; )'
+    cmdargs:
+      - - --text
+        - type: str
+          default: null
+          help: Check this rule text instead of the inbound nodes.
+      - - --engine
+        - type: int
+          default: 3
+          choices: [ 2, 3 ]
+          help: The engine of the --text rule.
+    forms:
+      input:
+        - it:app:snort:rule
+
+  - name: slib.snort.rule.errors
+    perms:
+      - [ slib, snort, user ]
+    descr: |
+      Print the rules the service couldn't load, and why.
+
+      Examples:
+
+        slib.snort.rule.errors
+
+        // Yield the rules that couldn't be loaded.
+        slib.snort.rule.errors --yield
+    cmdargs:
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the it:app:snort:rule nodes that couldn't be loaded.
+    forms:
+      output:
+        - it:app:snort:rule
+
+  - name: slib.snort.feed.list
+    perms:
+      - [ slib, snort, user ]
+    descr: |
+      Print the rule feeds and the state of their last download and sync.
+
+      Examples:
+
+        slib.snort.feed.list
+
+        // Yield the feeds' meta:ruleset nodes.
+        slib.snort.feed.list --yield
+    cmdargs:
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the feeds' meta:ruleset nodes.
+    forms:
+      output:
+        - meta:ruleset
+
+  - name: slib.snort.admin.feed
+    perms:
+      - [ slib, snort, admin ]
+    descr: |
+      Add, remove, enable, or disable a rule feed.
+
+      A feed is a URL that serves Snort rules, a .rules file or an archive (.tar.gz, .tar, .zip,
+      or .gz) of them. Every *.rules file in an archive is read, except those matching an --exclude
+      pattern. Changes take effect on the next slib.snort.sync. Removing a feed leaves its nodes
+      in the Cortex.
+
+      Examples:
+
+        slib.snort.admin.feed add my-feed https://example.com/my.rules.tar.gz --engine 3
+
+        slib.snort.admin.feed disable et-open
+    cmdargs:
+      - - action
+        - type: str
+          choices: [ add, del, enable, disable ]
+          help: What to do.
+      - - name
+        - type: str
+          help: The feed's name (lowercase letters, numbers, '-', '_', and '.').
+      - - url
+        - type: str
+          nargs: "?"
+          default: null
+          help: The feed's URL (for add).
+      - - --engine
+        - type: int
+          default: 3
+          choices: [ 2, 3 ]
+          help: "The syntax of the feed's rules: 3 for Snort 3 (the default), or 2 for Snort 2.x."
+      - - --exclude
+        - type: str
+          action: append
+          default: []
+          help: A glob of rules files in the feed to skip, ex. "*-deleted.rules". May be used multiple times.
+      - - --desc
+        - type: str
+          default: ""
+          help: A description of the feed.
+      - - --disabled
+        - default: false
+          action: store_true
+          help: Add the feed disabled.
+
+  - name: slib.snort.admin.schedule
+    perms:
+      - [ slib, snort, admin ]
+    descr: |
+      Show or change the cron job that runs slib.snort.sync.
+
+      The job is created when the service is added (hourly, at 17 minutes past the hour) and
+      runs as the admin that added the service, in their default view.
+
+      Examples:
+
+        slib.snort.admin.schedule
+
+        // Sync every 6 hours instead.
+        slib.snort.admin.schedule --period "hourly/6@:17"
+
+        slib.snort.admin.schedule --disable
+    cmdargs:
+      - - --period
+        - type: str
+          default: null
+          help: A new schedule, in cron.add --period syntax (ex. "daily@03:30"). Recreates the job (in the current view).
+      - - --enable
+        - default: false
+          action: store_true
+          help: Enable the job.
+      - - --disable
+        - default: false
+          action: store_true
+          help: Disable the job.
