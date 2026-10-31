@@ -1,0 +1,25 @@
+init {
+    $priv = $lib.import(slib.capa.priv.user)
+    $privadmin = $lib.import(slib.capa.priv.admin)
+    $sync = $lib.import(slib.capa.sync)
+    $util = $lib.import(slib.capa.util)
+
+    if ($cmdopts.enable and $cmdopts.disable) {
+        $lib.raise(BadArg, "slib.capa.admin.tags: Use --enable or --disable, not both.")
+    }
+
+    if $cmdopts.enable { $privadmin.setTagsEnabled((true)) }
+    if $cmdopts.disable { $privadmin.setTagsEnabled((false)) }
+
+    if ($cmdopts.prefix != $lib.null) {
+        $prefix = $lib.cast(syn:tag, $cmdopts.prefix)
+        $privadmin.setTagPrefix($prefix)
+        // Document the tags under the new prefix.
+        $retn = $priv.rulesInfo()
+        if (not $util.failed($retn, "Getting the capa rules info")) { $sync.syncTags($retn.data) }
+    }
+
+    $settings = $priv.tagSettings()
+    $lib.print("slib.capa tags: enabled={enabled} prefix={prefix}",
+        enabled=$settings.enabled, prefix=$settings.prefix)
+}

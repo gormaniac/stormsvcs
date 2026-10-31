@@ -1,0 +1,11 @@
+rule:
+  meta:
+    name: return from a function
+    namespace: testing/ops/ret
+    authors:
+      - test@example.com
+    scopes:
+      static: function
+      dynamic: unsupported
+  features:
+    - match: contain ret
