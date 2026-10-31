@@ -42,6 +42,12 @@ class TestShodanStormPkg(s_tests.SynTest):
             for cmd in CMDS:
                 assert cmd in core.stormcmds, cmd
 
+            for cdef in PKGDEFS[0]["commands"]:
+                # The "forms" key is deprecated and removed in Synapse 3.0.0, use "cmdinputs".
+                assert "forms" not in cdef, cdef["name"]
+                for cmdinput in cdef.get("cmdinputs", ()):
+                    assert core.model.form(cmdinput["form"]) is not None, (cdef["name"], cmdinput)
+
             for mod in MODS:
                 msgs = await core.stormlist(f"$mod = $lib.import({mod})")
                 self.stormHasNoErr(msgs)

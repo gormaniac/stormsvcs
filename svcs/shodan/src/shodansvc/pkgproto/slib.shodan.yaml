@@ -109,13 +109,11 @@ commands:
         - default: false
           action: store_true
           help: Yield the inet:ipv4/inet:ipv6 nodes instead of the inbound nodes.
-    forms:
-      input:
-        - inet:ipv4
-        - inet:ipv6
-      output:
-        - inet:ipv4
-        - inet:ipv6
+    cmdinputs:
+      - form: inet:ipv4
+        help: IPs to look up in Shodan (or InternetDB).
+      - form: inet:ipv6
+        help: IPs to look up in Shodan (or InternetDB).
 
   - name: slib.shodan.enrich
     perms:
@@ -140,19 +138,19 @@ commands:
         - default: false
           action: store_true
           help: Yield the enriched/created nodes instead of the inbound nodes.
-    forms:
-      input:
-        - inet:ipv4
-        - inet:ipv6
-        - inet:fqdn
-        - risk:vuln
-        - it:sec:cve
-        - it:sec:cpe
-      output:
-        - inet:ipv4
-        - inet:ipv6
-        - inet:fqdn
-        - risk:vuln
+    cmdinputs:
+      - form: inet:ipv4
+        help: Enriched with a host lookup.
+      - form: inet:ipv6
+        help: Enriched with a host lookup.
+      - form: inet:fqdn
+        help: Enriched with the domain's DNS records.
+      - form: risk:vuln
+        help: Enriched with CVEDB, using :cve.
+      - form: it:sec:cve
+        help: Enriched with CVEDB.
+      - form: it:sec:cpe
+        help: Enriched with CVEDB's CVEs for the CPE.
 
   - name: slib.shodan.search
     perms:
@@ -210,10 +208,6 @@ commands:
         - default: false
           action: store_true
           help: Print the available search filters and facets and stop.
-    forms:
-      output:
-        - inet:ipv4
-        - inet:ipv6
 
   - name: slib.shodan.dns.domain
     perms:
@@ -251,11 +245,9 @@ commands:
         - default: false
           action: store_true
           help: Yield the subdomain inet:fqdn nodes instead of the inbound nodes.
-    forms:
-      input:
-        - inet:fqdn
-      output:
-        - inet:fqdn
+    cmdinputs:
+      - form: inet:fqdn
+        help: Domains to model DNS records and subdomains for.
 
   - name: slib.shodan.dns.lookup
     perms:
@@ -273,15 +265,13 @@ commands:
         - default: false
           action: store_true
           help: Yield the resolved IP/hostname nodes instead of the inbound nodes.
-    forms:
-      input:
-        - inet:fqdn
-        - inet:ipv4
-        - inet:ipv6
-      output:
-        - inet:fqdn
-        - inet:ipv4
-        - inet:ipv6
+    cmdinputs:
+      - form: inet:fqdn
+        help: Hostnames to resolve.
+      - form: inet:ipv4
+        help: IPs to reverse resolve.
+      - form: inet:ipv6
+        help: IPs to reverse resolve.
 
   - name: slib.shodan.cve
     perms:
@@ -352,13 +342,13 @@ commands:
         - default: false
           action: store_true
           help: Yield the risk:vuln nodes instead of the inbound nodes.
-    forms:
-      input:
-        - risk:vuln
-        - it:sec:cve
-        - it:sec:cpe
-      output:
-        - risk:vuln
+    cmdinputs:
+      - form: risk:vuln
+        help: Vulns to enrich with CVEDB, using :cve.
+      - form: it:sec:cve
+        help: CVEs to enrich with CVEDB.
+      - form: it:sec:cpe
+        help: CPEs to search CVEDB for CVEs.
 
   - name: slib.shodan.cpe
     perms:
@@ -387,9 +377,6 @@ commands:
         - default: false
           action: store_true
           help: Create and yield it:sec:cpe nodes.
-    forms:
-      output:
-        - it:sec:cpe
 
   - name: slib.shodan.trends
     perms:
@@ -536,10 +523,6 @@ commands:
         - type: int
           default: 60
           help: Stop after this many seconds (0 for no timeout).
-    forms:
-      output:
-        - inet:ipv4
-        - inet:ipv6
 
   - name: slib.shodan.apikey
     perms:
@@ -597,12 +580,15 @@ commands:
           help: |
             Seconds to wait for the scan to finish before ingesting the results (0 to not wait).
             Ingesting requires the slib.shodan.user permission.
-    forms:
-      input:
-        - inet:ipv4
-        - inet:ipv6
-        - inet:cidr4
-        - inet:cidr6
+    cmdinputs:
+      - form: inet:ipv4
+        help: Added to the scan.
+      - form: inet:ipv6
+        help: Added to the scan.
+      - form: inet:cidr4
+        help: Added to the scan.
+      - form: inet:cidr6
+        help: Added to the scan.
 
   - name: slib.shodan.scan.status
     perms:
@@ -704,12 +690,15 @@ commands:
           action: append
           default: []
           help: A notifier ID to attach to the alert ("default" is your account email). May be used multiple times.
-    forms:
-      input:
-        - inet:ipv4
-        - inet:ipv6
-        - inet:cidr4
-        - inet:cidr6
+    cmdinputs:
+      - form: inet:ipv4
+        help: Added to the alert's monitored IPs.
+      - form: inet:ipv6
+        help: Added to the alert's monitored IPs.
+      - form: inet:cidr4
+        help: Added to the alert's monitored IPs.
+      - form: inet:cidr6
+        help: Added to the alert's monitored IPs.
 
   - name: slib.shodan.alert.edit
     perms:
@@ -769,12 +758,15 @@ commands:
           action: append
           default: []
           help: A notifier ID to detach. May be used multiple times.
-    forms:
-      input:
-        - inet:ipv4
-        - inet:ipv6
-        - inet:cidr4
-        - inet:cidr6
+    cmdinputs:
+      - form: inet:ipv4
+        help: Set as (or with --append, added to) the alert's monitored IPs.
+      - form: inet:ipv6
+        help: Set as (or with --append, added to) the alert's monitored IPs.
+      - form: inet:cidr4
+        help: Set as (or with --append, added to) the alert's monitored IPs.
+      - form: inet:cidr6
+        help: Set as (or with --append, added to) the alert's monitored IPs.
 
   - name: slib.shodan.alert.del
     perms:
