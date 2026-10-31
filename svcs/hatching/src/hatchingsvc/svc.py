@@ -9,11 +9,13 @@ them in the standard ``TelepathRetn`` convention for Storm.
 
 import asyncio
 import collections
+import contextlib
 from collections.abc import AsyncIterator
 from typing import Any
 
 import pyhatching
 import pyhatching.errors as p_errors
+import pyhatching.utils as p_utils
 from pyhatching import base as p_base
 import synapse.lib.cell as s_cell
 
@@ -101,12 +103,16 @@ class HatchingSvc(s_cell.Cell):
         self.clients: collections.OrderedDict[str, pyhatching.PyHatchingClient] = (
             collections.OrderedDict()
         )
+        # How many calls are using each client, so evicted clients are only closed once idle.
+        self.inuse: collections.Counter = collections.Counter()
+        self.retired: set[pyhatching.PyHatchingClient] = set()
         self.onfini(self._closeClients)
 
     async def _closeClients(self) -> None:
-        for client in list(self.clients.values()):
+        for client in list(self.clients.values()) + list(self.retired):
             await client.close()
         self.clients.clear()
+        self.retired.clear()
 
     # ---- API key management ----
 
@@ -160,27 +166,46 @@ class HatchingSvc(s_cell.Cell):
         self.clients[key] = client
         while len(self.clients) > MAX_CLIENTS:
             _, old = self.clients.popitem(last=False)
-            await old.close()
+            if self.inuse[old]:
+                # Still running a request or stream, it's closed when that finishes.
+                self.retired.add(old)
+            else:
+                await old.close()
         return client
+
+    @contextlib.asynccontextmanager
+    async def useClient(self, apikey: str | None = None):
+        """Yield a client for the resolved API key, keeping it open while it's in use.
+
+        pyhatching errors are raised as ``HatchingApiError``.
+        """
+
+        client = await self.getClient(apikey)
+        self.inuse[client] += 1
+        try:
+            yield client
+        except p_errors.PyHatchingError as err:
+            raise HatchingApiError(f"Hatching Triage: {err}") from err
+        finally:
+            self.inuse[client] -= 1
+            if not self.inuse[client]:
+                del self.inuse[client]
+                if client in self.retired:
+                    self.retired.discard(client)
+                    await client.close()
 
     async def _call(self, apikey: str | None, meth: str, *args, **kwargs) -> Any:
         """Call a pyhatching client method, returning its dumped result."""
 
-        client = await self.getClient(apikey)
-        try:
+        async with self.useClient(apikey) as client:
             return dump(await getattr(client, meth)(*args, **kwargs))
-        except p_errors.PyHatchingError as err:
-            raise HatchingApiError(f"Hatching Triage: {err}") from err
 
     async def _genr(self, apikey: str | None, meth: str, *args, **kwargs) -> AsyncIterator[Any]:
         """Iterate a pyhatching client generator, yielding dumped results."""
 
-        client = await self.getClient(apikey)
-        try:
+        async with self.useClient(apikey) as client:
             async for item in getattr(client, meth)(*args, **kwargs):
                 yield dump(item)
-        except p_errors.PyHatchingError as err:
-            raise HatchingApiError(f"Hatching Triage: {err}") from err
 
     async def _bytes(self, apikey: str | None, meth: str, *args) -> AsyncIterator[bytes]:
         """Stream a download in chunks, enforcing ``hatching:maxsize``."""
@@ -193,17 +218,25 @@ class HatchingSvc(s_cell.Cell):
             yield chunk
 
     async def resolve(self, sample: str, apikey: str | None = None) -> str:
-        """Resolve a sample ID, or a hash of a submitted file, to a sample ID."""
+        """Resolve a sample ID, or a hash of a submitted file, to a sample ID.
+
+        For a hash, the newest reported sample is preferred, so a file that was just
+        submitted again still resolves to its finished analysis.
+        """
 
         sample = str(sample).strip()
-        client = await self.getClient(apikey)
-        try:
-            sid = await client.norm_sample(sample)
-        except p_errors.PyHatchingError as err:
-            raise HatchingApiError(f"Hatching Triage: {err}") from err
-        if sid is None:
+        if not p_utils.is_hash(sample):
+            return sample
+
+        query = f"{p_utils.hash_type(sample)}:{sample}"
+        async with self.useClient(apikey) as client:
+            page = await client.search_page(query, limit=20)
+        if not page.data:
             raise HatchingApiError(f"Hatching Triage has no sample for {sample}.")
-        return sid
+        for item in page.data:
+            if getattr(item.status, "value", item.status) == "reported":
+                return item.id
+        return page.data[0].id
 
     async def rawRequest(self, method: str, path: str, params: dict | None = None,
                          json_data: Any = None, apikey: str | None = None) -> Any:
@@ -211,13 +244,10 @@ class HatchingSvc(s_cell.Cell):
 
         if not path.startswith("/"):
             path = "/" + path
-        client = await self.getClient(apikey)
-        try:
+        async with self.useClient(apikey) as client:
             resp, data = await client._request(  # pylint: disable=W0212
                 method.lower(), path, params=params, json=json_data
             )
-        except p_errors.PyHatchingError as err:
-            raise HatchingApiError(f"Hatching Triage: {err}") from err
         if resp.status >= 400:
             if isinstance(data, dict):
                 raise HatchingApiError(
@@ -313,6 +343,9 @@ class HatchingSvc(s_cell.Cell):
         """
 
         sid = await self.resolve(sample, apikey)
+        info = await self._call(apikey, "get_sample", sid)
+        if info.get("status") in TERMINAL:
+            return info
 
         async def follow():
             async for event in self._genr(apikey, "sample_events", sid):
@@ -398,7 +431,8 @@ class HatchingSvc(s_cell.Cell):
             if limit and count >= limit:
                 return
 
-    async def behavioralTasks(self, sid: str, overview: dict, apikey: str | None = None) -> list[str]:
+    @staticmethod
+    def behavioralTasks(sid: str, overview: dict) -> list[str]:
         """The names of a sample's reported behavioral (dynamic analysis) tasks."""
 
         ret = []
@@ -432,16 +466,28 @@ class HatchingSvc(s_cell.Cell):
             static = None
 
         reports, errors = {}, []
-        names = await self.behavioralTasks(sid, overview, apikey) if tasks else []
-        for name in names:
-            try:
-                reports[name] = await self._call(apikey, "task_report", sid, name)
-            except HatchingApiError as err:
-                errors.append(f"The {name} report of {sid} is unavailable: {err.mesg}")
+        names = self.behavioralTasks(sid, overview) if tasks else []
+        for name, report in zip(names, await self._taskReports(sid, names, apikey)):
+            if isinstance(report, HatchingApiError):
+                errors.append(f"The {name} report of {sid} is unavailable: {report.mesg}")
+            else:
+                reports[name] = report
 
         ret = norm.normSample(info, overview, static, reports)
         ret["errors"] = errors
         return ret
+
+    async def _taskReports(self, sid: str, names: list[str], apikey: str | None = None) -> list:
+        """Get several task reports concurrently. Failed reports are returned as their error."""
+
+        reports = await asyncio.gather(
+            *(self._call(apikey, "task_report", sid, name) for name in names),
+            return_exceptions=True,
+        )
+        for report in reports:
+            if isinstance(report, BaseException) and not isinstance(report, HatchingApiError):
+                raise report
+        return reports
 
     async def dumpedFiles(self, sample: str, apikey: str | None = None) -> list[dict]:
         """The files dropped during a sample's behavioral tasks, that can be downloaded.
@@ -451,9 +497,11 @@ class HatchingSvc(s_cell.Cell):
 
         sid = await self.resolve(sample, apikey)
         overview = await self._call(apikey, "overview", sid)
+        names = self.behavioralTasks(sid, overview)
         ret = []
-        for task in await self.behavioralTasks(sid, overview, apikey):
-            report = await self._call(apikey, "task_report", sid, task)
+        for task, report in zip(names, await self._taskReports(sid, names, apikey)):
+            if isinstance(report, HatchingApiError):
+                raise report
             for item in report.get("dumped") or []:
                 if item.get("sha256") and item.get("name") and item.get("kind") != "region":
                     ret.append({

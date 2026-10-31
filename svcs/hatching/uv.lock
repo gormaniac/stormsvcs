@@ -385,7 +385,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "pyhatching", url = "https://github.com/gormaniac/pyhatching/archive/0a93c24f217fc78c0a0e496075a5ca5d3a449bd1.tar.gz" },
+    { name = "pyhatching", url = "https://github.com/gormaniac/pyhatching/archive/9697212ff7b17190aa03156810224b7cdf612126.tar.gz" },
     { name = "stormlibpp", specifier = ">=0.10.1" },
 ]
 
@@ -730,12 +730,12 @@ wheels = [
 [[package]]
 name = "pyhatching"
 version = "0.3.1"
-source = { url = "https://github.com/gormaniac/pyhatching/archive/0a93c24f217fc78c0a0e496075a5ca5d3a449bd1.tar.gz" }
+source = { url = "https://github.com/gormaniac/pyhatching/archive/9697212ff7b17190aa03156810224b7cdf612126.tar.gz" }
 dependencies = [
     { name = "aiohttp" },
     { name = "pydantic" },
 ]
-sdist = { hash = "sha256:bfefe8e8c94d6fe3770b4a25a14b57ee7c51d705bcc0a779038bc566dde84c65" }
+sdist = { hash = "sha256:80e5e0ab5257a4343e7762a62020685fc56d701124a7221580e157bef4d90167" }
 
 [package.metadata]
 requires-dist = [

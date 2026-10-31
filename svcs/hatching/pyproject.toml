@@ -29,7 +29,7 @@ source-include = [
 # (instead of a git source) means building the image doesn't need git. Switch back to PyPI
 # once pyhatching's next release is published.
 [tool.uv.sources]
-pyhatching = { url = "https://github.com/gormaniac/pyhatching/archive/0a93c24f217fc78c0a0e496075a5ca5d3a449bd1.tar.gz" }
+pyhatching = { url = "https://github.com/gormaniac/pyhatching/archive/9697212ff7b17190aa03156810224b7cdf612126.tar.gz" }
 
 [tool.pytest]
 testpaths = [

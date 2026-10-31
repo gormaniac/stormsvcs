@@ -140,6 +140,15 @@ class TestHatchingSvc(s_tests.SynTest):
             for idx in range(1, 40):
                 await svc.getClient(f"k{idx}")
             assert len(svc.clients) == 32 and "k0" not in svc.clients
+            assert first.session.closed
+
+            # A client that's in use when it's evicted stays open until the call finishes.
+            async with svc.useClient("busy") as busy:
+                for idx in range(40, 80):
+                    await svc.getClient(f"k{idx}")
+                assert "busy" not in svc.clients and busy in svc.retired
+                assert not busy.session.closed
+            assert busy.session.closed and busy not in svc.retired and not svc.inuse
 
     async def test_api(self):
         async with hatchingSvc(self) as (core, svc, fake):
@@ -191,6 +200,14 @@ class TestHatchingSvc(s_tests.SynTest):
 
                 assert (await prox.maxSize())["data"] == 104857600
                 assert (await prox.resolve(ft.SAMPLE_MD5))["data"] == ft.SAMPLE_ID
+                assert (await prox.resolve(ft.SAMPLE_ID))["data"] == ft.SAMPLE_ID
+
+                # A hash resolves to its newest reported sample, even when it was resubmitted.
+                fake.samples["261031-resubmit"] = dict(ft.SAMPLE, id="261031-resubmit", status="pending")
+                fake.overviews["261031-resubmit"] = fake.overviews[ft.SAMPLE_ID]
+                assert (await prox.resolve(ft.SAMPLE_SHA256))["data"] == ft.SAMPLE_ID
+                fake.samples[ft.SAMPLE_ID]["status"] = "failed"
+                assert (await prox.resolve(ft.SAMPLE_SHA256))["data"] == "261031-resubmit"
 
     async def test_norm_sample(self):
         async with hatchingSvc(self) as (core, svc, fake):
@@ -263,6 +280,12 @@ class TestHatchingSvc(s_tests.SynTest):
         async with hatchingSvc(self) as (core, svc, fake):
             sample = await svc.wait(ft.SAMPLE_ID, timeout=10)
             assert sample["status"] == "reported"
+            # A finished sample's events aren't followed.
+            assert fake.last(path="/events") is None
+
+            fake.samples[ft.SAMPLE_ID]["status"] = "running"
+            sample = await svc.wait(ft.SAMPLE_ID, timeout=10)
+            assert sample["status"] == "reported" and fake.last(path="/events") is not None
 
             events = [e async for e in svc.sampleEvents(ft.SAMPLE_ID, limit=3)]
             assert [e["status"] for e in events] == ft.EVENTS[:3]
