@@ -1,0 +1,67 @@
+init {
+    $abusech = $lib.import(slib.abusech.lib)
+    $privsub = $lib.import(slib.abusech.priv.submit)
+    $model = $lib.import(slib.abusech.model)
+    $util = $lib.import(slib.abusech.util)
+
+    // Wait for a task to finish, returning the scanned file:bytes node (or null).
+    function wait(taskid) {
+        $deadline = ($lib.time.now() + ($cmdopts.wait * 1000))
+        while (true) {
+            ($status, $file) = $abusech.yaraifyTask($taskid)
+            if ($status = "done") { return($file) }
+            if ($status = $lib.null) { return($lib.null) }
+            if ($lib.time.now() >= $deadline) {
+                $lib.print("slib.abusech.yaraify.scan: Task {task} is still {status}, check it later with slib.abusech.yaraify.lookup --task {task}",
+                           task=$taskid, status=$status)
+                return($lib.null)
+            }
+            $lib.time.sleep(5)
+        }
+    }
+
+    // Submit a file:bytes node (or rescan it if it's not in the Axon). Returns the task ID, or null.
+    function scan(n) {
+        $sha256 = $n.props.sha256
+        if ($sha256 and $privsub.hasFile($sha256) and not $cmdopts.rescan) {
+            $name = $n.props.name
+            if (not $name) { $name = $sha256 }
+            $retn = $privsub.yaraifyScan($sha256, $n.props.size, $name, identifier=$cmdopts.identifier,
+                clamav=(not $cmdopts.noclamav), unpack=$cmdopts.unpack, share=$cmdopts.share,
+                skipknown=$cmdopts.skipknown, skipnoisy=$cmdopts.skipnoisy)
+            $what = `Submitting {$sha256} to YARAify`
+        } else {
+            $sha = $util.nodeHash($n)
+            if (not $sha) {
+                $lib.warn("slib.abusech.yaraify.scan: {repr} has no hash to rescan.", repr=$n.repr())
+                return($lib.null)
+            }
+            $retn = $privsub.yaraifyRescan($sha)
+            $what = `Rescanning {$sha} on YARAify`
+        }
+        if $util.failed($retn, $what) { return($lib.null) }
+        $taskid = $retn.data.task_id
+        $lib.print("slib.abusech.yaraify.scan: {what}: task {task}", what=$what, task=$taskid)
+        return($taskid)
+    }
+}
+
+if $cmdopts.hash {
+    spin |
+    for $sha in $cmdopts.hash {
+        $retn = $privsub.yaraifyRescan($sha)
+        if (not $util.failed($retn, `Rescanning {$sha} on YARAify`)) {
+            $lib.print("slib.abusech.yaraify.scan: Rescanning {sha}: task {task}", sha=$sha, task=$retn.data.task_id)
+            if $cmdopts.wait {
+                $file = $wait($retn.data.task_id)
+                if ($cmdopts.yield and $file) { yield $file }
+            }
+        }
+    }
+}
+else {
+    $results = ([])
+    $taskid = $scan($node)
+    if ($taskid and $cmdopts.wait) { $results = ($wait($taskid),) }
+    divert $cmdopts.yield $model.nodes($results)
+}

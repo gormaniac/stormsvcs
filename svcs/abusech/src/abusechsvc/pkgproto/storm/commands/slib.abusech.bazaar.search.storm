@@ -1,0 +1,21 @@
+init {
+    $abusech = $lib.import(slib.abusech.lib)
+    $model = $lib.import(slib.abusech.model)
+
+    if ($cmdopts.by = "recent") {
+        $selector = "time"
+        if $cmdopts.value { $selector = $cmdopts.value }
+        $files = $abusech.bazaarRecent($selector)
+    }
+    elif (not $cmdopts.value) {
+        $lib.raise(BadArg, "slib.abusech.bazaar.search requires a value to search for.")
+    }
+    else {
+        $files = $abusech.bazaarSearch($cmdopts.by, $cmdopts.value, limit=$cmdopts.limit)
+    }
+    $lib.print("slib.abusech.bazaar.search: Found {count} samples.", count=$lib.len($files))
+}
+
+spin |
+
+yield $model.nodes($files)

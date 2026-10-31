@@ -1,0 +1,30 @@
+// Privileged (asroot) wrappers for slib.abusech.download: download malware samples into the Axon.
+//
+// Returns {"status": bool, "mesg": str, "data": {"sha256", "size", "name"}} - the data is null
+// when abuse.ch doesn't have the file.
+
+init {
+    $svc = $lib.service.get("slib.abusech")
+}
+
+// Only reads the calling user's own vault, see slib.abusech.priv.user.
+function userKey() {
+    $vault = $lib.vault.bytype(abusech, scope=user)
+    if ($vault = $lib.null) { return($lib.null) }
+    $secrets = $vault.secrets
+    if ($secrets = $lib.null) { return($lib.null) }
+    return($secrets.apikey)
+}
+
+function _save(retn) {
+    if (not $retn.status) { return($retn) }
+    $file = $retn.data
+    if ($file = $lib.null) { return($retn) }
+
+    ($size, $sha256) = $lib.axon.put($file.bytes)
+    return(({"status": (true), "mesg": "", "data": ({"sha256": $sha256, "size": $size, "name": $file.name})}))
+}
+
+function bazaar(sha256) { return($_save($svc.bazaarFile($sha256, apikey=$userKey()))) }
+function urlhaus(sha256) { return($_save($svc.urlhausDownload($sha256, apikey=$userKey()))) }
+function yaraify(sha256) { return($_save($svc.yaraifyFile($sha256, apikey=$userKey()))) }

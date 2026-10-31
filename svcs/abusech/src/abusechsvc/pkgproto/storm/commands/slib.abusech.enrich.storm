@@ -1,0 +1,8 @@
+init {
+    $abusech = $lib.import(slib.abusech.lib)
+    $model = $lib.import(slib.abusech.model)
+    $platforms = $lib.null
+    if $cmdopts.platform { $platforms = $cmdopts.platform }
+}
+
+divert $cmdopts.yield $model.nodes($abusech.enrich($node, platforms=$platforms))

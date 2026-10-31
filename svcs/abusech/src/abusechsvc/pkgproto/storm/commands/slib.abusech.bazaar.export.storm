@@ -1,0 +1,12 @@
+init {
+    $abusech = $lib.import(slib.abusech.lib)
+    if ($cmdopts.kind = "full") {
+        $lib.warn("slib.abusech.bazaar.export: The full export has every MalwareBazaar sample, this may take a while.")
+    }
+}
+
+spin |
+
+for $file in $abusech.bazaarExport(kind=$cmdopts.kind, limit=$cmdopts.limit) {
+    if $cmdopts.yield { yield $file }
+}

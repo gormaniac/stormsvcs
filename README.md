@@ -51,6 +51,8 @@ Each service must have the following:
   - Enrich IPs from ip-api.com.
 - `shodan`
   - Every Shodan API: host lookups, search, scanning, alerts, DNS, streaming, InternetDB, CVEDB, exploits, and trends.
+- `abusech`
+  - Every abuse.ch platform: MalwareBazaar, URLhaus, ThreatFox, YARAify, Feodo Tracker, SSL Blacklist, and the false positive list.
 
 
 ## Services Wish List/Plan
@@ -69,8 +71,6 @@ This is a ToDo/wish list, check `services.toml` for the current list of develope
   - Enrich from ipinfo.io.
 - `mandiant`
   - Enrich from Mandiant Advantage.
-- `malbazaar`
-  - Enrich from MalwareBazaar.
 - `maxmind`
   - Enrich from Maxmind.
 - `mxtoolbox`

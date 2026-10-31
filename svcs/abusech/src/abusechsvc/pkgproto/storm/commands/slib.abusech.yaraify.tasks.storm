@@ -1,0 +1,26 @@
+init {
+    $priv = $lib.import(slib.abusech.priv.user)
+    $util = $lib.import(slib.abusech.util)
+
+    if $cmdopts.new {
+        $retn = $priv.yaraifyIdentifier()
+        if (not $util.failed($retn, "Generating a YARAify identifier")) {
+            $ident = $retn.data
+            if ($lib.vars.type($ident) = "dict") { $ident = $ident.identifier }
+            $lib.print("slib.abusech.yaraify.tasks: Your new (private) identifier is {ident}", ident=$ident)
+        }
+    }
+    elif (not $cmdopts.identifier) {
+        $lib.raise(BadArg, "slib.abusech.yaraify.tasks requires an identifier (or --new).")
+    }
+    else {
+        $retn = $priv.yaraifyTasks($cmdopts.identifier, status=$cmdopts.status)
+        if (not $util.failed($retn, "Listing YARAify tasks")) {
+            $rows = ([])
+            for $task in $retn.data {
+                $rows.append(($task.task_id, $task.time, $task.sha256, $task.name))
+            }
+            $util.table(([["task_id", 38], ["time", 20], ["sha256", 66], ["file_name", 30]]), $rows)
+        }
+    }
+}

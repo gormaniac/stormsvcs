@@ -1,0 +1,9 @@
+init {
+    $abusech = $lib.import(slib.abusech.lib)
+}
+
+spin |
+
+for $n in $abusech.sslblBlocklist(kind=$cmdopts.list, limit=$cmdopts.limit) {
+    if $cmdopts.yield { yield $n }
+}

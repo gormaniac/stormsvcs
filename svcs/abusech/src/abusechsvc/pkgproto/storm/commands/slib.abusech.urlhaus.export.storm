@@ -1,0 +1,9 @@
+init {
+    $abusech = $lib.import(slib.abusech.lib)
+}
+
+spin |
+
+for $url in $abusech.urlhausExport(kind=$cmdopts.kind, limit=$cmdopts.limit) {
+    if $cmdopts.yield { yield $url }
+}

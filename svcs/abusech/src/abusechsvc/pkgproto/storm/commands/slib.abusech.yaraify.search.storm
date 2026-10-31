@@ -1,0 +1,10 @@
+init {
+    $abusech = $lib.import(slib.abusech.lib)
+    $model = $lib.import(slib.abusech.model)
+    $files = $abusech.yaraifySearch($cmdopts.by, $cmdopts.value, limit=$cmdopts.limit)
+    $lib.print("slib.abusech.yaraify.search: Found {count} files.", count=$lib.len($files))
+}
+
+spin |
+
+yield $model.nodes($files)

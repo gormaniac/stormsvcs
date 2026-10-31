@@ -1,0 +1,12 @@
+init {
+    $abusech = $lib.import(slib.abusech.lib)
+    if ($cmdopts.kind = "full") {
+        $lib.warn("slib.abusech.threatfox.export: The full export has every ThreatFox IOC, this may take a while.")
+    }
+}
+
+spin |
+
+for $ioc in $abusech.threatfoxExport(kind=$cmdopts.kind, limit=$cmdopts.limit) {
+    if $cmdopts.yield { yield $ioc }
+}

@@ -1,0 +1,21 @@
+init {
+    $abusech = $lib.import(slib.abusech.lib)
+    $model = $lib.import(slib.abusech.model)
+
+    $limit = $cmdopts.limit
+    switch $cmdopts.by {
+        "recent-urls": { $nodes = $abusech.urlhausRecent(kind=urls, limit=$limit) }
+        "recent-payloads": { $nodes = $abusech.urlhausRecent(kind=payloads, limit=$limit) }
+        *: {
+            if (not $cmdopts.value) {
+                $lib.raise(BadArg, `slib.abusech.urlhaus.search {$cmdopts.by} requires a value.`)
+            }
+            $nodes = $abusech.urlhausSearch($cmdopts.by, $cmdopts.value, limit=$limit)
+        }
+    }
+    $lib.print("slib.abusech.urlhaus.search: Found {count} results.", count=$lib.len($nodes))
+}
+
+spin |
+
+yield $model.nodes($nodes)

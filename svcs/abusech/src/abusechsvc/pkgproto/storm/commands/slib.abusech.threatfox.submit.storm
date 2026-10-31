@@ -1,0 +1,60 @@
+init {
+    $privsub = $lib.import(slib.abusech.priv.submit)
+    $util = $lib.import(slib.abusech.util)
+
+    // ThreatFox IOC types for each form that can be submitted.
+    $ioctypes = ({
+        "inet:url": "url",
+        "inet:fqdn": "domain",
+        "inet:server": "ip:port",
+    })
+    $iocs = ([])
+    $iocs.extend($cmdopts.ioc)
+    $state = ({"type": $cmdopts.type})
+
+    // The (value, ThreatFox IOC type) of a node, or (null, null) if it can't be submitted.
+    function iocFor(n) {
+        $form = $n.form()
+        $props = $n.props
+        switch $form {
+            ("inet:url", "inet:fqdn"): { return(($n.repr(), $ioctypes.$form)) }
+            "inet:server": {
+                if $props.ipv4 { return((`{$lib.repr(inet:ipv4, $props.ipv4)}:{$props.port}`, "ip:port")) }
+                if $props.ipv6 { return((`{$props.ipv6}:{$props.port}`, "ip:port")) }
+            }
+            "file:bytes": {
+                if $props.sha256 { return(($props.sha256, "sha256_hash")) }
+                if $props.md5 { return(($props.md5, "md5_hash")) }
+            }
+        }
+        return(($lib.null, $lib.null))
+    }
+
+    function submit(iocs) {
+        if (not $iocs) { return() }
+        $ioctype = $state.type
+        if (not $ioctype) {
+            $lib.warn("slib.abusech.threatfox.submit: Use --type with --ioc.")
+            return()
+        }
+        $retn = $privsub.threatfoxSubmit($cmdopts.threat, $ioctype, $cmdopts.malware, $iocs,
+            confidence=$cmdopts.confidence, reference=$cmdopts.reference, comment=$cmdopts.comment,
+            tags=$cmdopts.tag, anonymous=$cmdopts.anonymous, compromised=$cmdopts.compromised)
+        $util.printSubmission(`Submitting {$lib.len($iocs)} IOCs to ThreatFox`, $retn)
+    }
+}
+
+// All the IOCs are submitted at once, after the inbound nodes are consumed. They must share a type.
+($valu, $ntype) = $iocFor($node)
+if ($valu = $lib.null) {
+    $lib.warn("slib.abusech.threatfox.submit: {repr} can't be submitted.", repr=$node.repr())
+}
+elif ($state.type and $state.type != $ntype) {
+    $lib.warn("slib.abusech.threatfox.submit: Skipping {repr}, every IOC must be a {type}.", repr=$node.repr(), type=$state.type)
+}
+else {
+    $state.type = $ntype
+    $iocs.append($valu)
+}
+
+fini { $submit($iocs) }

@@ -1,0 +1,1238 @@
+name: slib.abusech
+version: 0.1.0
+guid: e95841a657444e3691de476861eb2a94
+
+synapse_minversion: [2, 137, 0]
+
+genopts:
+    dotstorm: true
+
+author:
+  url: https://github.com/gormaniac
+  name: John Gorman
+
+desc: A Storm Service that integrates every abuse.ch platform (MalwareBazaar, URLhaus, ThreatFox, YARAify, Feodo Tracker, SSL Blacklist, and the false positive list) into Synapse.
+
+docs:
+  - title: README
+    path: README.md
+
+perms:
+  - perm: [ slib, abusech, user ]
+    gate: cortex
+    desc: Query abuse.ch (lookups, searches, exports, and blocklists) and model the results.
+  - perm: [ slib, abusech, download ]
+    gate: cortex
+    desc: Download malware samples from abuse.ch into the Axon.
+  - perm: [ slib, abusech, submit ]
+    gate: cortex
+    desc: Send data to abuse.ch (samples, URLs, IOCs, comments, scans, and YARA rules).
+  - perm: [ slib, abusech, admin ]
+    gate: cortex
+    desc: Manage the service-wide Auth-Key, tag settings, and raw API requests.
+
+modules:
+  # Privileged modules - these are the only modules that talk to the service.
+  # They run asroot so users don't need the service.get permission, and so the
+  # service's stored Auth-Key is never readable from Storm.
+  - name: slib.abusech.priv.user
+    asroot:perms:
+      - [ slib, abusech, user ]
+  - name: slib.abusech.priv.download
+    asroot:perms:
+      - [ slib, abusech, download ]
+  - name: slib.abusech.priv.submit
+    asroot:perms:
+      - [ slib, abusech, submit ]
+  - name: slib.abusech.priv.admin
+    asroot:perms:
+      - [ slib, abusech, admin ]
+
+  # Unprivileged modules - node edits here run as the calling user.
+  - name: slib.abusech.lib
+    perms:
+      - [ slib, abusech, user ]
+  - name: slib.abusech.model
+  - name: slib.abusech.util
+
+commands:
+
+  # ---- Cross platform ----
+
+  - name: slib.abusech.enrich
+    perms:
+      - [ slib, abusech, user ]
+    descr: |
+      Enrich nodes from every abuse.ch platform that knows about them.
+
+        file:bytes/hash:md5/hash:sha1/hash:sha256 -> MalwareBazaar, YARAify, URLhaus (MD5/SHA256), ThreatFox
+        inet:url                                  -> URLhaus, ThreatFox
+        inet:fqdn/inet:ipv4/inet:ipv6             -> URLhaus (host), ThreatFox
+        inet:server                               -> ThreatFox (ip:port)
+
+      Examples:
+
+        // Enrich a mixed set of nodes from every platform.
+        #my.tag | slib.abusech.enrich
+
+        // Only check MalwareBazaar and ThreatFox, and yield the results.
+        file:bytes#my.tag | slib.abusech.enrich --platform bazaar --platform threatfox --yield
+    cmdargs:
+      - - --platform
+        - type: str
+          action: append
+          default: []
+          choices: [ bazaar, urlhaus, threatfox, yaraify ]
+          help: Only query this platform. May be used multiple times (default is all of them).
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the enriched/created nodes instead of the inbound nodes.
+    forms:
+      input:
+        - file:bytes
+        - hash:md5
+        - hash:sha1
+        - hash:sha256
+        - inet:url
+        - inet:fqdn
+        - inet:ipv4
+        - inet:ipv6
+        - inet:server
+      output:
+        - file:bytes
+        - inet:url
+        - inet:fqdn
+        - inet:ipv4
+        - inet:ipv6
+        - inet:server
+
+  # ---- MalwareBazaar ----
+
+  - name: slib.abusech.bazaar.lookup
+    perms:
+      - [ slib, abusech, user ]
+    descr: |
+      Look up samples in MalwareBazaar (get_info) and model everything MalwareBazaar knows about them.
+
+      Models the file's hashes (including fuzzy hashes), names, type, and size, its tags and
+      malware family (under the configured tag prefix, ex. #rep.abusech.bazaar.emotet), ClamAV,
+      YARA, and vendor (sandbox/AV) results, code signing certificates, the reporter, comments,
+      related samples, and reference links.
+
+      Examples:
+
+        file:bytes#my.tag | slib.abusech.bazaar.lookup
+
+        slib.abusech.bazaar.lookup --hash 094fd325049b8a9cf6d3e5ef2a6d4cc6a567d7d49c35f8bb8dd9e3c6acf3d78d --yield
+    cmdargs:
+      - - --hash
+        - type: str
+          action: append
+          default: []
+          help: An MD5, SHA1, SHA256, or SHA3-384 hash to look up instead of using the inbound nodes. May be used multiple times.
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the file:bytes nodes instead of the inbound nodes.
+    forms:
+      input:
+        - file:bytes
+        - hash:md5
+        - hash:sha1
+        - hash:sha256
+      output:
+        - file:bytes
+
+  - name: slib.abusech.bazaar.search
+    perms:
+      - [ slib, abusech, user ]
+    descr: |
+      Search MalwareBazaar for samples and model them. Yields the file:bytes nodes.
+
+        tag        - Samples with a tag (get_taginfo)
+        signature  - Samples of a malware family (get_siginfo)
+        filetype   - Samples of a file type, ex. exe (get_file_type)
+        clamav     - Samples matching a ClamAV signature (get_clamavinfo)
+        imphash    - Samples with an imphash (get_imphash)
+        tlsh       - Samples with a TLSH (get_tlsh)
+        telfhash   - Samples with a telfhash (get_telfhash)
+        gimphash   - Samples with a gimphash (get_gimphash)
+        dhash      - Samples with an icon dhash (get_dhash_icon)
+        yara       - Samples matching a YARA rule (get_yarainfo)
+        issuer     - Samples signed by a certificate issuer CN (get_issuerinfo)
+        subject    - Samples signed by a certificate subject CN (get_subjectinfo)
+        recent     - Samples added in the last hour, or the latest 100 with the value "100" (get_recent)
+
+      Examples:
+
+        slib.abusech.bazaar.search signature AgentTesla --limit 50
+
+        slib.abusech.bazaar.search recent 100
+    cmdargs:
+      - - by
+        - type: str
+          choices: [ tag, signature, filetype, clamav, imphash, tlsh, telfhash, gimphash, dhash, yara, issuer, subject, recent ]
+          help: What to search by.
+      - - value
+        - type: str
+          nargs: "?"
+          default: null
+          help: The value to search for (for recent, "time" or "100").
+      - - --limit
+        - type: int
+          default: 100
+          help: The max number of samples to return (max 1000).
+    forms:
+      output:
+        - file:bytes
+
+  - name: slib.abusech.bazaar.cscb
+    perms:
+      - [ slib, abusech, user ]
+    descr: |
+      Model MalwareBazaar's Code Signing Certificate Blocklist (get_cscb) as crypto:x509:cert nodes
+      tagged #<prefix>.bazaar.cscb, with the listing reason as a meta:note.
+
+      Examples:
+
+        slib.abusech.bazaar.cscb --yield
+    cmdargs:
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the crypto:x509:cert nodes.
+    forms:
+      output:
+        - crypto:x509:cert
+
+  - name: slib.abusech.bazaar.download
+    perms:
+      - [ slib, abusech, download ]
+    descr: |
+      Download samples from MalwareBazaar (get_file) into the Axon, unzipping them.
+
+      Examples:
+
+        file:bytes#my.tag | slib.abusech.bazaar.download
+
+        slib.abusech.bazaar.download --hash <sha256> --yield
+    cmdargs:
+      - - --hash
+        - type: str
+          action: append
+          default: []
+          help: A SHA256 to download instead of using the inbound nodes. May be used multiple times.
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the downloaded file:bytes nodes instead of the inbound nodes.
+    forms:
+      input:
+        - file:bytes
+        - hash:sha256
+      output:
+        - file:bytes
+
+  - name: slib.abusech.bazaar.submit
+    perms:
+      - [ slib, abusech, submit ]
+    descr: |
+      Submit file:bytes nodes (that are in the Axon) to MalwareBazaar.
+
+      Make sure you've read MalwareBazaar's terms of service before you submit samples.
+
+      Examples:
+
+        file:bytes=<sha256> | slib.abusech.bazaar.submit --tag exe --tag AgentTesla --delivery email_attachment
+    cmdargs:
+      - - --tag
+        - type: str
+          action: append
+          default: []
+          help: A tag for the sample. May be used multiple times.
+      - - --delivery
+        - type: str
+          default: null
+          choices: [ email_attachment, email_link, web_download, web_drive-by, multiple, other ]
+          help: How the sample was delivered.
+      - - --link
+        - type: str
+          action: append
+          default: []
+          help: A reference URL about the sample. May be used multiple times.
+      - - --comment
+        - type: str
+          default: null
+          help: A comment about the sample.
+      - - --dropped-by
+        - type: str
+          default: null
+          help: The SHA256 of the sample that dropped this one.
+      - - --anonymous
+        - default: false
+          action: store_true
+          help: Submit anonymously.
+    forms:
+      input:
+        - file:bytes
+
+  - name: slib.abusech.bazaar.update
+    perms:
+      - [ slib, abusech, submit ]
+    descr: |
+      Comment on MalwareBazaar samples (add_comment) or add information to samples you submitted (update).
+
+      Examples:
+
+        file:bytes=<sha256> | slib.abusech.bazaar.update --comment "Seen in a phishing campaign"
+
+        slib.abusech.bazaar.update --hash <sha256> --add tags=AgentTesla --add urlhaus=https://urlhaus.abuse.ch/url/1/
+    cmdargs:
+      - - --hash
+        - type: str
+          action: append
+          default: []
+          help: A SHA256 to update instead of using the inbound nodes. May be used multiple times.
+      - - --comment
+        - type: str
+          default: null
+          help: Add this comment to the sample.
+      - - --add
+        - type: str
+          action: append
+          default: []
+          help: A <key>=<value> to add to the sample (ex. tags=x, urlhaus=<url>, any_run=<url>). May be used multiple times.
+    forms:
+      input:
+        - file:bytes
+        - hash:sha256
+
+  - name: slib.abusech.bazaar.export
+    perms:
+      - [ slib, abusech, user ]
+    descr: |
+      Model the samples in a MalwareBazaar CSV export.
+
+        recent - The samples added in the last 48 hours
+        full   - Every sample (large)
+
+      Examples:
+
+        slib.abusech.bazaar.export
+
+        slib.abusech.bazaar.export full --limit 10000
+    cmdargs:
+      - - kind
+        - type: str
+          nargs: "?"
+          default: recent
+          choices: [ recent, full ]
+          help: The export to model.
+      - - --limit
+        - type: int
+          default: 0
+          help: The max number of samples to model (0 for all of them).
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the file:bytes nodes.
+    forms:
+      output:
+        - file:bytes
+
+  # ---- URLhaus ----
+
+  - name: slib.abusech.urlhaus.lookup
+    perms:
+      - [ slib, abusech, user ]
+    descr: |
+      Look up URLs, hosts, and payloads in URLhaus and model the results.
+
+        inet:url                      -> URL information (/url/)
+        inet:fqdn/inet:ipv4/inet:ipv6 -> Host information and every URL URLhaus has seen on the host (/host/)
+        file:bytes/hash:md5/sha256    -> Payload information and every URL that served it (/payload/)
+
+      URLs are tagged with their threat, URLhaus tags, and status (ex. #rep.abusech.urlhaus.status.online),
+      linked to their payloads with inet:urlfile, and hosts get their Spamhaus DBL/SURBL listings.
+
+      Examples:
+
+        inet:url#my.tag | slib.abusech.urlhaus.lookup
+
+        slib.abusech.urlhaus.lookup --host vertex.link --id 12345 --yield
+    cmdargs:
+      - - --url
+        - type: str
+          action: append
+          default: []
+          help: A URL to look up instead of using the inbound nodes. May be used multiple times.
+      - - --id
+        - type: str
+          action: append
+          default: []
+          help: A URLhaus URL ID to look up instead of using the inbound nodes (/urlid/). May be used multiple times.
+      - - --host
+        - type: str
+          action: append
+          default: []
+          help: A host (FQDN or IP) to look up instead of using the inbound nodes. May be used multiple times.
+      - - --hash
+        - type: str
+          action: append
+          default: []
+          help: A payload MD5 or SHA256 to look up instead of using the inbound nodes. May be used multiple times.
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the URL/host/file nodes instead of the inbound nodes.
+    forms:
+      input:
+        - inet:url
+        - inet:fqdn
+        - inet:ipv4
+        - inet:ipv6
+        - file:bytes
+        - hash:md5
+        - hash:sha256
+      output:
+        - inet:url
+        - inet:fqdn
+        - inet:ipv4
+        - inet:ipv6
+        - file:bytes
+
+  - name: slib.abusech.urlhaus.search
+    perms:
+      - [ slib, abusech, user ]
+    descr: |
+      Search URLhaus and model the results. Yields the inet:url (or file:bytes) nodes.
+
+        tag             - URLs with a tag (/tag/)
+        signature       - URLs serving a malware family's payloads (/signature/)
+        recent-urls     - URLs added in the last 3 days (/urls/recent/)
+        recent-payloads - Payloads seen in the last 3 days (/payloads/recent/)
+
+      Examples:
+
+        slib.abusech.urlhaus.search tag Mozi
+
+        slib.abusech.urlhaus.search recent-urls --limit 100
+    cmdargs:
+      - - by
+        - type: str
+          choices: [ tag, signature, recent-urls, recent-payloads ]
+          help: What to search by.
+      - - value
+        - type: str
+          nargs: "?"
+          default: null
+          help: The tag or signature to search for.
+      - - --limit
+        - type: int
+          default: 0
+          help: The max number of results (0 for URLhaus' default, max 1000).
+    forms:
+      output:
+        - inet:url
+        - file:bytes
+
+  - name: slib.abusech.urlhaus.download
+    perms:
+      - [ slib, abusech, download ]
+    descr: |
+      Download payloads from URLhaus into the Axon, unzipping them.
+
+      Examples:
+
+        file:bytes#my.tag | slib.abusech.urlhaus.download
+    cmdargs:
+      - - --hash
+        - type: str
+          action: append
+          default: []
+          help: A SHA256 to download instead of using the inbound nodes. May be used multiple times.
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the downloaded file:bytes nodes instead of the inbound nodes.
+    forms:
+      input:
+        - file:bytes
+        - hash:sha256
+      output:
+        - file:bytes
+
+  - name: slib.abusech.urlhaus.submit
+    perms:
+      - [ slib, abusech, submit ]
+    descr: |
+      Report malware URLs to URLhaus. Every inbound inet:url (and --url) is sent in one submission.
+
+      Make sure you've read URLhaus' submission policy before you report URLs.
+
+      Examples:
+
+        inet:url#my.malware.urls | slib.abusech.urlhaus.submit --tag elf --tag Mozi
+    cmdargs:
+      - - --url
+        - type: str
+          action: append
+          default: []
+          help: A URL to report, in addition to the inbound nodes. May be used multiple times.
+      - - --threat
+        - type: str
+          default: malware_download
+          help: The threat type of the URLs.
+      - - --tag
+        - type: str
+          action: append
+          default: []
+          help: A tag for the URLs. May be used multiple times.
+      - - --anonymous
+        - default: false
+          action: store_true
+          help: Report anonymously.
+    forms:
+      input:
+        - inet:url
+
+  - name: slib.abusech.urlhaus.export
+    perms:
+      - [ slib, abusech, user ]
+    descr: |
+      Model the URLs in a URLhaus CSV export.
+
+        recent - URLs added in the last 30 days
+        online - URLs that are currently online
+        full   - Every URL (large)
+
+      Examples:
+
+        slib.abusech.urlhaus.export online
+    cmdargs:
+      - - kind
+        - type: str
+          nargs: "?"
+          default: recent
+          choices: [ recent, online, full ]
+          help: The export to model.
+      - - --limit
+        - type: int
+          default: 0
+          help: The max number of URLs to model (0 for all of them).
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the inet:url nodes.
+    forms:
+      output:
+        - inet:url
+
+  # ---- ThreatFox ----
+
+  - name: slib.abusech.threatfox.lookup
+    perms:
+      - [ slib, abusech, user ]
+    descr: |
+      Look up IOCs in ThreatFox and model them.
+
+        file:bytes/hash:*                         -> IOCs associated with the sample (search_hash)
+        inet:url/inet:fqdn/inet:ipv4/6/inet:server -> The IOC (search_ioc)
+
+      Each IOC is modeled as its observable (tagged with its threat type, malware family, and tags),
+      an it:sec:stix:indicator for the ThreatFox IOC record (confidence, pattern, comment), the
+      family's risk:tool:software, related samples, the reference, and the reporter.
+
+      Examples:
+
+        inet:fqdn#my.tag | slib.abusech.threatfox.lookup
+
+        slib.abusech.threatfox.lookup --ioc 1.2.3.4:443 --id 123456 --yield
+    cmdargs:
+      - - --ioc
+        - type: str
+          action: append
+          default: []
+          help: An IOC value to search for instead of using the inbound nodes. May be used multiple times.
+      - - --id
+        - type: str
+          action: append
+          default: []
+          help: A ThreatFox IOC ID to look up instead of using the inbound nodes. May be used multiple times.
+      - - --hash
+        - type: str
+          action: append
+          default: []
+          help: A sample MD5 or SHA256 to find IOCs for instead of using the inbound nodes. May be used multiple times.
+      - - --fuzzy
+        - default: false
+          action: store_true
+          help: Allow --ioc searches to match partially (ThreatFox's default), instead of exactly.
+      - - --limit
+        - type: int
+          default: 100
+          help: The max number of IOCs per lookup.
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the IOC nodes instead of the inbound nodes.
+    forms:
+      input:
+        - file:bytes
+        - hash:md5
+        - hash:sha1
+        - hash:sha256
+        - inet:url
+        - inet:fqdn
+        - inet:ipv4
+        - inet:ipv6
+        - inet:server
+      output:
+        - file:bytes
+        - inet:url
+        - inet:fqdn
+        - inet:ipv4
+        - inet:ipv6
+        - inet:server
+
+  - name: slib.abusech.threatfox.search
+    perms:
+      - [ slib, abusech, user ]
+    descr: |
+      Search ThreatFox for IOCs and model them. Yields the IOC nodes.
+
+        recent  - IOCs added in the last N days (1-7), default 1 (get_iocs)
+        tag     - IOCs with a tag (taginfo)
+        malware - IOCs for a malware family, ex. win.cobalt_strike (malwareinfo)
+
+      Examples:
+
+        slib.abusech.threatfox.search recent 3
+
+        slib.abusech.threatfox.search malware win.cobalt_strike --limit 500
+    cmdargs:
+      - - by
+        - type: str
+          choices: [ recent, tag, malware ]
+          help: What to search by.
+      - - value
+        - type: str
+          nargs: "?"
+          default: null
+          help: The number of days, tag, or malware family.
+      - - --limit
+        - type: int
+          default: 100
+          help: The max number of IOCs (max 1000).
+    forms:
+      output:
+        - file:bytes
+        - inet:url
+        - inet:fqdn
+        - inet:ipv4
+        - inet:ipv6
+        - inet:server
+
+  - name: slib.abusech.threatfox.ref
+    perms:
+      - [ slib, abusech, user ]
+    descr: |
+      Print ThreatFox reference data.
+
+        types   - The IOC and threat types (types)
+        tags    - Every tag (tag_list)
+        malware - Every malware family (malware_list)
+        label   - Find the ThreatFox label for a malware name, use with --malware (get_label)
+
+      Examples:
+
+        slib.abusech.threatfox.ref types
+
+        slib.abusech.threatfox.ref label --malware "cobalt strike" --platform win
+    cmdargs:
+      - - name
+        - type: str
+          choices: [ types, tags, malware, label ]
+          help: The reference data to print.
+      - - --malware
+        - type: str
+          default: null
+          help: The malware name to find a label for.
+      - - --platform
+        - type: str
+          default: null
+          choices: [ win, osx, apk, jar, elf ]
+          help: Narrow the label search to a platform.
+
+  - name: slib.abusech.threatfox.submit
+    perms:
+      - [ slib, abusech, submit ]
+    descr: |
+      Share IOCs with ThreatFox (submit_ioc). Every inbound node (and --ioc) is sent in one
+      submission, so they must all be the same IOC type.
+
+        inet:url    -> url
+        inet:fqdn   -> domain
+        inet:server -> ip:port
+        file:bytes  -> sha256_hash (or md5_hash)
+
+      Make sure you've read ThreatFox's submission policy before you share IOCs.
+      Use "slib.abusech.threatfox.ref types" and "slib.abusech.threatfox.ref malware" for valid values.
+
+      Examples:
+
+        inet:server#my.c2 | slib.abusech.threatfox.submit botnet_cc win.cobalt_strike --confidence 75
+    cmdargs:
+      - - threat
+        - type: str
+          help: The threat type (ex. botnet_cc, payload_delivery, payload).
+      - - malware
+        - type: str
+          help: The ThreatFox malware family (ex. win.cobalt_strike).
+      - - --ioc
+        - type: str
+          action: append
+          default: []
+          help: An IOC to submit, in addition to the inbound nodes (requires --type). May be used multiple times.
+      - - --type
+        - type: str
+          default: null
+          help: The IOC type of the --ioc values (ex. ip:port, domain, url, sha256_hash).
+      - - --confidence
+        - type: int
+          default: 50
+          help: Your confidence (0-100).
+      - - --reference
+        - type: str
+          default: null
+          help: A reference URL.
+      - - --comment
+        - type: str
+          default: null
+          help: A comment about the IOCs.
+      - - --tag
+        - type: str
+          action: append
+          default: []
+          help: A tag for the IOCs. May be used multiple times.
+      - - --compromised
+        - default: false
+          action: store_true
+          help: The IOCs are compromised (legitimate) infrastructure, not operated by the threat actor.
+      - - --anonymous
+        - default: false
+          action: store_true
+          help: Submit anonymously.
+    forms:
+      input:
+        - inet:url
+        - inet:fqdn
+        - inet:server
+        - file:bytes
+
+  - name: slib.abusech.threatfox.export
+    perms:
+      - [ slib, abusech, user ]
+    descr: |
+      Model the IOCs in a ThreatFox JSON export.
+
+        recent - IOCs added in the last 48 hours
+        full   - Every IOC (large)
+
+      Examples:
+
+        slib.abusech.threatfox.export
+    cmdargs:
+      - - kind
+        - type: str
+          nargs: "?"
+          default: recent
+          choices: [ recent, full ]
+          help: The export to model.
+      - - --limit
+        - type: int
+          default: 0
+          help: The max number of IOCs to model (0 for all of them).
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the IOC nodes.
+    forms:
+      output:
+        - file:bytes
+        - inet:url
+        - inet:fqdn
+        - inet:ipv4
+        - inet:ipv6
+        - inet:server
+
+  # ---- YARAify ----
+
+  - name: slib.abusech.yaraify.lookup
+    perms:
+      - [ slib, abusech, user ]
+    descr: |
+      Look up files (lookup_hash) or scan tasks (get_results) in YARAify and model the results.
+
+      Models the file's metadata, YARA matches (it:app:yara:match), ClamAV results, and the files
+      YARAify's unpacker extracted (file:subfile) with their YARA matches.
+
+      Examples:
+
+        file:bytes#my.tag | slib.abusech.yaraify.lookup
+
+        slib.abusech.yaraify.lookup --task cfa49f83-6d98-11ed-a71a-42010aa4000b --yield
+    cmdargs:
+      - - --hash
+        - type: str
+          action: append
+          default: []
+          help: An MD5, SHA1, SHA256, or SHA3-384 to look up instead of using the inbound nodes. May be used multiple times.
+      - - --task
+        - type: str
+          action: append
+          default: []
+          help: A scan task ID to retrieve the results of. May be used multiple times.
+      - - --malpedia
+        - type: str
+          default: null
+          help: A Malpedia token, to include TLP:AMBER/RED Malpedia YARA matches.
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the file:bytes nodes instead of the inbound nodes.
+    forms:
+      input:
+        - file:bytes
+        - hash:md5
+        - hash:sha1
+        - hash:sha256
+      output:
+        - file:bytes
+
+  - name: slib.abusech.yaraify.search
+    perms:
+      - [ slib, abusech, user ]
+    descr: |
+      Search YARAify for files and model them. Yields the file:bytes nodes.
+
+        yara     - Files matching a YARA rule (get_yara)
+        clamav   - Files matching a ClamAV signature (get_clamav)
+        imphash  - Files with an imphash (get_imphash)
+        gimphash - Files with a gimphash (get_gimphash)
+        dhash    - Files with an icon dhash (get_dhash_icon)
+        tlsh     - Files with a TLSH (get_tlsh)
+        telfhash - Files with a telfhash (get_telfhash)
+
+      Examples:
+
+        slib.abusech.yaraify.search yara CobaltStrikeBeacon --limit 50
+    cmdargs:
+      - - by
+        - type: str
+          choices: [ yara, clamav, imphash, gimphash, dhash, tlsh, telfhash ]
+          help: What to search by.
+      - - value
+        - type: str
+          help: The value to search for.
+      - - --limit
+        - type: int
+          default: 25
+          help: The max number of files.
+    forms:
+      output:
+        - file:bytes
+
+  - name: slib.abusech.yaraify.scan
+    perms:
+      - [ slib, abusech, submit ]
+    descr: |
+      Scan files with YARAify. Files in the Axon are uploaded, other files (or --rescan) are
+      rescanned by hash (rescan_file). Prints each task ID, use --wait to wait for and model the results.
+
+      Examples:
+
+        file:bytes=<sha256> | slib.abusech.yaraify.scan --unpack --wait 120 --yield
+
+        slib.abusech.yaraify.scan --hash <sha256>
+    cmdargs:
+      - - --hash
+        - type: str
+          action: append
+          default: []
+          help: A hash of a known file to rescan instead of using the inbound nodes. May be used multiple times.
+      - - --rescan
+        - default: false
+          action: store_true
+          help: Rescan inbound files by hash, even if they are in the Axon.
+      - - --identifier
+        - type: str
+          default: null
+          help: Your YARAify identifier, to track the scans with (see slib.abusech.yaraify.tasks).
+      - - --unpack
+        - default: false
+          action: store_true
+          help: Unpack the file and scan the unpacked files.
+      - - --share
+        - default: false
+          action: store_true
+          help: Share the file with the community.
+      - - --noclamav
+        - default: false
+          action: store_true
+          help: Don't scan the file with ClamAV.
+      - - --skipknown
+        - default: false
+          action: store_true
+          help: Don't scan files YARAify already knows.
+      - - --skipnoisy
+        - default: false
+          action: store_true
+          help: Skip noisy YARA rules.
+      - - --wait
+        - type: int
+          default: 0
+          help: Seconds to wait for each scan to finish before modeling the results (0 to not wait).
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the scanned file:bytes nodes (with --wait) instead of the inbound nodes.
+    forms:
+      input:
+        - file:bytes
+        - hash:md5
+        - hash:sha1
+        - hash:sha256
+      output:
+        - file:bytes
+
+  - name: slib.abusech.yaraify.tasks
+    perms:
+      - [ slib, abusech, user ]
+    descr: |
+      List the YARAify scan tasks for an identifier (list_tasks), or generate a new identifier (generate_identifier).
+
+      Examples:
+
+        slib.abusech.yaraify.tasks --new
+
+        slib.abusech.yaraify.tasks <identifier> --status queued
+    cmdargs:
+      - - identifier
+        - type: str
+          nargs: "?"
+          default: null
+          help: Your YARAify identifier.
+      - - --status
+        - type: str
+          default: processed
+          choices: [ queued, processed ]
+          help: The status of the tasks to list.
+      - - --new
+        - default: false
+          action: store_true
+          help: Generate a new identifier.
+
+  - name: slib.abusech.yaraify.rules
+    perms:
+      - [ slib, abusech, user ]
+    descr: |
+      Model YARAhub rules from YARAify as it:app:yara:rule nodes (with their text, author, and metadata).
+
+      Examples:
+
+        // A rule by its YARAhub UUID.
+        slib.abusech.yaraify.rules --uuid 3e8a1b8e-1f6e-4f5e-9f2a-1d4b3c2a1e0f --yield
+
+        // Recently deployed rules, and every TLP:CLEAR rule.
+        slib.abusech.yaraify.rules --recent --all
+    cmdargs:
+      - - --uuid
+        - type: str
+          action: append
+          default: []
+          help: A YARAhub rule UUID to download (get_yara_rule). May be used multiple times.
+      - - --recent
+        - default: false
+          action: store_true
+          help: Model recently deployed rules (recent_yararules).
+      - - --all
+        - default: false
+          action: store_true
+          help: Model every TLP:CLEAR YARAhub rule from YARAify's rule export.
+      - - --limit
+        - type: int
+          default: 0
+          help: The max number of rules to model with --all (0 for all of them).
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the it:app:yara:rule nodes.
+    forms:
+      output:
+        - it:app:yara:rule
+
+  - name: slib.abusech.yaraify.deploy
+    perms:
+      - [ slib, abusech, submit ]
+    descr: |
+      Deploy YARA rules to YARAify for live hunting.
+
+      Examples:
+
+        it:app:yara:rule#my.rules | slib.abusech.yaraify.deploy
+    cmdargs:
+      - - --text
+        - type: str
+          default: null
+          help: YARA rule text to deploy, in addition to the inbound nodes.
+    forms:
+      input:
+        - it:app:yara:rule
+
+  - name: slib.abusech.yaraify.download
+    perms:
+      - [ slib, abusech, download ]
+    descr: |
+      Download (shared) files from YARAify into the Axon, unzipping them.
+
+      Examples:
+
+        file:bytes#my.tag | slib.abusech.yaraify.download
+    cmdargs:
+      - - --hash
+        - type: str
+          action: append
+          default: []
+          help: A SHA256 to download instead of using the inbound nodes. May be used multiple times.
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the downloaded file:bytes nodes instead of the inbound nodes.
+    forms:
+      input:
+        - file:bytes
+        - hash:sha256
+      output:
+        - file:bytes
+
+  # ---- Feodo Tracker and SSL Blacklist ----
+
+  - name: slib.abusech.feodo
+    perms:
+      - [ slib, abusech, user ]
+    descr: |
+      Model a Feodo Tracker botnet C2 blocklist (Dridex, Emotet, TrickBot, QakBot, BazarLoader, ...).
+
+        all         - Every C2 seen in the last 30 days, with its status, family, ASN, and country
+        recommended - The C2s Feodo Tracker recommends blocking
+        aggressive  - Every C2 ever seen
+
+      C2s are modeled as inet:server (and their IPs) tagged #<prefix>.feodo.c2, with the family
+      (ex. #rep.abusech.feodo.qakbot) and status (ex. #rep.abusech.feodo.status.online).
+
+      Examples:
+
+        slib.abusech.feodo recommended --yield
+    cmdargs:
+      - - list
+        - type: str
+          nargs: "?"
+          default: all
+          choices: [ all, recommended, aggressive ]
+          help: The blocklist to model.
+      - - --limit
+        - type: int
+          default: 0
+          help: The max number of C2s to model (0 for all of them).
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the inet:server (or IP) nodes.
+    forms:
+      output:
+        - inet:server
+        - inet:ipv4
+
+  - name: slib.abusech.sslbl
+    perms:
+      - [ slib, abusech, user ]
+    descr: |
+      Model an SSL Blacklist (SSLBL) blocklist.
+
+        certs          - Malicious TLS certificates by SHA1, with the listing reason (crypto:x509:cert)
+        ips            - Botnet C2 servers seen in the last 30 days (inet:server)
+        ips-aggressive - Every botnet C2 server ever seen (inet:server)
+        ja3            - Malicious JA3 fingerprints (hash:md5)
+
+      Examples:
+
+        slib.abusech.sslbl certs
+
+        slib.abusech.sslbl ips --yield
+    cmdargs:
+      - - list
+        - type: str
+          nargs: "?"
+          default: certs
+          choices: [ certs, ips, ips-aggressive, ja3 ]
+          help: The blocklist to model.
+      - - --limit
+        - type: int
+          default: 0
+          help: The max number of entries to model (0 for all of them).
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the modeled nodes.
+    forms:
+      output:
+        - crypto:x509:cert
+        - inet:server
+        - inet:ipv4
+        - hash:md5
+
+  # ---- Hunting ----
+
+  - name: slib.abusech.fplist
+    perms:
+      - [ slib, abusech, user ]
+    descr: |
+      Model the abuse.ch false positive list: the hashes, domains, URLs, and IPs abuse.ch has removed
+      from its platforms as false positives, tagged #<prefix>.hunting.fp (and #<prefix>.hunting.fp.<platform>).
+
+      Examples:
+
+        slib.abusech.fplist --platform malwarebazaar --yield
+    cmdargs:
+      - - --platform
+        - type: str
+          default: null
+          help: Only model the entries for this platform (ex. malwarebazaar, urlhaus, threatfox).
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the false positive nodes.
+    forms:
+      output:
+        - file:bytes
+        - inet:url
+        - inet:fqdn
+        - inet:ipv4
+
+  # ---- Auth-Keys ----
+
+  - name: slib.abusech.apikey
+    perms:
+      - [ slib, abusech, user ]
+    descr: |
+      Set your own abuse.ch Auth-Key, stored in a user scoped Synapse vault of type "abusech".
+
+      Get a free Auth-Key at https://auth.abuse.ch/, one key works for every abuse.ch platform.
+      Your key takes precedence over the service-wide key set by slib.abusech.admin.apikey.
+
+      Examples:
+
+        slib.abusech.apikey ABCDEFG
+
+        slib.abusech.apikey --clear
+    cmdargs:
+      - - apikey
+        - type: str
+          nargs: "?"
+          default: null
+          help: Your abuse.ch Auth-Key.
+      - - --clear
+        - default: false
+          action: store_true
+          help: Delete your stored Auth-Key.
+
+  # ---- Admin commands ----
+
+  - name: slib.abusech.admin.apikey
+    perms:
+      - [ slib, abusech, admin ]
+    descr: |
+      Set the service-wide abuse.ch Auth-Key, used when a user hasn't set their own.
+
+      Examples:
+
+        slib.abusech.admin.apikey ABCDEFG
+    cmdargs:
+      - - apikey
+        - type: str
+          nargs: "?"
+          default: null
+          help: The abuse.ch Auth-Key. Prints whether a key is set when omitted.
+      - - --clear
+        - default: false
+          action: store_true
+          help: Clear the stored Auth-Key.
+
+  - name: slib.abusech.admin.tags
+    perms:
+      - [ slib, abusech, admin ]
+    descr: |
+      Configure the tags slib.abusech applies for abuse.ch's tags, malware families, and statuses.
+      Tags are "<prefix>.<platform>.<tag>", the default prefix is "rep.abusech".
+
+      Prints the current settings when run without options.
+
+      Examples:
+
+        slib.abusech.admin.tags --prefix rep.abuse
+
+        slib.abusech.admin.tags --disable
+    cmdargs:
+      - - --prefix
+        - type: str
+          default: null
+          help: The tag prefix to use.
+      - - --enable
+        - default: false
+          action: store_true
+          help: Enable tagging.
+      - - --disable
+        - default: false
+          action: store_true
+          help: Disable tagging.
+
+  - name: slib.abusech.admin.request
+    perms:
+      - [ slib, abusech, admin ]
+    descr: |
+      Send a raw request to an abuse.ch API and print the JSON response.
+
+      An escape hatch for queries/options not covered by other commands.
+
+      Examples:
+
+        slib.abusech.admin.request bazaar --form ({"query": "get_info", "hash": "<sha256>"})
+
+        slib.abusech.admin.request threatfox --json ({"query": "ioc", "id": 41})
+
+        slib.abusech.admin.request urlhaus --path urls/recent/limit/3/ --method get
+    cmdargs:
+      - - base
+        - type: str
+          choices: [ bazaar, urlhaus, urlhaus:submit, threatfox, yaraify, hunting ]
+          help: The abuse.ch API to send the request to.
+      - - --path
+        - type: str
+          default: ""
+          help: The endpoint path (ex. url/ for URLhaus).
+      - - --method
+        - type: str
+          default: post
+          choices: [ get, post ]
+          help: The HTTP method.
+      - - --form
+        - default: null
+          help: A dict to send as form data (MalwareBazaar, URLhaus).
+      - - --json
+        - default: null
+          help: A dict to send as the JSON body (ThreatFox, YARAify, Hunting).
+      - - --params
+        - default: null
+          help: A dict of query params.
