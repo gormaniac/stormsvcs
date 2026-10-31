@@ -81,24 +81,26 @@ Today the same TCP session scanned by both services becomes two different `inet:
 
 ## Model everything in one version-isolated Storm module
 
-Synapse 2.256 and the 3.0 branch disagree on almost every form this service touches, so all form and property names should live in one `slib.pcap.model` module that the rest of the package calls by function. In 2.x, Snort uses `it:app:snort:rule`, which has `:engine`, `:enabled` and `:family`. Snort matches are `it:app:snort:hit`, with `:rule`, `:flow`, src/dst props, `:time`, `:sensor`, `:version` and `:dropped`. Suricata has a separate `it:app:suricata:rule`, which has no `:engine` or `:family`. Suricata matches are `it:app:suricata:matched`, which link to the flow through `:target`, not `:flow`, and carry no src/dst props ([Synapse 2.x infotech.py](https://github.com/vertexproject/synapse/blob/master/synapse/models/infotech.py)). On the `synapse-3xx` branch the following changes ([Synapse 3.x infotech.py](https://github.com/vertexproject/synapse/blob/synapse-3xx/synapse/models/infotech.py), [3.x base.py](https://github.com/vertexproject/synapse/blob/synapse-3xx/synapse/models/base.py)):
+Synapse 2.256 and Synapse 3 (3.7.0 is the current release, and it requires Python 3.14) name many of the forms and properties this service touches differently, so all form and property names should live in one `slib.pcap.model` module that the rest of the package calls by function. In 2.x, Snort uses `it:app:snort:rule`, which has `:engine`, `:enabled` and `:family`. Snort matches are `it:app:snort:hit`, with `:rule`, `:flow`, src/dst props, `:time`, `:sensor`, `:version` and `:dropped`. Suricata has a separate `it:app:suricata:rule`, which has no `:engine` or `:family`. Suricata matches are `it:app:suricata:matched`, which link to the flow through `:target`, not `:flow`, and carry no src/dst props ([Synapse 2.x infotech.py](https://github.com/vertexproject/synapse/blob/master/synapse/models/infotech.py)). In Synapse 3.7.0 the following changes, as read from the released wheel ([synapse 3.7.0 on PyPI](https://pypi.org/project/synapse/3.7.0/): `synapse/models/infotech.py` L2846-2887, `synapse/models/base.py` L425-457 and L834-855, `synapse/models/doc.py`):
 
-- `it:app:snort:rule` becomes a `meta:rule` subtype.
-- `it:app:snort:hit` is renamed to `it:app:snort:match`, which implements `meta:matchish` (`:rule`, `:target`, `:version`, `:matched`) and drops the src/dst/time props.
-- The `it:app:suricata:*` forms are gone; only a `suricata` enum value survives.
-- `inet:flow` src/dst props become `client:*` and `server:*`.
+- Snort and Suricata stay parallel, first-class forms. `it:app:snort:rule` and `it:app:suricata:rule` are both `meta:rule` subtypes, and only the Snort form adds a prop (`:engine`). Rule props come from `meta:rule` (`:name`, `:type` taxonomy, `:status`, `:severity`, `:priority`, `:url`, `:enabled`, `:text`) and from the `doc:authorable` interface (`:id`, `:desc`, `:created`, `:updated`, `:version`).
+- Matches are `it:app:snort:matched` and `it:app:suricata:matched`. Both implement the shared `base:matched` interface: `:rule`, `:target` (an `inet:flow`), `:rule:version`, `:severity`, and `:time` (through `base:event`). Both add `:sensor` and `:dropped`. Match nodes no longer carry src/dst props.
+- No rename metadata links `it:app:snort:hit` to `it:app:snort:matched` in 3.7.0, so existing 2.x hits would need an explicit migration.
+- `meta:ruleset -(has)> meta:rule` is declared on the generic parent, so it covers Snort and Suricata rules alike.
+- `-(detects)>` edges are typed for both rule forms: `risk:vuln`, `it:software`, `meta:technique` and `it:softwarename`.
+- `inet:flow` uses `:client*`/`:server*` instead of `:src*`/`:dst*`, including `client:software:names`/`client:software:cpes`, and IPs are `inet:ip`.
 
-| Concept | Synapse 2.256 (target now) | Synapse 3.0 branch (plan for) |
+| Concept | Synapse 2.256 (target now) | Synapse 3.7.0 (plan for) |
 |---|---|---|
 | Flow | `inet:flow` with `:src*`/`:dst*`, `:tot:*`, `:ip:proto`, `:raw` | `inet:flow` with `:client*`/`:server*`, `inet:ip` |
-| Snort rule | `it:app:snort:rule` (`:engine` 2 or 3) | `it:app:snort:rule`, a `meta:rule` subtype |
-| Snort match | `it:app:snort:hit` (`:flow`, `:time`, src/dst) | `it:app:snort:match` (`:target`, `:matched`) |
-| Suricata rule | `it:app:suricata:rule` | Removed; likely `meta:rule` with a type (unconfirmed) |
-| Suricata match | `it:app:suricata:matched` (`:target`) | Removed; replacement unconfirmed |
-| Ruleset | `meta:ruleset -(has)> it:app:snort:rule` declared; the Suricata edge is not | `meta:ruleset` |
-| Detects edge | `-(detects)> *` | Typed targets such as `risk:vuln` and `it:software` |
+| Snort rule | `it:app:snort:rule` (`:engine` 2 or 3) | `it:app:snort:rule`, a `meta:rule` subtype (keeps `:engine`) |
+| Snort match | `it:app:snort:hit` (`:flow`, `:time`, src/dst) | `it:app:snort:matched` (`base:matched`: `:target`, `:time`, `:rule:version`) |
+| Suricata rule | `it:app:suricata:rule` | `it:app:suricata:rule`, a `meta:rule` subtype |
+| Suricata match | `it:app:suricata:matched` (`:target`) | `it:app:suricata:matched` (`base:matched`, same shape as Snort's) |
+| Ruleset | `meta:ruleset -(has)> it:app:snort:rule` declared; the Suricata edge is not | `meta:ruleset -(has)> meta:rule`, covering both engines |
+| Detects edge | `-(detects)> *` | Typed targets: `risk:vuln`, `it:software`, `meta:technique`, `it:softwarename` |
 
-The 2.x plan works as follows. Both engines' rules live in feed `meta:ruleset`s. For Suricata this uses an undeclared `-(has)>` light edge, so a test should confirm that the Cortex accepts it ([Synapse 2.x base.py](https://github.com/vertexproject/synapse/blob/master/synapse/models/base.py)). Hits set the props each form actually has: `:flow`, endpoints and `:time` for Snort, and `:target`, `:time` and `:version` for Suricata. Both get `<(seen)+ meta:source` and `<(refs)+ file:bytes`, as PR #17 does. `:time` is the first alert, and `count`, `msg`, `action` and the last-seen time go into the returned dict. `:dropped` stays unset, because offline "would_drop" isn't a drop. Snort rules keep `:engine` 2 or 3. The service's internal push protocol widens from PR #17's integer engine to a named engine (`snort2`, `snort3`, `suricata`), because Suricata rules have no `:engine` prop to carry the distinction. The merged package takes the higher `synapse_minversion`, 2.234.0 from PR #17 instead of PR #16's 2.137.0 ([PR17 slib.snort.yaml](https://github.com/gormaniac/stormsvcs/blob/83354b1f3260ff15c0f7e7e95dcdb32721b1f706/svcs/snort/src/snortsvc/pkgproto/slib.snort.yaml)). The 3.x port should be its own later milestone and a major version, once Vertex publishes what replaces the Suricata forms.
+The 2.x plan works as follows. Both engines' rules live in feed `meta:ruleset`s. For Suricata this uses an undeclared `-(has)>` light edge, so a test should confirm that the Cortex accepts it ([Synapse 2.x base.py](https://github.com/vertexproject/synapse/blob/master/synapse/models/base.py)). Hits set the props each form actually has: `:flow`, endpoints and `:time` for Snort, and `:target`, `:time` and `:version` for Suricata. Both get `<(seen)+ meta:source` and `<(refs)+ file:bytes`, as PR #17 does. `:time` is the first alert, and `count`, `msg`, `action` and the last-seen time go into the returned dict. `:dropped` stays unset, because offline "would_drop" isn't a drop. Snort rules keep `:engine` 2 or 3. The service's internal push protocol widens from PR #17's integer engine to a named engine (`snort2`, `snort3`, `suricata`), because Suricata rules have no `:engine` prop to carry the distinction. The merged package takes the higher `synapse_minversion`, 2.234.0 from PR #17 instead of PR #16's 2.137.0 ([PR17 slib.snort.yaml](https://github.com/gormaniac/stormsvcs/blob/83354b1f3260ff15c0f7e7e95dcdb32721b1f706/svcs/snort/src/snortsvc/pkgproto/slib.snort.yaml)). The 3.x port should be its own later milestone and a major version. It's mostly renames, because 3.7.0 keeps both engines' forms and gives their matches the same shape. It also needs a Python 3.14 base image, since the services pin Python 3.11 today.
 
 ## Commands, rules and settings each get one clear owner
 
@@ -215,7 +217,7 @@ PR #16 merges first, because it owns the flow table that everything else attache
 | 3. Snort port | 0.3.0 | Engine, rules, feeds and push code move into `pcapsvc`; commands renamed to `slib.pcap.*`; hits joined to dpkt flows by `pkt_num`; Snort engine runs under the wrapper | PR #17's 39 tests ported and passing; `pkt_num` parity proven; one `inet:flow` per session whichever engines ran |
 | 4. Suricata protocol pass | 0.4.0 | Suricata 8 builder stage; generated YAML; EVE parser; file-store replaces tshark file export; tshark narrowed to gap triggers | A parity suite shows Suricata matches or beats the PR #16 tshark output on every fixture except the documented gaps |
 | 5. Suricata rules | 0.5.0 | `it:app:suricata:rule`/`matched`; ET Open moved to the Suricata build; abuse.ch opt-in; per-rule load errors | ET Open loads with failures listed per guid; no duplicate ET hits across engines |
-| 6. Hardening and 3.x | 0.6.x, then 1.0.0 | Seccomp allowlist generated in CI by strace; optional unix-socket pool if load time warrants it; Synapse 3.x model module (major) | 3.x Cortex test suite green |
+| 6. Hardening and 3.x | 0.6.x, then 1.0.0 | Seccomp allowlist generated in CI by strace; optional unix-socket pool if load time warrants it; Synapse 3.x model module on a Python 3.14 base image, with a hit-to-`matched` migration (major) | 3.x Cortex test suite green |
 
 Testing follows PR #16's strongest habit: real recordings, not synthetic packets, for anything an engine parses. PR #16 already keeps loopback recordings for FTP, HTTP, RDP, SMTP, SSH, TLS and TLS 1.3 with a key log, plus a `capture.py` to re-record them ([PR16 README](https://github.com/gormaniac/stormsvcs/blob/claude/pcap-flow-analyzer/svcs/pcap/README.md)). The fixture set should grow to cover the corner cases this design depends on:
 
@@ -247,7 +249,7 @@ The sandbox gets its own suite, which runs probe commands through the same wrapp
 
 | Risk | Likelihood and impact | Mitigation |
 |---|---|---|
-| Synapse 3.x removes `it:app:suricata:*`, with no published replacement | Certain on the 3.x branch; high rework | All names in one model module; a 3.x port as a separate major |
+| Synapse 3.x renames match and flow props (`it:app:snort:hit` to `it:app:snort:matched`, `:src*`/`:dst*` to `:client*`/`:server*`) and needs Python 3.14 | Certain for 3.7.0; moderate rework | All names in one model module; a 3.x port as a separate major, with the base image move |
 | Talos Registered rules redistributed through the Cortex | Medium; licensing exposure | Off by default, operator oinkcode only, documented warning |
 | Snort `pkt_num` ≠ frame number | Unknown; breaks tier-1 joins | Parity test before relying on it; tuple-plus-time fallback |
 | Flow mismatches from VLAN, timeouts, `tcp_reuse`, or UDP direction swaps | Medium; orphan hits | VLAN in the flow key, raised Suricata timeouts, endpoint-normalised joins, `unmatched` counter |
@@ -265,7 +267,7 @@ The sandbox gets its own suite, which runs probe commands through the same wrapp
 | Is Snort mandatory in the published image, or a build-time option? | Built by default, switchable off at build, start and run time |
 | Should `axon:url` become optional, with Storm streaming as the PR #17 default? | Yes; file upload only when it is set |
 | Should Decode As also drive Suricata `detection-ports`? | Later, optional |
-| How should Suricata rules be modelled in 3.x (`meta:rule` with a type?) | Wait for Vertex's model, then do a major bump |
+| When should the services move to Synapse 3, which needs a Python 3.14 base image? | After step 5, as the 1.0.0 major |
 | Should Snort decoder and inspector alerts (gid ≠ 1) and Suricata anomaly events be modelled? | Count them now and model them later |
 | Should Suricata's DNS, QUIC, SMB and Kerberos events feed new enrichment? | After step 5, as minor bumps |
 
@@ -273,4 +275,4 @@ The sandbox gets its own suite, which runs probe commands through the same wrapp
 
 The three services stop conflicting once each becomes a contributor to one dpkt flow table instead of an owner of flows. Their real disagreements were about identity, and all of it moves to dpkt: flow guids, frame numbering and direction. Then Snort and Suricata are just rule engines, and tshark is just a decryption-capable specialist. The engine question resolves the same way. Suricata is the better analyser and the wrong Snort engine. Snort 3 stays because Talos only speaks Snort, not because it adds analysis.
 
-Two choices are time-sensitive. The flow identity has to be fixed inside PR #16 while 0.1.0 is unreleased; after release the same change counts as breaking and orphans every existing flow. Any Synapse 3.x exposure has to stay behind one model module, because the 3.x branch deletes the Suricata forms this plan uses. Everything else, including Suricata rules, the unix-socket pool, Decode As for Suricata and the seccomp allowlist, can land as ordinary minor bumps. The tshark sandbox is the first new feature, at 0.2.0. It works in a stock container with no changes to how the container is run, and the same wrapper then covers the two new engines.
+Two choices are time-sensitive. The flow identity has to be fixed inside PR #16 while 0.1.0 is unreleased; after release the same change counts as breaking and orphans every existing flow. Any Synapse 3.x exposure has to stay behind one model module, because 3.7.0 renames the match forms and flow props this plan uses, even though it keeps separate Snort and Suricata forms. Everything else, including Suricata rules, the unix-socket pool, Decode As for Suricata and the seccomp allowlist, can land as ordinary minor bumps. The tshark sandbox is the first new feature, at 0.2.0. It works in a stock container with no changes to how the container is run, and the same wrapper then covers the two new engines.

@@ -31,6 +31,10 @@ Caveats:
 - Some notes contain paths from the research environment (ex. `/home/user/stormsvcs/...`). They mean
   the matching paths in this repo.
 - Advisory counts and version facts are as of 2026-10-31.
+- Synapse 3 facts were corrected against the released 3.7.0 wheel. The first version wrongly said
+  Synapse 3 was unreleased and had dropped the `it:app:suricata:*` forms. 3.7.0 keeps separate Snort
+  and Suricata rule and `matched` forms, renames `it:app:snort:hit` to `it:app:snort:matched`, and
+  requires Python 3.14.
 - `prototypes/landlock_exec.py` is an unreviewed ~25 line ctypes proof of concept from the sandboxing
   research. Usage: `python landlock_exec.py <comma separated allowed paths> <command> [args...]`. It
   limits the command to reading system directories and the listed paths, then execs it. It isn't part
