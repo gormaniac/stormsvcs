@@ -117,7 +117,8 @@ service (or run `slib.capa.admin.sync --reload`), and the next package load impo
 to run if the rules on disk changed since the service loaded them, so results always match the imported
 rules.
 
-capa runs in a subprocess per file, and caches its parsed rules in the service's storage.
+capa runs in a subprocess per file, and caches its parsed rules in the service's storage. The cache is
+built when the rules are loaded, and the caches of any other rules are deleted once it's built.
 
 ## Tests
 

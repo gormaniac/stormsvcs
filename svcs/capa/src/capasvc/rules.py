@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import capa.rules
+import capa.rules.cache
 import synapse.common as s_common
 import synapse.datamodel as s_datamodel
 import synapse.exc as s_exc
@@ -258,6 +259,15 @@ class CapaRules:
 
         self.rules = rules
         self.sha256 = hashRules(files)
+        # The name capa gives its cache of these rules, see cacheName.
+        self.cacheId = capa.rules.cache.compute_cache_identifier(
+            [text.encode("utf-8") for _, text in files]
+        )
+
+    def cacheName(self, cachedir: str) -> str:
+        """The file name capa caches these rules under in a cache directory."""
+
+        return capa.rules.cache.get_cache_path(Path(cachedir), self.cacheId).name
 
     def url(self, relpath: str) -> str | None:
         """The URL that documents a rule, by its path relative to the rules directory."""

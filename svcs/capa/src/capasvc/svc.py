@@ -267,6 +267,23 @@ class CapaSvc(s_cell.Cell):
         if proc.returncode != 0:
             mesg = stderrMesg(stderr.decode("utf-8", "replace"))
             logger.warning(f"Unable to build the capa rules cache: {mesg}")
+            return
+
+        self._cleanCache(rules)
+
+    def _cleanCache(self, rules: CapaRules) -> None:
+        """Delete capa's caches of rules other than these (ex. an older version of the rules)."""
+
+        keep = rules.cacheName(self.cachedir)
+        for name in os.listdir(self.cachedir):
+            if name == keep or not (name.startswith("capa-") and name.endswith(".cache")):
+                continue
+            try:
+                os.unlink(os.path.join(self.cachedir, name))
+            except OSError as err:  # pragma: no cover - the cache is only an optimization
+                logger.warning(f"Unable to delete the old capa rules cache {name}: {err}")
+                continue
+            logger.info(f"Deleted the old capa rules cache {name}")
 
     def _getRules(self) -> CapaRules:
         if self.capaRules is None:

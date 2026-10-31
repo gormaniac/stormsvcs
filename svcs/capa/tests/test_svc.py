@@ -268,6 +268,39 @@ class TestCapaSvc(s_tests.SynTest):
                         await svc.scan(SAMPLE_SHA256, fmt="sc64")
                     assert "The capa rules on disk can't be read" in cm.exception.mesg
 
+    async def test_cache_cleanup(self):
+        # Reloading the rules deletes capa's caches of other rules, once the new cache is built.
+        with self.getTestDir() as dirn:
+            rules = os.path.join(dirn, "rules")
+            shutil.copytree(RULES, rules)
+            async with self.getTestCell(CapaSvc, svcConf(**{"capa:rules": rules})) as svc:
+                await asyncio.wait_for(svc.cacheReady.wait(), timeout=60)
+                old = svc.capaRules.cacheName(svc.cachedir)
+                assert os.listdir(svc.cachedir) == [old]
+
+                other = os.path.join(svc.cachedir, "notacache.txt")
+                with open(other, "w") as fd:
+                    fd.write("x")
+
+                with open(os.path.join(rules, "testing", "never.yml"), "a") as fd:
+                    fd.write("# changed\n")
+                await svc.reload()
+                await asyncio.wait_for(svc.cacheReady.wait(), timeout=60)
+
+                new = svc.capaRules.cacheName(svc.cachedir)
+                assert new != old
+                assert sorted(os.listdir(svc.cachedir)) == sorted([new, "notacache.txt"])
+
+                # A failed build (capa rejects a rule that depends on a missing rule) keeps them.
+                with open(os.path.join(rules, "testing", "bad.yml"), "w") as fd:
+                    fd.write(
+                        "rule:\n  meta:\n    name: bad\n    scopes:\n      static: function\n"
+                        "      dynamic: unsupported\n  features:\n    - match: newp\n"
+                    )
+                await svc.reload()
+                await asyncio.wait_for(svc.cacheReady.wait(), timeout=60)
+                assert new in os.listdir(svc.cachedir)
+
     async def test_cache_lock(self):
         # Rule cache builds run one at a time, and scans wait for the latest one.
         async with self.getTestCell(CapaSvc, svcConf()) as svc:
