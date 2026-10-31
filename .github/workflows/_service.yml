@@ -29,6 +29,10 @@ permissions:
   contents: read
   packages: write
 
+env:
+  # The ruff locked in the root uv.lock. Bump it with that lock so local and CI runs agree.
+  RUFF_VERSION: "0.16.0"
+
 jobs:
 
   test:
@@ -46,6 +50,14 @@ jobs:
           enable-cache: true
           cache-dependency-glob: svcs/${{ inputs.service }}/uv.lock
 
+      # Ruff reads the [tool.ruff] config in the root pyproject.toml, which targets Python 3.11.
+      # Only a few rules block, so this passes on today's code: syntax errors (including syntax
+      # newer than 3.11, ex. `except A, B:`), undefined names (ex. an unquoted forward
+      # reference), and a few other errors that would break at runtime. It runs before the
+      # install so these fail early.
+      - name: Ruff gate
+        run: uvx ruff@${{ env.RUFF_VERSION }} check --select E9,F63,F7,F82 --output-format=github .
+
       - name: Setup Python
         run: uv python install
 
@@ -54,6 +66,32 @@ jobs:
 
       - name: Run tests
         run: uv run pytest tests
+
+      # Every rule and the formatter, but it never fails the job. Use it to see what ruff
+      # would change in a service, and to help pick a stricter default config later. The
+      # counts and unformatted files are in the job summary, and the full findings and format
+      # diffs are in the log.
+      - name: Ruff report (non-blocking)
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: |
+          set +e
+          ruff="uvx ruff@${RUFF_VERSION}"
+          {
+            echo "## Ruff report for \`svcs/${{ inputs.service }}\` (non-blocking)"
+            echo
+            echo '```'
+            $ruff check --statistics .
+            echo
+            $ruff format --check --output-format=concise .
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          $ruff check --output-format=concise .
+          check_rc=$?
+          $ruff format --check .
+          format_rc=$?
+          # A non-zero exit marks this step as failed in the UI, without failing the job.
+          exit $(( check_rc || format_rc ))
 
   docker:
     runs-on: ubuntu-latest
