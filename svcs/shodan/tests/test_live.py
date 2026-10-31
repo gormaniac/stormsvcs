@@ -149,6 +149,8 @@ class TestLiveKeyed(s_tests.SynTest):
         async with liveSvc(self, apikey=APIKEY) as (core, _svc):
             msgs = await core.stormlist("slib.shodan.host --ip 45.33.32.156")
             self.stormHasNoErr(msgs)
-            # scanme.nmap.org's banners list Ubuntu's CPE next to OpenSSH's and Apache's.
-            nodes = await core.nodes("it:prod:softver:cpe^='cpe:2.3:o:canonical:ubuntu_linux'")
-            assert nodes and all(n.get("name") is None for n in nodes)
+            # scanme.nmap.org's banners list OS CPEs (ex. Ubuntu's) next to OpenSSH's and Apache's.
+            # A banner's product/version must never be applied to an OS CPE.
+            assert await core.nodes("it:prod:softver")
+            nodes = await core.nodes("it:prod:softver:cpe^='cpe:2.3:o:'")
+            assert all(n.get("name") is None and n.get("vers") is None for n in nodes)

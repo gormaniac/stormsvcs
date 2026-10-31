@@ -52,6 +52,9 @@ def normParam(valu: Any) -> str:
 
     if isinstance(valu, bool):
         return "true" if valu else "false"
+    if isinstance(valu, Mapping):
+        # Ex. POST /shodan/scan's {ip: [[port, protocol], ...]} form of "ips".
+        return json.dumps(valu)
     if isinstance(valu, (list, tuple, set)):
         return ",".join(str(v) for v in valu)
     return str(valu)
@@ -62,10 +65,12 @@ def normParams(params: Mapping[str, Any] | None) -> dict[str, str]:
 
     if not params:
         return {}
+    if not isinstance(params, Mapping):
+        raise ShodanApiError(f"Expected a dict of params, got {type(params).__name__}: {params!r}")
     return {k: normParam(v) for k, v in params.items() if v is not None}
 
 
-def errMesg(code: int, data: Any, text: str) -> str:
+def errMesg(code: int, data: Any, text: str, keyed: bool = True) -> str:
     """Pull the most useful error message out of a Shodan error response.
 
     The main API uses ``{"error": ...}`` while InternetDB/CVEDB (FastAPI) use
@@ -84,6 +89,9 @@ def errMesg(code: int, data: Any, text: str) -> str:
 
     # Shodan returns an empty body or an HTML page for these, both for bad keys and
     # for valid keys whose plan doesn't include the API (ex. the Streaming API).
+    # The keyless APIs can't have key problems, ex. a 403 there is an IP/WAF block.
+    if not keyed:
+        return f"HTTP {code}"
     if code == 401:
         return "Shodan rejected the API key: it is invalid, or its plan doesn't include this API (HTTP 401)"
     if code == 403:
@@ -179,6 +187,9 @@ class ShodanClient:
             If Shodan can't be reached, returns an error, or returns invalid JSON.
         """
 
+        if json_data is not None and form is not None:
+            raise ShodanApiError("A request can't have both a JSON body and a form body.")
+
         url, params = self._prep(base, path, apikey, params)
         data = normParams(form) if form is not None else None
 
@@ -208,7 +219,7 @@ class ShodanClient:
                 raise ShodanApiError(f"Unable to parse the JSON response from {url}", code=code)
 
         if code >= 400 or (isinstance(data, dict) and "error" in data):
-            raise ShodanApiError(errMesg(code, data, text), code=code)
+            raise ShodanApiError(errMesg(code, data, text, keyed=base in KEYED_APIS), code=code)
 
         return data
 

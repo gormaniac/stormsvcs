@@ -126,6 +126,20 @@ class TestNorm(s_tests.SynTest):
             {"cpe": None, "product": "nginx", "version": "1.24.0"},
         ]
 
+        # A shorter version of another product's CPE (OpenSSL 1.1) must not match nginx 1.18.0.
+        cpes = norm.normCpes(["cpe:2.3:a:openssl:openssl:1.1", "cpe:2.3:a:f5:nginx:1.18.0"])
+        assert norm.normSoftvers(cpes, "nginx", "1.18.0") == [
+            {"cpe": cpes[0], "product": None, "version": None},
+            {"cpe": cpes[1], "product": "nginx", "version": "1.18.0"},
+        ]
+        assert norm.normSoftvers(cpes[:1], "x", "1.1.0") == [
+            {"cpe": cpes[0], "product": None, "version": None},
+            {"cpe": None, "product": "x", "version": "1.1.0"},
+        ]
+
+        # CPE 2.3 escapes colons within a component.
+        assert norm._cpeInfo(r"cpe:2.3:a:acme:foo\:bar:2.0:*:*:*:*:*:*:*") == ("a", "2.0")
+
         assert norm.normSoftvers(["cpe:/a:ntp:ntp:3"], "ntpd", "3") == [
             {"cpe": "cpe:/a:ntp:ntp:3", "product": "ntpd", "version": "3"},
         ]
@@ -211,6 +225,10 @@ class TestClient(s_tests.SynTest):
         assert normParam(3) == "3"
         assert normParams({"a": None, "b": True}) == {"b": "true"}
         assert normParams(None) == {}
+        # Dicts (ex. POST /shodan/scan's {ip: [[port, protocol]]} "ips") are sent as JSON.
+        assert normParam({"1.2.3.4": [[443, "https"]]}) == '{"1.2.3.4": [[443, "https"]]}'
+        with self.raises(ShodanApiError):
+            normParams("ips=1.2.3.4")
 
     def test_err_mesg(self):
         assert errMesg(404, {"error": "nope"}, "") == "nope"
@@ -220,6 +238,8 @@ class TestClient(s_tests.SynTest):
         assert errMesg(401, None, "").startswith("Shodan rejected the API key")
         # Ex. /org and /shodan/data on plans without them, which return an HTML page.
         assert errMesg(403, None, "<html>").startswith("Access denied")
+        # The keyless APIs can't have key problems, ex. a WAF's 403 page.
+        assert errMesg(403, None, "<html>", keyed=False) == "HTTP 403"
         assert errMesg(500, None, "") == "HTTP 500"
         assert errMesg(500, None, "plain error") == "plain error"
         # The Streaming API wraps an HTML error page in JSON.
@@ -247,6 +267,10 @@ class TestClient(s_tests.SynTest):
                 await client.request("get", "/shodan/ports", apikey="badkey")
             assert cm.exception.code == 401
             assert cm.exception.mesg == "Invalid API key"
+
+            with self.raises(ShodanApiError) as cm:
+                await client.request("post", "/shodan/alert", apikey="key", json_data={}, form={})
+            assert "both a JSON body and a form body" in cm.exception.mesg
 
             with self.raises(ShodanApiError) as cm:
                 await client.request("get", "/shodan/host/10.0.0.1", apikey="key")

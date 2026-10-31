@@ -6,6 +6,7 @@ without a Cortex.
 """
 
 
+import re
 from typing import Any
 
 
@@ -57,7 +58,8 @@ def normCpes(cpes: Any) -> list[str]:
 def _cpeInfo(cpe: str) -> tuple[str | None, str | None]:
     """Return the (part, version) of a CPE 2.3 or 2.2 string. Wildcard versions are None."""
 
-    parts = cpe.split(":")
+    # CPE 2.3 escapes colons inside a component as "\:".
+    parts = re.split(r"(?<!\\):", cpe)
     if cpe.lower().startswith("cpe:2.3:"):
         part = parts[2] if len(parts) > 2 else None
         vers = parts[5] if len(parts) > 5 else None
@@ -79,19 +81,32 @@ def normSoftvers(cpes: list[str], product: str | None, version: str | None) -> l
     version. When no CPE matches, the product/version get their own entry without a CPE.
     """
 
-    retn = []
-    matched = False
-    for cpe in cpes:
-        item = {"cpe": cpe, "product": None, "version": None}
-        part, vers = _cpeInfo(cpe)
-        if (product and version and not matched and part == "a" and vers
-                and str(version).lower().startswith(vers.lower())):
-            item["product"] = product
-            item["version"] = version
-            matched = True
-        retn.append(item)
+    # Prefer a CPE whose version is the banner's exact version, then one whose version is a
+    # prefix of it at a word boundary (ex. "6.6.1p1" for "6.6.1p1 Ubuntu 2ubuntu2.13", but
+    # not "1.1" for "1.18.0").
+    match = None
+    if product and version:
+        lvers = str(version).lower()
+        candidates = []
+        for cpe in cpes:
+            part, vers = _cpeInfo(cpe)
+            if part == "a" and vers:
+                candidates.append((cpe, vers.lower()))
 
-    if product and not matched:
+        exact = [cpe for cpe, vers in candidates if vers == lvers]
+        prefix = [cpe for cpe, vers in candidates
+                  if len(lvers) > len(vers) and lvers.startswith(vers)
+                  and not (lvers[len(vers)].isalnum() or lvers[len(vers)] == ".")]
+        match = (exact or prefix or [None])[0]
+
+    retn = []
+    for cpe in cpes:
+        if cpe == match:
+            retn.append({"cpe": cpe, "product": product, "version": version})
+        else:
+            retn.append({"cpe": cpe, "product": None, "version": None})
+
+    if product and match is None:
         retn.append({"cpe": None, "product": product, "version": version})
 
     return retn
