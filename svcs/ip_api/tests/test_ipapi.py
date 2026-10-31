@@ -179,6 +179,18 @@ class TestIpApiSvcQueryHttp(s_tests.SynTest):
                 assert headers["X-Rl"] == "44"
                 assert headers["X-Ttl"] == "60"
 
+    async def test_query_success_without_as_field(self):
+        """A success body missing the "as" field entirely must not KeyError -
+        it falls back to "", ip-api.com's own value for IPs with no ASN."""
+
+        with self.getTestDir() as dirn:
+            async with await IpApiSvc.anit(dirn) as svc:
+                with vcr.use_cassette(str(CASSETTE_DIR / "ipapi_query_success_noas.yaml")):
+                    data, headers = await svc._query("192.0.2.1")
+
+                assert data["status"] == "success"
+                assert data["as_"] == ""
+
     async def test_query_returns_failure_response(self):
         """An HTTP 200 "fail" body has no "as" key - _query() must return it
         intact (no KeyError) so _processQuery() can report the failure."""

@@ -89,7 +89,6 @@ commands:
     cmdargs:
       - - prefix
         - type: str
-          default: ''
           help: |
             The custom tag prefix to use.
 
