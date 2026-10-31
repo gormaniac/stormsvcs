@@ -1,0 +1,21 @@
+name: PCAP Pipeline
+
+on:
+  workflow_dispatch:
+  workflow_call:
+  pull_request:
+    paths:
+      - "svcs/pcap/**"
+      - ".github/workflows/pcap.yml"
+      - ".github/workflows/_service.yml"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  pipeline:
+    uses: ./.github/workflows/_service.yml
+    with:
+      service: pcap
+    secrets: inherit

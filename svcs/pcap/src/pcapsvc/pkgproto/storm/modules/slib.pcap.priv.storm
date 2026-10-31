@@ -1,0 +1,12 @@
+// Privileged (asroot) wrappers around the slib.pcap service.
+// Emits the service's {status, mesg, data} dicts, see pcapsvc.svc.PcapSvc.flows.
+
+init {
+    $svc = $lib.service.get("slib.pcap")
+}
+
+function flows(sha256, timeout=$lib.null, limit=$lib.null, handshake=$lib.null) {
+    for $retn in $svc.flows($sha256, timeout=$timeout, limit=$limit, handshake=$handshake) {
+        emit $retn
+    }
+}

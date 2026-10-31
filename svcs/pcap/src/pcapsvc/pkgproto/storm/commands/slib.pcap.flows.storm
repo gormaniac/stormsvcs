@@ -1,0 +1,25 @@
+init {
+    $pcap = $lib.import(slib.pcap.lib)
+    $opts = ({"tag": $cmdopts.tag, "host": $cmdopts.host})
+}
+
+if $cmdopts.sha256s {
+    // SHA-256s ignore inbound nodes.
+    spin |
+    for $sha256 in $cmdopts.sha256s {
+        for $n in $pcap.ingest($sha256, timeout=$cmdopts.timeout, limit=$cmdopts.limit,
+                               handshake=$cmdopts.handshake, opts=$opts) {
+            yield $n
+        }
+    }
+}
+else {
+    if ($node.form() = "file:bytes" and :sha256) {
+        divert $cmdopts.yield $pcap.nodes($pcap.ingest(:sha256, timeout=$cmdopts.timeout,
+            limit=$cmdopts.limit, handshake=$cmdopts.handshake, file=$node, opts=$opts))
+    } else {
+        $lib.warn("slib.pcap.flows: Unable to analyze {form} {repr}, it needs to be a file:bytes with a :sha256.",
+                  form=$node.form(), repr=$node.repr())
+        spin
+    }
+}

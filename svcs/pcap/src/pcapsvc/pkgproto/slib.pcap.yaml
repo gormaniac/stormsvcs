@@ -1,0 +1,92 @@
+name: slib.pcap
+version: 0.1.0
+guid: e02a89d21d5b4eb588a03a7156b3b467
+
+synapse_minversion: [2, 137, 0]
+
+genopts:
+    dotstorm: true
+
+author:
+  url: https://github.com/gormaniac
+  name: John Gorman
+
+desc: A Storm Service that reads PCAP files from an Axon and models their network flows as inet:flow nodes.
+
+docs:
+  - title: README
+    path: README.md
+
+perms:
+  - perm: [ slib, pcap, user ]
+    gate: cortex
+    desc: Analyze PCAP files in the Axon and model their flows.
+
+modules:
+  # Privileged module - the only module that talks to the service.
+  - name: slib.pcap.priv
+    asroot:perms:
+      - [ slib, pcap, user ]
+
+  # Unprivileged modules - node edits here run as the calling user.
+  - name: slib.pcap.lib
+    perms:
+      - [ slib, pcap, user ]
+  - name: slib.pcap.model
+    perms:
+      - [ slib, pcap, user ]
+
+commands:
+
+  - name: slib.pcap.flows
+    perms:
+      - [ slib, pcap, user ]
+    descr: |
+      Read PCAP files (pcap, pcapng, or either gzip compressed) from the Axon and model
+      every network flow in them as an inet:flow node.
+
+      Packets are grouped into bidirectional flows by IP protocol and endpoints (plus ports
+      for TCP and UDP). The client (:src) is the side that sent the TCP SYN, the ICMP
+      request, or the first packet. A flow ends when it's idle for --timeout seconds, or a
+      new TCP connection reuses its ports. Each flow is linked to its PCAP's file:bytes with
+      a -(refs)> edge and shares an inet:flow:from with every other flow from that PCAP.
+
+      Examples:
+
+        file:bytes:mime=application/vnd.tcpdump.pcap | slib.pcap.flows
+
+        file:bytes=sha256:<sha256> | slib.pcap.flows --yield --timeout 60 --tag cno.case.x
+
+        slib.pcap.flows <sha256> --yield | +inet:flow:dst:port=443
+    cmdargs:
+      - - sha256s
+        - type: str
+          nargs: "*"
+          help: SHA-256s of PCAPs in the Axon to analyze instead of the inbound nodes.
+      - - --timeout
+        - type: int
+          default: null
+          help: Seconds a flow can be idle before a new flow starts, 0 to never time out (service default 300).
+      - - --limit
+        - type: int
+          default: 0
+          help: The max number of flows to model per PCAP (0 for the service's max).
+      - - --handshake
+        - type: int
+          default: null
+          help: The max characters kept from each side's first text payload, 0 for none (service default 1024).
+      - - --tag
+        - type: str
+          default: null
+          help: A tag to add to every flow.
+      - - --host
+        - type: str
+          default: null
+          help: The it:host that captured the traffic, set as each flow's :capture:host.
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the inet:flow nodes instead of the inbound nodes.
+    cmdinputs:
+      - form: file:bytes
+        help: PCAP files to analyze, by :sha256.

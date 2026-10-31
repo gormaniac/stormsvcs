@@ -1,0 +1,68 @@
+// Model the flows the slib.pcap service finds (see pcapsvc.flows.Flow.asdict) in Synapse.
+//
+// Node edits here run as the calling user. Every flow is linked to the slib.pcap
+// meta:source node with a -(seen)> edge.
+
+init {
+    $sourceGuid = "cae9b5f5923a48b9a1a691f851a77429"
+}
+
+// The file:bytes node for a PCAP's SHA-256, created if needed.
+function fileNode(sha256) {
+    [ file:bytes=$sha256 ]
+    return($node)
+}
+
+// The inet:flow:from guid shared by every flow from a PCAP.
+function fromGuid(sha256) {
+    return($lib.guid(slib.pcap, pcap, $sha256))
+}
+
+// Set the props for one side (src or dst) of a flow.
+function side(n, name, s, proto) {
+    $txcount = `{$name}:txcount`
+    $txbytes = `{$name}:txbytes`
+    $protoprop = `{$name}:proto`
+    $port = `{$name}:port`
+    $handshake = `{$name}:handshake`
+    if ($s.ip.find(":") = $lib.null) { $ip = `{$name}:ipv4` } else { $ip = `{$name}:ipv6` }
+    yield $n
+    [
+        :$txcount=$s.pkts
+        :$txbytes=$s.bytes
+        :$ip=$s.ip
+        :$protoprop ?= $proto
+        :$port ?= $s.port
+        :$handshake ?= $s.handshake
+    ]
+    return($node)
+}
+
+// Create (or update) the inet:flow node for a flow and return it.
+//
+// f is a flow from the service, file is the PCAP's file:bytes node, and opts may have
+// a "tag" to add and a "host" (it:host) to set as the :capture:host.
+function flow(f, file, opts=$lib.null) {
+    if ($opts = $lib.null) { $opts = ({}) }
+    $sha256 = $file.props.sha256
+    [ inet:flow=$f.iden
+        :time=$f.time
+        :duration=$f.duration
+        :from=$fromGuid($sha256)
+        :ip:proto=$f.ipproto
+        :tot:txcount=$f.pkts
+        :tot:txbytes=$f.bytes
+        :ip:tcp:flags ?= $f."tcp:flags"
+        :raw=$f
+        .seen=($f.time, $f.last)
+        <(seen)+ { [ meta:source=$sourceGuid :name="slib.pcap" ] }
+        <(refs)+ { yield $file }
+    ]
+    $side($node, src, $f.src, $f.proto)
+    $side($node, dst, $f.dst, $f.proto)
+    if $f.src.addr { [ :src=$f.src.addr ] }
+    if $f.dst.addr { [ :dst=$f.dst.addr ] }
+    if $opts.host { [ :capture:host=$opts.host ] }
+    if $opts.tag { [ +#$opts.tag ] }
+    return($node)
+}
