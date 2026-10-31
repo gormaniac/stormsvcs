@@ -142,7 +142,7 @@ PRINTABLE = frozenset(range(0x20, 0x7F)) | {0x09, 0x0A, 0x0D}
 """The bytes counted as printable when deciding if a payload is text."""
 
 DEFAULT_TIMEOUT = 300
-"""The default seconds a flow can be idle before a packet with the same endpoints starts a new flow."""
+"""Default seconds a flow can be idle before a packet between its endpoints starts a new flow."""
 DEFAULT_HANDSHAKE = 1024
 """The default max number of characters saved from a flow's first text payload in each direction."""
 
@@ -422,7 +422,7 @@ def tcpFlagNames(flags: int) -> list[str]:
 
 
 def addrValu(proto: str | None, ip: str, port: int | None) -> str | None:
-    """An inet:addr (inet:client/inet:server) value for an endpoint, or None if there can't be one."""
+    """An inet:addr (inet:client/inet:server) value for an endpoint, or None if there can't be."""
 
     if proto not in ADDR_PROTOS:
         return None

@@ -91,7 +91,9 @@ FILTER = (
 DECODE_AS = re.compile(
     r"^[a-z][a-z0-9_.-]{0,63}==[0-9]{1,10}(-[0-9]{1,10})?,[a-z][a-z0-9_.-]{0,63}$"
 )
-"""A valid "Decode As" rule (tshark's -d), ex. ``tcp.port==8443,tls`` or ``udp.port==5000-5010,rtp``.
+"""A valid "Decode As" rule (tshark's -d).
+
+Ex. ``tcp.port==8443,tls`` or ``udp.port==5000-5010,rtp``.
 
 Rules are the only tshark option Storm users can set per run, so they're strictly validated.
 """
