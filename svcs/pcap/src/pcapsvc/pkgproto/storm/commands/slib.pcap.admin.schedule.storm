@@ -1,0 +1,36 @@
+init {
+    $admin = $lib.import(slib.pcap.priv.admin)
+    $pcap = $lib.import(slib.pcap.lib)
+    $util = $lib.import(slib.pcap.util)
+    $util.warnNoAxon("slib.pcap.admin.schedule", $admin.hasAxon())
+
+    if ($cmdopts.enable and $cmdopts.disable) {
+        $lib.warn("slib.pcap.admin.schedule: Use --enable or --disable, not both.")
+    } else {
+        if $cmdopts.period {
+            try {
+                $job = $admin.schedule($cmdopts.period)
+                $lib.print("slib.pcap.admin.schedule: slib.pcap.sync now runs {period} (cron {iden}).",
+                    period=$cmdopts.period, iden=$job.iden)
+            } catch * as err {
+                $lib.warn("slib.pcap.admin.schedule: Unable to schedule slib.pcap.sync with period {period}: {err}",
+                    period=$cmdopts.period, err=$err.mesg)
+            }
+        }
+        if ($cmdopts.enable or $cmdopts.disable) {
+            if (not $admin.enable(enabled=$cmdopts.enable)) {
+                $lib.warn("slib.pcap.admin.schedule: There is no sync cron job, create one with --period.")
+            }
+        }
+
+        $job = $pcap.schedule()
+        if $job {
+            $state = disabled
+            if $job.enabled { $state = enabled }
+            $lib.print("slib.pcap.admin.schedule: cron {iden} ({state}) runs slib.pcap.sync, in view {view}, last run: {last}",
+                iden=$job.iden, state=$state, view=$job.view, last=$util.when($job.laststart))
+        } else {
+            $lib.print("slib.pcap.admin.schedule: There is no sync cron job, create one with --period.")
+        }
+    }
+}

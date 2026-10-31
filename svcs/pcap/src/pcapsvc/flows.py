@@ -11,14 +11,15 @@ two together and returns the flows plus a summary of the capture.
 
 
 import gzip
-import hashlib
 import ipaddress
 import struct
 from collections.abc import Iterator
 from typing import Any, BinaryIO, NamedTuple
 
 import dpkt
+import synapse.common as s_common
 
+from . import communityid as p_communityid
 from . import enrich as p_enrich
 
 
@@ -345,6 +346,11 @@ def readPackets(fd: BinaryIO, state: dict | None = None) -> Iterator[Packet]:
         state["error"] = str(err) or err.__class__.__name__
 
 
+FLOW_IDEN_VERSION = 2
+"""The version of the scheme ``Flow.asdict`` builds flow idens with. Changing what goes into an
+iden needs a new version, so the idens of the old and new schemes can't collide."""
+
+
 def _unwrapIp(pkt: Any) -> dpkt.ip.IP | dpkt.ip6.IP6 | None:
     """Find the IP packet inside a decoded link-layer packet (through VLAN, PPPoE, PPP, etc.)."""
 
@@ -355,6 +361,12 @@ def _unwrapIp(pkt: Any) -> dpkt.ip.IP | dpkt.ip6.IP6 | None:
             return None
         pkt = pkt.data
     return None
+
+
+def vlanIds(pkt: Any) -> tuple[int, ...]:
+    """The 802.1Q VLAN IDs (outermost first) an Ethernet frame is tagged with."""
+
+    return tuple(int(tag.id) for tag in getattr(pkt, "vlan_tags", None) or ())
 
 
 def _rawIp(buf: bytes) -> dpkt.ip.IP | dpkt.ip6.IP6 | None:
@@ -372,6 +384,8 @@ def _rawIp(buf: bytes) -> dpkt.ip.IP | dpkt.ip6.IP6 | None:
 
 def decodeIp(linktype: int, buf: bytes) -> dpkt.ip.IP | dpkt.ip6.IP6 | None:
     """Decode the IP packet in a captured packet, or None if it isn't an IP packet.
+
+    See ``decodePacket`` for the packet's VLAN IDs too.
 
     Raises
     ------
@@ -396,6 +410,16 @@ def decodeIp(linktype: int, buf: bytes) -> dpkt.ip.IP | dpkt.ip6.IP6 | None:
     if linktype == LINKTYPE_PPP:
         return _unwrapIp(dpkt.ppp.PPP(buf))
     raise KeyError(linktype)
+
+
+def decodePacket(linktype: int, buf: bytes) -> tuple[dpkt.ip.IP | dpkt.ip6.IP6 | None,
+                                                     tuple[int, ...]]:
+    """Decode a captured packet's IP packet (see ``decodeIp``) and its VLAN IDs."""
+
+    if linktype == LINKTYPE_ETHERNET:
+        eth = dpkt.ethernet.Ethernet(buf)
+        return _unwrapIp(eth), vlanIds(eth)
+    return decodeIp(linktype, buf), ()
 
 
 def textPayload(payload: bytes, size: int) -> str | None:
@@ -435,7 +459,7 @@ def addrValu(proto: str | None, ip: str, port: int | None) -> str | None:
 class Side:
     """The traffic sent by one side of a flow."""
 
-    __slots__ = ("ip", "port", "pkts", "bytes", "payload", "first")
+    __slots__ = ("bytes", "first", "ip", "payload", "pkts", "port")
 
     def __init__(self, ip: bytes, port: int | None) -> None:
         self.ip = ip
@@ -449,13 +473,29 @@ class Side:
 class Flow:
     """A bidirectional network flow, the packets sent between a client and a server."""
 
-    __slots__ = ("vers", "ipproto", "client", "server", "start", "last", "flags",
-                 "fins", "reset", "syn", "icmptypes", "index", "frames")
+    __slots__ = (
+        "client",
+        "fins",
+        "flags",
+        "frames",
+        "icmpfirst",
+        "icmptypes",
+        "index",
+        "ipproto",
+        "last",
+        "reset",
+        "server",
+        "start",
+        "syn",
+        "vers",
+        "vlans",
+    )
 
     def __init__(self, vers: int, ipproto: int, client: Side, server: Side, ts: int,
-                 index: int) -> None:
+                 index: int, vlans: tuple[int, ...] = ()) -> None:
         self.vers = vers
         self.ipproto = ipproto
+        self.vlans = vlans
         self.client = client
         self.server = server
         self.start = ts
@@ -465,6 +505,8 @@ class Flow:
         self.reset = False
         self.syn = False
         self.icmptypes: set[int] = set()
+        # The (sender is the client, type, code) of the first ICMP packet, for the Community ID.
+        self.icmpfirst: tuple[bool, int, int] | None = None
         self.index = index
         self.frames: list[tuple[bool, dict]] = []
 
@@ -492,6 +534,19 @@ class Flow:
             return "closed"
         return "open"
 
+    def communityId(self) -> str:
+        """The flow's Community ID (see ``pcapsvc.communityid``), the same one Suricata logs.
+
+        ICMP flows are by address, so their Community ID is the first ICMP packet's.
+        """
+
+        if self.ipproto in (1, 58) and self.icmpfirst is not None:
+            fromclient, itype, code = self.icmpfirst
+            src, dst = (self.client, self.server) if fromclient else (self.server, self.client)
+            return p_communityid.communityId(self.ipproto, src.ip, dst.ip, itype, code)
+        return p_communityid.communityId(self.ipproto, self.client.ip, self.server.ip,
+                                         self.client.port, self.server.port)
+
     def asdict(self, handshake: int = DEFAULT_HANDSHAKE, seed: Any = None) -> dict:
         """The flow as a dict of primitives that can be sent over Telepath.
 
@@ -502,6 +557,10 @@ class Flow:
         seed : Any
             A value (ex. the capture's SHA-256) included in the flow's iden, so the same flow
             from the same capture always has the same iden.
+
+        The iden is a Synapse guid of the iden scheme's version (``FLOW_IDEN_VERSION``), the
+        seed, the IP protocol, the client's and server's addresses and ports, the VLAN IDs, and
+        when the flow started (in nanoseconds).
         """
 
         proto = IPPROTOS.get(self.ipproto)
@@ -520,9 +579,9 @@ class Flow:
             }
 
         client, server = side(self.client), side(self.server)
-        key = (self.ipproto, client["ip"], client["port"], server["ip"], server["port"],
-               self.start)
-        iden = hashlib.md5(repr((seed, key)).encode(), usedforsecurity=False).hexdigest()
+        iden = s_common.guid(("slib.pcap.flow", FLOW_IDEN_VERSION, seed, self.ipproto,
+                              client["ip"], client["port"], server["ip"], server["port"],
+                              list(self.vlans), self.start))
 
         return {
             "iden": iden,
@@ -530,6 +589,8 @@ class Flow:
             "version": self.vers,
             "ipproto": self.ipproto,
             "proto": proto,
+            "vlans": list(self.vlans),
+            "community_id": self.communityId(),
             "src": client,
             "dst": server,
             "time": self.start // 1_000_000,
@@ -599,7 +660,7 @@ class FlowTable:
             self.last = pkt.ts
 
         try:
-            ip = decodeIp(pkt.linktype, pkt.data)
+            ip, vlans = decodePacket(pkt.linktype, pkt.data)
         except KeyError:
             self._skip("linktype")
             return None
@@ -611,13 +672,17 @@ class FlowTable:
             self._skip("nonip")
             return None
 
-        flow = self.addIp(pkt.ts, ip)
+        flow = self.addIp(pkt.ts, ip, vlans)
         if flow is not None and rec is not None:
             flow.frames.append((self.fromClient, rec))
         return flow
 
-    def addIp(self, ts: int, ip: dpkt.ip.IP | dpkt.ip6.IP6) -> Flow | None:
-        """Add a decoded IP packet, captured at ts (nanoseconds), to its flow."""
+    def addIp(self, ts: int, ip: dpkt.ip.IP | dpkt.ip6.IP6,
+              vlans: tuple[int, ...] = ()) -> Flow | None:
+        """Add a decoded IP packet, captured at ts (nanoseconds), to its flow.
+
+        Packets on different VLANs are different flows, even between the same endpoints.
+        """
 
         if isinstance(ip, dpkt.ip.IP):
             vers = 4
@@ -651,16 +716,18 @@ class FlowTable:
             payload = bytes(l4.data)
             if ipproto == 6:
                 flags = l4.flags
-        elif ipproto in (1, 58):
+        icmpcode = 0
+        if ipproto in (1, 58):
             if isinstance(l4, dpkt.Packet):
-                icmptype = l4.type
+                icmptype, icmpcode = l4.type, l4.code
             elif len(l4):
                 icmptype = l4[0]
+                icmpcode = l4[1] if len(l4) > 1 else 0
 
         self.decoded += 1
         src, dst = bytes(ip.src), bytes(ip.dst)
         a, b = (src, sport), (dst, dport)
-        key = (ipproto,) + ((a, b) if a <= b else (b, a))
+        key = (ipproto, vlans) + ((a, b) if a <= b else (b, a))
 
         flow = self.active.get(key)
         if flow is not None and self._expired(flow, ts, flags):
@@ -671,7 +738,8 @@ class FlowTable:
             if self.limit and self.count >= self.limit:
                 self.dropped += 1
                 return None
-            flow = self._newFlow(vers, ipproto, src, sport, dst, dport, ts, flags, icmptype)
+            flow = self._newFlow(vers, ipproto, src, sport, dst, dport, ts, flags, icmptype,
+                                 vlans)
             self.active[key] = flow
 
         side = flow.side(src, sport)
@@ -695,6 +763,8 @@ class FlowTable:
                 flow.fins |= 1 if side is flow.client else 2
         elif icmptype is not None:
             flow.icmptypes.add(icmptype)
+            if flow.icmpfirst is None:
+                flow.icmpfirst = (side is flow.client, icmptype, icmpcode)
 
         return flow
 
@@ -707,7 +777,8 @@ class FlowTable:
         return flow.closed and bool(flags & TCP_SYN) and not flags & TCP_ACK
 
     def _newFlow(self, vers: int, ipproto: int, src: bytes, sport: int | None, dst: bytes,
-                 dport: int | None, ts: int, flags: int, icmptype: int | None) -> Flow:
+                 dport: int | None, ts: int, flags: int, icmptype: int | None,
+                 vlans: tuple[int, ...] = ()) -> Flow:
         """Create a flow from its first packet, deciding which side is the client."""
 
         swap = False
@@ -730,7 +801,7 @@ class FlowTable:
             client, server = server, client
 
         self.count += 1
-        return Flow(vers, ipproto, client, server, ts, self.count - 1)
+        return Flow(vers, ipproto, client, server, ts, self.count - 1, vlans)
 
     def flows(self) -> list[Flow]:
         """Every flow, ordered by when they started."""
@@ -752,9 +823,52 @@ class FlowTable:
         }
 
 
+def matchLoose(flows: list[dict], loose: list[tuple[str, int | None, str, Any]]
+               ) -> tuple[dict[str, list[tuple[str, Any]]], int]:
+    """Match records that have no frame number to flows, by Community ID and time.
+
+    Parameters
+    ----------
+    flows : list[dict]
+        The flows (``Flow.asdict``), with their ``community_id``, ``time``, and ``last``.
+    loose : list
+        (Community ID, time in epoch millis or None, kind, record) of each record.
+
+    Returns
+    -------
+    tuple
+        ({flow iden: [(kind, record), ...]}, the number of records no flow matched). A record
+        goes to the flow with its Community ID that was active at its time (within a second),
+        or the closest one.
+    """
+
+    bycid: dict[str, list[dict]] = {}
+    for flow in flows:
+        bycid.setdefault(flow["community_id"], []).append(flow)
+
+    matched: dict[str, list[tuple[str, Any]]] = {}
+    unmatched = 0
+    for cid, tick, kind, rec in loose:
+        cands = bycid.get(cid)
+        if not cands:
+            unmatched += 1
+            continue
+        best = cands[0]
+        if tick is not None and len(cands) > 1:
+            def dist(flow: dict, tick: int = tick) -> int:
+                if flow["time"] - 1000 <= tick <= flow["last"] + 1000:
+                    return 0
+                return min(abs(tick - flow["time"]), abs(tick - flow["last"]))
+            best = min(cands, key=dist)
+        matched.setdefault(best["iden"], []).append((kind, rec))
+    return matched, unmatched
+
+
 def analyze(fd: BinaryIO, timeout: int = DEFAULT_TIMEOUT, limit: int = 0,
             handshake: int = DEFAULT_HANDSHAKE, seed: Any = None, frames: dict | None = None,
-            files: p_enrich.FileStore | None = None) -> tuple[list[dict], dict]:
+            files: p_enrich.FileStore | None = None, unsaved: bool = False,
+            rules: dict | None = None, loose: list | None = None,
+            filestore: str | None = None) -> tuple[list[dict], dict]:
     """Read a capture file and return its flows (see ``Flow.asdict``) and a summary of it.
 
     Parameters
@@ -770,10 +884,22 @@ def analyze(fd: BinaryIO, timeout: int = DEFAULT_TIMEOUT, limit: int = 0,
     seed : Any
         A value (ex. the capture's SHA-256) used to make flow idens unique to the capture.
     frames : dict | None
-        What tshark found in the capture, by frame number (see ``pcapsvc.tshark``). The details
-        are added to the flows the frames belong to (see ``pcapsvc.enrich``).
+        What the engines found in the capture, by frame number: tshark's fields (see
+        ``pcapsvc.tshark``), and ``_eve`` (Suricata events) and ``_alerts`` ((engine, alert)
+        pairs) lists. The details are added to the flows the frames belong to (see
+        ``pcapsvc.enrich``).
     files : FileStore | None
         Where to write the files found in the flows, None to not extract files.
+    unsaved : bool
+        Count the files that would have been extracted when ``files`` is None.
+    rules : dict | None
+        The loaded rules of each engine, to turn alerts into hits.
+    loose : list | None
+        Records without a frame number, matched to flows by Community ID and time (see
+        ``matchLoose``). Each is (Community ID, time, kind, record), kind is ``eve`` or an
+        alert's engine.
+    filestore : str | None
+        The directory of the files Suricata extracted.
 
     Raises
     ------
@@ -785,11 +911,15 @@ def analyze(fd: BinaryIO, timeout: int = DEFAULT_TIMEOUT, limit: int = 0,
     state: dict = {}
     table = FlowTable(timeout=timeout, limit=limit)
     matched = 0
+    unframed = 0
     for pkt in readPackets(fd, state):
         rec = frames.get(pkt.num)
         flow = table.add(pkt, rec)
-        if rec is not None and flow is not None:
-            matched += 1
+        if rec is not None:
+            if flow is not None:
+                matched += 1
+            else:
+                unframed += len(rec.get("_eve", ())) + len(rec.get("_alerts", ()))
 
     summary = table.summary()
     skipped = dict(state["skipped"])
@@ -807,13 +937,29 @@ def analyze(fd: BinaryIO, timeout: int = DEFAULT_TIMEOUT, limit: int = 0,
         "tshark": {"frames": len(frames), "matched": matched},
     })
 
+    counts: dict[str, dict[str, int]] = {}
+    base = [(flow, flow.asdict(handshake=handshake, seed=seed)) for flow in table.flows()]
+    extra, unmatched = matchLoose([d for _, d in base], loose or [])
+
     flows = []
-    for flow in table.flows():
-        enricher = p_enrich.Enricher(files)
+    unsavedcount = 0
+    for flow, fdict in base:
+        enricher = p_enrich.Enricher(files, unsaved=unsaved, rules=rules, counts=counts,
+                                     filestore=filestore)
         for client, rec in flow.frames:
             enricher.add(client, rec)
-        flows.append(enricher.apply(flow.asdict(handshake=handshake, seed=seed)))
+        for kind, rec in extra.get(fdict["iden"], ()):
+            if kind == "eve":
+                enricher.eve.append(rec)
+            else:
+                enricher.alerts.append((kind, rec))
+        flows.append(enricher.apply(fdict))
+        unsavedcount += enricher.unsaved
 
+    summary["events"] = {"unmatched": unmatched + unframed, **counts}
+    summary["hits"] = sum(len(f["hits"]) for f in flows)
     if files is not None:
         summary["files"] = {"count": len(files.files), "skipped": files.skipped}
+    if unsaved:
+        summary["files"] = {"count": 0, "skipped": 0, "unsaved": unsavedcount}
     return flows, summary

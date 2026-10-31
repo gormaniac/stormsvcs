@@ -1,4 +1,6 @@
-FROM ghcr.io/gormaniac/stormsvcs/pcap:latest
+# CI builds this on the image it just built (see the docker_tests input of _service.yml).
+ARG BASE_IMAGE=ghcr.io/gormaniac/stormsvcs/pcap:latest
+FROM ${BASE_IMAGE}
 
 # Move tests into the image so they can be run in CI.
 COPY tests /opt/stormsvcs/pcap/tests

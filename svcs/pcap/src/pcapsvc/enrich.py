@@ -22,12 +22,13 @@ import locale
 import os
 import posixpath
 import re
+import shutil
 import struct
 import urllib.parse
 from typing import Any
 
+from . import eve as p_eve
 from . import x509 as p_x509
-
 
 FTP_FILE_CMDS = ("RETR", "STOR", "STOU", "APPE")
 """FTP commands whose data connection transfers a file (not a directory listing)."""
@@ -191,6 +192,23 @@ class FileStore:
             self.files[sha256] = len(data)
         return sha256
 
+    def addPath(self, path: str, sha256: str, size: int) -> str | None:
+        """Store a file that's already on disk (ex. Suricata extracted it) by moving it.
+
+        Returns its SHA-256, or None if it's over the limits.
+        """
+
+        if self.maxsize and size > self.maxsize:
+            self.skipped += 1
+            return None
+        if sha256 not in self.files:
+            if self.limit and len(self.files) >= self.limit:
+                self.skipped += 1
+                return None
+            shutil.move(path, os.path.join(self.dirn, sha256))
+            self.files[sha256] = size
+        return sha256
+
     def path(self, sha256: str) -> str:
         """The path a stored file was written to."""
 
@@ -203,10 +221,36 @@ def _addUniq(items: list, valu: Any) -> None:
 
 
 class Enricher:
-    """Collects the details tshark found in one flow's frames."""
+    """Collects the details tshark, Suricata, and the rule engines found in one flow.
 
-    def __init__(self, files: FileStore | None) -> None:
+    Parameters
+    ----------
+    files : FileStore | None
+        Where to write the files found in the flow, None to not extract them.
+    unsaved : bool
+        Count the files that would have been extracted when ``files`` is None (they couldn't be
+        saved, ex. the service has no Axon), see ``Enricher.unsaved``.
+    rules : dict | None
+        The loaded rules of each engine (``snort``, ``suricata``), ``gid:sid`` -> rule info,
+        to turn alerts into hits (see ``pcapsvc.eve.hits``).
+    counts : dict | None
+        Updated with the alerts that aren't for a loaded rule (see ``pcapsvc.eve.hits``).
+    filestore : str | None
+        The directory of the files Suricata extracted.
+    """
+
+    def __init__(self, files: FileStore | None, unsaved: bool = False,
+                 rules: dict | None = None, counts: dict | None = None,
+                 filestore: str | None = None) -> None:
         self.files = files
+        self.countunsaved = unsaved
+        self.unsaved = 0
+        self.rules = rules or {}
+        self.counts = counts if counts is not None else {}
+        self.filestore = filestore
+        self.eve: list[dict] = []
+        self.alerts: list[tuple[str, dict]] = []
+        self.extra: dict[str, Any] = {}
         self.sides = {True: self._side(), False: self._side()}
         self.tls = {"sni": [], "ja3": [], "ja3s": [], "ja4": []}
         self.http = {"hosts": [], "requests": []}
@@ -221,39 +265,77 @@ class Enricher:
         return {"ssl:cert": None, "ssl:certs": [], "ssh:key": None, "rdp:hostname": None,
                 "rdp:keyboard:layout": None, "softnames": [], "cpes": [], "txfiles": []}
 
+    @staticmethod
+    def _uniq(items: list, valu: Any) -> None:
+        _addUniq(items, valu)
+
     def _soft(self, side: dict, valu: str | None) -> None:
         name = softname(valu) if valu else None
-        if name:
-            _addUniq(side["softnames"], name)
-            for cpe in softCpes(name):
-                _addUniq(side["cpes"], cpe)
+        if not name:
+            return
+        names = side["softnames"]
+        # Engines report the same software differently, ex. Suricata's "openssh_9.6p1" and
+        # tshark's "openssh_9.6p1 ubuntu-3ubuntu13.20", keep the most complete name.
+        if any(other.startswith(name) for other in names):
+            return
+        names[:] = [other for other in names if not name.startswith(other)]
+        names.append(name)
+        for cpe in softCpes(name):
+            _addUniq(side["cpes"], cpe)
+
+    def _cert(self, side: dict, der: bytes) -> None:
+        """Add a certificate the side sent, the first one is its leaf."""
+
+        cert = p_x509.parseCert(der)
+        if any(c["sha256"] == cert["sha256"] for c in side["ssl:certs"]):
+            return
+        if self.files is not None:
+            self.files.add(der)
+        side["ssl:certs"].append(cert)
+        if side["ssl:cert"] is None:
+            side["ssl:cert"] = cert
+
+    def _addEntry(self, side: dict, entry: dict) -> None:
+        for other in side["txfiles"]:
+            if (other["sha256"], other["name"]) == (entry["sha256"], entry["name"]):
+                return
+        side["txfiles"].append(entry)
 
     def _file(self, side: dict, data: bytes, proto: str, name: str | None = None,
               mime: str | None = None, text: str | None = None, complete: bool = True) -> None:
-        if self.files is None or not data:
+        if not data:
+            return
+        if self.files is None:
+            if self.countunsaved:
+                self.unsaved += 1
             return
         sha256 = self.files.add(data)
         if sha256 is None:
             return
-        entry = {"sha256": sha256, "size": len(data), "name": name, "mime": mime, "text": text,
-                 "proto": proto, "complete": complete}
-        if entry not in side["txfiles"]:
-            side["txfiles"].append(entry)
+        self._addEntry(side, {"sha256": sha256, "size": len(data), "name": name, "mime": mime,
+                              "text": text, "proto": proto, "complete": complete})
+
+    def _storedFile(self, side: dict, path: str, sha256: str, size: int, proto: str,
+                    name: str | None = None, mime: str | None = None,
+                    complete: bool = True) -> None:
+        """Add a file that's already on disk (Suricata extracted it)."""
+
+        if self.files.addPath(path, sha256, size) is None:
+            return
+        self._addEntry(side, {"sha256": sha256, "size": size, "name": name, "mime": mime,
+                              "text": None, "proto": proto, "complete": complete})
 
     def add(self, client: bool, rec: dict) -> None:
         """Add the fields of a frame, sent by the client if ``client`` (else the server)."""
 
         side = self.sides[client]
+        self.eve.extend(rec.get("_eve", ()))
+        self.alerts.extend(rec.get("_alerts", ()))
 
         certs = rec.get("tls.handshake.certificate")
         if certs and not side["ssl:certs"]:
             for hexder in certs:
-                der = bytes.fromhex(hexder.replace(":", ""))
-                cert = p_x509.parseCert(der)
-                if self.files is not None:
-                    self.files.add(der)
-                side["ssl:certs"].append(cert)
-            side["ssl:cert"] = side["ssl:certs"][0]
+                self._cert(side, bytes.fromhex(hexder.replace(":", "")))
 
         for field, key in (("tls.handshake.extensions_server_name", "sni"),
                            ("tls.handshake.ja3", "ja3"), ("tls.handshake.ja3s", "ja3s"),
@@ -296,7 +378,6 @@ class Enricher:
                 self.responses += 1
             return
         data = bytes.fromhex(body[0].replace(":", ""))
-        mime = mimeType((rec.get("http.content_type") or [None])[0])
         if methods:
             name = uriName(uris[0] if uris else None)
         else:
@@ -434,10 +515,16 @@ class Enricher:
 
         self._finishFtp()
         self._finishHttp2()
+        if self.eve:
+            p_eve.applyEve(self, flow, self.eve, self.filestore)
         for client, key in ((True, "src"), (False, "dst")):
             flow[key].update(self.sides[client])
         flow["tls"] = self.tls if any(self.tls.values()) else None
         flow["http"] = self.http if any(self.http.values()) else None
+        for key in ("quic", "smb", "krb5", "sip", "smtp", "ftp", "anomalies", "app_proto"):
+            flow[key] = self.extra.get(key) or None
+        flow["dns"] = p_eve.dnsQueries(self.extra.get("dns"))
+        flow["hits"] = p_eve.hits(self.alerts, self.rules, self.counts)
         return flow
 
 

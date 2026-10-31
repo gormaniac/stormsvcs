@@ -1,5 +1,7 @@
 init {
     $privadmin = $lib.import(slib.pcap.priv.admin)
+    $util = $lib.import(slib.pcap.util)
+    $util.warnNoAxon("slib.pcap.admin.decode", $privadmin.hasAxon())
 
     $rules = ([])
     if (not $cmdopts.clear) {

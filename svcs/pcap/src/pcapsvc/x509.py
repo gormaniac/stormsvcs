@@ -19,7 +19,7 @@ def toMillis(valu: datetime.datetime) -> int:
     """Convert a datetime (naive ones are UTC) to epoch millis, Synapse's time format."""
 
     if valu.tzinfo is None:
-        valu = valu.replace(tzinfo=datetime.timezone.utc)
+        valu = valu.replace(tzinfo=datetime.UTC)
     return int(valu.timestamp() * 1000)
 
 

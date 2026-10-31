@@ -19,7 +19,6 @@ from pcapsvc import tshark as p_tshark
 
 from . import pcapgen as g
 
-
 DATA = pathlib.Path(__file__).parent / "data"
 
 DOWNLOAD = hashlib.sha256(bytes(range(256)) * 64).hexdigest()
@@ -85,8 +84,9 @@ class TestCaptures:
         assert (tmp_path / flow["dst"]["ssl:cert"]["sha256"]).exists()
 
     async def test_ssh(self, tmp_path):
-        from cryptography.hazmat.primitives import serialization
         import base64
+
+        from cryptography.hazmat.primitives import serialization
 
         (flow,), _ = await enriched("ssh", tmp_path)
         assert flow["src"]["softnames"] == ["openssh_9.6p1 ubuntu-3ubuntu13.20"]

@@ -1,0 +1,32 @@
+init {
+    $rules = $lib.import(slib.pcap.priv.rules)
+    $util = $lib.import(slib.pcap.util)
+    $push = ([])
+}
+
+$form = $node.form()
+if ($form = "it:app:snort:rule" or $form = "it:app:suricata:rule") {
+    [ :enabled=(true) ]
+    $engine = $node.props.engine
+    if (not $node.props.text) {
+        $lib.warn("slib.pcap.rule.enable: {form}={guid} has no :text, it can't be pushed to the service.",
+            form=$form, guid=$node.repr())
+    } elif ($form = "it:app:snort:rule" and $engine != $lib.null and $engine != 2 and $engine != 3) {
+        $lib.warn("slib.pcap.rule.enable: it:app:snort:rule={guid} has an unsupported :engine ({engine}), the service runs engines 2 and 3.",
+            guid=$node.repr(), engine=$engine)
+    } else {
+        $push.append(($node.repr(), $form, $node.props.text, $engine))
+    }
+}
+
+fini {
+    if $push {
+        $summary = $util.data($rules.update(rules=$push), "Pushing the rules to the service")
+        if $summary {
+            $util.printBuild("slib.pcap.rule.enable", $summary)
+            for ($guid, $mesg) in $summary.errors {
+                $lib.warn("slib.pcap.rule.enable: Rule {guid} couldn't be loaded: {err}", guid=$guid, err=$mesg)
+            }
+        }
+    }
+}

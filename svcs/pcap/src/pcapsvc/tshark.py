@@ -10,13 +10,15 @@ with fewer details (ex. ``tls.handshake.ja4`` needs Wireshark 4.2).
 """
 
 
-import asyncio
+import contextlib
 import json
 import os
 import re
 import shutil
-from collections.abc import Iterable
+import tempfile
+from collections.abc import Iterable, Iterator
 
+from . import sandbox as p_sandbox
 
 FIELDS = (
     # TLS (certificates are only in cleartext before TLS 1.3).
@@ -87,6 +89,10 @@ FILTER = (
 )
 """Fields (or protocols) that make a frame worth returning, the display filter ORs them."""
 
+GAP_PREFIXES = ("ssh.", "sip.", "imf")
+"""The fields tshark is still needed for when Suricata ran (``Tshark.frames(gaps=True)``):
+SSH host keys and full banners, SIP User-Agent/Server, and whole emails."""
+
 
 DECODE_AS = re.compile(
     r"^[a-z][a-z0-9_.-]{0,63}==[0-9]{1,10}(-[0-9]{1,10})?,[a-z][a-z0-9_.-]{0,63}$"
@@ -139,8 +145,21 @@ def ekName(field: str) -> str:
     return field.replace(".", "_")
 
 
+PROTOCOLS = (
+    "frame", "eth", "ethertype", "vlan", "sll", "ppp", "pppoes", "null", "loop", "gre",
+    "ip", "ipv6", "ipv6.hopopts", "ipv6.routing", "ipv6.fraghdr", "ipv6.dstopts", "icmp",
+    "icmpv6", "tcp", "udp", "data", "tls", "x509af", "x509ce", "x509if", "x509sat", "pkcs-1",
+    "pkix1explicit", "pkix1implicit", "ber", "ssh", "tpkt", "cotp", "t124", "t125", "rdp",
+    "http", "http2", "data-text-lines", "media", "mime_multipart", "urlencoded-form", "ftp",
+    "ftp-data", "smtp", "imf", "sip", "sdp", "gquic", "quic",
+)
+"""The only dissectors tshark runs (``--only-protocols``), what ``FIELDS`` needs and the link
+layers and tunnels under them. Every other dissector is off, less code parsing untrusted input.
+Protocols named by Decode As rules are enabled too."""
+
+
 class Tshark:
-    """A tshark binary and the fields it supports.
+    """A tshark binary and the fields it supports. tshark always runs in a ``Sandbox``.
 
     Parameters
     ----------
@@ -150,13 +169,26 @@ class Tshark:
         Extra tshark arguments, ex. ``("-d", "tcp.port==2222,ssh")`` to decode SSH on port 2222.
     timeout : float
         Seconds a tshark run may take before it's killed, 0 for no limit.
+    sandbox : Sandbox | None
+        The sandbox tshark runs in, by default a best-effort one.
+    protocols : Iterable[str] | None
+        The dissectors to run (see ``PROTOCOLS``), None to run every dissector.
+    tmpdir : str | None
+        Where each run's scratch directory (tshark's config dir and output) is made.
     """
 
-    def __init__(self, path: str = "tshark", args: Iterable[str] = (), timeout: float = 0) -> None:
+    def __init__(self, path: str = "tshark", args: Iterable[str] = (), timeout: float = 0,
+                 sandbox: p_sandbox.Sandbox | None = None,
+                 protocols: Iterable[str] | None = PROTOCOLS, tmpdir: str | None = None) -> None:
         self.path = shutil.which(path) or (path if os.path.isfile(path) else None)
         self.args = list(args)
         self.timeout = timeout or None
+        self.sandbox = sandbox or p_sandbox.Sandbox()
+        self.protocols = list(protocols) if protocols is not None else None
+        self.tmpdir = tmpdir
         self.supported: set[str] | None = None
+        self.known: set[str] = set()
+        self.onlyprotos = False
         self.version: str | None = None
 
     @property
@@ -165,52 +197,93 @@ class Tshark:
 
         return self.path is not None
 
-    async def _run(self, *args: str) -> tuple[int, bytes, bytes]:
-        """Run tshark to completion and return (exit code, stdout, stderr)."""
+    @contextlib.contextmanager
+    def _workdir(self) -> Iterator[str]:
+        """A scratch directory for one run, owned by the sandbox's user."""
+
+        if self.tmpdir:
+            os.makedirs(self.tmpdir, exist_ok=True)
+        path = tempfile.mkdtemp(prefix="tshark-", dir=self.tmpdir)
+        try:
+            os.makedirs(os.path.join(path, "config"))
+            self.sandbox.prepare(path)
+            yield path
+        finally:
+            shutil.rmtree(path, ignore_errors=True)
+
+    async def _run(self, args: list[str], workdir: str, read: list[str] = (),
+                   stdout: str | None = None) -> tuple[int, bytes, bytes]:
+        """Run tshark in the sandbox, returning (exit code, stdout, stderr)."""
 
         if self.path is None:
             raise TsharkError("tshark is not installed")
-        proc = await asyncio.create_subprocess_exec(
-            self.path, *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        )
+        prefix = os.path.dirname(os.path.dirname(os.path.realpath(self.path)))
+        env = {
+            "PATH": os.path.dirname(os.path.realpath(self.path)) + ":/usr/bin:/bin",
+            "HOME": workdir,
+            "TMPDIR": workdir,
+            "WIRESHARK_CONFIG_DIR": os.path.join(workdir, "config"),
+            "XDG_CONFIG_HOME": os.path.join(workdir, "config"),
+            "LANG": "C.UTF-8",
+        }
         try:
-            out, err = await asyncio.wait_for(proc.communicate(), timeout=self.timeout)
-        except TimeoutError:
-            proc.kill()
-            await proc.wait()
-            raise TsharkError(f"tshark took longer than {self.timeout} seconds") from None
-        return proc.returncode, out, err
+            res = await self.sandbox.run(
+                [self.path, *args], read=[*read], write=[workdir], execs=[prefix], env=env,
+                cwd=workdir, timeout=self.timeout, maxoutput=64 * 1024 * 1024, stdout=stdout,
+            )
+        except p_sandbox.SandboxError as err:
+            raise TsharkError(err.mesg) from None
+        return res.code, res.stdout, res.stderr
 
     async def load(self) -> None:
         """Find out the tshark version and which of ``FIELDS`` it supports (once)."""
 
         if self.supported is not None:
             return
-        code, out, err = await self._run("-v")
-        if code != 0:
-            raise TsharkError(f"tshark -v failed: {err.decode(errors='replace').strip()}")
-        self.version = out.decode(errors="replace").splitlines()[0].strip()
+        with self._workdir() as work:
+            code, out, err = await self._run(["-v"], work)
+            if code != 0:
+                raise TsharkError(f"tshark -v failed: {err.decode(errors='replace').strip()}")
+            self.version = out.decode(errors="replace").splitlines()[0].strip()
 
-        code, out, err = await self._run("-G", "fields")
-        if code != 0:
-            raise TsharkError(f"tshark -G fields failed: {err.decode(errors='replace').strip()}")
-        known = set()
-        for line in out.decode(errors="replace").splitlines():
-            parts = line.split("\t")
-            if len(parts) > 2 and parts[0] in ("F", "P"):
-                known.add(parts[2])
+            code, out, err = await self._run(["-h"], work)
+            self.onlyprotos = b"--only-protocols" in out
+
+            fpath = os.path.join(work, "fields.txt")
+            code, _, err = await self._run(["-G", "fields"], work, stdout=fpath)
+            if code != 0:
+                raise TsharkError(f"tshark -G fields failed: {err.decode(errors='replace').strip()}")
+            known, protos = set(), set()
+            with open(fpath, encoding="utf-8", errors="replace") as fd:
+                for line in fd:
+                    parts = line.rstrip("\r\n").split("\t")
+                    if len(parts) > 2 and parts[0] in ("F", "P"):
+                        known.add(parts[2])
+                        if parts[0] == "P":
+                            protos.add(parts[2])
         self.supported = known
+        self.known = protos
 
-    def _fields(self) -> list[str]:
-        return [f for f in FIELDS if f in self.supported]
+    def _fields(self, gaps: bool = False) -> list[str]:
+        return [f for f in FIELDS if f in self.supported
+                and (not gaps or f.startswith(GAP_PREFIXES))]
 
-    def _filter(self) -> str:
-        return " or ".join(f for f in FILTER if f in self.supported)
+    def _filter(self, gaps: bool = False) -> str:
+        return " or ".join(f for f in FILTER if f in self.supported
+                           and (not gaps or f.startswith(GAP_PREFIXES)))
 
     def _args(self, keylog: str | None, decode: list[str]) -> list[str]:
-        """The tshark arguments for one run: the configured ones, the key log, and decode rules."""
+        """The tshark arguments for one run: the configured ones, the dissectors to run, the
+        key log, and decode rules."""
 
         args = list(self.args)
+        if self.protocols is not None and self.onlyprotos:
+            protos = list(self.protocols)
+            for rule in decode:
+                proto = rule.rsplit(",", 1)[1]
+                if proto not in protos:
+                    protos.append(proto)
+            args.extend(("--only-protocols", ",".join(p for p in protos if p in self.known)))
         if keylog:
             args.extend(("-o", f"tls.keylog_file:{keylog}"))
         for rule in decode:
@@ -218,7 +291,7 @@ class Tshark:
         return args
 
     async def frames(self, path: str, keylog: str | None = None,
-                     decode: list[str] = ()) -> tuple[dict[int, dict], dict]:
+                     decode: list[str] = (), gaps: bool = False) -> tuple[dict[int, dict], dict]:
         """Run tshark over a capture and return ({frame number: fields}, info).
 
         Fields are keyed by their tshark name (ex. ``http.user_agent``) and are always lists
@@ -238,48 +311,61 @@ class Tshark:
             pcapng file (Decryption Secrets Blocks) are always used.
         decode : list[str]
             "Decode As" rules (see ``checkDecodeAs``), ex. ``["tcp.port==8443,tls"]``.
+        gaps : bool
+            Only extract what Suricata can't (see ``GAP_PREFIXES``), when Suricata ran too.
+            Ignored with a key log, only tshark can see inside the TLS it decrypts.
         """
 
         await self.load()
-        fields = self._fields()
+        gaps = gaps and not keylog
+        path = os.path.abspath(path)
+        keylog = os.path.abspath(keylog) if keylog else None
+        fields = self._fields(gaps)
         extra = self._args(keylog, checkDecodeAs(list(decode)))
-        args = ["-n", "-r", path, *extra, "-Y", self._filter(), "-T", "ek",
+        args = ["-n", "-r", path, *extra, "-Y", self._filter(gaps), "-T", "ek",
                 "-e", "frame.number"]
         for field in fields:
             args.extend(("-e", field))
 
-        code, out, err = await self._run(*args)
+        read = [path] + ([keylog] if keylog else [])
         records = {}
         names = {ekName(f): f for f in fields}
-        for line in out.splitlines():
-            if not line.startswith(b'{"timestamp"'):
-                continue
-            layers = json.loads(line).get("layers", {})
-            num = layers.pop("frame_number", None)
-            if not num:
-                continue
-            records[int(num[0])] = {names.get(k, k): v for k, v in layers.items()}
+        with self._workdir() as work:
+            opath = os.path.join(work, "frames.json")
+            code, _, err = await self._run(args, work, read=read, stdout=opath)
+            with open(opath, "rb") as fd:
+                for line in fd:
+                    if not line.startswith(b'{"timestamp"'):
+                        continue
+                    layers = json.loads(line).get("layers", {})
+                    num = layers.pop("frame_number", None)
+                    if not num:
+                        continue
+                    records[int(num[0])] = {names.get(k, k): v for k, v in layers.items()}
 
-        info = {"version": self.version, "error": None}
-        if code != 0:
-            info["error"] = err.decode(errors="replace").strip() or f"tshark exited {code}"
-            if not records:
-                raise TsharkError(f"tshark failed: {info['error']}")
+            info = {"version": self.version, "error": None}
+            if code != 0:
+                info["error"] = err.decode(errors="replace").strip() or f"tshark exited {code}"
+                if not records:
+                    raise TsharkError(f"tshark failed: {info['error']}")
 
-        if any("imf" in rec for rec in records.values()):
-            for num, raw in (await self._emails(path, extra)).items():
-                records.setdefault(num, {})["imf.raw"] = [raw]
+            if any("imf" in rec for rec in records.values()):
+                for num, raw in (await self._emails(path, extra, work, read)).items():
+                    records.setdefault(num, {})["imf.raw"] = [raw]
 
         return records, info
 
-    async def _emails(self, path: str, extra: list[str]) -> dict[int, str]:
+    async def _emails(self, path: str, extra: list[str], work: str,
+                      read: list[str]) -> dict[int, str]:
         """The raw bytes (hex) of every email (IMF) in a capture, keyed by frame number."""
 
-        code, out, err = await self._run("-n", "-r", path, *extra, "-Y", "imf",
-                                         "-T", "json", "-x", "-J", "frame imf")
+        opath = os.path.join(work, "emails.json")
+        await self._run(["-n", "-r", path, *extra, "-Y", "imf", "-T", "json", "-x",
+                         "-J", "frame imf"], work, read=read, stdout=opath)
         try:
-            packets = json.loads(out or b"[]")
-        except ValueError:
+            with open(opath, "rb") as fd:
+                packets = json.load(fd)
+        except (OSError, ValueError):
             return {}
         emails = {}
         for pkt in packets:

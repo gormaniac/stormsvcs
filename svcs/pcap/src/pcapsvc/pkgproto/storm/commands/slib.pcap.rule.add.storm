@@ -1,0 +1,38 @@
+init {
+    $priv = $lib.import(slib.pcap.priv.user)
+    $rules = $lib.import(slib.pcap.priv.rules)
+    $model = $lib.import(slib.pcap.model)
+    $util = $lib.import(slib.pcap.util)
+
+    $nodes = ([])
+    $push = ([])
+    $dels = ([])
+    for $text in $cmdopts.text {
+        $r = $util.data($priv.ruleParse($text, engine=$cmdopts.engine), "Parsing the rule")
+        if (not $r) { continue }
+
+        $rule = $model.rule($r, enabled=(not $cmdopts.disabled))
+        if $r.refs { $model.refs($rule, $r.refs) }
+        $nodes.append($rule)
+
+        if $cmdopts.disabled {
+            $dels.append($rule.repr())
+        } else {
+            $push.append(($rule.repr(), $rule.form(), $rule.props.text, $rule.props.engine))
+        }
+        $lib.print("slib.pcap.rule.add: {form}={guid} (sid {id}, rev {rev}): {msg}",
+            form=$rule.form(), guid=$rule.repr(), id=$r.id, rev=$r.rev, msg=$r.msg)
+    }
+
+    if ($push or $dels) {
+        $summary = $util.data($rules.update(rules=$push, dels=$dels), "Pushing the rules to the service")
+        if $summary {
+            $util.printBuild("slib.pcap.rule.add", $summary)
+            for ($guid, $mesg) in $summary.errors {
+                $lib.warn("slib.pcap.rule.add: Rule {guid} couldn't be loaded: {err}", guid=$guid, err=$mesg)
+            }
+        }
+    }
+}
+
+divert $cmdopts.yield $model.nodes($nodes)

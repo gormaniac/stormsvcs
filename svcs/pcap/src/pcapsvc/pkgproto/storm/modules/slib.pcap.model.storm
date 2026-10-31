@@ -1,8 +1,8 @@
-// Model the flows the slib.pcap service finds (see pcapsvc.flows.Flow.asdict and
-// pcapsvc.enrich) in Synapse.
+// Model what the slib.pcap service finds (see pcapsvc.flows.Flow.asdict, pcapsvc.enrich, and
+// pcapsvc.feeds.ruleRecord) in Synapse: flows, rule matches, DNS, and rules.
 //
-// Node edits here run as the calling user. Every flow is linked to the slib.pcap
-// meta:source node with a -(seen)> edge.
+// Node edits here run as the calling user (or as root, when called by slib.pcap.priv.sync).
+// Every flow and match is linked to the slib.pcap meta:source node with a -(seen)> edge.
 
 init {
     $sourceGuid = "cae9b5f5923a48b9a1a691f851a77429"
@@ -211,5 +211,167 @@ function flow(f, file, opts=$lib.null) {
         // The server names clients asked for.
         for $sni in $f.tls.sni { $refsFqdn($n, $sni) }
     }
-    return($n)
+    if $f.dns { $dns($n, $f, $opts) }
+    $hits = ([])
+    for $h in $f.hits { $hits.append($hit($n, $f, $h, $file, $opts)) }
+    return(({"flow": $n, "hits": $hits}))
+}
+
+// ---- Rule matches ----
+
+function _hitEnds(n, f) {
+    yield $n
+    if ($f.version = 6) {
+        [ :src:ipv6=$f.src.ip :dst:ipv6=$f.dst.ip ]
+    } else {
+        [ :src:ipv4=$f.src.ip :dst:ipv4=$f.dst.ip ]
+    }
+    [ :src:port?=$f.src.port :dst:port?=$f.dst.port :src?=$f.src.addr :dst?=$f.dst.addr ]
+    return($node)
+}
+
+// A rule match on a flow: an it:app:snort:hit (Snort rules) or it:app:suricata:matched
+// (Suricata rules), unique to the engine, flow, and rule.
+function hit(flownode, f, h, file, opts) {
+    $guid = $lib.guid(slib.pcap.hit, $h.engine, $f.iden, $h.rule)
+    if ($h.engine = "suricata") {
+        [ it:app:suricata:matched=$guid :rule=$h.rule :target=$flownode ]
+    } else {
+        [ it:app:snort:hit=$guid :rule=$h.rule :flow=$flownode ]
+        $_hitEnds($node, $f)
+    }
+    [ :version?=$lib.cast(str, $h.rev) ]
+    if $h.time { [ :time=$h.time .seen=$h.time ] }
+    if $h.last { [ .seen=$h.last ] }
+    if $opts.host { [ :sensor=$opts.host ] }
+    [ <(seen)+ { meta:source=$sourceGuid } <(refs)+ { yield $file } ]
+    return($node)
+}
+
+// ---- DNS ----
+
+function _dnsAnswer(req, a) {
+    [ inet:dns:answer=$lib.guid(slib.pcap.dns.answer, $req.repr(), $a.rrname, $a.rrtype, $a.rdata)
+        :request=$req
+        :ttl?=$a.ttl
+    ]
+    switch $a.rrtype {
+        "A": { [ :a?=($a.rrname, $a.rdata) ] }
+        "AAAA": { [ :aaaa?=($a.rrname, $a.rdata) ] }
+        "CNAME": { [ :cname?=($a.rrname, $a.rdata) ] }
+        "NS": { [ :ns?=($a.rrname, $a.rdata) ] }
+        "MX": { [ :mx?=($a.rrname, $a.rdata) ] }
+        "TXT": { [ :txt?=($a.rrname, $a.rdata) ] }
+    }
+    return($node)
+}
+
+// An inet:dns:request for a DNS query (by transaction ID and name) in a flow, with its answers.
+function _dnsRequest(flownode, f, q, opts) {
+    $types = ({"A": 1, "NS": 2, "CNAME": 5, "SOA": 6, "PTR": 12, "MX": 15, "TXT": 16,
+               "AAAA": 28, "SRV": 33, "HTTPS": 65, "SVCB": 64, "ANY": 255})
+    $qtype = $types.($q.rrtype)
+    [ inet:dns:request=$lib.guid(slib.pcap.dns, $f.iden, $q.id, $q.rrname, $q.rrtype)
+        :query:name?=$q.rrname
+        :time?=$q.time
+        :server?=$f.dst.addr
+        :sandbox:file?=$opts.sandbox
+    ]
+    if ($qtype != $lib.null) { [ :query:type=$qtype ] }
+    if ($f.src.addr and $q.rrname and $qtype != $lib.null) {
+        [ :query?=($f.src.addr, $q.rrname, $qtype) ]
+    }
+    if ($q.rcode != $lib.null) { [ :reply:code?=$q.rcode ] }
+    [ <(refs)- { yield $flownode } ]
+    return($node)
+}
+
+// Model a flow's DNS queries (see pcapsvc.eve.dnsQueries).
+function dns(flownode, f, opts) {
+    for $q in $f.dns {
+        $req = $_dnsRequest($flownode, $f, $q, $opts)
+        for $a in $q.answers { $_dnsAnswer($req, $a) }
+    }
+    return()
+}
+
+// ---- Rules ----
+
+// Create or update a rule node from a parsed rule (the service's ruleParse or a feed's rule
+// record): an it:app:snort:rule (Snort 2.x and 3 rules) or it:app:suricata:rule.
+// enabled is only set when it isn't null.
+function rule(r, enabled=$lib.null) {
+    if ($r.form = "it:app:suricata:rule") {
+        [ it:app:suricata:rule=$r.guid ]
+    } else {
+        $engines = ({"snort2": 2, "snort3": 3})
+        [ it:app:snort:rule=$r.guid :engine=$engines.($r.engine) :family?=$r.family ]
+    }
+    [
+        :id=$r.id
+        :text=$r.text
+        :version=$lib.cast(str, $r.rev)
+        :name?=$r.msg
+        :created?=$r.created
+        :updated?=$r.updated
+    ]
+    if ($enabled != $lib.null) { [ :enabled=$enabled ] }
+    return($node)
+}
+
+// Link a rule to one of its references: the CVE it detects, or the URL or hash it refers to.
+function _ref(rule, scheme, valu) {
+    yield $rule
+    switch $scheme {
+        "cve": {
+            $cve = $lib.cast(str, $valu).lower()
+            if (not $cve.startswith("cve-")) { $cve = `cve-{$cve}` }
+            [ +(detects)> { [ it:sec:cve?=$cve ] } ]
+        }
+        "url": {
+            $url = $lib.cast(str, $valu)
+            if (not $lib.regex.matches("^[a-zA-Z][a-zA-Z0-9+.-]*://", $url)) { $url = `http://{$url}` }
+            [ +(refs)> { [ inet:url?=$url ] } ]
+        }
+        "md5": { [ +(refs)> { [ hash:md5?=$valu ] } ] }
+        "sha256": { [ +(refs)> { [ hash:sha256?=$valu ] } ] }
+    }
+    return($rule)
+}
+
+// Link a rule to its references, a list of (scheme, value).
+function ruleRefs(rule, refs) {
+    for ($scheme, $valu) in $refs {
+        $_ref($rule, $scheme, $valu)
+    }
+    return($rule)
+}
+
+// ---- Generators ----
+
+// Yield every node in a list.
+function nodes(items) {
+    for $item in $items {
+        if $item { yield $item }
+    }
+}
+
+// Yield the rule nodes (either form) with these guids (that exist).
+function rules(guids) {
+    for $guid in $guids {
+        it:app:snort:rule=$guid
+        emit $node
+    }
+    for $guid in $guids {
+        it:app:suricata:rule=$guid
+        emit $node
+    }
+}
+
+// Yield the meta:ruleset nodes with these guids (that exist).
+function rulesets(guids) {
+    for $guid in $guids {
+        meta:ruleset=$guid
+        emit $node
+    }
 }

@@ -1,0 +1,102 @@
+// Privileged (asroot) wrappers around the slib.pcap service for slib.pcap.user.
+// Every function returns the service's {status, mesg, data} dict, or emits them for generators.
+
+init {
+    $svc = $lib.service.get("slib.pcap")
+    $chunk = (1048576)
+}
+
+
+function status() { return($svc.status()) }
+function hasAxon() { return($svc.hasAxon()) }
+function feeds() { return($svc.feeds(view=$lib.view.get().iden)) }
+function ruleErrors(guids=$lib.null) { return($svc.ruleErrors(guids=$guids)) }
+function ruleInfo(guid) { return($svc.ruleInfo($guid)) }
+function ruleParse(text, engine=$lib.null) { return($svc.ruleParse($text, engine=$engine)) }
+function ruleCheck(text, engine=$lib.null) { return($svc.ruleCheck($text, engine=$engine)) }
+function checkDecodeAs(rules) { return($svc.checkDecodeAs($rules)) }
+
+// The Decode As rules an admin set for every run (see slib.pcap.admin.decode).
+function decodeDefaults() {
+    $rules = $lib.globals.get("slib:pcap:decode")
+    if ($rules = $lib.null) { return(([])) }
+    return($rules)
+}
+
+// Stream a file in the Axon to the service. Returns {status, mesg, data} with the upload's ID.
+function _upload(sha256, kind) {
+    if (not $lib.axon.has($sha256)) {
+        return(({"status": (false), "mesg": `The {$kind} file:bytes:sha256={$sha256} is not in the Axon.`, "data": $lib.null}))
+    }
+    $retn = $svc.uploadStart(kind=$kind)
+    if (not $retn.status) { return($retn) }
+    $iden = $retn.data
+
+    $offs = (0)
+    while (true) {
+        $byts = $lib.axon.read($sha256, offs=$offs, size=$chunk)
+        if (not $byts) { break }
+        $retn = $svc.uploadChunk($iden, $byts)
+        if (not $retn.status) { return($retn) }
+        $offs = ($offs + $lib.len($byts))
+        if ($lib.len($byts) < $chunk) { break }
+    }
+    return(({"status": (true), "mesg": "", "data": $iden}))
+}
+
+// Analyze a PCAP in the Axon by its SHA-256, emitting the service's results (see PcapSvc.flows).
+//
+// The service reads the PCAP (and key logs) from the Axon itself if it has one (axon:url),
+// otherwise they're streamed to the service.
+function flows(sha256, opts) {
+    $retn = $svc.hasAxon()
+    if (not $retn.status) {
+        emit $retn
+        stop
+    }
+
+    $upload = $lib.null
+    $keylogs = $opts.keylogs
+    $keyuploads = ([])
+    if (not $retn.data) {
+        $retn = $_upload($sha256, capture)
+        if (not $retn.status) {
+            emit $retn
+            stop
+        }
+        $upload = $retn.data
+        for $keylog in $opts.keylogs {
+            $retn = $_upload($keylog, keylog)
+            if (not $retn.status) {
+                $svc.uploadCancel($upload)
+                emit $retn
+                stop
+            }
+            $keyuploads.append($retn.data)
+        }
+        $keylogs = ([])
+    }
+
+    for $retn in $svc.flows($sha256, timeout=$opts.timeout, limit=$opts.limit,
+                            handshake=$opts.handshake, tshark=$opts.tshark, files=$opts.files,
+                            keylogs=$keylogs, decode=$opts.decode, suricata=$opts.suricata,
+                            snort=$opts.snort, rules=$opts.rules, upload=$upload,
+                            keyloguploads=$keyuploads) {
+        emit $retn
+    }
+}
+
+// The sync cron job's details (iden, enabled, view, and the last run), or null if there isn't one.
+function schedule() {
+    $iden = $lib.globals.get("slib:pcap:cron")
+    if (not $iden) { return($lib.null) }
+    try {
+        $job = $lib.cron.get($iden)
+    } catch (NoSuchIden, StormRuntimeError) as err {
+        return($lib.null)
+    }
+    $info = $job.pprint()
+    // pprint() has "Y" or "N".
+    $info.enabled = ($info.enabled = "Y")
+    return($info)
+}

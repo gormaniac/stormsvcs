@@ -28,7 +28,6 @@ import tempfile
 import threading
 import time
 
-
 HERE = pathlib.Path(__file__).parent
 
 DOWNLOAD = bytes(range(256)) * 64
@@ -281,9 +280,8 @@ def scenario_smtp(tmp: pathlib.Path) -> None:
     msg.set_content("See attached.\n")
     msg.add_attachment(ATTACHMENT, maintype="application", subtype="pdf",
                        filename="report.pdf")
-    with Capture("smtp", "tcp port 25"):
-        with smtplib.SMTP("127.0.0.1", 25) as client:
-            client.send_message(msg)
+    with Capture("smtp", "tcp port 25"), smtplib.SMTP("127.0.0.1", 25) as client:
+        client.send_message(msg)
     ctrl.stop()
 
 

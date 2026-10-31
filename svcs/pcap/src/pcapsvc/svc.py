@@ -1,37 +1,77 @@
 """The slib.pcap service.
 
-``PcapSvc`` downloads capture files (pcap, pcapng, or either gzip compressed) from an
-Axon, aggregates their packets into flows (see ``pcapsvc.flows``), and returns them to
-Storm, which models them as ``inet:flow`` nodes.
+``PcapSvc`` analyzes capture files (pcap, pcapng, or either gzip compressed) and returns their
+flows to Storm, which models them as ``inet:flow`` nodes:
 
-When tshark is installed, it also runs tshark over the capture to find application layer
-details (certificates, SSH keys, software, transferred files, etc., see ``pcapsvc.tshark``
-and ``pcapsvc.enrich``). Files found in the flows are uploaded to the Axon.
+1. **Flows (dpkt, always).** ``pcapsvc.flows`` reads every packet and builds the flows. Flows
+   are always built the same way, the engines only add to them.
+2. **Engines (optional, sandboxed, run concurrently).**
+
+   - Suricata analyzes the protocols (TLS, HTTP, SSH, RDP, SMTP, FTP, DNS, QUIC, SMB, Kerberos,
+     SIP), extracts the files sent, and matches the Suricata rules.
+   - Snort 3 matches the Snort rules.
+   - tshark fills the gaps Suricata has (SSH host keys, SIP headers, whole emails), decrypts
+     TLS with key logs, and does everything when Suricata isn't available.
+
+   Their output is matched to flows by frame number (``pcap_cnt``/``pkt_num``), or by Community
+   ID and time, see ``pcapsvc.enrich`` and ``pcapsvc.eve``.
+3. **Rules.** The Cortex is the source of truth for the rules, see ``pcapsvc.rulesvc``.
+
+Captures are read from the Axon (``axon:url``) or streamed to the service by Storm. Files found
+in the flows are uploaded to the Axon, when the service has one.
 """
 
 
+import asyncio
 import binascii
+import contextlib
+import gzip
+import hashlib
+import ipaddress
+import logging
 import os
 import re
+import shutil
 import tempfile
 from collections.abc import AsyncIterator
+from typing import Any
 
-from stormlibpp.telepath import TelepathRetn
+import aiohttp
+import synapse.common as s_common
 import synapse.exc as s_exc
 import synapse.lib.cell as s_cell
 import synapse.lib.coro as s_coro
 import synapse.telepath as s_telepath
+from stormlibpp.telepath import TelepathRetn
 
+from . import communityid as p_communityid
 from . import enrich as p_enrich
+from . import eve as p_eve
+from . import feeds as p_feeds
 from . import flows as p_flows
+from . import rulesvc as p_rulesvc
+from . import sandbox as p_sandbox
+from . import snort as p_snort
+from . import suricata as p_suricata
 from . import tshark as p_tshark
 from .api import PcapCellApi
+
+logger = logging.getLogger(__name__)
 
 
 SHA256RE = re.compile(r"^[0-9a-f]{64}$")
 
 CHUNK = 1024 * 1024
 """The size of the chunks files are uploaded to the Axon in."""
+
+UPLOAD_IDLE = 60 * 60 * 1000
+"""Uploads (streamed by Storm) untouched for this long (ms) are removed."""
+
+UPLOAD_KINDS = ("capture", "keylog")
+"""The kinds of files Storm can stream to the service."""
+
+PROTO_NUMS = {"tcp": 6, "udp": 17, "icmp": 1, "ipv6-icmp": 58, "sctp": 132, "gre": 47}
+"""IP protocol numbers by the protocol names Snort and Suricata use in alerts."""
 
 
 def normSha256(valu) -> str:
@@ -57,15 +97,50 @@ class PcapSvcError(Exception):
         self.mesg = mesg
 
 
-class PcapSvc(s_cell.Cell):
+def _gunzip(src: str, dst: str) -> None:
+    """Decompress a gzip compressed capture (Snort and Suricata only read plain captures)."""
+
+    with gzip.open(src, "rb") as ifd, open(dst, "wb") as ofd:
+        shutil.copyfileobj(ifd, ofd, CHUNK)
+
+
+def _isGzip(path: str) -> bool:
+    with open(path, "rb") as fd:
+        return fd.read(2) == b"\x1f\x8b"
+
+
+def alertCommunityId(proto: str, src: str, sport: Any, dst: str, dport: Any) -> str | None:
+    """The Community ID of an alert's packet, from its protocol, addresses, and ports."""
+
+    ipproto = PROTO_NUMS.get(str(proto).lower())
+    try:
+        srcb, dstb = ipaddress.ip_address(src).packed, ipaddress.ip_address(dst).packed
+    except ValueError:
+        return None
+    if ipproto is None:
+        return None
+    if ipproto in (6, 17, 132):
+        try:
+            return p_communityid.communityId(ipproto, srcb, dstb, int(sport), int(dport))
+        except (TypeError, ValueError):
+            return None
+    return p_communityid.communityId(ipproto, srcb, dstb)
+
+
+class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
     """The Cell implementation for the slib.pcap service."""
 
     cellapi = PcapCellApi
 
     confdefs = {
         "axon:url": {
-            "type": "string",
-            "description": "The Telepath URL of the Axon that capture files are read from.",
+            "type": ["string", "null"],
+            "default": None,
+            "description": (
+                "The Telepath URL of the Cortex's Axon. With it the service reads captures from "
+                "the Axon itself and uploads every file it extracts from flows there. Without "
+                "it Storm streams captures to the service, and extracted files aren't saved."
+            ),
         },
         "pcap:timeout": {
             "type": "integer",
@@ -91,13 +166,22 @@ class PcapSvc(s_cell.Cell):
                 "text payload (its :src:handshake/:dst:handshake), 0 to keep none."
             ),
         },
+        "pcap:maxsize": {
+            "type": "integer",
+            "default": 1024 * 1024 * 1024,
+            "minimum": 0,
+            "description": "The max size, in bytes, of a capture file to read, 0 for no limit.",
+        },
+        "pcap:workers": {
+            "type": "integer",
+            "default": 2,
+            "minimum": 1,
+            "description": "The max number of captures analyzed at once.",
+        },
         "pcap:files": {
             "type": "boolean",
             "default": True,
-            "description": (
-                "Extract the files sent in flows (HTTP, FTP, email) into the Axon by default. "
-                "Needs tshark."
-            ),
+            "description": "Extract the files sent in flows (HTTP, FTP, SMB, email) by default.",
         },
         "pcap:files:maxsize": {
             "type": "integer",
@@ -111,12 +195,114 @@ class PcapSvc(s_cell.Cell):
             "minimum": 0,
             "description": "The max number of files extracted from one capture, 0 for no limit.",
         },
+        "pcap:feeds": {
+            "type": "array",
+            "items": {"type": "object"},
+            "default": [dict(f) for f in p_feeds.DEFAULT_FEEDS],
+            "description": (
+                "The rule feeds the service starts with, each a {name, url, engine, enabled, "
+                "exclude, desc}. Only read the first time the service starts, after that feeds "
+                "are managed with slib.pcap.admin.feed."
+            ),
+        },
+        "pcap:feeds:secrets": {
+            "type": "object",
+            "additionalProperties": {"type": "string"},
+            "default": {},
+            "description": (
+                "Secrets feed URLs reference as ${name}, ex. {\"talos:oinkcode\": \"...\"}. "
+                "Only the service's operator can see them."
+            ),
+        },
+        "pcap:feeds:interval": {
+            "type": "number",
+            "default": 24,
+            "description": "Hours between feed downloads (a sync downloads a feed when it's due).",
+        },
+        "pcap:feeds:timeout": {
+            "type": "number",
+            "default": 300,
+            "description": "Seconds before a feed download times out.",
+        },
+        "pcap:feeds:maxsize": {
+            "type": "integer",
+            "default": 268435456,
+            "description": "The max size, in bytes, of a feed (and of the rules it unpacks to).",
+        },
+        "suricata:enabled": {
+            "type": "boolean",
+            "default": True,
+            "description": "Use Suricata (when it's installed) for protocols and rules by default.",
+        },
+        "suricata:bin": {
+            "type": "string",
+            "default": "suricata",
+            "description": "The Suricata binary, a path or a name on the PATH.",
+        },
+        "suricata:conf": {
+            "type": ["string", "null"],
+            "default": None,
+            "description": (
+                "The base suricata.yaml, the service's outputs and settings are applied over it. "
+                "Defaults to the one installed with Suricata."
+            ),
+        },
+        "suricata:vars": {
+            "type": "object",
+            "default": p_suricata.DEFAULT_VARS,
+            "description": "Suricata address variables, ex. HOME_NET and EXTERNAL_NET.",
+        },
+        "suricata:timeout": {
+            "type": "number",
+            "default": 900,
+            "description": "Seconds before a Suricata run is killed.",
+        },
+        "snort:enabled": {
+            "type": "boolean",
+            "default": True,
+            "description": "Use Snort (when it's installed) for Snort rules by default.",
+        },
+        "snort:bin": {
+            "type": "string",
+            "default": "snort",
+            "description": "The Snort 3 binary, a path or a name on the PATH.",
+        },
+        "snort:snort2lua": {
+            "type": "string",
+            "default": "snort2lua",
+            "description": "The snort2lua binary, converts Snort 2.x rules to Snort 3.",
+        },
+        "snort:conf": {
+            "type": ["string", "null"],
+            "default": None,
+            "description": (
+                "The base Snort config (snort.lua). Defaults to the snort.lua installed with "
+                "Snort. Relative includes are found in the config's directory."
+            ),
+        },
+        "snort:vars": {
+            "type": "object",
+            "default": p_snort.DEFAULT_VARS,
+            "description": (
+                "Snort variables to set in the base config, ex. HOME_NET and EXTERNAL_NET. Only "
+                "variables the base config assigns can be set."
+            ),
+        },
+        "snort:args": {
+            "type": "array",
+            "items": {"type": "string"},
+            "default": [],
+            "description": "Extra arguments for every Snort run (operator only).",
+        },
+        "snort:timeout": {
+            "type": "number",
+            "default": 900,
+            "description": "Seconds before a Snort run (a rule build or a scan) is killed.",
+        },
         "tshark:enabled": {
             "type": "boolean",
             "default": True,
-            "description": (
-                "Use tshark (when it's installed) for application layer details by default."
-            ),
+            "description": "Use tshark (when it's installed) by default.",
         },
         "tshark:path": {
             "type": "string",
@@ -128,15 +314,24 @@ class PcapSvc(s_cell.Cell):
             "items": {"type": "string"},
             "default": [],
             "description": (
-                "Extra tshark arguments, ex. [\"-d\", \"tcp.port==2222,ssh\"] to decode SSH "
-                "on a non-standard port."
+                "Extra tshark arguments for every run (operator only), ex. [\"-d\", "
+                "\"tcp.port==2222,ssh\"]. Users set Decode As rules with --decode-as."
+            ),
+        },
+        "tshark:protocols": {
+            "type": ["array", "null"],
+            "items": {"type": "string"},
+            "default": list(p_tshark.PROTOCOLS),
+            "description": (
+                "The only dissectors tshark runs (--only-protocols), null to run every "
+                "dissector. Protocols named by Decode As rules are added to it."
             ),
         },
         "tshark:keylog:maxsize": {
             "type": "integer",
             "default": 16 * 1024 * 1024,
             "minimum": 0,
-            "description": "The largest TLS key log, in bytes, read from the Axon, 0 for no limit.",
+            "description": "The largest TLS key log, in bytes, read for a run, 0 for no limit.",
         },
         "tshark:timeout": {
             "type": "number",
@@ -144,11 +339,33 @@ class PcapSvc(s_cell.Cell):
             "minimum": 0,
             "description": "Seconds a tshark run may take before it's killed, 0 for no limit.",
         },
-        "pcap:maxsize": {
-            "type": "integer",
-            "default": 1024 * 1024 * 1024,
-            "minimum": 0,
-            "description": "The max size, in bytes, of a capture file to read, 0 for no limit.",
+        "sandbox:mode": {
+            "type": "string",
+            "enum": list(p_sandbox.MODES),
+            "default": "best-effort",
+            "description": (
+                "How engines (tshark, Suricata, Snort) are sandboxed: best-effort applies every "
+                "layer the host supports, strict refuses to run an engine without all of them, "
+                "off runs them directly."
+            ),
+        },
+        "sandbox:user": {
+            "type": ["string", "null"],
+            "default": p_sandbox.DEFAULT_USER,
+            "description": "The unprivileged user engines run as when the service runs as root.",
+        },
+        "sandbox:rlimits": {
+            "type": "object",
+            "default": p_sandbox.DEFAULT_RLIMITS,
+            "description": (
+                "Resource limits of an engine run: as (address space bytes), cpu (seconds), "
+                "fsize (bytes per file), nofile, core. 0 is unlimited."
+            ),
+        },
+        "sandbox:seccomp": {
+            "type": "boolean",
+            "default": True,
+            "description": "Refuse engines IPv4, IPv6, and packet sockets with a seccomp filter.",
         },
     }
 
@@ -156,12 +373,173 @@ class PcapSvc(s_cell.Cell):
         await s_cell.Cell.__anit__(self, dirn, *args, **kwargs)
         self.axonurl = self.conf.get("axon:url")
         self.tmpdir = os.path.join(self.dirn, "tmp")
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
         os.makedirs(self.tmpdir, exist_ok=True)
+
+        self.sandbox = p_sandbox.Sandbox(
+            mode=self.conf.get("sandbox:mode"),
+            user=self.conf.get("sandbox:user"),
+            rlimits=self.conf.get("sandbox:rlimits"),
+            seccomp=self.conf.get("sandbox:seccomp"),
+        )
         self.tshark = p_tshark.Tshark(
             path=self.conf.get("tshark:path"),
             args=self.conf.get("tshark:args"),
             timeout=self.conf.get("tshark:timeout"),
+            sandbox=self.sandbox,
+            protocols=self.conf.get("tshark:protocols"),
+            tmpdir=self.tmpdir,
         )
+        self.snort = p_snort.Snort(
+            os.path.join(self.dirn, "snort"),
+            binpath=self.conf.get("snort:bin"),
+            s2lpath=self.conf.get("snort:snort2lua"),
+            conf=self.conf.get("snort:conf"),
+            snortvars=self.conf.get("snort:vars"),
+            args=self.conf.get("snort:args"),
+            timeout=self.conf.get("snort:timeout"),
+            sandbox=self.sandbox,
+        )
+        self.suricata = p_suricata.Suricata(
+            os.path.join(self.dirn, "suricata"),
+            binpath=self.conf.get("suricata:bin"),
+            conf=self.conf.get("suricata:conf"),
+            addrvars=self.conf.get("suricata:vars"),
+            timeout=self.conf.get("suricata:timeout"),
+            sandbox=self.sandbox,
+        )
+        self.versions: dict[str, str | None] = {}
+        self.uploads: dict[str, dict[str, Any]] = {}
+        self.runsema = asyncio.Semaphore(self.conf.get("pcap:workers"))
+
+        await self._initRules()
+
+        self.session = aiohttp.ClientSession(trust_env=True)
+        self.onfini(self.session.close)
+        self.schedCoro(self._pruneLoop())
+
+    # ---- Status ----
+
+    async def _version(self, name: str) -> str | None:
+        if name in self.versions:
+            return self.versions[name]
+        vers = None
+        try:
+            if name == "tshark" and self.tshark.available:
+                await self.tshark.load()
+                vers = self.tshark.version
+            elif name == "snort" and self.snort.available():
+                vers = await self.snort.version()
+            elif name == "suricata" and self.suricata.available():
+                vers = await self.suricata.version()
+        except (p_tshark.TsharkError, p_snort.SnortError, p_suricata.SuricataError) as err:
+            logger.warning("Unable to get the %s version: %s", name, err.mesg)
+            return None
+        self.versions[name] = vers
+        return vers
+
+    async def status(self) -> dict[str, Any]:
+        """The service's engines, sandbox, Axon, and rules."""
+
+        engines = {}
+        for name, avail, enabled in (
+            ("suricata", self.suricata.available(), self.conf.get("suricata:enabled")),
+            ("snort", self.snort.available(), self.conf.get("snort:enabled")),
+            ("tshark", self.tshark.available, self.conf.get("tshark:enabled")),
+        ):
+            engines[name] = {"available": avail, "enabled": enabled,
+                             "version": await self._version(name) if avail else None}
+        return {
+            "engines": engines,
+            "sandbox": self.sandbox.probe(),
+            "axon": bool(self.axonurl),
+            "rules": await self.ruleStatus(),
+        }
+
+    async def hasAxon(self) -> bool:
+        """Whether the service has an Axon (``axon:url``): it reads captures from it and saves
+        extracted files to it."""
+
+        return bool(self.axonurl)
+
+    # ---- Uploads (when Storm streams files to the service) ----
+
+    def _pruneUploads(self, idle: int = UPLOAD_IDLE) -> list[str]:
+        cutoff = s_common.now() - idle
+        stale = [iden for iden, up in self.uploads.items() if up["touched"] < cutoff]
+        for iden in stale:
+            self._dropUpload(iden)
+        return stale
+
+    async def _pruneLoop(self) -> None:
+        while not await self.waitfini(timeout=600):
+            self._pruneUploads()
+            self._prunePushes()
+
+    async def uploadStart(self, kind: str = "capture") -> str:
+        """Start streaming a file (a ``capture`` or a ``keylog``) to the service. Returns its ID.
+
+        Send the file with ``uploadChunk``, then pass the ID to ``flows``.
+        """
+
+        if kind not in UPLOAD_KINDS:
+            raise PcapSvcError(f"Invalid upload kind {kind!r}, use one of: "
+                               f"{', '.join(UPLOAD_KINDS)}")
+        iden = s_common.guid()
+        path = os.path.join(self.tmpdir, f"upload-{iden}")
+        open(path, "wb").close()  # noqa: ASYNC230 - creates an empty file
+        maxsize = self.conf.get("pcap:maxsize" if kind == "capture" else "tshark:keylog:maxsize")
+        self.uploads[iden] = {"path": path, "kind": kind, "size": 0, "maxsize": maxsize,
+                              "sha256": hashlib.sha256(), "touched": s_common.now()}
+        return iden
+
+    def _reqUpload(self, iden: str, kind: str | None = None) -> dict[str, Any]:
+        upload = self.uploads.get(iden)
+        if upload is None or (kind is not None and upload["kind"] != kind):
+            raise PcapSvcError(f"Unknown upload: {iden}")
+        upload["touched"] = s_common.now()
+        return upload
+
+    def _dropUpload(self, iden: str) -> None:
+        upload = self.uploads.pop(iden, None)
+        if upload is not None:
+            with contextlib.suppress(OSError):
+                os.remove(upload["path"])
+
+    async def uploadChunk(self, iden: str, byts: bytes) -> int:
+        """Append a chunk to an upload. Returns its size so far."""
+
+        upload = self._reqUpload(iden)
+        upload["size"] += len(byts)
+        if upload["maxsize"] and upload["size"] > upload["maxsize"]:
+            self._dropUpload(iden)
+            raise PcapSvcError(f"The {upload['kind']} is larger than the service's max size of "
+                               f"{upload['maxsize']} bytes.")
+        upload["sha256"].update(byts)
+        with open(upload["path"], "ab") as fd:  # noqa: ASYNC230 - a small append per chunk
+            fd.write(byts)
+        return upload["size"]
+
+    async def uploadCancel(self, iden: str) -> bool:
+        """Remove an upload."""
+
+        found = iden in self.uploads
+        self._dropUpload(iden)
+        return found
+
+    def _takeUpload(self, iden: str, kind: str, dst: str, sha256: str | None = None) -> int:
+        """Move an upload to ``dst`` (it's then gone). Returns its size."""
+
+        upload = self._reqUpload(iden, kind)
+        digest = upload["sha256"].hexdigest()
+        if sha256 is not None and digest != sha256:
+            self._dropUpload(iden)
+            raise PcapSvcError(f"The uploaded {kind} has the SHA-256 {digest}, not {sha256}.")
+        self.uploads.pop(iden)
+        shutil.move(upload["path"], dst)
+        return upload["size"]
+
+    # ---- The Axon ----
 
     def _opts(self, timeout: int | None, limit: int | None,
               handshake: int | None) -> tuple[int, int, int]:
@@ -178,26 +556,24 @@ class PcapSvc(s_cell.Cell):
 
         return timeout, min(limit, maxlimit), handshake
 
-    async def _download(self, axon, sha256: str, fd) -> int:
-        """Write a file from the Axon into fd, returning its size."""
+    async def _download(self, axon, sha256: str, path: str, maxsize: int,
+                        what: str = "capture") -> int:
+        """Append a file from the Axon to ``path``, returning its size."""
 
-        maxsize = self.conf.get("pcap:maxsize")
         shabyts = binascii.unhexlify(sha256)
-
         size = await axon.size(shabyts)
         if size is None:
-            raise PcapSvcError(f"file:bytes:sha256={sha256} is not in the Axon.")
+            raise PcapSvcError(f"The {what} file:bytes:sha256={sha256} is not in the Axon.")
         if maxsize and size > maxsize:
-            raise PcapSvcError(
-                f"file:bytes:sha256={sha256} is {size} bytes, larger than the "
-                f"pcap:maxsize of {maxsize} bytes."
-            )
+            raise PcapSvcError(f"The {what} file:bytes:sha256={sha256} is {size} bytes, larger "
+                               f"than the max size of {maxsize} bytes.")
         try:
-            async for byts in axon.get(shabyts):
-                fd.write(byts)
+            with open(path, "ab") as fd:  # noqa: ASYNC230 - a write per Axon chunk
+                async for byts in axon.get(shabyts):
+                    fd.write(byts)
         except s_exc.NoSuchFile:
-            raise PcapSvcError(f"file:bytes:sha256={sha256} is not in the Axon.") from None
-
+            raise PcapSvcError(f"The {what} file:bytes:sha256={sha256} is not in the Axon.") \
+                from None
         return size
 
     async def _upload(self, axon, files: p_enrich.FileStore) -> int:
@@ -208,123 +584,294 @@ class PcapSvc(s_cell.Cell):
             if await axon.has(binascii.unhexlify(sha256)):
                 continue
             async with await axon.upload() as upfd:
-                with open(files.path(sha256), "rb") as fd:
+                with open(files.path(sha256), "rb") as fd:  # noqa: ASYNC230 - chunked reads
                     while byts := fd.read(CHUNK):
                         await upfd.write(byts)
                 await upfd.save()
             count += 1
         return count
 
-    async def _keylog(self, axon, keylogs: list[str], path: str) -> int:
-        """Download TLS key logs from the Axon into one file, returning how many there were."""
+    @contextlib.asynccontextmanager
+    async def _axon(self):
+        if not self.axonurl:
+            yield None
+            return
+        async with s_telepath.withTeleEnv(), await s_telepath.openurl(self.axonurl) as axon:
+            yield axon
 
-        maxsize = self.conf.get("tshark:keylog:maxsize")
-        with open(path, "wb") as fd:
-            for sha256 in keylogs:
-                shabyts = binascii.unhexlify(sha256)
-                size = await axon.size(shabyts)
-                if size is None:
-                    raise PcapSvcError(
-                        f"The TLS key log file:bytes:sha256={sha256} is not in the Axon."
-                    )
-                if maxsize and size > maxsize:
-                    raise PcapSvcError(
-                        f"The TLS key log file:bytes:sha256={sha256} is {size} bytes, larger than "
-                        f"the tshark:keylog:maxsize of {maxsize} bytes."
-                    )
-                async for byts in axon.get(shabyts):
-                    fd.write(byts)
-                fd.write(b"\n")
-        return len(keylogs)
+    # ---- Engines ----
 
-    async def _tshark(self, path: str, keylog: str | None,
-                      decode: list[str]) -> tuple[dict, dict]:
-        """Run tshark over a capture, returning (frames, info). Failures are in the info."""
-
-        info = {"enabled": True, "version": None, "error": None}
+    async def _runTshark(self, path: str, keylog: str | None, decode: list[str],
+                         gaps: bool) -> tuple[dict, dict]:
+        info = {"enabled": True, "version": None, "error": None, "gaps": gaps and not keylog}
         try:
-            frames, tsinfo = await self.tshark.frames(path, keylog=keylog, decode=decode)
+            frames, tsinfo = await self.tshark.frames(path, keylog=keylog, decode=decode,
+                                                      gaps=gaps)
         except p_tshark.TsharkError as err:
             info["error"] = err.mesg
             return {}, info
         info.update(tsinfo)
         return frames, info
 
+    async def _runSuricata(self, path: str, outdir: str, decode: list[str], files: bool,
+                           rules: bool) -> tuple[dict | None, dict]:
+        info: dict[str, Any] = {"enabled": True, "error": None, "rules": 0, "warnings": []}
+        active = self._acquire("suricata") if rules else None
+        try:
+            if active is not None:
+                info["rules"] = len(active[1])
+            res = await self.suricata.run(
+                path, outdir, rulespath=active[0] if active else None, decode=decode,
+                filestore=files, maxbody=self.conf.get("pcap:files:maxsize"))
+            info["warnings"] = res["warnings"]
+            return {**res, "index": active[1] if active else {}}, info
+        except p_suricata.SuricataError as err:
+            info["error"] = err.mesg
+            return None, info
+        finally:
+            if active is not None:
+                self._release(active[0])
+
+    async def _runSnort(self, path: str) -> tuple[dict | None, dict]:
+        info: dict[str, Any] = {"enabled": True, "error": None, "rules": 0, "warnings": []}
+        active = self._acquire("snort")
+        if active is None:
+            info["enabled"] = False
+            return None, info
+        alerts: list[dict] = []
+        try:
+            info["rules"] = len(active[1])
+            count, warnings = await self.snort.scan(active[0], path, alerts.append)
+            info["warnings"] = warnings
+            info["alerts"] = count
+            return {"alerts": alerts, "index": active[1]}, info
+        except p_snort.SnortError as err:
+            info["error"] = err.mesg
+            return None, info
+        finally:
+            self._release(active[0])
+
+    @staticmethod
+    def _correlate(frames: dict, suri: dict | None, snort: dict | None) -> tuple[list, dict]:
+        """Add the engines' events and alerts to ``frames`` (by frame number). Returns the
+        records without a frame number (see ``pcapsvc.flows.matchLoose``) and the rule index
+        of each engine."""
+
+        loose: list = []
+        index: dict[str, dict] = {}
+        if suri is not None:
+            index["suricata"] = suri["index"]
+            for ev in p_suricata.iterEve(suri["eve"]):
+                etype = ev.get("event_type")
+                if etype == "stats":
+                    continue
+                kind = "suricata" if etype == "alert" else "eve"
+                num = ev.get("pcap_cnt")
+                if num:
+                    rec = frames.setdefault(int(num), {})
+                    if kind == "eve":
+                        rec.setdefault("_eve", []).append(ev)
+                    else:
+                        rec.setdefault("_alerts", []).append(("suricata", ev))
+                elif ev.get("community_id"):
+                    tick = p_eve.eveTime(ev.get("timestamp"))
+                    if etype == "flow":
+                        tick = p_eve.eveTime((ev.get("flow") or {}).get("start")) or tick
+                    loose.append((ev["community_id"], tick, kind, ev))
+
+        if snort is not None:
+            index["snort"] = snort["index"]
+            for alert in snort["alerts"]:
+                num = alert.get("pkt_num")
+                if num:
+                    frames.setdefault(int(num), {}).setdefault("_alerts", []).append(
+                        ("snort", alert))
+                    continue
+                cid = alertCommunityId(alert.get("proto"), alert.get("src_addr"),
+                                       alert.get("src_port"), alert.get("dst_addr"),
+                                       alert.get("dst_port"))
+                if cid:
+                    loose.append((cid, p_eve.alertTime("snort", alert), "snort", alert))
+        return loose, index
+
+    # ---- Analysis ----
+
     async def analyze(self, sha256: str, timeout: int | None = None, limit: int | None = None,
                       handshake: int | None = None, tshark: bool | None = None,
                       files: bool | None = None, keylogs: list[str] | None = None,
-                      decode: list[str] | None = None) -> tuple[list[dict], dict]:
-        """Read a capture file from the Axon and return its flows and a summary of it.
+                      decode: list[str] | None = None, suricata: bool | None = None,
+                      snort: bool | None = None, rules: bool = True, upload: str | None = None,
+                      keyloguploads: list[str] | None = None) -> tuple[list[dict], dict]:
+        """Analyze a capture and return its flows and a summary of it.
 
-        See ``pcapsvc.flows.analyze`` for what the flows and summary contain. The summary
-        also has the file's ``sha256`` and ``size``, how tshark went (``tshark``), and how many
-        files were extracted (``files``).
+        See ``pcapsvc.flows.analyze`` for what the flows and summary contain. The summary also
+        has the file's ``sha256`` and ``size``, how each engine went (``engines``), and the
+        extracted files (``files``).
+
+        Parameters
+        ----------
+        sha256 : str
+            The capture's SHA-256.
+        upload : str | None
+            The ID of the capture's upload (see ``uploadStart``), otherwise it's read from
+            the Axon.
+        keylogs, keyloguploads : list | None
+            TLS key logs to decrypt with, by SHA-256 in the Axon or by upload ID.
+        decode : list | None
+            Decode As rules, for tshark (``-d``) and Suricata (detection ports).
+        tshark, suricata, snort, files : bool | None
+            Use each engine, and extract files, None for the service's config.
+        rules : bool
+            Match the capture against the rules (Snort and Suricata).
 
         Raises
         ------
         PcapSvcError
-            If the file (or a key log) isn't in the Axon or is too big, the file isn't a
-            capture file, or a Decode As rule is invalid.
+            If the capture (or a key log) can't be read, is too big, or isn't a capture.
         """
 
         sha256 = normSha256(sha256)
         keylogs = [normSha256(k) for k in (keylogs or ())]
+        keyloguploads = list(keyloguploads or ())
         try:
             decode = p_tshark.checkDecodeAs(decode)
         except (p_tshark.TsharkError, TypeError) as err:
             raise PcapSvcError(getattr(err, "mesg", str(err))) from None
 
         timeout, limit, handshake = self._opts(timeout, limit, handshake)
-        tshark = self.conf.get("tshark:enabled") if tshark is None else bool(tshark)
-        files = self.conf.get("pcap:files") if files is None else bool(files)
+        opts = {
+            "tshark": self.conf.get("tshark:enabled") if tshark is None else bool(tshark),
+            "suricata": self.conf.get("suricata:enabled") if suricata is None else bool(suricata),
+            "snort": self.conf.get("snort:enabled") if snort is None else bool(snort),
+            "files": self.conf.get("pcap:files") if files is None else bool(files),
+            "rules": bool(rules),
+        }
 
-        if not self.axonurl:
-            raise PcapSvcError("The slib.pcap service has no axon:url configured.")
+        if upload is None and not self.axonurl:
+            raise PcapSvcError("The service has no axon:url, the capture must be uploaded.")
+        if keylogs and not self.axonurl:
+            raise PcapSvcError("The service has no axon:url, key logs must be uploaded.")
 
-        with tempfile.TemporaryDirectory(dir=self.tmpdir) as tmp:
-            path = os.path.join(tmp, "capture")
-            filesdir = os.path.join(tmp, "files")
-            os.makedirs(filesdir)
+        async with self.runsema:
+            with tempfile.TemporaryDirectory(dir=self.tmpdir) as tmp:
+                return await self._analyze(tmp, sha256, upload, keylogs, keyloguploads, decode,
+                                           timeout, limit, handshake, opts)
 
-            async with s_telepath.withTeleEnv(), await s_telepath.openurl(self.axonurl) as axon:
-                with open(path, "wb") as fd:
-                    size = await self._download(axon, sha256, fd)
+    async def _fetch(self, axon, tmp: str, sha256: str, upload: str | None, keylogs: list[str],
+                     keyloguploads: list[str]) -> tuple[str, int, str | None]:
+        """Get the capture (and the key logs, joined into one) into the run's directory.
 
-                frames: dict = {}
-                tsinfo = {"enabled": False, "version": None, "error": None}
-                if tshark and not self.tshark.available:
-                    tsinfo["error"] = "tshark is not installed"
-                elif tshark:
-                    keylog = None
-                    if keylogs:
-                        keylog = os.path.join(tmp, "keylog")
-                        await self._keylog(axon, keylogs, keylog)
-                    frames, tsinfo = await self._tshark(path, keylog, decode)
-                tsinfo["keylogs"] = len(keylogs)
-                tsinfo["decode"] = decode
+        Returns (the capture's path, its size, the key log's path or None).
+        """
 
-                store = None
-                if files and tsinfo["enabled"] and not tsinfo["error"]:
-                    store = p_enrich.FileStore(
-                        filesdir, maxsize=self.conf.get("pcap:files:maxsize"),
-                        limit=self.conf.get("pcap:files:limit"),
+        path = os.path.join(tmp, "capture")
+        if upload is not None:
+            size = self._takeUpload(upload, "capture", path, sha256)
+        else:
+            size = await self._download(axon, sha256, path, self.conf.get("pcap:maxsize"))
+
+        keylog = None
+        if keylogs or keyloguploads:
+            keylog = os.path.join(tmp, "keylog")
+            for kiden in keyloguploads:
+                part = os.path.join(tmp, f"keylog-{kiden}")
+                self._takeUpload(kiden, "keylog", part)
+                with open(part, "rb") as ifd, open(keylog, "ab") as ofd:  # noqa: ASYNC230
+                    shutil.copyfileobj(ifd, ofd)
+                    ofd.write(b"\n")
+            for ksha in keylogs:
+                await self._download(axon, ksha, keylog, self.conf.get("tshark:keylog:maxsize"),
+                                     what="TLS key log")
+                with open(keylog, "ab") as fd:  # noqa: ASYNC230 - one byte
+                    fd.write(b"\n")
+        return path, size, keylog
+
+    async def _engines(self, tmp: str, path: str, plain: str, keylog: str | None,
+                       decode: list[str], opts: dict, saving: bool) -> dict[str, Any]:
+        """Run the engines (concurrently). Returns their results and how each went."""
+
+        suridir = os.path.join(tmp, "suricata")
+        os.makedirs(suridir)
+        self.sandbox.prepare(tmp)
+
+        info: dict[str, dict] = {name: {"enabled": False, "error": None}
+                                 for name in ("suricata", "snort", "tshark")}
+        tasks: dict[str, Any] = {}
+        if opts["suricata"] and self.suricata.available():
+            tasks["suricata"] = self._runSuricata(plain, suridir, decode, saving, opts["rules"])
+        elif opts["suricata"]:
+            info["suricata"]["error"] = "Suricata is not installed"
+        if opts["snort"] and opts["rules"] and self.snort.available():
+            tasks["snort"] = self._runSnort(plain)
+        if opts["tshark"] and self.tshark.available:
+            tasks["tshark"] = self._runTshark(path, keylog, decode, gaps="suricata" in tasks)
+        elif opts["tshark"]:
+            info["tshark"]["error"] = "tshark is not installed"
+        if keylog and "tshark" not in tasks:
+            info["tshark"]["error"] = info["tshark"]["error"] or "TLS key logs need tshark"
+
+        results = dict(zip(tasks, await asyncio.gather(*tasks.values())))
+        out: dict[str, Any] = {"frames": {}, "suricata": None, "snort": None}
+        for name, (res, einfo) in results.items():
+            info[name] = einfo
+            out["frames" if name == "tshark" else name] = res
+
+        if out["suricata"] is None and info["tshark"].get("gaps"):
+            # Suricata failed, so tshark has to do everything.
+            out["frames"], info["tshark"] = await self._runTshark(path, keylog, decode,
+                                                                  gaps=False)
+        out["info"] = info
+        return out
+
+    async def _analyze(self, tmp: str, sha256: str, upload: str | None, keylogs: list[str],
+                       keyloguploads: list[str], decode: list[str], timeout: int, limit: int,
+                       handshake: int, opts: dict) -> tuple[list[dict], dict]:
+        filesdir = os.path.join(tmp, "files")
+        os.makedirs(filesdir)
+
+        async with self._axon() as axon:
+            path, size, keylog = await self._fetch(axon, tmp, sha256, upload, keylogs,
+                                                   keyloguploads)
+
+            # Snort and Suricata only read plain captures, dpkt and tshark read either.
+            plain = path
+            if await s_coro.executor(_isGzip, path):
+                plain = os.path.join(tmp, "capture.pcap")
+                try:
+                    await s_coro.executor(_gunzip, path, plain)
+                except (OSError, EOFError, gzip.BadGzipFile) as err:
+                    raise PcapSvcError(f"file:bytes:sha256={sha256}: Unable to decompress the "
+                                       f"capture: {err}") from None
+
+            # Files are saved to the Axon, without one they're only counted.
+            saving = opts["files"] and axon is not None
+            res = await self._engines(tmp, path, plain, keylog, decode, opts, saving)
+            loose, index = self._correlate(res["frames"], res["suricata"], res["snort"])
+
+            store = None
+            if saving:
+                store = p_enrich.FileStore(filesdir, maxsize=self.conf.get("pcap:files:maxsize"),
+                                           limit=self.conf.get("pcap:files:limit"))
+            suri = res["suricata"]
+            with open(path, "rb") as fd:  # noqa: ASYNC230 - read in the executor
+                try:
+                    flows, summary = await s_coro.executor(
+                        p_flows.analyze, fd, timeout=timeout, limit=limit, handshake=handshake,
+                        seed=sha256, frames=res["frames"], files=store,
+                        unsaved=opts["files"] and not saving, rules=index, loose=loose,
+                        filestore=suri["filestore"] if suri else None,
                     )
+                except p_flows.PcapError as err:
+                    raise PcapSvcError(f"file:bytes:sha256={sha256}: {err.mesg}") from None
 
-                with open(path, "rb") as fd:
-                    try:
-                        flows, summary = await s_coro.executor(
-                            p_flows.analyze, fd, timeout=timeout, limit=limit,
-                            handshake=handshake, seed=sha256, frames=frames, files=store,
-                        )
-                    except p_flows.PcapError as err:
-                        raise PcapSvcError(f"file:bytes:sha256={sha256}: {err.mesg}") from None
-
-                if store is not None:
-                    summary["files"]["uploaded"] = await self._upload(axon, store)
+            if store is not None:
+                summary["files"]["uploaded"] = await self._upload(axon, store)
 
         summary["sha256"] = sha256
         summary["size"] = size
-        summary["tshark"].update(tsinfo)
+        summary["keylogs"] = len(keylogs) + len(keyloguploads)
+        summary["decode"] = decode
+        summary["engines"] = res["info"]
         summary.setdefault("files", None)
         return flows, summary
 
@@ -339,45 +886,16 @@ class PcapSvc(s_cell.Cell):
         except p_tshark.TsharkError as err:
             return TelepathRetn(status=False, mesg=err.mesg, data=None)
 
-    async def flows(self, sha256: str, timeout: int | None = None, limit: int | None = None,
-                    handshake: int | None = None, tshark: bool | None = None,
-                    files: bool | None = None, keylogs: list[str] | None = None,
-                    decode: list[str] | None = None) -> AsyncIterator[TelepathRetn]:
-        """Yield the flows in a capture file in the Axon, each wrapped in a ``TelepathRetn``.
+    async def flows(self, sha256: str, **opts: Any) -> AsyncIterator[TelepathRetn]:
+        """Yield the flows in a capture, each wrapped in a ``TelepathRetn``.
 
         The first item's data is ``{"summary": <summary>}``, every item after it is
-        ``{"flow": <flow>}``. An error yields a single ``status=False`` item.
-
-        Parameters
-        ----------
-        sha256 : str
-            The SHA-256 of the capture file in the Axon.
-        timeout : int | None
-            Seconds a flow can be idle before a new flow starts, 0 to never time out flows.
-            Defaults to the ``pcap:timeout`` config.
-        limit : int | None
-            The max number of flows, capped by (and defaulting to) the ``pcap:limit`` config.
-        handshake : int | None
-            The max number of characters kept from each side's first text payload, 0 for none.
-            Defaults to the ``pcap:handshake`` config.
-        tshark : bool | None
-            Use tshark for application layer details, if it's installed. Defaults to the
-            ``tshark:enabled`` config.
-        files : bool | None
-            Extract the files sent in flows into the Axon (needs tshark). Defaults to the
-            ``pcap:files`` config.
-        keylogs : list[str] | None
-            SHA-256s of NSS key logs (SSLKEYLOGFILE) in the Axon, to decrypt TLS 1.2 and 1.3
-            with (needs tshark).
-        decode : list[str] | None
-            tshark "Decode As" rules, ex. ``["tcp.port==8443,tls"]``, see
-            ``pcapsvc.tshark.checkDecodeAs``.
+        ``{"flow": <flow>}``. An error yields a single ``status=False`` item. See ``analyze``
+        for the options.
         """
 
         try:
-            flows, summary = await self.analyze(sha256, timeout=timeout, limit=limit,
-                                                handshake=handshake, tshark=tshark, files=files,
-                                                keylogs=keylogs, decode=decode)
+            flows, summary = await self.analyze(sha256, **opts)
         except PcapSvcError as err:
             yield TelepathRetn(status=False, mesg=err.mesg, data=None)
             return

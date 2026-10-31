@@ -24,7 +24,7 @@ def mkcert(cn: str = "vertex.link", key=None, serial: int = 0x1234, sans=None,
     """A DER certificate."""
 
     key = key or ec.generate_private_key(ec.SECP256R1())
-    now = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
+    now = datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC)
     subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, cn)])
     builder = (
         x509.CertificateBuilder()

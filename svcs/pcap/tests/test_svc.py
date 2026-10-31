@@ -18,7 +18,6 @@ from pcapsvc.defs import SVC_NAME
 
 from . import pcapgen as g
 
-
 SVCDIR = pathlib.Path(__file__).parent.parent
 
 
@@ -36,6 +35,20 @@ class SvcProx:
         async with self.svc.getLocalProxy() as prox:
             async for item in prox.flows(*args, **kwargs):
                 yield item
+
+    async def call(self, name, *args, **kwargs):
+        async with self.svc.getLocalProxy() as prox:
+            return await getattr(prox, name)(*args, **kwargs)
+
+    async def upload(self, byts: bytes, kind: str = "capture", size: int = 7) -> str:
+        """Stream a file to the service in small chunks, returning the upload's ID."""
+
+        retn = await self.call("uploadStart", kind=kind)
+        assert retn["status"], retn
+        for off in range(0, len(byts), size):
+            chunk = await self.call("uploadChunk", retn["data"], byts[off:off + size])
+            assert chunk["status"], chunk
+        return retn["data"]
 
 
 class TestPcapSvc(s_tests.SynTest):
@@ -56,12 +69,27 @@ class TestPcapSvc(s_tests.SynTest):
             self.stormIsInPrint(f"true (svc) ({SVC_NAME} @ {pcapsvc.__version__})", msgs)
 
             assert "slib.pcap.flows" in core.stormcmds
-            for mod in ("slib.pcap.lib", "slib.pcap.model", "slib.pcap.priv"):
+            for cmd in ("slib.pcap.status", "slib.pcap.sync", "slib.pcap.rule.add",
+                        "slib.pcap.rule.check", "slib.pcap.admin.feed", "slib.pcap.admin.decode"):
+                assert cmd in core.stormcmds
+            for mod in ("slib.pcap.lib", "slib.pcap.model", "slib.pcap.util",
+                        "slib.pcap.priv.user", "slib.pcap.priv.rules", "slib.pcap.priv.sync",
+                        "slib.pcap.priv.admin"):
                 assert mod in core.stormmods
                 self.stormHasNoErr(await core.stormlist(f"$mod = $lib.import({mod})"))
 
-            # The add event creates the service's meta:source.
+            # The add event creates the service's meta:source and the sync cron job.
             self.len(1, await core.nodes("meta:source:name=slib.pcap"))
+            iden = await core.callStorm('return($lib.globals.get("slib:pcap:cron"))')
+            assert iden
+            crons = await core.callStorm("return($lib.cron.list())")
+            assert [c["iden"] for c in crons if c["iden"] == iden] == [iden]
+
+            status = (await SvcProx(svc).call("status"))["data"]
+            assert set(status) == {"engines", "sandbox", "axon", "rules"}
+            assert set(status["engines"]) == {"suricata", "snort", "tshark"}
+            assert status["axon"] is False
+            assert (await SvcProx(svc).call("hasAxon"))["data"] is False
 
     async def test_flows(self):
         async with self.getTestAxon() as axon:
@@ -121,7 +149,7 @@ class TestPcapSvc(s_tests.SynTest):
                 svc.conf["pcap:maxsize"] = 10
                 retns = await collect(prox.flows(sha.hex()))
                 assert not retns[0]["status"]
-                assert "larger than the pcap:maxsize of 10 bytes" in retns[0]["mesg"]
+                assert "larger than the max size of 10 bytes" in retns[0]["mesg"]
 
                 # Temp files are cleaned up.
                 assert list(pathlib.Path(svc.tmpdir).iterdir()) == []
@@ -132,7 +160,10 @@ class TestPcapSvc(s_tests.SynTest):
             sha = hashlib.sha256(b"x").hexdigest()
             retns = await collect(prox.flows(sha))
             assert not retns[0]["status"]
-            assert retns[0]["mesg"] == "The slib.pcap service has no axon:url configured."
+            assert retns[0]["mesg"] == \
+                "The service has no axon:url, the capture must be uploaded."
+            retns = await collect(prox.flows(sha, keylogs=[sha], upload="x"))
+            assert retns[0]["mesg"] == "The service has no axon:url, key logs must be uploaded."
 
             # An Axon that can't be reached.
             svc.axonurl = "tcp://127.0.0.1:1/axon"
@@ -165,30 +196,114 @@ DATA = pathlib.Path(__file__).parent / "data"
 needsTshark = unittest.skipIf(shutil.which("tshark") is None, "tshark isn't installed")
 
 
+class TestPcapSvcUploads(s_tests.SynTest):
+
+    async def test_uploads(self):
+        # Without an Axon, Storm streams the capture (and key logs) to the service.
+        data = g.pcap(g.session())
+        sha = hashlib.sha256(data).hexdigest()
+        async with self.getTestCoreProxSvc(PcapSvc) as (_, _, svc):
+            prox = SvcProx(svc)
+            iden = await prox.upload(data)
+            retns = await collect(prox.flows(sha, upload=iden))
+            assert all(r["status"] for r in retns), retns[0]
+            summary = retns[0]["data"]["summary"]
+            assert summary["size"] == len(data) and summary["flows"] == 4
+            # Uploads are used once.
+            assert iden not in svc.uploads
+            retns = await collect(prox.flows(sha, upload=iden))
+            assert retns[0]["mesg"] == f"Unknown upload: {iden}"
+
+            # The upload's SHA-256 has to match.
+            iden = await prox.upload(data)
+            other = hashlib.sha256(b"other").hexdigest()
+            retns = await collect(prox.flows(other, upload=iden))
+            assert retns[0]["mesg"] == \
+                f"The uploaded capture has the SHA-256 {sha}, not {other}."
+            assert iden not in svc.uploads
+
+            # Key logs are uploads too, and can't be used as captures (or the other way around).
+            klog = await prox.upload(b"CLIENT_RANDOM 00 00\n", kind="keylog")
+            retns = await collect(prox.flows(sha, upload=klog))
+            assert retns[0]["mesg"] == f"Unknown upload: {klog}"
+            iden = await prox.upload(data)
+            retns = await collect(prox.flows(sha, upload=iden, keyloguploads=[klog], tshark=False))
+            assert retns[0]["status"] and retns[0]["data"]["summary"]["keylogs"] == 1
+
+            retn = await prox.call("uploadStart", kind="nope")
+            assert not retn["status"] and "Invalid upload kind 'nope'" in retn["mesg"]
+            retn = await prox.call("uploadChunk", "nope", b"x")
+            assert retn["mesg"] == "Unknown upload: nope"
+
+            # Over the size limit.
+            svc.conf["pcap:maxsize"] = 10
+            iden = (await prox.call("uploadStart"))["data"]
+            retn = await prox.call("uploadChunk", iden, b"x" * 11)
+            assert retn["mesg"] == \
+                "The capture is larger than the service's max size of 10 bytes."
+            assert iden not in svc.uploads
+            svc.conf["pcap:maxsize"] = 1 << 30
+
+            # Cancelled and idle uploads are removed (with their files).
+            iden = await prox.upload(b"abc")
+            path = svc.uploads[iden]["path"]
+            assert (await prox.call("uploadCancel", iden))["data"] is True
+            assert (await prox.call("uploadCancel", iden))["data"] is False
+            assert not pathlib.Path(path).exists()
+            iden = await prox.upload(b"abc")
+            assert svc._pruneUploads(idle=-1) == [iden]
+            assert svc.uploads == {}
+
+            # Files are counted, not saved, without an Axon.
+            retns = await collect(prox.flows(sha, upload=await prox.upload(data)))
+            files = retns[0]["data"]["summary"]["files"]
+            assert files["count"] == 0 and "unsaved" in files
+
+            # Unknown options are refused.
+            retns = await collect(prox.flows(sha, nope=1))
+            assert retns == [{"status": False, "mesg": "Unknown options: nope", "data": None}]
+            assert list(pathlib.Path(svc.tmpdir).iterdir()) == []
+
+
+DATA = pathlib.Path(__file__).parent / "data"
+# A unittest skip, SynTest's async test wrappers drop pytest marks on methods.
+needsTshark = unittest.skipIf(shutil.which("tshark") is None, "tshark isn't installed")
+NOENGINES = {"suricata:bin": "/nonexistent/suricata", "snort:bin": "/nonexistent/snort"}
+
+
 class TestPcapSvcTshark(s_tests.SynTest):
 
     async def test_no_tshark(self):
         async with self.getTestAxon() as axon:
             _, sha = await axon.put(g.pcap(g.session()))
-            conf = {"axon:url": axon.getLocalUrl(), "tshark:path": "/nonexistent/tshark"}
+            conf = {"axon:url": axon.getLocalUrl(), "tshark:path": "/nonexistent/tshark",
+                    **NOENGINES}
             async with self.getTestCoreProxSvc(PcapSvc, ssvc_conf=conf) as (_, _, svc):
                 prox = SvcProx(svc)
                 retns = await collect(prox.flows(sha.hex()))
                 summary = retns[0]["data"]["summary"]
-                assert summary["tshark"] == {"frames": 0, "matched": 0, "enabled": False,
-                                             "version": None, "error": "tshark is not installed",
-                                             "keylogs": 0, "decode": ()}
-                assert summary["files"] is None
+                assert summary["engines"]["tshark"] == {"enabled": False,
+                                                        "error": "tshark is not installed"}
+                assert summary["engines"]["suricata"] == {"enabled": False,
+                                                          "error": "Suricata is not installed"}
+                # Snort only runs with rules.
+                assert summary["engines"]["snort"] == {"enabled": False, "error": None}
+                assert summary["files"] == {"count": 0, "skipped": 0, "uploaded": 0}
+                assert summary["hits"] == 0
                 # Flows still have every key, just empty.
-                assert retns[1]["data"]["flow"]["src"]["txfiles"] == ()
+                flow = retns[1]["data"]["flow"]
+                assert flow["src"]["txfiles"] == () and flow["hits"] == ()
+                assert flow["community_id"].startswith("1:")
 
-                retns = await collect(prox.flows(sha.hex(), tshark=False))
-                assert retns[0]["data"]["summary"]["tshark"]["error"] is None
+                retns = await collect(prox.flows(sha.hex(), tshark=False, suricata=False))
+                engines = retns[0]["data"]["summary"]["engines"]
+                assert engines["tshark"]["error"] is None
+                assert engines["suricata"]["error"] is None
 
     async def test_tshark_fails(self):
         async with self.getTestAxon() as axon:
             _, sha = await axon.put(g.pcap(g.session()))
-            conf = {"axon:url": axon.getLocalUrl()}
+            conf = {"axon:url": axon.getLocalUrl(), **NOENGINES}
             async with self.getTestCoreProxSvc(PcapSvc, ssvc_conf=conf) as (_, _, svc):
                 async def broken(path, **kwargs):
                     raise p_tshark.TsharkError("boom")
@@ -196,15 +311,15 @@ class TestPcapSvcTshark(s_tests.SynTest):
                 svc.tshark.frames = broken
                 retns = await collect(SvcProx(svc).flows(sha.hex()))
                 summary = retns[0]["data"]["summary"]
-                assert summary["tshark"]["enabled"] and summary["tshark"]["error"] == "boom"
-                assert summary["files"] is None
+                tsinfo = summary["engines"]["tshark"]
+                assert tsinfo["enabled"] and tsinfo["error"] == "boom"
                 assert len(retns) == 5
 
     @needsTshark
     async def test_files(self):
         async with self.getTestAxon() as axon:
             _, sha = await axon.put((DATA / "http.pcapng").read_bytes())
-            conf = {"axon:url": axon.getLocalUrl()}
+            conf = {"axon:url": axon.getLocalUrl(), **NOENGINES}
             async with self.getTestCoreProxSvc(PcapSvc, ssvc_conf=conf) as (_, _, svc):
                 prox = SvcProx(svc)
                 download = hashlib.sha256(bytes(range(256)) * 64).digest()
@@ -216,8 +331,9 @@ class TestPcapSvcTshark(s_tests.SynTest):
 
                 retns = await collect(prox.flows(sha.hex()))
                 summary = retns[0]["data"]["summary"]
-                assert summary["tshark"]["enabled"] and summary["tshark"]["error"] is None
-                assert summary["tshark"]["version"].startswith("TShark")
+                tsinfo = summary["engines"]["tshark"]
+                assert tsinfo["enabled"] and tsinfo["error"] is None
+                assert tsinfo["version"].startswith("TShark")
                 assert summary["files"] == {"count": 3, "skipped": 0, "uploaded": 3}
                 assert await axon.has(download)
                 assert b"".join([b async for b in axon.get(download)]) == bytes(range(256)) * 64
@@ -234,9 +350,22 @@ class TestPcapSvcTshark(s_tests.SynTest):
 
                 svc.conf["tshark:enabled"] = False
                 retns = await collect(prox.flows(sha.hex()))
-                assert not retns[0]["data"]["summary"]["tshark"]["enabled"]
+                assert not retns[0]["data"]["summary"]["engines"]["tshark"]["enabled"]
                 retns = await collect(prox.flows(sha.hex(), tshark=True))
-                assert retns[0]["data"]["summary"]["tshark"]["enabled"]
+                assert retns[0]["data"]["summary"]["engines"]["tshark"]["enabled"]
+
+    @needsTshark
+    async def test_files_unsaved(self):
+        # Without an Axon, the files that would have been saved are counted.
+        data = (DATA / "http.pcapng").read_bytes()
+        sha = hashlib.sha256(data).hexdigest()
+        async with self.getTestCoreProxSvc(PcapSvc, ssvc_conf=NOENGINES) as (_, _, svc):
+            prox = SvcProx(svc)
+            retns = await collect(prox.flows(sha, upload=await prox.upload(data, size=4096)))
+            summary = retns[0]["data"]["summary"]
+            assert summary["files"] == {"count": 0, "skipped": 0, "unsaved": 3}
+            flows = [r["data"]["flow"] for r in retns[1:]]
+            assert not any(f["src"]["txfiles"] or f["dst"]["txfiles"] for f in flows)
 
 
 class TestPcapSvcOptions(s_tests.SynTest):
@@ -245,7 +374,8 @@ class TestPcapSvcOptions(s_tests.SynTest):
         async with self.getTestAxon() as axon:
             _, sha = await axon.put(g.pcap(g.session()))
             _, keylog = await axon.put(b"CLIENT_RANDOM 00 00\n")
-            conf = {"axon:url": axon.getLocalUrl(), "tshark:path": "/nonexistent/tshark"}
+            conf = {"axon:url": axon.getLocalUrl(), "tshark:path": "/nonexistent/tshark",
+                    **NOENGINES}
             async with self.getTestCoreProxSvc(PcapSvc, ssvc_conf=conf) as (_, _, svc):
                 prox = SvcProx(svc)
                 missing = hashlib.sha256(b"missing").hexdigest()
@@ -260,26 +390,28 @@ class TestPcapSvcOptions(s_tests.SynTest):
                 # Without tshark the key logs and rules aren't used, but are still reported.
                 retns = await collect(prox.flows(sha.hex(), keylogs=[keylog.hex()],
                                                  decode=["TCP.port==8443,tls"]))
-                tsinfo = retns[0]["data"]["summary"]["tshark"]
-                assert tsinfo["keylogs"] == 1 and tsinfo["decode"] == ("tcp.port==8443,tls",)
+                summary = retns[0]["data"]["summary"]
+                assert summary["keylogs"] == 1 and summary["decode"] == ("tcp.port==8443,tls",)
+                assert summary["engines"]["tshark"]["error"] == "tshark is not installed"
 
                 # With tshark, key logs have to be in the Axon and under the size limit.
                 svc.tshark.path = "/bin/true"
-                async def frames(path, keylog=None, decode=()):
+                async def frames(path, keylog=None, decode=(), gaps=False):
                     assert open(keylog, "rb").read() == b"CLIENT_RANDOM 00 00\n\n" * 2
                     assert decode == ["tcp.port==8443,tls"]
+                    assert not gaps
                     return {}, {"version": "fake", "error": None}
                 svc.tshark.frames = frames
                 retns = await collect(prox.flows(sha.hex(), keylogs=[keylog.hex(), keylog.hex()],
                                                  decode=["tcp.port==8443,tls"]))
-                assert retns[0]["status"] and retns[0]["data"]["summary"]["tshark"]["keylogs"] == 2
+                assert retns[0]["status"] and retns[0]["data"]["summary"]["keylogs"] == 2
 
                 retns = await collect(prox.flows(sha.hex(), keylogs=[missing]))
                 assert retns[0]["mesg"] == \
                     f"The TLS key log file:bytes:sha256={missing} is not in the Axon."
                 svc.conf["tshark:keylog:maxsize"] = 5
                 retns = await collect(prox.flows(sha.hex(), keylogs=[keylog.hex()]))
-                assert "larger than the tshark:keylog:maxsize of 5 bytes" in retns[0]["mesg"]
+                assert "larger than the max size of 5 bytes" in retns[0]["mesg"]
 
                 async with svc.getLocalProxy() as sprox:
                     retn = await sprox.checkDecodeAs(["TCP.port==22,ssh"])

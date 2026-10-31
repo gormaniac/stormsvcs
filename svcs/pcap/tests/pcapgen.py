@@ -7,7 +7,6 @@ import struct
 
 import dpkt
 
-
 BASE = 1_700_000_000
 """The capture start time for test packets, in seconds since the epoch."""
 

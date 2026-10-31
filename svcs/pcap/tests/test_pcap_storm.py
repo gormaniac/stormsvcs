@@ -7,7 +7,6 @@ import pathlib
 import shutil
 
 import pytest
-
 import synapse.tests.utils as s_tests
 
 from pcapsvc import PcapSvc
@@ -41,7 +40,7 @@ class TestPcapStorm(s_tests.SynTest):
             msgs = await core.stormlist(f"file:bytes={sha} | slib.pcap.flows")
             self.stormHasNoWarnErr(msgs)
             self.stormIsInPrint(
-                f"slib.pcap: Modeled 4 flows from 16 packets in file:bytes=sha256:{sha}", msgs
+                f"slib.pcap: Modeled 4 flows (0 rule matches) from 16 packets in file:bytes=sha256:{sha}", msgs
             )
             # Without --yield the inbound nodes pass through.
             nodes = [m[1] for m in msgs if m[0] == "node"]
@@ -144,7 +143,7 @@ class TestPcapStorm(s_tests.SynTest):
 
             msgs = await core.stormlist(f"slib.pcap.flows {cut}")
             self.stormHasNoErr(msgs)
-            self.stormIsInPrint("Modeled 4 flows from 15 packets", msgs)
+            self.stormIsInPrint("Modeled 4 flows (0 rule matches) from 15 packets", msgs)
             self.stormIsInWarn(f"slib.pcap: {cut} is truncated, read up to the error", msgs)
 
             for sha, err in ((bad, "The file is not a pcap or pcapng file"),
@@ -180,10 +179,9 @@ class TestPcapStorm(s_tests.SynTest):
 
             q = """
                 $pcap = $lib.import(slib.pcap.lib)
-                $opts = ({"tag": "lib.test"})
+                $opts = ({"tag": "lib.test", "timeout": (0), "limit": (1), "handshake": (0)})
                 file:bytes:sha256=$sha
-                for $n in $pcap.flows(:sha256, timeout=(0), limit=(1), handshake=(0), file=$node,
-                                      opts=$opts) {
+                for $n in $pcap.flows(:sha256, opts=$opts, file=$node) {
                     yield $n
                 }
                 +inet:flow
@@ -355,7 +353,7 @@ class TestPcapStormSettings(s_tests.SynTest):
 
             # Every run uses the admin's rules, plus its own.
             seen = []
-            async def frames(path, keylog=None, decode=()):
+            async def frames(path, keylog=None, decode=(), gaps=False):
                 seen.append(list(decode))
                 return {}, {"version": "fake", "error": None}
             svc.tshark.path = "/bin/true"

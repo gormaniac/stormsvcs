@@ -470,3 +470,60 @@ class TestHelpers:
         arp = dpkt.ethernet.Ethernet(src=g.MAC_A, dst=g.MAC_B, type=dpkt.ethernet.ETH_TYPE_ARP,
                                      data=dpkt.arp.ARP())
         assert p_flows._unwrapIp(arp) is None
+
+
+class TestIdentity:
+
+    def test_communityId(self):
+        from pcapsvc import communityid as p_cid
+
+        def ip(valu):
+            import ipaddress
+            return ipaddress.ip_address(valu).packed
+
+        # The Community ID spec's example, and its reverse direction.
+        assert p_cid.communityId(6, ip("128.232.110.120"), ip("66.35.250.204"), 34855, 80) == \
+            "1:LQU9qZlK+B5F3KDmev6m5PMibrg="
+        assert p_cid.communityId(6, ip("66.35.250.204"), ip("128.232.110.120"), 80, 34855) == \
+            "1:LQU9qZlK+B5F3KDmev6m5PMibrg="
+        # Values checked against the reference implementation (pip install communityid).
+        assert p_cid.communityId(1, ip("10.0.0.1"), ip("1.1.1.1"), 8, 0) == \
+            p_cid.communityId(1, ip("1.1.1.1"), ip("10.0.0.1"), 0, 0)
+        assert p_cid.communityId(47, ip("10.0.0.1"), ip("10.0.0.2")) == \
+            p_cid.communityId(47, ip("10.0.0.2"), ip("10.0.0.1"))
+        # One way ICMP types (ex. unreachable) aren't reordered.
+        assert p_cid.communityId(1, ip("10.0.0.1"), ip("10.0.0.9"), 3, 1) != \
+            p_cid.communityId(1, ip("10.0.0.9"), ip("10.0.0.1"), 3, 1)
+
+        flows, _ = analyze(g.pcap(g.session()))
+        http, dns, ping, ssh = flows
+        assert http["community_id"] == p_cid.communityId(
+            6, ip("10.0.0.1"), ip("93.184.216.34"), 50000, 80)
+        assert ping["community_id"] == p_cid.communityId(1, ip("10.0.0.1"), ip("1.1.1.1"), 8, 0)
+        assert all(f["community_id"].startswith("1:") for f in flows)
+
+    def test_vlans(self):
+        udp = g.udp("10.0.0.1", 5000, "10.0.0.2", 53)
+
+        def tagged(*ids):
+            tags = [dpkt.ethernet.VLANtag8021Q(id=i, type=0x8100) for i in ids]
+            if tags:
+                tags[-1].type = dpkt.ethernet.ETH_TYPE_IP
+            return bytes(dpkt.ethernet.Ethernet(src=g.MAC_A, dst=g.MAC_B, vlan_tags=tags,
+                                                type=dpkt.ethernet.ETH_TYPE_IP, data=udp))
+
+        pkts = [(0, tagged(7)), (1, tagged(7)), (2, tagged(8)), (3, tagged()), (4, tagged(7, 9))]
+        flows, _ = analyze(g.pcap(pkts))
+        assert [(f["vlans"], f["pkts"]) for f in flows] == [([7], 2), ([8], 1), ([], 1), ([7, 9], 1)]
+        # The VLAN IDs are part of the iden, the Community ID (endpoints only) isn't.
+        assert len({f["iden"] for f in flows}) == 4
+        assert len({f["community_id"] for f in flows}) == 1
+
+    def test_iden(self):
+        import synapse.common as s_common
+
+        flows, _ = analyze(g.pcap(g.session()), seed="abc")
+        http = flows[0]
+        assert http["iden"] == s_common.guid((
+            "slib.pcap.flow", p_flows.FLOW_IDEN_VERSION, "abc", 6, "10.0.0.1", 50000,
+            "93.184.216.34", 80, [], g.BASE * 1_000_000_000))

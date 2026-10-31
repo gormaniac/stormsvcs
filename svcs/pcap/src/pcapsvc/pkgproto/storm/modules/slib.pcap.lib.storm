@@ -1,9 +1,15 @@
-// Analyze PCAPs in the Axon with the slib.pcap service and model their flows.
+// The slib.pcap user API.
+//
+// Usable directly from Storm, ex:
+//     $pcap = $lib.import(slib.pcap.lib)
+//     for $flow in $pcap.flows($sha256) { yield $flow }
 
 init {
-    $priv = $lib.import(slib.pcap.priv)
+    $priv = $lib.import(slib.pcap.priv.user)
     $model = $lib.import(slib.pcap.model)
+    $util = $lib.import(slib.pcap.util)
 }
+
 
 // Normalize a SHA-256 (or a file:bytes sha256:<sha256> value) to a lowercase hex string.
 function normSha256(valu) {
@@ -12,16 +18,7 @@ function normSha256(valu) {
     return($valu)
 }
 
-// The SHA-256s of the TLS key logs to use.
-function normKeylogs(keylogs) {
-    $shas = ([])
-    if $keylogs {
-        for $keylog in $keylogs { $shas.append($normSha256($keylog)) }
-    }
-    return($shas)
-}
-
-// The "Decode As" rules to use, the admin's for every run and then the run's own.
+// The Decode As rules to use, the admin's for every run and then the run's own.
 function decodeRules(decode) {
     $rules = ([])
     for $rule in $priv.decodeDefaults() { $rules.append($rule) }
@@ -31,45 +28,57 @@ function decodeRules(decode) {
     return($rules)
 }
 
-// Emit the inet:flow nodes for every flow in a PCAP, modeling them as needed.
+// The run options the service takes, from opts (see flows()).
+function _runOpts(opts) {
+    $keylogs = ([])
+    for $keylog in $opts.keylogs { $keylogs.append($normSha256($keylog)) }
+    return(({
+        "timeout": $opts.timeout, "limit": $opts.limit, "handshake": $opts.handshake,
+        "tshark": $opts.tshark, "files": $opts.files, "keylogs": $keylogs,
+        "decode": $decodeRules($opts.decode), "suricata": $opts.suricata, "snort": $opts.snort,
+        "rules": ($opts.rules != (false)),
+    }))
+}
+
+// Emit the inet:flow nodes for every flow in a PCAP (and model their rule matches).
 //
-// tshark and files turn tshark and file extraction on or off (null for the service's defaults).
-// keylogs are SHA-256s of TLS key logs (SSLKEYLOGFILE) in the Axon to decrypt TLS with, and
-// decode are tshark "Decode As" rules (ex. "tcp.port==8443,tls"), used on top of the rules an
-// admin set with slib.pcap.admin.decode.
-// file is the PCAP's file:bytes node (created from the SHA-256 if null). opts may have a
-// "tag" to add to every flow, a "host" (it:host) to set as their :capture:host, and a
-// "sandbox" (file:bytes) to set as their :sandbox:file.
+// opts may have:
+//   timeout, limit, handshake    The flow options (see slib.pcap.flows).
+//   tshark, suricata, snort      Use (or don't use) an engine, null for the service's config.
+//   files                        Extract the files sent in flows (null for the service's config).
+//   rules                        Match the PCAP against the rules (default true).
+//   keylogs                      SHA-256s of TLS key logs (SSLKEYLOGFILE) in the Axon.
+//   decode                       Decode As rules (ex. "tcp.port==8443,tls"), on top of the admin's.
+//   tag                          A tag to add to every flow.
+//   host                         The it:host that captured the traffic (:capture:host, :sensor).
+//   sandbox                      The file:bytes a sandbox ran to make the PCAP (:sandbox:file).
+// file is the PCAP's file:bytes node (created from the SHA-256 if null).
 //
-// Raises slib.pcap.Error if the PCAP can't be read (ex. it isn't in the Axon).
-function flows(sha256, timeout=$lib.null, limit=$lib.null, handshake=$lib.null, tshark=$lib.null,
-               files=$lib.null, keylogs=$lib.null, decode=$lib.null, file=$lib.null,
-               opts=$lib.null) {
+// Raises slib.pcap.Error if the PCAP can't be analyzed (ex. it isn't in the Axon).
+function flows(sha256, opts=$lib.null, file=$lib.null) {
+    if ($opts = $lib.null) { $opts = ({}) }
     $sha256 = $normSha256($sha256)
-    for $retn in $priv.flows($sha256, timeout=$timeout, limit=$limit, handshake=$handshake,
-                             tshark=$tshark, files=$files, keylogs=$normKeylogs($keylogs),
-                             decode=$decodeRules($decode)) {
+    for $retn in $priv.flows($sha256, $_runOpts($opts)) {
         if (not $retn.status) { $lib.raise(slib.pcap.Error, $retn.mesg, sha256=$sha256) }
         if $retn.data.summary {
             // Only create the file:bytes node once the service has read the PCAP.
             if (not $file) { $file = $model.fileNode($sha256) }
         } else {
-            emit $model.flow($retn.data.flow, $file, opts=$opts)
+            emit $model.flow($retn.data.flow, $file, opts=$opts).flow
         }
     }
 }
 
-// The same as flows(), but for user facing code: it warns instead of raising, and prints
-// a summary of the PCAP (or more details with $lib.debug).
-function ingest(sha256, timeout=$lib.null, limit=$lib.null, handshake=$lib.null, tshark=$lib.null,
-                files=$lib.null, keylogs=$lib.null, decode=$lib.null, file=$lib.null,
-                opts=$lib.null) {
+// The same as flows(), but for user facing code: it warns instead of raising, and prints a
+// summary of the PCAP (or more details with $lib.debug). With hits, it emits the rule matches
+// (it:app:snort:hit and it:app:suricata:matched nodes) instead of the flows.
+function ingest(sha256, opts=$lib.null, file=$lib.null, hits=(false)) {
+    if ($opts = $lib.null) { $opts = ({}) }
     $sha256 = $normSha256($sha256)
     $summary = $lib.null
     $count = (0)
-    for $retn in $priv.flows($sha256, timeout=$timeout, limit=$limit, handshake=$handshake,
-                             tshark=$tshark, files=$files, keylogs=$normKeylogs($keylogs),
-                             decode=$decodeRules($decode)) {
+    $nhits = (0)
+    for $retn in $priv.flows($sha256, $_runOpts($opts)) {
         if (not $retn.status) {
             $lib.warn("slib.pcap: Unable to analyze {sha256}: {err}", sha256=$sha256,
                       err=$retn.mesg)
@@ -80,41 +89,80 @@ function ingest(sha256, timeout=$lib.null, limit=$lib.null, handshake=$lib.null,
             if (not $file) { $file = $model.fileNode($sha256) }
         } else {
             $count = ($count + 1)
-            emit $model.flow($retn.data.flow, $file, opts=$opts)
+            $made = $model.flow($retn.data.flow, $file, opts=$opts)
+            $nhits = ($nhits + $lib.len($made.hits))
+            if $hits {
+                for $hit in $made.hits { emit $hit }
+            } else {
+                emit $made.flow
+            }
         }
     }
 
     if (not $summary) { stop }
+    $_report($sha256, $summary, $count, $nhits, $file)
+}
 
-    $lib.print("slib.pcap: Modeled {count} flows from {packets} packets in file:bytes={file}",
-               count=$count, packets=$summary.packets, file=$file.repr())
+// Print (and warn about) a PCAP's summary.
+function _report(sha256, summary, count, nhits, file) {
+    $lib.print("slib.pcap: Modeled {count} flows ({hits} rule matches) from {packets} packets in file:bytes={file}",
+               count=$count, hits=$nhits, packets=$summary.packets, file=$file.repr())
     if $summary.truncated {
         $lib.warn("slib.pcap: {sha256} is truncated, read up to the error: {err}",
                   sha256=$sha256, err=$summary.error)
-    }
-    if ($summary.tshark.keylogs and not $summary.tshark.enabled) {
-        $lib.warn("slib.pcap: TLS key logs need tshark, {sha256} wasn't decrypted.",
-                  sha256=$sha256)
-    }
-    if ($summary.tshark.enabled and $summary.tshark.error) {
-        $lib.warn("slib.pcap: tshark had a problem with {sha256}: {err}", sha256=$sha256,
-                  err=$summary.tshark.error)
-    } elif ($summary.tshark.error and $lib.debug) {
-        $lib.print("slib.pcap: No tshark details for {sha256}: {err}", sha256=$sha256,
-                   err=$summary.tshark.error)
-    }
-    if ($summary.files and $summary.files.skipped) {
-        $lib.warn("slib.pcap: {count} files in {sha256} were over the extraction limits.",
-                  count=$summary.files.skipped, sha256=$sha256)
     }
     if $summary.limited {
         $lib.warn("slib.pcap: {sha256} has more than {count} flows, {dropped} packets for the rest were dropped.",
                   sha256=$sha256, count=$count, dropped=$summary.dropped)
     }
+    for ($name, $info) in $summary.engines {
+        if ($info.enabled and $info.error) {
+            $lib.warn("slib.pcap: {engine} had a problem with {sha256}: {err}", engine=$name,
+                      sha256=$sha256, err=$info.error)
+        } elif ($info.error and $lib.debug) {
+            $lib.print("slib.pcap: No {engine} details for {sha256}: {err}", engine=$name,
+                       sha256=$sha256, err=$info.error)
+        }
+    }
+    if ($summary.keylogs and not $summary.engines.tshark.enabled) {
+        $lib.warn("slib.pcap: TLS key logs need tshark, {sha256} wasn't decrypted.",
+                  sha256=$sha256)
+    }
+    if $summary.files {
+        if $summary.files.unsaved {
+            $lib.warn("slib.pcap: {count} files in {sha256} weren't saved, the service has no Axon (axon:url) to save them to. Ask an admin to set it.",
+                      count=$summary.files.unsaved, sha256=$sha256)
+        }
+        if $summary.files.skipped {
+            $lib.warn("slib.pcap: {count} files in {sha256} were over the extraction limits.",
+                      count=$summary.files.skipped, sha256=$sha256)
+        }
+    }
     if $lib.debug {
         $lib.print("slib.pcap: {sha256} summary: {summary}", sha256=$sha256,
                    summary=$lib.json.save($summary))
     }
+    return()
+}
+
+// The service's status, or null (with a warning) if it couldn't be read.
+function status() {
+    return($util.data($priv.status(), "Getting the service's status"))
+}
+
+// The rule feeds, or null if they couldn't be listed.
+function feeds() {
+    return($util.data($priv.feeds(), "Listing the feeds"))
+}
+
+// The guid -> error of the rules the engines couldn't load, or null if they couldn't be listed.
+function ruleErrors(guids=$lib.null) {
+    return($util.data($priv.ruleErrors(guids=$guids), "Listing the rule errors"))
+}
+
+// The sync cron job's details, or null if there isn't one.
+function schedule() {
+    return($priv.schedule())
 }
 
 // Yield the nodes a generator emits, so divert can use them.
