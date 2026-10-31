@@ -1,0 +1,48 @@
+[project]
+name = "capasvc"
+version = "0.1.0"
+description = "A Storm Service that runs Mandiant capa against files in an Axon"
+readme = "README.md"
+license-files = ["LICENSE"]
+authors = [
+    { name = "John Gorman", email = "83027042+gormaniac@users.noreply.github.com" }
+]
+
+# Stick with 3.11 until Synapse's base image changes
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "flare-capa==10.0.0",
+    "stormlibpp>=0.10.1",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.32,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+source-include = [
+    "pkgproto/*.yaml",
+    "pkgproto/storm/*/*.storm",
+]
+
+[tool.pytest]
+testpaths = [
+    "tests",
+]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "pytest-cov>=7.1.0",
+]
+
+[tool.coverage.run]
+source = ["capasvc"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true

@@ -1,0 +1,11 @@
+rule:
+  meta:
+    name: contain xor
+    namespace: testing/ops/xor
+    authors:
+      - test@example.com
+    scopes:
+      static: function
+      dynamic: unsupported
+  features:
+    - mnemonic: xor

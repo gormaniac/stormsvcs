@@ -1,0 +1,11 @@
+rule:
+  meta:
+    name: contain a string that is never there
+    namespace: testing/never
+    authors:
+      - test@example.com
+    scopes:
+      static: file
+      dynamic: file
+  features:
+    - string: "this string is never in the test file"

@@ -1,0 +1,83 @@
+// Import the service's capa rules as meta:rule nodes, and their namespaces as documented tags.
+//
+// Runs when the package loads (see the package's onload) and from slib.capa.admin.sync. An
+// import is skipped if it was already done for the same rules (by their sha256) and tag prefix.
+
+init {
+    $util = $lib.import(slib.capa.util)
+}
+
+// Run by the package's onload, as root.
+function onload() {
+    if (not $lib.service.wait("slib.capa", timeout=(300))) {
+        $lib.warn("slib.capa: The service wasn't ready, the capa rules weren't imported. Run slib.capa.admin.sync.")
+        return()
+    }
+    $sync()
+}
+
+// Import the rules and the tags. Returns the meta:ruleset, or null if the rules aren't available.
+//
+// force imports them even if they haven't changed, reload has the service reload its rules first.
+function sync(force=(false), reload=(false)) {
+    $priv = $lib.import(slib.capa.priv.user)
+    $privadmin = $lib.import(slib.capa.priv.admin)
+
+    if $reload {
+        if $util.failed($privadmin.reload(), "Reloading the capa rules") { return($lib.null) }
+    }
+
+    $retn = $priv.rulesInfo()
+    if $util.failed($retn, "Getting the capa rules info") { return($lib.null) }
+
+    $set = $syncRules($retn.data, $force)
+    $syncTags($retn.data, $force)
+    return($set)
+}
+
+// Import every rule into the ruleset of these rules. Returns the meta:ruleset.
+function syncRules(info, force=(false)) {
+    $priv = $lib.import(slib.capa.priv.user)
+    $privadmin = $lib.import(slib.capa.priv.admin)
+    $model = $lib.import(slib.capa.model)
+
+    $set = $model.ruleset($info)
+    if ((not $force) and $priv.syncState().rules = $info.sha256) {
+        if $lib.debug { $lib.print("slib.capa: The capa rules ({v}) are already imported.", v=$info.version) }
+        return($set)
+    }
+
+    $lib.print("slib.capa: Importing {n} capa rules ({v}).", n=$info.rules, v=$info.version)
+    $count = (0)
+    for $retn in $priv.rules() {
+        if $util.failed($retn, "Importing the capa rules") { return($set) }
+        $model.rule($retn.data, $set)
+        $count = ($count + 1)
+    }
+    $privadmin.setSynced(rules, $info.sha256)
+    $lib.print("slib.capa: Imported {n} capa rules ({v}).", n=$count, v=$info.version)
+    return($set)
+}
+
+// Import the docs of every tag the rules' namespaces become, under the current tag prefix.
+// They're imported even if tagging is disabled. Returns the number of tags.
+function syncTags(info, force=(false)) {
+    $priv = $lib.import(slib.capa.priv.user)
+    $privadmin = $lib.import(slib.capa.priv.admin)
+    $model = $lib.import(slib.capa.model)
+
+    $prefix = $priv.tagSettings().prefix
+    $key = `{$prefix}:{$info.sha256}`
+    if ((not $force) and $priv.syncState().tags = $key) {
+        if $lib.debug { $lib.print("slib.capa: The {p} tags are already imported.", p=$prefix) }
+        return((0))
+    }
+
+    $retn = $priv.tags()
+    if $util.failed($retn, "Importing the capa tags") { return((0)) }
+
+    for $t in $retn.data { $model.tag($prefix, $t) }
+    $privadmin.setSynced(tags, $key)
+    $lib.print("slib.capa: Imported the docs of {n} {p} tags.", n=$retn.data.size(), p=$prefix)
+    return($retn.data.size())
+}

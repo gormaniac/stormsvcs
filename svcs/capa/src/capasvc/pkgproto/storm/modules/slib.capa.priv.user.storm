@@ -1,0 +1,40 @@
+// Privileged (asroot) wrappers around the slib.capa service for slib.capa.user.
+// Service calls return the service's {status, mesg, data} dict, or emit them for generators.
+
+init {
+    $svc = $lib.service.get("slib.capa")
+}
+
+// The tag settings, see slib.capa.admin.tags.
+function tagSettings() {
+    return(({
+        "enabled": $lib.globals.get("slib:capa:tag:enabled", (true)),
+        "prefix": $lib.globals.get("slib:capa:tag:prefix", "rep.capa"),
+    }))
+}
+
+// The tag prefix to use, or null if tagging is disabled.
+function tagPrefix() {
+    $settings = $tagSettings()
+    if $settings.enabled { return($settings.prefix) }
+    return($lib.null)
+}
+
+// What was last imported by slib.capa.sync: the rules' sha256, and "<tag prefix>:<sha256>".
+function syncState() {
+    return(({
+        "rules": $lib.globals.get("slib:capa:sync:rules"),
+        "tags": $lib.globals.get("slib:capa:sync:tags"),
+    }))
+}
+
+function rulesInfo() { return($svc.rulesInfo()) }
+function tags() { return($svc.tags()) }
+
+function scan(sha256, fmt=auto, osname=auto) {
+    return($svc.scan($sha256, fmt=$fmt, osname=$osname))
+}
+
+function rules(names=$lib.null) {
+    for $retn in $svc.rules(names=$names) { emit $retn }
+}
