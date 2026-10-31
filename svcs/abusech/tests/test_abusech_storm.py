@@ -238,6 +238,13 @@ class TestStormBazaar(s_tests.SynTest):
             assert nodes[0].get("size") == len(fd.SAMPLE_BYTES)
             assert await count(core, f"file:bytes={fd.SAMPLE_SHA256} <(seen)- meta:source") == 3
 
+            # Files YARAify unpacked.
+            msgs = await core.stormlist(f"slib.abusech.yaraify.download --unpacked --hash {fd.SAMPLE_SHA256}")
+            self.stormIsInPrint(f"Saved {fd.SAMPLE_SHA256}", msgs)
+            assert fake.last("/yaraify")["json"]["query"] == "get_unpacked"
+            msgs = await core.stormlist(f"slib.abusech.yaraify.download --unpacked --hash {'a' * 64}")
+            self.stormIsInWarn("does not have", msgs)
+
     async def test_submit(self):
         async with abusechSvc(self) as (core, svc, fake):
             size, sha256 = await core.axon.put(b"MZ sample to submit")
@@ -397,7 +404,7 @@ class TestStormUrlhaus(s_tests.SynTest):
             assert "rep.abusech.urlhaus.agenttesla" in nodes[0].tags
             assert await count(core, "inet:service:account:user=reporter1") == 1
             await core.nodes("slib.abusech.urlhaus.export full --limit 1")
-            assert fake.last()["path"] == "/urlhaus_export/csv/"
+            assert fake.last()["path"] == "/urlhaus_export/testkey/full.csv.zip"
 
 
 class TestStormThreatFox(s_tests.SynTest):
@@ -552,7 +559,20 @@ class TestStormYaraify(s_tests.SynTest):
             assert await count(core, "it:app:yara:rule:name=MyRule -> it:app:yara:match") == 1
 
             nodes = await core.nodes("slib.abusech.yaraify.rules --uuid 6a6d2b48-1234-4cde-9f00-112233445566 --recent --yield")
-            assert {n.get("name") for n in nodes} == {"win_agent_tesla_auto", "helper_rule", "New_Rule_1"}
+            assert {n.get("name") for n in nodes} == {"win_agent_tesla_auto", "helper_rule", "New_Rule_1", "Private_Rule"}
+            # Recent rules get their text when the author shares them.
+            rule = (await core.nodes("it:app:yara:rule:name=New_Rule_1"))[0]
+            assert rule.get("text") == fd.NEW_RULE_TEXT.strip()
+            assert rule.get("ext:id") == "11111111-2222-3333-4444-555555555555"
+            assert (await core.nodes("it:app:yara:rule:name=Private_Rule"))[0].get("text") is None
+
+            # Your deployed rules, and an updated rule's text replaces the old one.
+            fake.overrides[("yaraify", "get_yara_rule")] = (200, fd.NEW_RULE_TEXT.replace("0x5a4d", "0x457f"))
+            nodes = await core.nodes("slib.abusech.yaraify.rules --deployed --yield")
+            assert [n.get("name") for n in nodes] == ["New_Rule_1"]
+            assert "0x457f" in nodes[0].get("text")
+            assert await count(core, "it:app:yara:rule:name=New_Rule_1") == 1
+            fake.overrides.clear()
             rule = (await core.nodes("it:app:yara:rule:name=win_agent_tesla_auto"))[0]
             assert rule.get("text").startswith("rule win_agent_tesla_auto")
             assert rule.get("created") == 1767225600000
@@ -561,7 +581,7 @@ class TestStormYaraify(s_tests.SynTest):
             nodes = await core.nodes("slib.abusech.yaraify.rules --all --limit 1 --yield")
             assert len(nodes) == 1
             msgs = await core.stormlist("slib.abusech.yaraify.rules")
-            self.stormIsInErr("requires --uuid, --recent, or --all", msgs)
+            self.stormIsInErr("requires --uuid, --recent, --deployed, or --all", msgs)
 
     async def test_scan_tasks_deploy(self):
         async with abusechSvc(self) as (core, svc, fake):
@@ -596,6 +616,10 @@ class TestStormYaraify(s_tests.SynTest):
             msgs = await core.stormlist("it:app:yara:rule | slib.abusech.yaraify.deploy --text 'rule t { condition: true }'")
             self.stormIsInPrint("Rule deployed", msgs)
             assert fake.last("/yaraify")["files"]["yara_file"] == ("myrule.yar", b"rule myrule { condition: true }")
+            msgs = await core.stormlist("slib.abusech.yaraify.deploy --delete 6a6d2b48-1234-4cde-9f00-112233445566 --delete nope")
+            self.stormIsInPrint("YARA rule deleted", msgs)
+            self.stormIsInWarn("Unknown YARA rule", msgs)
+            assert fake.last("/yaraify")["json"] == {"query": "delete_yara_rule", "yarahub_uuid": "nope"}
             msgs = await core.stormlist("[ it:app:yara:rule=* :name=empty ] | slib.abusech.yaraify.deploy")
             self.stormIsInWarn("has no :text", msgs)
             msgs = await core.stormlist("[ inet:fqdn=a.com ] | slib.abusech.yaraify.deploy")

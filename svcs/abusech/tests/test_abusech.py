@@ -84,7 +84,11 @@ JSON_ENDPOINTS = (
     ("yaraifyTasks", ("ident",), {"status": "queued"}, "/yaraify", {"query": "list_tasks", "identifier": "ident", "task_status": "queued"}),
     ("yaraifyIdentifier", (), {}, "/yaraify", {"query": "generate_identifier"}),
     ("yaraifyRescan", (SHA256,), {}, "/yaraify", {"query": "rescan_file", "hash": SHA256}),
-    ("yaraifyRule", ("uuid-1",), {}, "/yaraify", {"query": "get_yara_rule", "uuid": "uuid-1"}),
+    ("yaraifyRule", ("11111111-2222-3333-4444-555555555555",), {}, "/yaraify",
+     {"query": "get_yara_rule", "uuid": "11111111-2222-3333-4444-555555555555"}),
+    ("yaraifyDeployedRules", (), {}, "/yaraify", {"query": "show_deployed_yara_rules"}),
+    ("yaraifyDeleteRule", ("6a6d2b48-1234-4cde-9f00-112233445566",), {}, "/yaraify",
+     {"query": "delete_yara_rule", "yarahub_uuid": "6a6d2b48-1234-4cde-9f00-112233445566"}),
     ("fplist", (), {}, "/hunting", {"query": "get_fplist", "format": "json"}),
 )
 
@@ -540,6 +544,21 @@ class TestClient(s_tests.SynTest):
             with self.raises(AbuseChApiError):
                 await client.fetch("feodo", "x")
 
+    async def test_client_export_key(self):
+        async with FakeAbuseCh() as fake, aiohttp.ClientSession() as sess:
+            client = AbuseChClient(sess, urls=fake.urls, rate=0)
+            with self.raises(NoApiKeyError):
+                await client.fetch("urlhaus:export", "recent.csv")
+            byts, _ = await client.fetch("urlhaus:export", "recent.csv", apikey="abc")
+            assert byts.startswith(b"####")
+            assert fake.last()["path"] == "/urlhaus_export/abc/recent.csv"
+
+        async with aiohttp.ClientSession() as sess:
+            client = AbuseChClient(sess, urls={"bazaar:export": "http://127.0.0.1:1/x"}, rate=0, timeout=5)
+            with self.raises(AbuseChApiError) as cm:
+                await client.fetch("bazaar:export", "recent.csv", apikey="secretkey")
+            assert "secretkey" not in cm.exception.mesg
+
 
 class TestSvc(s_tests.SynTest):
     """The AbuseChSvc methods send the right requests and normalize the responses."""
@@ -630,9 +649,11 @@ class TestSvc(s_tests.SynTest):
 
             rows = [s async for s in svc.bazaarExport()]
             assert [r["sha256"] for r in rows] == [SHA256, "b" * 64]
-            assert fake.last()["path"] == "/bazaar_export/csv/recent/"
+            # The exports take the Auth-Key in the URL path.
+            assert fake.last()["path"] == "/bazaar_export/testkey/recent.csv"
+            assert fake.last()["exportkey"] == "testkey"
             assert len([s async for s in svc.bazaarExport("full", limit=1)]) == 1
-            assert fake.last()["path"] == "/bazaar_export/csv/full/"
+            assert fake.last()["path"] == "/bazaar_export/testkey/full.csv.zip"
             with self.raises(AbuseChApiError):
                 [s async for s in svc.bazaarExport("bogus")]
 
@@ -677,10 +698,10 @@ class TestSvc(s_tests.SynTest):
             urls = [u async for u in svc.urlhausExport()]
             assert urls[0]["url"] == "http://csv.example.com/x.exe" and urls[0]["tags"] == ["exe", "agenttesla"]
             assert urls[0]["reference"] == "https://urlhaus.abuse.ch/url/4000/" and urls[0]["reporter"] == "reporter1"
-            assert fake.last()["path"] == "/urlhaus_export/csv_recent/"
+            assert fake.last()["path"] == "/urlhaus_export/testkey/recent.csv"
             assert len([u async for u in svc.urlhausExport("online", limit=1)]) == 1
             assert len([u async for u in svc.urlhausExport("full")]) == 1
-            assert fake.last()["path"] == "/urlhaus_export/csv/"
+            assert fake.last()["path"] == "/urlhaus_export/testkey/full.csv.zip"
             with self.raises(AbuseChApiError):
                 [u async for u in svc.urlhausExport("bogus")]
 
@@ -702,11 +723,11 @@ class TestSvc(s_tests.SynTest):
 
             iocs = [i async for i in svc.threatfoxExport()]
             assert iocs[0]["ioc"] == "export.example.com"
-            assert fake.last()["path"] == "/threatfox_export/json/recent/"
+            assert fake.last()["path"] == "/threatfox_export/testkey/recent.json"
             assert len([i async for i in svc.threatfoxExport("full", limit=1)]) == 1
             with self.raises(AbuseChApiError):
                 [i async for i in svc.threatfoxExport("bogus")]
-            fake.overrides[("threatfox:export", "json/recent/")] = (200, "not json")
+            fake.overrides[("threatfox:export", "testkey/recent.json")] = (200, "not json")
             with self.raises(AbuseChApiError):
                 [i async for i in svc.threatfoxExport()]
 
@@ -724,7 +745,21 @@ class TestSvc(s_tests.SynTest):
             with self.raises(AbuseChApiError):
                 await svc.yaraifySearch("bogus", "x")
 
-            assert (await svc.normYaraifyRecentRules())[0]["name"] == "New_Rule_1"
+            # Listed rules don't include their text, it's downloaded for each shared rule.
+            rules = await svc.normYaraifyRecentRules()
+            assert [(r["name"], r["desc"]) for r in rules] == [("New_Rule_1", "A new rule"), ("Private_Rule", None)]
+            assert rules[0]["text"] == fake_data.NEW_RULE_TEXT.strip()
+            assert rules[1]["text"] is None
+            assert fake.queries("yaraify")[-3:] == ["recent_yararules", "get_yara_rule", "get_yara_rule"]
+            rules = await svc.normYaraifyRecentRules(text=False)
+            assert rules[0]["text"] is None and fake.queries("yaraify")[-1] == "recent_yararules"
+
+            rules = await svc.normYaraifyDeployedRules()
+            assert [r["name"] for r in rules] == ["New_Rule_1"] and rules[0]["text"]
+            assert await svc.yaraifyDeleteRule("6a6d2b48-1234-4cde-9f00-112233445566") == "YARA rule deleted"
+            with self.raises(AbuseChApiError) as cm:
+                await svc.yaraifyDeleteRule("nope")
+            assert cm.exception.mesg == "abuse.ch yaraify: error: Unknown YARA rule"
             res = await svc.normYaraifyResults("task1")
             assert res["status"] == "done" and res["file"]["sha256"] == SHA256
             assert (await svc.normYaraifyResults("queued-task"))["status"] == "queued"
@@ -752,6 +787,9 @@ class TestSvc(s_tests.SynTest):
             fake.overrides[("yaraify", "get_yara_rule")] = (200, {"query_status": "no_results"})
             assert await svc.yaraifyRule("u3") == []
             fake.overrides.clear()
+            with self.raises(AbuseChApiError):
+                await svc.yaraifyRule("unknown-uuid")
+            fake.overrides.clear()
 
             sample = await svc.yaraifyFile(fake_data.SAMPLE_SHA256)
             assert sample["bytes"] == fake_data.SAMPLE_BYTES
@@ -759,9 +797,16 @@ class TestSvc(s_tests.SynTest):
             with self.raises(AbuseChApiError):
                 await svc.yaraifyFile(MD5)
 
+            sample = await svc.yaraifyUnpacked(fake_data.SAMPLE_SHA256)
+            assert sample["bytes"] == fake_data.SAMPLE_BYTES
+            assert fake.last("/yaraify")["json"] == {"query": "get_unpacked", "sha256_hash": fake_data.SAMPLE_SHA256}
+            assert await svc.yaraifyUnpacked("a" * 64) is None
+            with self.raises(AbuseChApiError):
+                await svc.yaraifyUnpacked(MD5)
+
             rules = [r async for r in svc.yaraifyRulesExport()]
             assert [r["name"] for r in rules] == ["win_agent_tesla_auto", "helper_rule"]
-            assert fake.last()["path"] == "/yaraify_export/download/yaraify-rules.zip"
+            assert fake.last()["path"] == "/yaraify_export/yarahub/yaraify-rules.zip"
             assert len([r async for r in svc.yaraifyRulesExport(limit=1)]) == 1
 
     async def test_blocklists(self):

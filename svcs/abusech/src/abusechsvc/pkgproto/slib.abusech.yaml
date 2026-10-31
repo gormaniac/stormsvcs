@@ -315,7 +315,7 @@ commands:
       Model the samples in a MalwareBazaar CSV export.
 
         recent - The samples added in the last 48 hours
-        full   - Every sample (large)
+        full   - Every sample (large, zipped)
 
       Examples:
 
@@ -505,7 +505,7 @@ commands:
 
         recent - URLs added in the last 30 days
         online - URLs that are currently online
-        full   - Every URL (large)
+        full   - URLs that are online or were added in the last 90 days (large)
 
       Examples:
 
@@ -940,13 +940,20 @@ commands:
     descr: |
       Model YARAhub rules from YARAify as it:app:yara:rule nodes (with their text, author, and metadata).
 
+      Rule text is only available for rules whose author shares them (yarahub_rule_sharing_tlp
+      TLP:WHITE), the others are modeled with their metadata only. --recent and --deployed
+      download each rule's text, one request per rule.
+
       Examples:
 
         // A rule by its YARAhub UUID.
         slib.abusech.yaraify.rules --uuid 3e8a1b8e-1f6e-4f5e-9f2a-1d4b3c2a1e0f --yield
 
-        // Recently deployed rules, and every TLP:CLEAR rule.
+        // Recently deployed rules, and every shared rule.
         slib.abusech.yaraify.rules --recent --all
+
+        // The rules you've deployed for live hunting.
+        slib.abusech.yaraify.rules --deployed --yield
     cmdargs:
       - - --uuid
         - type: str
@@ -957,10 +964,14 @@ commands:
         - default: false
           action: store_true
           help: Model recently deployed rules (recent_yararules).
+      - - --deployed
+        - default: false
+          action: store_true
+          help: Model the rules you've deployed for live hunting (show_deployed_yara_rules).
       - - --all
         - default: false
           action: store_true
-          help: Model every TLP:CLEAR YARAhub rule from YARAify's rule export.
+          help: Model every shared YARAhub rule from YARAify's rule export (updated every 5 minutes).
       - - --limit
         - type: int
           default: 0
@@ -977,16 +988,29 @@ commands:
     perms:
       - [ slib, abusech, submit ]
     descr: |
-      Deploy YARA rules to YARAify for live hunting.
+      Deploy YARA rules to YARAify for live hunting, or delete rules you've deployed.
+
+      YARAify requires these rule meta fields: date, yarahub_uuid, yarahub_license,
+      yarahub_rule_matching_tlp, yarahub_rule_sharing_tlp, and yarahub_reference_md5.
+      Deploying a rule with an existing yarahub_uuid and name updates it.
 
       Examples:
 
         it:app:yara:rule#my.rules | slib.abusech.yaraify.deploy
+
+        // List your deployed rules, then delete one.
+        slib.abusech.yaraify.rules --deployed --yield
+        slib.abusech.yaraify.deploy --delete 3e8a1b8e-1f6e-4f5e-9f2a-1d4b3c2a1e0f
     cmdargs:
       - - --text
         - type: str
           default: null
           help: YARA rule text to deploy, in addition to the inbound nodes.
+      - - --delete
+        - type: str
+          action: append
+          default: []
+          help: The YARAhub UUID of one of your deployed rules to delete (delete_yara_rule). May be used multiple times.
     forms:
       input:
         - it:app:yara:rule
@@ -997,9 +1021,14 @@ commands:
     descr: |
       Download (shared) files from YARAify into the Axon, unzipping them.
 
+      Use --unpacked to download files YARAify's unpacker extracted (get_unpacked).
+
       Examples:
 
         file:bytes#my.tag | slib.abusech.yaraify.download
+
+        // The files unpacked from a sample.
+        file:bytes=<sha256> -> file:subfile:parent :child -> file:bytes | slib.abusech.yaraify.download --unpacked
     cmdargs:
       - - --hash
         - type: str
@@ -1010,6 +1039,10 @@ commands:
         - default: false
           action: store_true
           help: Yield the downloaded file:bytes nodes instead of the inbound nodes.
+      - - --unpacked
+        - default: false
+          action: store_true
+          help: Download a file YARAify unpacked from a sample, instead of a submitted file.
     forms:
       input:
         - file:bytes

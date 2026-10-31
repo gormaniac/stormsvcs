@@ -32,7 +32,8 @@ RETN_METHS = (
     "yaraifyQuery", "yaraifyHash", "normYaraifyHash", "yaraifySearch", "normYaraifySearch",
     "yaraifyRecentRules", "normYaraifyRecentRules", "yaraifyResults", "normYaraifyResults",
     "yaraifyTasks", "normYaraifyTasks", "yaraifyIdentifier", "yaraifyRescan", "yaraifyScan",
-    "yaraifyDeploy", "yaraifyRule", "yaraifyFile",
+    "yaraifyDeploy", "yaraifyRule", "yaraifyFile", "yaraifyDeployedRules", "normYaraifyDeployedRules",
+    "yaraifyDeleteRule", "yaraifyUnpacked",
     # Hunting
     "fplist", "normFplist",
 )

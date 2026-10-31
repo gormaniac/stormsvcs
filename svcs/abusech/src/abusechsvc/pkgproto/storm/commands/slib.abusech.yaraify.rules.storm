@@ -4,8 +4,9 @@ init {
     $rules = ([])
     for $uuid in $cmdopts.uuid { $rules.extend($abusech.yaraifyRule($uuid)) }
     if $cmdopts.recent { $rules.extend($abusech.yaraifyRecentRules()) }
-    if ((not $cmdopts.uuid) and (not $cmdopts.recent) and (not $cmdopts.all)) {
-        $lib.raise(BadArg, "slib.abusech.yaraify.rules requires --uuid, --recent, or --all.")
+    if $cmdopts.deployed { $rules.extend($abusech.yaraifyDeployedRules()) }
+    if ((not $cmdopts.uuid) and (not $cmdopts.recent) and (not $cmdopts.deployed) and (not $cmdopts.all)) {
+        $lib.raise(BadArg, "slib.abusech.yaraify.rules requires --uuid, --recent, --deployed, or --all.")
     }
 }
 

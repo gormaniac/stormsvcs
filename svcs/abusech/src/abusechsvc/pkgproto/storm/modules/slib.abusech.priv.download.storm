@@ -28,3 +28,4 @@ function _save(retn) {
 function bazaar(sha256) { return($_save($svc.bazaarFile($sha256, apikey=$userKey()))) }
 function urlhaus(sha256) { return($_save($svc.urlhausDownload($sha256, apikey=$userKey()))) }
 function yaraify(sha256) { return($_save($svc.yaraifyFile($sha256, apikey=$userKey()))) }
+function yaraifyUnpacked(sha256) { return($_save($svc.yaraifyUnpacked($sha256, apikey=$userKey()))) }

@@ -10,7 +10,8 @@ init {
             $lib.warn("slib.abusech.yaraify.download: {sha} is not a SHA256 hash.", sha=$sha256)
             return($lib.null)
         }
-        $retn = $privdl.yaraify($sha256)
+        if $cmdopts.unpacked { $retn = $privdl.yaraifyUnpacked($sha256) }
+        else { $retn = $privdl.yaraify($sha256) }
         if $util.failed($retn, `Downloading {$sha256} from YARAify`) { return($lib.null) }
         if ($retn.data = $lib.null) {
             $lib.warn("slib.abusech.yaraify.download: YARAify does not have {sha} available.", sha=$sha256)

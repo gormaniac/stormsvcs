@@ -65,3 +65,4 @@ function yaraifyScan(sha256, size, name, identifier=$lib.null, clamav=(true), un
 }
 function yaraifyRescan(sha) { return($svc.yaraifyRescan($sha, apikey=$userKey())) }
 function yaraifyDeploy(text, name=rule.yar) { return($svc.yaraifyDeploy($text, name=$name, apikey=$userKey())) }
+function yaraifyDeleteRule(uuid) { return($svc.yaraifyDeleteRule($uuid, apikey=$userKey())) }

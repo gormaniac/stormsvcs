@@ -200,10 +200,19 @@ function _rules(rules) {
     return($nodes)
 }
 
-// Recently deployed YARA rules. Returns a list of it:app:yara:rule nodes.
+// Recently deployed YARA rules, with their text when the author shares it.
+// Returns a list of it:app:yara:rule nodes.
 function yaraifyRecentRules() {
     $retn = $priv.yaraifyRecentRules()
     if $util.failed($retn, "Retrieving recent YARAify rules") { return(([])) }
+    return($_rules($retn.data))
+}
+
+// The YARA rules you've deployed for live hunting, with their text when shared.
+// Returns a list of it:app:yara:rule nodes.
+function yaraifyDeployedRules() {
+    $retn = $priv.yaraifyDeployedRules()
+    if $util.failed($retn, "Retrieving your deployed YARAify rules") { return(([])) }
     return($_rules($retn.data))
 }
 

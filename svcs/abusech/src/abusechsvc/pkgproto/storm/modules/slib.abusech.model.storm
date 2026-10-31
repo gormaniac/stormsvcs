@@ -272,7 +272,8 @@ function rule(r, plat) {
         :created ?= $r.date
         :family ?= $r.family
     ]
-    if ($r.text and not :text) { [ :text ?= $r.text ] }
+    // Authors can update a rule in place, so the latest text wins.
+    [ :text ?= $r.text ]
     if $r.author { [ :author ?= {[ ps:contact=({"name": $r.author}) ]} ] }
     $rulenode = $seen($node, $plat, $r.time)
 

@@ -5,6 +5,9 @@ init {
     if $cmdopts.text {
         $util.printSubmission("Deploying a YARA rule to YARAify", $privsub.yaraifyDeploy($cmdopts.text))
     }
+    for $uuid in $cmdopts.delete {
+        $util.printSubmission(`Deleting YARA rule {$uuid} from YARAify`, $privsub.yaraifyDeleteRule($uuid))
+    }
 }
 
 if ($node.form() != "it:app:yara:rule") {

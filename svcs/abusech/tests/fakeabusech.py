@@ -419,10 +419,30 @@ private rule helper_rule {
 }
 """
 
+# recent_yararules and show_deployed_yara_rules only list rule metadata, never the text.
 YARAIFY_RECENT_RULES = [
     {"time_stamp": "2026-10-01 00:00:00", "rule_name": "New_Rule_1", "author": "someone",
-     "yarahub_uuid": "11111111-2222-3333-4444-555555555555", "yarahub_rule_matching_tlp": "TLP:WHITE"},
+     "description": "A new rule", "yarahub_uuid": "11111111-2222-3333-4444-555555555555",
+     "yarahub_rule_matching_tlp": "TLP:WHITE", "yarahub_rule_sharing_tlp": "TLP:WHITE"},
+    {"time_stamp": "2026-10-01 00:00:00", "rule_name": "Private_Rule", "author": "someone",
+     "yarahub_uuid": "99999999-2222-3333-4444-555555555555",
+     "yarahub_rule_matching_tlp": "TLP:WHITE", "yarahub_rule_sharing_tlp": "TLP:RED"},
 ]
+
+NEW_RULE_TEXT = """rule New_Rule_1 {
+    meta:
+        yarahub_uuid = "11111111-2222-3333-4444-555555555555"
+        description = "A new rule"
+    condition:
+        uint16(0) == 0x5a4d
+}
+"""
+
+# get_yara_rule returns the text of shared rules, keyed by UUID.
+YARA_RULES = {
+    "6a6d2b48-1234-4cde-9f00-112233445566": YARA_RULE_TEXT,
+    "11111111-2222-3333-4444-555555555555": NEW_RULE_TEXT,
+}
 
 FPLIST = {
     "1": {"time_stamp": "2026-01-01 00:00:00 UTC", "platform": "MalwareBazaar", "entry_type": "sha256_hash",
@@ -603,10 +623,20 @@ class FakeAbuseCh:
                 return self._json({"query_status": "success"})
         return self._json({"query_status": "unknown_query"})
 
+    def _export(self, info: dict, path: str) -> str:
+        """Record the Auth-Key the exports take in the URL path, and return the file name."""
+
+        key, _, name = path.partition("/")
+        info["exportkey"] = key
+        return name
+
     async def _bazaar_export(self, request, info, path, query):
-        if path.startswith("csv/full"):
+        name = self._export(info, path)
+        if name == "full.csv.zip":
             return web.Response(body=mkzip({"full.csv": BAZAAR_CSV.encode()}), content_type="application/zip")
-        return web.Response(text=BAZAAR_CSV)
+        if name == "recent.csv":
+            return web.Response(text=BAZAAR_CSV)
+        return self._json({"status": 404, "message": "Invalid export file name"}, status=404)
 
     async def _urlhaus(self, request, info, path, query):
         form = info["form"]
@@ -644,9 +674,12 @@ class FakeAbuseCh:
         return web.Response(text="Your submission has been accepted")
 
     async def _urlhaus_export(self, request, info, path, query):
-        if path == "csv/":
+        name = self._export(info, path)
+        if name == "full.csv.zip":
             return web.Response(body=mkzip({"csv.txt": URLHAUS_CSV.encode()}), content_type="application/zip")
-        return web.Response(text=URLHAUS_CSV)
+        if name in ("recent.csv", "online.csv"):
+            return web.Response(text=URLHAUS_CSV)
+        return self._json({"status": 404, "message": "Invalid export file name"}, status=404)
 
     async def _threatfox(self, request, info, path, query):
         body = info["json"] or {}
@@ -680,10 +713,13 @@ class FakeAbuseCh:
         return self._json({"query_status": "unknown_query"})
 
     async def _threatfox_export(self, request, info, path, query):
+        name = self._export(info, path)
         text = json.dumps(THREATFOX_EXPORT)
-        if path.startswith("json/full"):
+        if name == "full.json.zip":
             return web.Response(body=mkzip({"full.json": text.encode()}), content_type="application/zip")
-        return web.Response(text=text, content_type="application/json")
+        if name == "recent.json":
+            return web.Response(text=text, content_type="application/json")
+        return self._json({"status": 404, "message": "Invalid export file name"}, status=404)
 
     async def _yaraify(self, request, info, path, query):
         if "yara_file" in info["files"]:
@@ -701,6 +737,12 @@ class FakeAbuseCh:
                 return self._json(ok(YARAIFY_SEARCH))
             case "recent_yararules":
                 return self._json(ok(YARAIFY_RECENT_RULES))
+            case "show_deployed_yara_rules":
+                return self._json(ok(YARAIFY_RECENT_RULES[:1]))
+            case "delete_yara_rule":
+                if body.get("yarahub_uuid") in YARA_RULES:
+                    return self._json(ok("YARA rule deleted"))
+                return self._json({"query_status": "error", "data": "Unknown YARA rule"})
             case "get_results":
                 if body.get("task_id") == "queued-task":
                     return self._json(ok("queued"))
@@ -712,7 +754,15 @@ class FakeAbuseCh:
             case "rescan_file":
                 return self._json(ok({"task_id": "22222222-aaaa-bbbb-cccc-000000000002"}, query_status="queued"))
             case "get_yara_rule":
-                return web.Response(text=YARA_RULE_TEXT)
+                text = YARA_RULES.get(body.get("uuid"))
+                if text is None:
+                    return self._json({"query_status": "error", "data": "Unknown YARA rule"})
+                return web.Response(text=text, content_type="text/plain")
+            case "get_unpacked":
+                if body.get("sha256_hash") == SAMPLE_SHA256:
+                    return web.Response(body=mkzip({SAMPLE_SHA256: SAMPLE_BYTES}, b"infected"),
+                                        content_type="application/zip")
+                return self._json({"query_status": "not_found", "data": "Unknown file or file not shareable"})
             case "get_file":
                 if body.get("sha256_hash") == SAMPLE_SHA256:
                     return web.Response(body=mkzip({SAMPLE_SHA256: SAMPLE_BYTES}, b"infected"),
@@ -721,6 +771,8 @@ class FakeAbuseCh:
         return self._json({"query_status": "unknown_query"})
 
     async def _yaraify_export(self, request, info, path, query):
+        if path != "yarahub/yaraify-rules.zip":
+            return web.Response(status=404, text="<html>Not Found</html>", content_type="text/html")
         return web.Response(body=mkzip({"win_agent_tesla_auto.yar": YARA_RULE_TEXT.encode()}),
                             content_type="application/zip")
 

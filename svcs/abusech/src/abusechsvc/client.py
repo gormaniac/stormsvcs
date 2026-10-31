@@ -15,6 +15,7 @@ import json
 import zipfile
 from collections.abc import Mapping
 from typing import Any
+from urllib.parse import quote
 
 import aiohttp
 import pyzipper
@@ -23,17 +24,17 @@ import pyzipper
 BASE_URLS = {
     # MalwareBazaar
     "bazaar": "https://mb-api.abuse.ch/api/v1",
-    "bazaar:export": "https://bazaar.abuse.ch/export",
+    "bazaar:export": "https://mb-api.abuse.ch/v2/files/exports",
     # URLhaus
     "urlhaus": "https://urlhaus-api.abuse.ch/v1",
     "urlhaus:submit": "https://urlhaus.abuse.ch/api",
-    "urlhaus:export": "https://urlhaus.abuse.ch/downloads",
+    "urlhaus:export": "https://urlhaus-api.abuse.ch/v2/files/exports",
     # ThreatFox
     "threatfox": "https://threatfox-api.abuse.ch/api/v1",
-    "threatfox:export": "https://threatfox.abuse.ch/export",
+    "threatfox:export": "https://threatfox-api.abuse.ch/v2/files/exports",
     # YARAify
     "yaraify": "https://yaraify-api.abuse.ch/api/v1",
-    "yaraify:export": "https://yaraify-api.abuse.ch",
+    "yaraify:export": "https://yaraify.abuse.ch",
     # Hunting (the false positive list)
     "hunting": "https://hunting-api.abuse.ch/api/v1",
     # Feodo Tracker and SSL Blacklist only publish datasets.
@@ -42,8 +43,14 @@ BASE_URLS = {
 }
 """The base URL of every abuse.ch API and dataset host, keyed by the name used throughout the service."""
 
-KEYED_APIS = frozenset(("bazaar", "urlhaus", "urlhaus:submit", "threatfox", "yaraify", "hunting"))
-"""The APIs that require an abuse.ch Auth-Key. The datasets send one when it's available."""
+KEYED_APIS = frozenset((
+    "bazaar", "bazaar:export", "urlhaus", "urlhaus:submit", "urlhaus:export", "threatfox", "threatfox:export",
+    "yaraify", "hunting",
+))
+"""The APIs that require an abuse.ch Auth-Key. The other datasets send one when it's available."""
+
+EXPORT_APIS = frozenset(("bazaar:export", "urlhaus:export", "threatfox:export"))
+"""The exports that take the Auth-Key in the URL path (``<base>/<Auth-Key>/<file>``)."""
 
 OK_STATUSES = frozenset((
     "ok", "queued", "inserted", "updated", "success", "processing",
@@ -260,8 +267,10 @@ class AbuseChClient:
         with any ``form`` fields alongside them.
         """
 
-        url = self.url(base, path)
         headers = self.headers(base, apikey)
+        if base in EXPORT_APIS:
+            path = f"{quote(apikey, safe='')}/{path.lstrip('/')}"
+        url = self.url(base, path)
 
         for attempt in range(MAX_RETRIES + 1):
             await self.limiter.wait()
@@ -287,7 +296,9 @@ class AbuseChClient:
                     code = resp.status
                     ctype = resp.headers.get("Content-Type", "")
             except (TimeoutError, aiohttp.ClientError) as err:
-                raise AbuseChApiError(f"Unable to connect to abuse.ch ({base}): {err}") from err
+                # Some errors include the URL, which has the Auth-Key for the exports.
+                mesg = str(err).replace(apikey, "<auth-key>") if apikey else str(err)
+                raise AbuseChApiError(f"Unable to connect to abuse.ch ({base}): {mesg}") from err
 
             if code in (429, 503) and attempt < MAX_RETRIES:
                 await asyncio.sleep(2 ** attempt)

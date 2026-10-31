@@ -57,7 +57,9 @@ every platform. Keys are resolved in this order, per request:
    service, not the Cortex, so it can't be read back from Storm.
 3. **The `abusech:apikey` config option.**
 
-The Feodo Tracker and SSL Blacklist blocklists don't need a key (one is sent when available).
+The Feodo Tracker and SSL Blacklist blocklists and the YARAhub rule export don't need a key (one is
+sent when available). The MalwareBazaar, URLhaus, and ThreatFox exports take the key in their URL
+(`https://<api>/v2/files/exports/<Auth-Key>/<file>`), which the service never includes in errors.
 
 ## Permissions
 
@@ -98,9 +100,9 @@ permission. Users still need the normal node permissions for the nodes the comma
 | `slib.abusech.yaraify.search` | Files by `yara`, `clamav`, `imphash`, `gimphash`, `dhash`, `tlsh`, or `telfhash`. |
 | `slib.abusech.yaraify.scan` | Scan files from the Axon (or rescan known files by hash), `--wait` models the results. |
 | `slib.abusech.yaraify.tasks` | List the tasks for your identifier, or generate a new one with `--new`. |
-| `slib.abusech.yaraify.rules` | Model YARAhub rules by `--uuid`, `--recent` rules, or `--all` TLP:CLEAR rules. |
-| `slib.abusech.yaraify.deploy` | Deploy `it:app:yara:rule` nodes (or `--text`) for live hunting. |
-| `slib.abusech.yaraify.download` | Download (shared) files into the Axon (unzipped). |
+| `slib.abusech.yaraify.rules` | Model YARAhub rules, with their text, by `--uuid`, `--recent` rules, your `--deployed` rules, or `--all` shared rules. |
+| `slib.abusech.yaraify.deploy` | Deploy `it:app:yara:rule` nodes (or `--text`) for live hunting, or `--delete` your deployed rules. |
+| `slib.abusech.yaraify.download` | Download (shared) files into the Axon (unzipped), or files YARAify unpacked with `--unpacked`. |
 | `slib.abusech.feodo` | Model the `all`, `recommended`, or `aggressive` C2 blocklist. |
 | `slib.abusech.sslbl` | Model the `certs`, `ips`, `ips-aggressive`, or `ja3` blocklist. |
 | `slib.abusech.fplist` | Model the false positive list (optionally one `--platform`). |
@@ -156,7 +158,7 @@ the platform's `meta:source` with a `-(seen)>` edge, and has `.seen` updated fro
 | Malware families | `risk:tool:software` (`:soft:name`, `:soft:names` aliases, `:id` Malpedia ID, `:tag` the family's tag), Malpedia link `inet:url -(refs)>` |
 | Reporters | `inet:service:account` (on an `inet:service:platform` per abuse.ch platform) `-(seen)>` the node |
 | ClamAV, vendor intel (ANY.RUN, Triage, ReversingLabs, ...), VirusTotal | `it:av:scan:result` (`:scanner:name`, `:signame`, `:verdict`, `:time`, `:categories`, `:multi:count`, `:multi:count:malicious`), report links as `inet:url -(refs)> file:bytes` |
-| YARA rules and matches | `it:app:yara:rule` (`:name`, `:ext:id` YARAhub UUID, `:author`, `:url`, `:text`, `:created`, `:family`), TLP tag, description/license as a `meta:note`; `it:app:yara:match` |
+| YARA rules and matches | `it:app:yara:rule` (`:name`, `:ext:id` YARAhub UUID, `:author`, `:url`, `:text`, `:created`, `:family`), TLP tag, description/license as a `meta:note`; `it:app:yara:match`. `:text` is only available for rules the author shares (TLP:WHITE), and is replaced when the author updates the rule. |
 | Code signing certificates | `crypto:x509:cert` (`:sha256`/`:sha1` thumbprint, `:serial`, `:subject`, `:issuer`, `:validity:*`), `crypto:x509:signedfile`; CSCB listings tagged `#rep.abusech.bazaar.cscb` with the reason as a `meta:note` |
 | Unpacked/related files | `file:subfile` (YARAify/UnpacMe unpacked files), droppers as `file:bytes -(refs)> file:bytes` |
 | Comments, file information, OLE info | `meta:note -(about)>` the node |
@@ -184,24 +186,24 @@ and `slib.abusech.admin.request`.
 | | `get_file` | `slib.abusech.bazaar.download` |
 | | Sample upload | `slib.abusech.bazaar.submit` |
 | | `update`, `add_comment` | `slib.abusech.bazaar.update` |
-| | CSV exports (`recent`, `full`) | `slib.abusech.bazaar.export` |
+| | CSV exports (`recent.csv`, `full.csv.zip`) | `slib.abusech.bazaar.export` |
 | URLhaus | `/url/`, `/urlid/`, `/host/`, `/payload/` | `slib.abusech.urlhaus.lookup`, `slib.abusech.enrich` |
 | | `/tag/`, `/signature/`, `/urls/recent/`, `/payloads/recent/` | `slib.abusech.urlhaus.search` |
 | | `/download/{sha256}/` | `slib.abusech.urlhaus.download` |
 | | URL submission | `slib.abusech.urlhaus.submit` |
-| | CSV exports (`recent`, `online`, `full`) | `slib.abusech.urlhaus.export` |
+| | CSV exports (`recent.csv`, `online.csv`, `full.csv.zip`) | `slib.abusech.urlhaus.export` |
 | ThreatFox | `search_ioc`, `search_hash`, `ioc` | `slib.abusech.threatfox.lookup`, `slib.abusech.enrich` |
 | | `get_iocs`, `taginfo`, `malwareinfo` | `slib.abusech.threatfox.search` |
 | | `types`, `tag_list`, `malware_list`, `get_label` | `slib.abusech.threatfox.ref` |
 | | `submit_ioc` | `slib.abusech.threatfox.submit` |
-| | JSON exports (`recent`, `full`) | `slib.abusech.threatfox.export` |
+| | JSON exports (`recent.json`, `full.json.zip`) | `slib.abusech.threatfox.export` |
 | YARAify | `lookup_hash`, `get_results` | `slib.abusech.yaraify.lookup`, `slib.abusech.enrich` |
 | | `get_yara`, `get_clamav`, `get_imphash`, `get_gimphash`, `get_dhash_icon`, `get_tlsh`, `get_telfhash` | `slib.abusech.yaraify.search` |
 | | File scan, `rescan_file` | `slib.abusech.yaraify.scan` |
 | | `list_tasks`, `generate_identifier` | `slib.abusech.yaraify.tasks` |
-| | `get_yara_rule`, `recent_yararules`, the YARAhub rule export | `slib.abusech.yaraify.rules` |
-| | YARA rule upload | `slib.abusech.yaraify.deploy` |
-| | `get_file` | `slib.abusech.yaraify.download` |
+| | `get_yara_rule`, `recent_yararules`, `show_deployed_yara_rules`, the YARAhub rule export | `slib.abusech.yaraify.rules` |
+| | YARA rule upload, `delete_yara_rule` | `slib.abusech.yaraify.deploy` |
+| | `get_file`, `get_unpacked` | `slib.abusech.yaraify.download` |
 | Feodo Tracker | `ipblocklist.json`, `ipblocklist_recommended.txt`, `ipblocklist_aggressive.csv` | `slib.abusech.feodo` |
 | SSL Blacklist | `sslblacklist.csv`, `sslipblacklist.csv`, `sslipblacklist_aggressive.csv`, `ja3_fingerprints.csv` | `slib.abusech.sslbl` |
 | Hunting | `get_fplist` | `slib.abusech.fplist` |

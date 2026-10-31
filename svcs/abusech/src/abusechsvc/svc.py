@@ -60,30 +60,30 @@ YARAIFY_SEARCHES = {
 """YARAify searches: name -> query. Each takes a ``search_term`` and ``result_max``."""
 
 BAZAAR_EXPORTS = {
-    "recent": "csv/recent/",
-    "full": "csv/full/",
+    "recent": "recent.csv",
+    "full": "full.csv.zip",
 }
-"""MalwareBazaar CSV exports: name -> path. ``full`` is zipped."""
+"""MalwareBazaar CSV exports: name -> file. ``recent`` is the last 48 hours."""
 
 BAZAAR_CSV = ("first_seen_utc", "sha256_hash", "md5_hash", "sha1_hash", "reporter", "file_name",
               "file_type_guess", "mime_type", "signature", "clamav", "vtpercent", "imphash", "ssdeep", "tlsh")
 """The columns of the MalwareBazaar CSV export."""
 
 URLHAUS_EXPORTS = {
-    "recent": "csv_recent/",
-    "online": "csv_online/",
-    "full": "csv/",
+    "recent": "recent.csv",
+    "online": "online.csv",
+    "full": "full.csv.zip",
 }
-"""URLhaus CSV exports: name -> path. ``full`` is zipped."""
+"""URLhaus CSV exports: name -> file. ``recent`` is the last 30 days, ``full`` the last 90 days and every online URL."""
 
 URLHAUS_CSV = ("id", "dateadded", "url", "url_status", "last_online", "threat", "tags", "urlhaus_link", "reporter")
 """The columns of the URLhaus CSV exports."""
 
 THREATFOX_EXPORTS = {
-    "recent": "json/recent/",
-    "full": "json/full/",
+    "recent": "recent.json",
+    "full": "full.json.zip",
 }
-"""ThreatFox JSON exports: name -> path. ``full`` is zipped."""
+"""ThreatFox JSON exports: name -> file. ``recent`` is the last 48 hours."""
 
 FEODO_BLOCKLISTS = {
     "all": "ipblocklist.json",
@@ -680,10 +680,47 @@ class AbuseChSvc(s_cell.Cell):
 
         return _data(await self.yaraifyQuery("recent_yararules", apikey=apikey), [])
 
-    async def normYaraifyRecentRules(self, apikey=None) -> list[dict]:
-        """Like ``yaraifyRecentRules()`` but normalized."""
+    async def normYaraifyRecentRules(self, text: bool = True, apikey=None) -> list[dict]:
+        """Like ``yaraifyRecentRules()`` but normalized, with each rule's text (see ``_ruleText``)."""
 
-        return norm.normRules(await self.yaraifyRecentRules(apikey=apikey))
+        rules = norm.normRules(await self.yaraifyRecentRules(apikey=apikey))
+        return await self._ruleText(rules, apikey=apikey) if text else rules
+
+    async def yaraifyDeployedRules(self, apikey=None) -> list:
+        """``show_deployed_yara_rules`` - The YARA rules you've deployed for live hunting."""
+
+        return _data(await self.yaraifyQuery("show_deployed_yara_rules", apikey=apikey), [])
+
+    async def normYaraifyDeployedRules(self, text: bool = True, apikey=None) -> list[dict]:
+        """Like ``yaraifyDeployedRules()`` but normalized, with each rule's text (see ``_ruleText``)."""
+
+        rules = norm.normRules(await self.yaraifyDeployedRules(apikey=apikey))
+        return await self._ruleText(rules, apikey=apikey) if text else rules
+
+    async def _ruleText(self, rules: list[dict], apikey=None) -> list[dict]:
+        """Fill in the text of rules listed without it, by downloading each one (``get_yara_rule``).
+
+        Only rules whose author shares them (TLP:WHITE) can be downloaded, the
+        rest keep their metadata only.
+        """
+
+        for rule in rules:
+            if rule["text"] or not rule["uuid"]:
+                continue
+            try:
+                downloads = await self.yaraifyRule(rule["uuid"], apikey=apikey)
+            except AbuseChApiError:
+                continue
+            match = [d for d in downloads if d["name"] == rule["name"]] or downloads[:1]
+            if match:
+                rule["text"] = match[0]["text"]
+        return rules
+
+    async def yaraifyDeleteRule(self, uuid: str, apikey=None) -> Any:
+        """``delete_yara_rule`` - Delete one of your deployed YARA rules."""
+
+        resp = await self.yaraifyQuery("delete_yara_rule", {"yarahub_uuid": uuid}, apikey=apikey)
+        return _data(resp, (resp or {}).get("query_status"))
 
     async def yaraifyResults(self, task_id: str, malpedia: str | None = None, apikey=None) -> Any:
         """``get_results`` - The results of a scan task, or ``"queued"`` while it's still running."""
@@ -771,10 +808,18 @@ class AbuseChSvc(s_cell.Cell):
         return await self._download("yaraify", method="post", apikey=apikey,
                                     json_data={"query": "get_file", "sha256_hash": sha256.lower()})
 
+    async def yaraifyUnpacked(self, sha256: str, apikey=None) -> dict | None:
+        """``get_unpacked`` - Download a file YARAify unpacked, returning ``{name, size, sha256, bytes}`` (unzipped)."""
+
+        if hashType(sha256) != "sha256":
+            raise AbuseChApiError("YARAify downloads require a SHA256 hash.")
+        return await self._download("yaraify", method="post", apikey=apikey,
+                                    json_data={"query": "get_unpacked", "sha256_hash": sha256.lower()})
+
     async def yaraifyRulesExport(self, limit: int = 0, apikey=None) -> AsyncIterator[dict]:
         """Yield every TLP:CLEAR YARAhub rule, normalized, from YARAify's rule export."""
 
-        byts, _ = await self._fetch("yaraify:export", "download/yaraify-rules.zip", apikey=apikey)
+        byts, _ = await self._fetch("yaraify:export", "yarahub/yaraify-rules.zip", apikey=apikey)
         files = unzip(byts, password=None) if byts[:2] == b"PK" else [("rules.yar", byts)]
         count = 0
         for _, rbyts in files:

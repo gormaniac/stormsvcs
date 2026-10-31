@@ -71,6 +71,7 @@ function yaraifyResults(taskid, malpedia=$lib.null) { return($svc.normYaraifyRes
 function yaraifyTasks(identifier, status=processed) { return($svc.normYaraifyTasks($identifier, status=$status, apikey=$userKey())) }
 function yaraifyIdentifier() { return($svc.yaraifyIdentifier(apikey=$userKey())) }
 function yaraifyRecentRules() { return($svc.normYaraifyRecentRules(apikey=$userKey())) }
+function yaraifyDeployedRules() { return($svc.normYaraifyDeployedRules(apikey=$userKey())) }
 function yaraifyRule(uuid) { return($svc.yaraifyRule($uuid, apikey=$userKey())) }
 function yaraifyRulesExport(limit=(0)) {
     for $retn in $svc.yaraifyRulesExport(limit=$limit, apikey=$userKey()) { emit $retn }
