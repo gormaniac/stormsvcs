@@ -1,6 +1,6 @@
 [project]
 name = "capasvc"
-version = "0.2.1"
+version = "0.3.0"
 description = "A Storm Service that runs Mandiant capa against files in an Axon"
 readme = "README.md"
 license-files = ["LICENSE"]

@@ -58,6 +58,11 @@ jobs:
       - name: Ruff gate
         run: uvx ruff@${{ env.RUFF_VERSION }} check --select E9,F63,F7,F82 --output-format=github .
 
+      # Everything is formatted now, so an unformatted file fails the job. Run
+      # `uvx ruff format .` locally to fix.
+      - name: Ruff format gate
+        run: uvx ruff@${{ env.RUFF_VERSION }} format --check .
+
       - name: Setup Python
         run: uv python install
 
@@ -67,10 +72,9 @@ jobs:
       - name: Run tests
         run: uv run pytest tests
 
-      # Every rule and the formatter, but it never fails the job. Use it to see what ruff
-      # would change in a service, and to help pick a stricter default config later. The
-      # counts and unformatted files are in the job summary, and the full findings and format
-      # diffs are in the log.
+      # Every rule, but it never fails the job (formatting gates above). Use it to see
+      # what ruff would flag in a service, and to help pick a stricter default config
+      # later. The counts are in the job summary, and the full findings are in the log.
       - name: Ruff report (non-blocking)
         if: ${{ !cancelled() }}
         continue-on-error: true
@@ -82,16 +86,10 @@ jobs:
             echo
             echo '```'
             $ruff check --statistics .
-            echo
-            $ruff format --check --output-format=concise .
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-          $ruff check --output-format=concise .
-          check_rc=$?
-          $ruff format --check .
-          format_rc=$?
           # A non-zero exit marks this step as failed in the UI, without failing the job.
-          exit $(( check_rc || format_rc ))
+          $ruff check --output-format=concise .
 
   docker:
     runs-on: ubuntu-latest
