@@ -22,6 +22,7 @@ import asyncio
 import hashlib
 import io
 import json
+import logging
 import os
 import re
 import shutil
@@ -41,6 +42,8 @@ import synapse.lib.msgpack as s_msgpack
 from . import bulk, norm
 from .api import AbuseChCellApi
 from .client import AbuseChApiError, AbuseChClient, unzip
+
+logger = logging.getLogger(__name__)
 
 
 BAZAAR_SEARCHES = {
@@ -135,6 +138,9 @@ BULK_EXPORTS = {
 BULK_BATCH = 1000
 """How many export records are built before their nodes are written to the job's .nodes file."""
 
+BULK_IDLE = 6 * 60 * 60 * 1000
+"""Bulk import jobs untouched for this long (ms) are removed, ex. when the Storm side was cancelled."""
+
 RAW_BASES = ("bazaar", "urlhaus", "urlhaus:submit", "threatfox", "yaraify", "hunting")
 """The APIs that ``rawRequest`` can send JSON/form requests to."""
 
@@ -147,6 +153,31 @@ def _sha256File(path: str) -> str:
         for byts in iter(lambda: fd.read(1024 * 1024), b""):
             sha.update(byts)
     return sha.hexdigest()
+
+
+def parseThreatfox(byts: bytes, kind: str) -> list[dict]:
+    """Parse a ThreatFox JSON export (zipped or not) into normalized IOCs."""
+
+    if byts[:2] == b"PK":
+        byts = b"\n".join(b for _, b in unzip(byts, password=None))
+    try:
+        data = json.loads(byts) if byts.strip() else {}
+    except ValueError as err:
+        raise AbuseChApiError(f"Unable to parse the ThreatFox {kind} export: {err}") from err
+    return list(norm.normThreatFoxExport(data))
+
+
+def _readThreatfox(path: str, kind: str) -> list[dict]:
+    with open(path, "rb") as fd:
+        return parseThreatfox(fd.read(), kind)
+
+
+def urlhausReader(kind: str) -> tuple[tuple[str, ...], Any]:
+    """The CSV columns and row normalizer of a URLhaus export."""
+
+    if kind == "payloads":
+        return norm.URLHAUS_PAYLOAD_CSV, norm.normUrlhausPayloadRow
+    return URLHAUS_CSV, norm.normUrl
 
 
 def _seg(valu: Any) -> str:
@@ -235,6 +266,7 @@ class AbuseChSvc(s_cell.Cell):
         os.makedirs(self.bulkdir, exist_ok=True)
         self.bulkjobs: dict[str, dict] = {}
         self._bulkmodel = None
+        self.schedCoro(self._bulkPruneLoop())
 
     # ---- Auth-Key management ----
 
@@ -660,11 +692,10 @@ class AbuseChSvc(s_cell.Cell):
         if kind not in URLHAUS_EXPORTS:
             raise AbuseChApiError(f"Unknown URLhaus export: {kind}")
         # The payloads export is GBs, so the exports are streamed.
-        payloads = kind == "payloads"
-        fields = norm.URLHAUS_PAYLOAD_CSV if payloads else URLHAUS_CSV
+        fields, normrow = urlhausReader(kind)
         count = 0
         async for row in self._csvRows("urlhaus:export", URLHAUS_EXPORTS[kind], fields, apikey=apikey):
-            url = norm.normUrlhausPayloadRow(row) if payloads else norm.normUrl(row)
+            url = normrow(row)
             if url:
                 yield url
                 count += 1
@@ -812,11 +843,8 @@ class AbuseChSvc(s_cell.Cell):
             raise AbuseChApiError(f"Unknown ThreatFox export: {kind}")
         # A few MB, downloaded with a read timeout only, since slow links take longer than the request timeout.
         byts = await self._downloadBytes("threatfox:export", THREATFOX_EXPORTS[kind], apikey=apikey)
-        try:
-            data = json.loads(byts) if byts.strip() else {}
-        except ValueError as err:
-            raise AbuseChApiError(f"Unable to parse the ThreatFox {kind} export: {err}") from err
-        for count, ioc in enumerate(norm.normThreatFoxExport(data), start=1):
+        iocs = await asyncio.to_thread(parseThreatfox, byts, kind)
+        for count, ioc in enumerate(iocs, start=1):
             yield ioc
             if limit and count >= limit:
                 return
@@ -1128,7 +1156,24 @@ class AbuseChSvc(s_cell.Cell):
         job = self.bulkjobs.get(jobid)
         if job is None:
             raise AbuseChApiError(f"Unknown bulk import job: {jobid}")
+        job["touched"] = s_common.now()
         return job
+
+    def _bulkPrune(self, idle: int = BULK_IDLE) -> list[str]:
+        """Remove jobs untouched for ``idle`` ms. The Storm side removes its job when it finishes or
+        fails, but not when it's cancelled (ex. a killed background query). Returns the removed job IDs."""
+
+        cutoff = s_common.now() - idle
+        stale = [jobid for jobid, job in self.bulkjobs.items() if job["touched"] < cutoff]
+        for jobid in stale:
+            job = self.bulkjobs.pop(jobid)
+            shutil.rmtree(job["dirn"], ignore_errors=True)
+            logger.warning("Removed the idle %s %s bulk import job %s", job["plat"], job["kind"], jobid)
+        return stale
+
+    async def _bulkPruneLoop(self) -> None:
+        while not await self.waitfini(timeout=600):
+            self._bulkPrune()
 
     async def bulkExports(self) -> list[list[str]]:
         """The (platform, kind) of every export that can be bulk imported."""
@@ -1154,7 +1199,7 @@ class AbuseChSvc(s_cell.Cell):
         self.bulkjobs[jobid] = {
             "plat": plat, "kind": kind, "sha256": sha256.lower(), "dirn": dirn,
             "source": os.path.join(dirn, "source"), "nodes": os.path.join(dirn, "export.nodes"),
-            "size": 0, "started": s_common.now(),
+            "size": 0, "started": s_common.now(), "touched": s_common.now(),
         }
         return jobid
 
@@ -1168,39 +1213,25 @@ class AbuseChSvc(s_cell.Cell):
         return job["size"]
 
     def _bulkRecords(self, job: dict, fd: Any) -> Iterator[tuple[str, dict | None]]:
-        """Yield (record type, normalized record) for each record in a staged export file."""
+        """Yield (record type, normalized record) for each row of a staged CSV export file."""
 
         plat, kind = job["plat"], job["kind"]
-        path = BULK_EXPORTS[(plat, kind)][1]
-        if plat == "threatfox":
-            byts = fd.read()
-            if byts[:2] == b"PK":
-                byts = b"\n".join(b for _, b in unzip(byts, password=None))
-            try:
-                data = json.loads(byts) if byts.strip() else {}
-            except ValueError as err:
-                raise AbuseChApiError(f"Unable to parse the ThreatFox {kind} export: {err}") from err
-            for ioc in norm.normThreatFoxExport(data):
-                yield "ioc", ioc
-            return
-
-        lines = self._fileLines(fd, BULK_EXPORTS[(plat, kind)][0], path)
+        base, path = BULK_EXPORTS[(plat, kind)]
+        lines = self._fileLines(fd, base, path)
         if plat == "bazaar":
             for row in norm.parseCsvLines(lines, BAZAAR_CSV):
                 yield "sample", norm.normSample(row)
-        elif kind == "payloads":
-            for row in norm.parseCsvLines(lines, norm.URLHAUS_PAYLOAD_CSV):
-                yield "url", norm.normUrlhausPayloadRow(row)
         else:
-            for row in norm.parseCsvLines(lines, URLHAUS_CSV):
-                yield "url", norm.normUrl(row)
+            fields, normrow = urlhausReader(kind)
+            for row in norm.parseCsvLines(lines, fields):
+                yield "url", normrow(row)
 
     async def bulkBuild(self, jobid: str, prefix: str | None = None, batch: int = BULK_BATCH) -> AsyncIterator[dict]:
         """Build the nodes for a staged export into the job's .nodes file, yielding progress.
 
         ``prefix`` is the tag prefix (null when tagging is disabled). Yields
         ``{"rows", "nodes"}`` after each batch, then ``{"done": True, "rows", "skipped", "nodes",
-        "sha256", "size", "builder", "seconds"}``.
+        "size", "builder", "seconds"}``.
         """
 
         job = self._bulkJob(jobid)
@@ -1218,6 +1249,11 @@ class AbuseChSvc(s_cell.Cell):
         rows = skipped = count = 0
         plat = job["plat"]
 
+        # ThreatFox exports are one JSON document, parsed in a thread to keep the service responsive.
+        iocs = None
+        if plat == "threatfox":
+            iocs = await asyncio.to_thread(_readThreatfox, job["source"], job["kind"])
+
         with open(job["nodes"], "wb") as out:  # noqa: ASYNC230 - written a batch at a time
 
             def write(nodes):
@@ -1225,7 +1261,8 @@ class AbuseChSvc(s_cell.Cell):
                 return len(nodes)
 
             with open(job["source"], "rb") as fd:  # noqa: ASYNC230 - read a record at a time
-                for rtype, rec in self._bulkRecords(job, fd):
+                records = (("ioc", ioc) for ioc in iocs) if iocs is not None else self._bulkRecords(job, fd)
+                for rtype, rec in records:
                     rows += 1
                     if rtype == "sample":
                         ndef = builder.sample(rec, plat)
@@ -1238,6 +1275,7 @@ class AbuseChSvc(s_cell.Cell):
 
                     if rows % batch == 0:
                         count += write(builder.flush())
+                        job["touched"] = s_common.now()
                         yield {"rows": rows, "nodes": count}
                     if rows % 100 == 0:
                         await asyncio.sleep(0)
@@ -1246,7 +1284,6 @@ class AbuseChSvc(s_cell.Cell):
 
         yield {
             "done": True, "rows": rows, "skipped": skipped, "nodes": count,
-            "sha256": await asyncio.to_thread(_sha256File, job["nodes"]),
             "size": os.path.getsize(job["nodes"]), "builder": bulk.BUILDER_VERSION,
             "seconds": round(time.monotonic() - start, 1),
         }
@@ -1257,6 +1294,7 @@ class AbuseChSvc(s_cell.Cell):
         job = self._bulkJob(jobid)
         with open(job["nodes"], "rb") as fd:  # noqa: ASYNC230 - read a chunk at a time
             for byts in iter(lambda: fd.read(chunk), b""):
+                job["touched"] = s_common.now()
                 yield byts
                 await asyncio.sleep(0)
 

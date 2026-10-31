@@ -8,6 +8,8 @@ import synapse.tests.utils as s_tests
 from abusechsvc import bulk, norm
 from abusechsvc.client import AbuseChApiError
 
+from abusechsvc.svc import BULK_IDLE
+
 from . import fakeabusech as fd
 from .fakeabusech import abusechSvc
 
@@ -88,10 +90,27 @@ class TestBuilder(s_tests.SynTest):
         assert builder.reporter(None, ("inet:fqdn", "a.com"), "urlhaus") is None
         assert builder.refNode(None, ("inet:fqdn", "a.com"), "urlhaus") is None
 
+    def test_arrays(self):
+        # Array values only accumulate across batches for held nodes (families); the rest are
+        # dropped once their batch is flushed, so memory doesn't grow with the export.
+        builder = bulk.NodeBuilder(bulk.buildModel(), "rep.abusech")
+        file = builder.node("file:bytes", "sha256:" + "a" * 64)
+        builder.addArray(file, "ssdeeps", "3:a:b")
+        tool = builder.family("bazaar", "Emotet", "emotet", ["Heodo"])
+        builder.flush()
+        assert list(builder.arrays) == [(tool, "soft:names")]
+        builder.family("bazaar", "Emotet", "emotet", ["Geodo"])
+        builder.addArray(file, "ssdeeps", "3:c:d")
+        nodes = dict(builder.finish())
+        assert nodes[file]["props"]["ssdeeps"] == ("3:c:d",)
+        assert nodes[tool]["props"]["soft:names"] == ("emotet", "geodo", "heodo")
+
     def test_time_pair(self):
         assert norm.timePair("2026-02-01", "2026-01-01") == ("2026-01-01", "2026-02-01")
         assert norm.timePair("2026-01-01", None) == ("2026-01-01", None)
         assert norm.normUrl({"url": "http://a/", "dateadded": "2026-02-01", "last_online": "2026-01-01"})["added"] == "2026-01-01"
+        c2 = norm.normC2("1.2.3.4", 443, first_seen="2026-02-01 10:00:00", last_online="2026-01-01")
+        assert c2["first_seen"] < c2["last_online"]
 
 
 class TestBulkSvc(s_tests.SynTest):
@@ -123,7 +142,7 @@ class TestBulkSvc(s_tests.SynTest):
             done = items[-1]
             assert done["done"] and done["rows"] == 2 and done["skipped"] == 0 and done["builder"] == bulk.BUILDER_VERSION
             nodes = b"".join([b async for b in svc.bulkNodes(jobid, chunk=100)])
-            assert len(nodes) == done["size"] and hashlib.sha256(nodes).hexdigest() == done["sha256"]
+            assert len(nodes) == done["size"] and "sha256" not in done
             packed = [i for _, i in s_msgpack.Unpk().feed(nodes)]
             assert len(packed) == done["nodes"]
             assert ("file:bytes", f"sha256:{fd.SHA256}") in [tuple(p[0]) for p in packed]
@@ -137,6 +156,25 @@ class TestBulkSvc(s_tests.SynTest):
             await svc.bulkStage(jobid, b"nope")
             with self.raises(AbuseChApiError):
                 [i async for i in svc.bulkBuild(jobid)]
+            await svc.bulkDone(jobid)
+
+            # Jobs left behind (ex. by a cancelled import) are removed once idle; active ones are kept.
+            old = await svc.bulkStart("urlhaus", "recent", "a" * 64)
+            new = await svc.bulkStart("urlhaus", "recent", "b" * 64)
+            olddirn = svc.bulkjobs[old]["dirn"]
+            svc.bulkjobs[old]["touched"] -= BULK_IDLE + 1
+            await svc.bulkStage(new, b"x")
+            assert svc._bulkPrune() == [old]
+            assert old not in svc.bulkjobs and not os.path.exists(olddirn)
+            assert new in svc.bulkjobs
+            await svc.bulkDone(new)
+
+            # ThreatFox exports, zipped or not, build from the staged JSON.
+            byts = b"".join([b async for b in svc.bulkPull("threatfox", "full")])
+            jobid = await svc.bulkStart("threatfox", "full", hashlib.sha256(byts).hexdigest())
+            await svc.bulkStage(jobid, byts)
+            done = [i async for i in svc.bulkBuild(jobid, prefix="rep.abusech")][-1]
+            assert done["rows"] > 0 and done["nodes"] > done["rows"]
             await svc.bulkDone(jobid)
 
 
@@ -223,6 +261,20 @@ class TestBulkStorm(s_tests.SynTest):
             self.stormIsInWarn("The bulk import failed", msgs)
             assert not svc.bulkjobs
 
+    async def test_stale(self):
+        async with abusechSvc(self) as (core, svc, fake):
+            await core.nodes("slib.abusech.threatfox.export full --bulk")
+            msgs = await core.stormlist("slib.abusech.threatfox.export full --bulk")
+            self.stormNotInWarn("days old", msgs)
+
+            # Reused full pulls more than a day old come with a warning.
+            sets = await core.callStorm("return($lib.globals.get(slib:abusech:datasets))")
+            sets["threatfox:full"]["time"] -= 3 * 86400000
+            await core.callStorm("$lib.globals.set(slib:abusech:datasets, $s)", opts={"vars": {"s": sets}})
+            msgs = await core.stormlist("slib.abusech.threatfox.export full --bulk")
+            self.stormIsInWarn("That pull is 3 days old", msgs)
+            self.stormIsInPrint("Ingested", msgs)
+
     async def test_perms(self):
         async with abusechSvc(self) as (core, svc, fake):
             user = await core.auth.addUser("analyst")
@@ -248,3 +300,10 @@ class TestBulkStorm(s_tests.SynTest):
             # The datasets global is written for the user, who can't otherwise set globals.
             msgs = await core.stormlist("$lib.globals.set(x, y)", opts=opts)
             self.stormIsInErr("permission", msgs)
+
+            # The bulk module only exposes run(), which does every step itself.
+            for name in ("setDataset", "stage", "bulk"):
+                msgs = await core.stormlist(f"$lib.import(slib.abusech.priv.bulk).{name}()", opts=opts)
+                assert [m for m in msgs if m[0] == "err"], name
+            msgs = await core.stormlist("$lib.import(slib.abusech.bulk)", opts=opts)
+            self.stormIsInErr("slib.abusech.bulk", msgs)

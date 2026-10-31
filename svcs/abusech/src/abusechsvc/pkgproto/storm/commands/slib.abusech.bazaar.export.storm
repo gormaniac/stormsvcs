@@ -4,7 +4,7 @@ init {
         $lib.raise(BadArg, "slib.abusech.bazaar.export: The yara export can't be bulk imported.")
     }
     if $cmdopts.bulk {
-        $bulk = $lib.import(slib.abusech.bulk)
+        $bulk = $lib.import(slib.abusech.priv.bulk)
         $bulk.run(bazaar, $cmdopts.kind, reuse=$cmdopts.reuse, repull=$cmdopts.repull)
     }
     elif ($cmdopts.reuse or $cmdopts.repull) {

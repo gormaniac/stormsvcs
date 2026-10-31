@@ -8,8 +8,14 @@ nodedefs written to a msgpack ``.nodes`` file, which the Cortex ingests in bulk 
 ``NodeBuilder`` mirrors the Storm model function by function for the record shapes the exports
 contain (see ``norm.normSample``, ``norm.normUrl``, ``norm.normUrlhausPayloadRow``, and
 ``norm.normIoc``). Values are normalized with a standalone copy of the Synapse data model, so
-primary values, props, and guids (including guid-by-dict nodes like ``risk:tool:software``) match
-what Storm creates, and bulk imported nodes deduplicate with nodes modeled live.
+primary values and props match what Storm creates, and nodes keyed by their primary value (files
+by SHA256, URLs, IPs, FQDNs, etc.) merge with nodes modeled live.
+
+Guid-by-dict nodes (``risk:tool:software``, ``inet:service:account``, ``it:av:scan:result``, etc.) get
+the guid ``$lib.guid()`` would give them, but Storm's ``{...}`` guid syntax first looks for an
+existing node with those props, which the service can't do. Where a matching node was made some
+other way (ex. by hand, or with a different guid), the import adds a second node instead of
+reusing it.
 
 Known differences from the Storm model, because bulk ingest can only add and set:
 
@@ -451,6 +457,8 @@ class NodeBuilder:
         """Return the accumulated nodes as ``syn.nodes`` nodedefs and start a new batch."""
 
         nodes, self.nodes = self.nodes, {}
+        # Only held nodes' arrays accumulate across batches; the rest are complete once flushed.
+        self.arrays = {k: v for k, v in self.arrays.items() if k[0] in self.held}
         # Held nodes are kept, but their edges (to this batch's nodes) go out with the batch.
         for ndef, info in self.held.items():
             if info["edges"]:

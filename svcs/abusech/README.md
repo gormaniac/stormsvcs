@@ -155,7 +155,7 @@ export commands' `--bulk` option imports a whole export at once instead:
 2. The file is copied from the Axon into a job directory in the service's storage
    (`<cell dir>/tmp/bulk/`), and its SHA256 is checked.
 3. The service builds every node in Python (`abusechsvc.bulk`), the same nodes the Storm model
-   creates, normalized with a copy of the Synapse data model so values and guids match. Nodes are
+   creates, normalized with a copy of the Synapse data model so values match. Nodes are
    written in batches to a `syn.nodes` msgpack `.nodes` file.
 4. The `.nodes` file is saved into the Axon and ingested with `$lib.feed.fromAxon()`, as the
    calling user.
@@ -171,7 +171,8 @@ Every pull is recorded in the `slib:abusech:datasets` global, keyed `<platform>:
 (`sha256`, `size`, node `count`, `rows`, `skipped`, `builder` version, and `time`).
 
 - **Full exports** (`full`, `payloads`) reuse their last pull by default, so a service update can
-  rebuild the same data without pulling it again. `--repull` pulls a new one.
+  rebuild the same data without pulling it again. `--repull` pulls a new one. When the reused pull
+  is more than a day old, the command warns that newer data isn't included.
 - **Recent exports** (`recent`, `online`) can only be pulled once an hour, as abuse.ch asks.
   Within the hour, the command warns and stops: `--reuse` imports the last pull again, and
   `--repull` pulls a new one anyway.
@@ -185,6 +186,13 @@ Since a bulk import can only add and set, it differs from the Storm model on nod
 exist: old `status.*` tags aren't removed, `file:bytes:ssdeeps` and
 `risk:tool:software:soft:names` are replaced instead of added to, `file:bytes:name` is replaced,
 and files only known by an MD5/SHA1 get their own `guid:` node instead of reusing an existing one.
+Guid nodes made from props (`risk:tool:software`, `inet:service:account`, `it:av:scan:result`,
+etc.) get the same guid Storm's `{...}` syntax would generate, but the service can't look up an
+existing node with those props first, so one made some other way (ex. by hand) isn't reused.
+
+A job's files are removed from the service's storage when the import finishes or fails. Jobs
+left behind by a cancelled import are removed after 6 hours idle, and every job is removed when
+the service restarts. The export and `.nodes` files stay in the Axon.
 
 ## Data model
 

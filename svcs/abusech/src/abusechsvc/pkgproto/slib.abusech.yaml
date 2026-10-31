@@ -61,9 +61,6 @@ modules:
   - name: slib.abusech.model
   - name: slib.abusech.util
   - name: slib.abusech.download
-  - name: slib.abusech.bulk
-    perms:
-      - [ slib, abusech, bulk ]
 
 commands:
 
@@ -347,13 +344,15 @@ commands:
 
       Each pull is recorded in the slib:abusech:datasets global (its SHA256, size, and time). Later
       bulk imports of a full export reuse that file, so a service update can rebuild the same data
-      without pulling it again; use --repull to pull a new one. Recent exports (recent, online) can
-      only be pulled once an hour: use --reuse to import the last pull again, or --repull to pull a
-      new one anyway.
+      without pulling it again (warning when that pull is over a day old); use --repull to pull a new
+      one. Recent exports (recent, online) can only be pulled once an hour: use --reuse to import
+      the last pull again, or --repull to pull a new one anyway.
 
       --bulk requires the slib.abusech.bulk permission and permission to add any node (node) in the
       layer. Unlike the normal import, it doesn't remove old status tags, and it replaces (instead
-      of adding to) file:bytes:ssdeeps and risk:tool:software:soft:names on existing nodes.
+      of adding to) file:bytes:ssdeeps and risk:tool:software:soft:names on existing nodes. Guid
+      nodes made from props get the guid Storm would generate, but matching nodes made some other
+      way aren't reused.
 
       Examples:
 
@@ -573,13 +572,15 @@ commands:
 
       Each pull is recorded in the slib:abusech:datasets global (its SHA256, size, and time). Later
       bulk imports of a full export reuse that file, so a service update can rebuild the same data
-      without pulling it again; use --repull to pull a new one. Recent exports (recent, online) can
-      only be pulled once an hour: use --reuse to import the last pull again, or --repull to pull a
-      new one anyway.
+      without pulling it again (warning when that pull is over a day old); use --repull to pull a new
+      one. Recent exports (recent, online) can only be pulled once an hour: use --reuse to import
+      the last pull again, or --repull to pull a new one anyway.
 
       --bulk requires the slib.abusech.bulk permission and permission to add any node (node) in the
       layer. Unlike the normal import, it doesn't remove old status tags, and it replaces (instead
-      of adding to) file:bytes:ssdeeps and risk:tool:software:soft:names on existing nodes.
+      of adding to) file:bytes:ssdeeps and risk:tool:software:soft:names on existing nodes. Guid
+      nodes made from props get the guid Storm would generate, but matching nodes made some other
+      way aren't reused.
 
       Examples:
 
@@ -840,13 +841,15 @@ commands:
 
       Each pull is recorded in the slib:abusech:datasets global (its SHA256, size, and time). Later
       bulk imports of a full export reuse that file, so a service update can rebuild the same data
-      without pulling it again; use --repull to pull a new one. Recent exports (recent, online) can
-      only be pulled once an hour: use --reuse to import the last pull again, or --repull to pull a
-      new one anyway.
+      without pulling it again (warning when that pull is over a day old); use --repull to pull a new
+      one. Recent exports (recent, online) can only be pulled once an hour: use --reuse to import
+      the last pull again, or --repull to pull a new one anyway.
 
       --bulk requires the slib.abusech.bulk permission and permission to add any node (node) in the
       layer. Unlike the normal import, it doesn't remove old status tags, and it replaces (instead
-      of adding to) file:bytes:ssdeeps and risk:tool:software:soft:names on existing nodes.
+      of adding to) file:bytes:ssdeeps and risk:tool:software:soft:names on existing nodes. Guid
+      nodes made from props get the guid Storm would generate, but matching nodes made some other
+      way aren't reused.
 
       Examples:
 

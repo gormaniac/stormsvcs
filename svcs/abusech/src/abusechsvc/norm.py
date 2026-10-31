@@ -975,13 +975,14 @@ def normUrl(data: dict) -> dict | None:
 
     status = lower(data.get("url_status"))
     host = data.get("host") or None
+    added, last_online = timePair(ts(data.get("date_added") or data.get("dateadded")), ts(data.get("last_online")))
     return {
         "id": str(data.get("id") or data.get("url_id") or "") or None,
         "url": data["url"].strip(),
         "status": status,
         "host": normHost(host) if host else None,
-        "added": timePair(ts(data.get("date_added") or data.get("dateadded")), ts(data.get("last_online")))[0],
-        "last_online": timePair(ts(data.get("date_added") or data.get("dateadded")), ts(data.get("last_online")))[1],
+        "added": added,
+        "last_online": last_online,
         "threat": normTag(data.get("threat")),
         "tags": normTags(data.get("tags")),
         "reporter": data.get("reporter") if data.get("reporter") not in (None, "anonymous") else None,
@@ -1181,6 +1182,7 @@ def normC2(ip: str | None, port: Any, *, family: str | None = None, status: str 
     host = normHost(ip)
     if host is None or host["form"] not in ("inet:ipv4", "inet:ipv6"):
         return None
+    first_seen, last_online = timePair(ts(first_seen), ts(last_online))
     return {
         "ip": host["valu"],
         "ipform": host["form"],
@@ -1188,8 +1190,8 @@ def normC2(ip: str | None, port: Any, *, family: str | None = None, status: str 
         "family": family.strip() if family and family.strip().lower() not in ("none", "unknown") else None,
         "family_tag": normTag(family) if family and family.strip().lower() not in ("none", "unknown") else None,
         "status": lower(status),
-        "first_seen": ts(first_seen),
-        "last_online": ts(last_online),
+        "first_seen": first_seen,
+        "last_online": last_online,
         "hostname": lower(hostname),
         "asn": toInt(asn),
         "as_name": as_name,
