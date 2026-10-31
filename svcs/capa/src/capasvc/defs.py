@@ -1,6 +1,5 @@
 """The Python definition of the slib.capa Storm package."""
 
-
 from stormlibpp import StormPkg
 
 from . import __version__
@@ -22,7 +21,7 @@ SVC_EVTS = {
     "add": {
         "storm": (
             f'[(meta:source={SVC_GUID} :name="capa" :type=slib.capa '
-            ':url=https://github.com/mandiant/capa)]'
+            ":url=https://github.com/mandiant/capa)]"
         )
     }
 }

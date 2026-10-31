@@ -34,7 +34,6 @@ def liveConf() -> dict:
 
 
 class TestLiveRules(s_tests.SynTest):
-
     def test_load(self):
         rules = CapaRules(LIVE_RULES, RULES_VERSION, RULES_URL)
         info = rules.info()

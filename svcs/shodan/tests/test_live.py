@@ -24,7 +24,9 @@ LIVE = os.environ.get("SLIB_SHODAN_LIVE") == "1"
 APIKEY = os.environ.get("SHODAN_API_KEY")
 
 pytestmark = pytest.mark.skipif(not LIVE, reason="Set SLIB_SHODAN_LIVE=1 to run live Shodan tests.")
-needkey = pytest.mark.skipif(not APIKEY, reason="Set SHODAN_API_KEY to run live tests of keyed APIs.")
+needkey = pytest.mark.skipif(
+    not APIKEY, reason="Set SHODAN_API_KEY to run live tests of keyed APIs."
+)
 
 
 @contextlib.asynccontextmanager
@@ -35,7 +37,6 @@ async def liveSvc(test, apikey=None):
 
 
 class TestLiveKeyless(s_tests.SynTest):
-
     async def test_internetdb(self):
         async with liveSvc(self) as (core, svc):
             data = await svc.normInternetDb("8.8.8.8")
@@ -50,7 +51,9 @@ class TestLiveKeyless(s_tests.SynTest):
 
             # IPs InternetDB hasn't seen are a 404, reported as a warning.
             msgs = await core.stormlist("slib.shodan.host --ip 192.0.2.1 --internetdb")
-            self.stormIsInWarn("InternetDB lookup of 192.0.2.1 failed: No information available", msgs)
+            self.stormIsInWarn(
+                "InternetDB lookup of 192.0.2.1 failed: No information available", msgs
+            )
 
     async def test_cvedb_cve(self):
         async with liveSvc(self) as (core, svc):
@@ -67,7 +70,9 @@ class TestLiveKeyless(s_tests.SynTest):
 
     async def test_cvedb_advisories(self):
         async with liveSvc(self) as (core, svc):
-            msgs = await core.stormlist("slib.shodan.cve --cve GHSA-jfh8-c2jp-5v3q --cve EUVD-2021-1252 --yield")
+            msgs = await core.stormlist(
+                "slib.shodan.cve --cve GHSA-jfh8-c2jp-5v3q --cve EUVD-2021-1252 --yield"
+            )
             self.stormHasNoErr(msgs)
 
             vuln = (await core.nodes("risk:vuln:cve=cve-2021-44228"))[0]
@@ -84,7 +89,9 @@ class TestLiveKeyless(s_tests.SynTest):
             self.stormHasNoErr(msgs)
             self.stormIsInPrint("matching CVEs", msgs)
 
-            msgs = await core.stormlist("slib.shodan.cve --product log4j --kev --epss --limit 3 --yield")
+            msgs = await core.stormlist(
+                "slib.shodan.cve --product log4j --kev --epss --limit 3 --yield"
+            )
             self.stormHasNoErr(msgs)
             nodes = [m for m in msgs if m[0] == "node"]
             assert 0 < len(nodes) <= 3
@@ -94,14 +101,15 @@ class TestLiveKeyless(s_tests.SynTest):
             self.stormHasNoErr(msgs)
             assert len([m for m in msgs if m[0] == "node"]) == 3
 
-            msgs = await core.stormlist("[ it:sec:cpe='cpe:2.3:a:apache:log4j:2.14.1:*:*:*:*:*:*:*' ] | slib.shodan.enrich --yield")
+            msgs = await core.stormlist(
+                "[ it:sec:cpe='cpe:2.3:a:apache:log4j:2.14.1:*:*:*:*:*:*:*' ] | slib.shodan.enrich --yield"
+            )
             self.stormHasNoErr(msgs)
             assert len(await core.nodes("risk:vuln:cve=cve-2021-44228")) == 1
 
 
 @needkey
 class TestLiveKeyed(s_tests.SynTest):
-
     async def test_host(self):
         async with liveSvc(self, apikey=APIKEY) as (core, svc):
             msgs = await core.stormlist("slib.shodan.host --ip 8.8.8.8 --yield")
@@ -112,12 +120,18 @@ class TestLiveKeyed(s_tests.SynTest):
     async def test_free_endpoints(self):
         # These don't use query or scan credits.
         async with liveSvc(self, apikey=APIKEY) as (core, svc):
-            for query in ("slib.shodan.info", "slib.shodan.ref ports", "slib.shodan.ref filters",
-                          "slib.shodan.ref triggers", "slib.shodan.ref providers",
-                          'slib.shodan.search "port:22" --count --facets country:3',
-                          'slib.shodan.search "apache port:8080" --tokens',
-                          "slib.shodan.alert.list", "slib.shodan.notifier.list",
-                          "slib.shodan.scan.status"):
+            for query in (
+                "slib.shodan.info",
+                "slib.shodan.ref ports",
+                "slib.shodan.ref filters",
+                "slib.shodan.ref triggers",
+                "slib.shodan.ref providers",
+                'slib.shodan.search "port:22" --count --facets country:3',
+                'slib.shodan.search "apache port:8080" --tokens',
+                "slib.shodan.alert.list",
+                "slib.shodan.notifier.list",
+                "slib.shodan.scan.status",
+            ):
                 msgs = await core.stormlist(query)
                 self.stormHasNoErr(msgs)
                 assert not [m for m in msgs if m[0] == "warn"], (query, msgs)

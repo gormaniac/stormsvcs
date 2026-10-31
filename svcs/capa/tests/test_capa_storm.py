@@ -30,7 +30,6 @@ def leafTags(node) -> set[str]:
 
 
 class TestCapaStormPkg(s_tests.SynTest):
-
     def test_versions_match(self):
         pyproject = pathlib.Path(__file__).parent.parent / "pyproject.toml"
         with pyproject.open("rb") as fd:
@@ -70,7 +69,6 @@ class TestCapaStormPkg(s_tests.SynTest):
 
 
 class TestCapaStormSync(s_tests.SynTest):
-
     async def test_onload_import(self):
         async with capaSvc(self) as (core, svc, axon):
             rules = await core.nodes("meta:rule")
@@ -116,8 +114,12 @@ class TestCapaStormSync(s_tests.SynTest):
             # Every namespace (and the namespaces above them) is a documented tag.
             tags = {n.ndef[1]: n for n in await core.nodes("syn:tag^=rep.capa")}
             assert set(tags) == {
-                "rep.capa", "rep.capa.testing", "rep.capa.testing.never",
-                "rep.capa.testing.ops", "rep.capa.testing.ops.ret", "rep.capa.testing.ops.xor",
+                "rep.capa",
+                "rep.capa.testing",
+                "rep.capa.testing.never",
+                "rep.capa.testing.ops",
+                "rep.capa.testing.ops.ret",
+                "rep.capa.testing.ops.xor",
                 "rep.capa.testing.slib_capa",
             }
             assert tags["rep.capa"].get("title") == "capa"
@@ -187,8 +189,11 @@ class TestCapaStormSync(s_tests.SynTest):
             assert len(await core.nodes("meta:rule")) == 0
 
             msgs = await core.stormlist("slib.capa.admin.sync")
-            self.stormIsInWarn("Getting the capa rules info failed: The slib.capa service has no "
-                               "capa:rules directory configured.", msgs)
+            self.stormIsInWarn(
+                "Getting the capa rules info failed: The slib.capa service has no "
+                "capa:rules directory configured.",
+                msgs,
+            )
             assert len(await core.nodes("slib.capa.admin.sync")) == 0
 
             msgs = await core.stormlist("slib.capa.admin.sync --reload")
@@ -211,7 +216,6 @@ class TestCapaStormSync(s_tests.SynTest):
 
 
 class TestCapaStormScan(s_tests.SynTest):
-
     async def test_scan(self):
         async with capaSvc(self) as (core, svc, axon):
             await putSample(core, axon)
@@ -231,14 +235,19 @@ class TestCapaStormScan(s_tests.SynTest):
             data = await file.getData("slib:capa")
             assert data["capa"] == "10.0.0"
             assert data["rules"] == {
-                "version": RULES_VERSION, "sha256": svc.capaRules.sha256, "custom": None,
+                "version": RULES_VERSION,
+                "sha256": svc.capaRules.sha256,
+                "custom": None,
             }
             assert (data["format"], data["arch"], data["flavor"]) == ("sc64", "amd64", "static")
             assert [m["rule"] for m in data["matches"]] == MATCHED
             xor = [m for m in data["matches"] if m["rule"] == "contain xor"][0]
             assert xor == {
-                "rule": "contain xor", "guid": ruleGuid("contain xor"),
-                "namespace": "testing/ops/xor", "count": 1, "addrs": ("0x690000",),
+                "rule": "contain xor",
+                "guid": ruleGuid("contain xor"),
+                "namespace": "testing/ops/xor",
+                "count": 1,
+                "addrs": ("0x690000",),
             }
 
             # Scanning again is skipped.
@@ -353,7 +362,8 @@ class TestCapaStormScan(s_tests.SynTest):
             await core.nodes(SCAN)
             capatags = {t.replace("rep.capa", "rep") for t in TAGS}
             assert leafTags((await core.nodes(FILE))[0]) == capatags | {
-                "rep.vt.malicious", "rep.testing.mine",
+                "rep.vt.malicious",
+                "rep.testing.mine",
             }
 
             # The next scan matches fewer rules: their tags, and the parents left empty, go.
@@ -379,8 +389,13 @@ class TestCapaStormScan(s_tests.SynTest):
             svc._runCapa = nothing
             await core.nodes(SCAN + " --force")
             file = (await core.nodes(FILE))[0]
-            assert set(file.tags) == {"rep", "rep.vt", "rep.vt.malicious", "rep.testing",
-                                      "rep.testing.mine"}
+            assert set(file.tags) == {
+                "rep",
+                "rep.vt",
+                "rep.vt.malicious",
+                "rep.testing",
+                "rep.testing.mine",
+            }
 
             # With only capa tags, the prefix and its parents are removed too.
             await core.nodes(f"{FILE} [ -#rep ]")
@@ -405,8 +420,10 @@ class TestCapaStormScan(s_tests.SynTest):
 
             # Not in the Axon.
             msgs = await core.stormlist(f"[ file:bytes=sha256:{SAMPLE_SHA256} ] | slib.capa.scan")
-            self.stormIsInWarn(f"Scanning {SAMPLE_SHA256} failed: The file {SAMPLE_SHA256} is not "
-                               "in the Axon.", msgs)
+            self.stormIsInWarn(
+                f"Scanning {SAMPLE_SHA256} failed: The file {SAMPLE_SHA256} is not in the Axon.",
+                msgs,
+            )
             assert [m[0] for m in msgs].count("node") == 1
 
             # Not a format capa supports.
@@ -420,14 +437,18 @@ class TestCapaStormScan(s_tests.SynTest):
         async with capaSvc(self, conf={"capa:rules": None}) as (core, svc, axon):
             await putSample(core, axon)
             sha256 = await putSample(core, axon, b"another file")
-            msgs = await core.stormlist(f"file:bytes:sha256*in=({SAMPLE_SHA256}, {sha256}) "
-                                        "| slib.capa.scan --format sc64")
+            msgs = await core.stormlist(
+                f"file:bytes:sha256*in=({SAMPLE_SHA256}, {sha256}) | slib.capa.scan --format sc64"
+            )
             warns = [m[1]["mesg"] for m in msgs if m[0] == "warn"]
             # One warning for the rules info, and one per file for the scan.
             assert len([w for w in warns if "Getting the capa rules info failed" in w]) == 1
             assert len([w for w in warns if "no capa:rules directory configured" in w]) == 3
-            self.stormIsInWarn(f"Scanning {SAMPLE_SHA256} failed: The slib.capa service has no "
-                               "capa:rules directory configured.", msgs)
+            self.stormIsInWarn(
+                f"Scanning {SAMPLE_SHA256} failed: The slib.capa service has no "
+                "capa:rules directory configured.",
+                msgs,
+            )
 
             query = f"{FILE} $lib.print($lib.import(slib.capa.lib).scanned($node))"
             msgs = await core.stormlist(query)
@@ -464,7 +485,6 @@ class TestCapaStormScan(s_tests.SynTest):
 
 
 class TestCapaStormCustom(s_tests.SynTest):
-
     async def addCustom(self, core, text, type="capa.custom"):
         """Make a custom rule meta:rule, returns its guid."""
 
@@ -489,8 +509,13 @@ class TestCapaStormCustom(s_tests.SynTest):
             assert guid in names and len(names) == 5
             data = await file.getData("slib:capa")
             assert data["rules"]["custom"]
-            assert {"rule": "custom marker rule", "guid": guid, "namespace": "custom/marker",
-                    "count": 1, "addrs": ()} in data["matches"]
+            assert {
+                "rule": "custom marker rule",
+                "guid": guid,
+                "namespace": "custom/marker",
+                "count": 1,
+                "addrs": (),
+            } in data["matches"]
 
             # The custom rule node is the user's, scans and syncs don't edit it.
             node = (await core.nodes(f"meta:rule={guid}"))[0]
@@ -538,10 +563,14 @@ class TestCapaStormCustom(s_tests.SynTest):
             await core.nodes("[ meta:rule=* :type=yara :text=newp ]")
 
             msgs = await core.stormlist(SCAN)
-            self.stormIsInWarn(f"Skipping the custom capa rule meta:rule={shadowed}, an official "
-                               "capa rule has the same name: contain xor", msgs)
-            self.stormIsInWarn(f"Skipping the custom capa rule meta:rule={invalid}: Invalid capa "
-                               "rule", msgs)
+            self.stormIsInWarn(
+                f"Skipping the custom capa rule meta:rule={shadowed}, an official "
+                "capa rule has the same name: contain xor",
+                msgs,
+            )
+            self.stormIsInWarn(
+                f"Skipping the custom capa rule meta:rule={invalid}: Invalid capa rule", msgs
+            )
             assert len([m for m in msgs if m[0] == "warn"]) == 2
             # The scan still works, with only the official rules.
             file = (await core.nodes(FILE))[0]

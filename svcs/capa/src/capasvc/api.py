@@ -1,6 +1,5 @@
 """The CellApi implementation for slib.capa."""
 
-
 from collections.abc import AsyncIterator, Awaitable
 
 from stormlibpp.telepath import TelepathRetn

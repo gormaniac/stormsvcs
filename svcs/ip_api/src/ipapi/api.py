@@ -1,6 +1,5 @@
 """The CellApi implementation for ipapi."""
 
-
 from stormlibpp.telepath import BoolRetn
 from stormlibpp.utils import normver
 import synapse.lib.cell as s_cell

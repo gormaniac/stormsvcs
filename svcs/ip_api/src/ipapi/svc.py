@@ -1,6 +1,5 @@
 """The slib.ipapi service."""
 
-
 import asyncio
 from collections.abc import Mapping
 from typing import NamedTuple, TypedDict
@@ -24,29 +23,29 @@ DEFAULT_RL_TTL = 60.0
 class IpData(TypedDict):
     """The results of a single ip-api.com query, either successful or unsuccessful."""
 
-    query: str          # "24.48.0.1"
-    status: str         # "success"
-    country: str        # "Canada"
-    countryCode: str    # "CA"
-    region: str         # "QC"
-    regionName: str     # "Quebec"
-    city: str           # "Montreal"
-    zip: str            # "H1K"
-    lat: float          # 45.6085
-    lon: float          # -73.5493
-    timezone: str       # "America/Toronto"
-    isp: str            # "Le Groupe Videotron Ltee"
-    org: str            # "Videotron Ltee"
-    as_: str            # "AS5769 Videotron Ltee" - this is really "as" in the data
-    asname: str         # "VIDEOTRON"
-    mobile: bool        # false
-    proxy: bool         # false
-    hosting: bool       # false
+    query: str  # "24.48.0.1"
+    status: str  # "success"
+    country: str  # "Canada"
+    countryCode: str  # "CA"
+    region: str  # "QC"
+    regionName: str  # "Quebec"
+    city: str  # "Montreal"
+    zip: str  # "H1K"
+    lat: float  # 45.6085
+    lon: float  # -73.5493
+    timezone: str  # "America/Toronto"
+    isp: str  # "Le Groupe Videotron Ltee"
+    org: str  # "Videotron Ltee"
+    as_: str  # "AS5769 Videotron Ltee" - this is really "as" in the data
+    asname: str  # "VIDEOTRON"
+    mobile: bool  # false
+    proxy: bool  # false
+    hosting: bool  # false
 
 
 class IpRetn(TelepathRetn):
     """A TelepathRetn that describes the result of an ip-api.com query."""
-    
+
     data: IpData | None
 
 
@@ -114,7 +113,7 @@ class IpApiSvc(s_cell.Cell):
 
                 data = await resp.json()
 
-                return IpData(as_=data.pop('as'), **data), resp.headers
+                return IpData(as_=data.pop("as"), **data), resp.headers
 
     async def _sleepTtl(self, ttl_raw: str | None):
         """Sleep for the duration given by an X-Ttl header value, falling back

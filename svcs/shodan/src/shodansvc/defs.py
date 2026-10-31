@@ -1,6 +1,5 @@
 """The Python definition of the slib.shodan Storm package."""
 
-
 from stormlibpp import StormPkg
 
 from . import __version__
@@ -17,10 +16,10 @@ SVC_EVTS = {
             f'[(meta:source={SVC_GUID} :name="shodan" :type=slib.shodan :url=https://www.shodan.io)] | spin | '
             'if ($lib.globals.get("slib:shodan:tag:enabled") = $lib.null) { '
             '    $lib.globals.set("slib:shodan:tag:enabled", (true)) '
-            '} '
+            "} "
             'if ($lib.globals.get("slib:shodan:tag:prefix") = $lib.null) { '
             '    $lib.globals.set("slib:shodan:tag:prefix", "rep.shodan") '
-            '}'
+            "}"
         )
     }
 }

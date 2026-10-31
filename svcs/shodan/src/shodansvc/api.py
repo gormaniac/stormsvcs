@@ -1,6 +1,5 @@
 """The CellApi implementation for slib.shodan."""
 
-
 from collections.abc import AsyncIterator, Awaitable
 
 from stormlibpp.telepath import BoolRetn, TelepathRetn
@@ -17,31 +16,76 @@ from .defs import SVC_EVTS, PKGDEFS, SVC_NAME, SVC_VER
 RETN_METHS = (
     "rawRequest",
     # Search
-    "host", "normHost", "count", "search", "searchFacets", "searchFilters", "searchTokens",
+    "host",
+    "normHost",
+    "count",
+    "search",
+    "searchFacets",
+    "searchFilters",
+    "searchTokens",
     # On-demand scanning
-    "ports", "protocols", "services", "scan", "scanInternet", "scans", "scanStatus",
+    "ports",
+    "protocols",
+    "services",
+    "scan",
+    "scanInternet",
+    "scans",
+    "scanStatus",
     # Network alerts
-    "alertCreate", "alertEdit", "alertInfo", "alertDelete", "alertTriggers",
-    "alertTriggerEnable", "alertTriggerDisable", "alertTriggerIgnore", "alertTriggerUnignore",
-    "alertNotifierAdd", "alertNotifierDel",
+    "alertCreate",
+    "alertEdit",
+    "alertInfo",
+    "alertDelete",
+    "alertTriggers",
+    "alertTriggerEnable",
+    "alertTriggerDisable",
+    "alertTriggerIgnore",
+    "alertTriggerUnignore",
+    "alertNotifierAdd",
+    "alertNotifierDel",
     # Notifiers
-    "notifiers", "notifierProviders", "notifierCreate", "notifierGet", "notifierEdit", "notifierDelete",
+    "notifiers",
+    "notifierProviders",
+    "notifierCreate",
+    "notifierGet",
+    "notifierEdit",
+    "notifierDelete",
     # Directory
-    "queries", "queriesSearch", "queriesTags",
+    "queries",
+    "queriesSearch",
+    "queriesTags",
     # Bulk data
-    "datasets", "datasetFiles",
+    "datasets",
+    "datasetFiles",
     # Organization
-    "org", "orgMemberAdd", "orgMemberDel",
+    "org",
+    "orgMemberAdd",
+    "orgMemberDel",
     # Account, API status, and utility
-    "profile", "apiInfo", "myip", "httpHeaders",
+    "profile",
+    "apiInfo",
+    "myip",
+    "httpHeaders",
     # DNS
-    "dnsDomain", "dnsDomainAll", "dnsResolve", "dnsReverse",
+    "dnsDomain",
+    "dnsDomainAll",
+    "dnsResolve",
+    "dnsReverse",
     # Trends
-    "trendsSearch", "trendsFacets", "trendsFilters",
+    "trendsSearch",
+    "trendsFacets",
+    "trendsFilters",
     # InternetDB
-    "internetdb", "normInternetDb",
+    "internetdb",
+    "normInternetDb",
     # CVEDB
-    "cve", "normCve", "ghsa", "euvd", "normVuln", "cves", "cpes",
+    "cve",
+    "normCve",
+    "ghsa",
+    "euvd",
+    "normVuln",
+    "cves",
+    "cpes",
 )
 
 
@@ -101,21 +145,39 @@ class ShodanCellApi(s_cell.CellApi, s_stormsvc.StormSvc):
 
         return BoolRetn(status=True, mesg="", data=await self.cell.hasApiKey())
 
-    async def searchGenr(self, query: str, limit: int = 100, minify: bool = True,
-                         page: int = 1, apikey=None) -> AsyncIterator[TelepathRetn]:
+    async def searchGenr(
+        self, query: str, limit: int = 100, minify: bool = True, page: int = 1, apikey=None
+    ) -> AsyncIterator[TelepathRetn]:
         """Yield normalized banners from a paged Shodan search."""
 
-        async for item in _retnGenr(self.cell.searchGenr(query, limit=limit, minify=minify,
-                                                          page=page, apikey=apikey)):
+        async for item in _retnGenr(
+            self.cell.searchGenr(query, limit=limit, minify=minify, page=page, apikey=apikey)
+        ):
             yield item
 
-    async def stream(self, kind: str = "banners", values=None, query: str | None = None,
-                     aid: str | None = None, limit: int = 100, timeout: float = 60,
-                     apikey=None) -> AsyncIterator[TelepathRetn]:
+    async def stream(
+        self,
+        kind: str = "banners",
+        values=None,
+        query: str | None = None,
+        aid: str | None = None,
+        limit: int = 100,
+        timeout: float = 60,
+        apikey=None,
+    ) -> AsyncIterator[TelepathRetn]:
         """Yield normalized banners from the Shodan Streaming API."""
 
-        async for item in _retnGenr(self.cell.stream(kind=kind, values=values, query=query, aid=aid,
-                                                      limit=limit, timeout=timeout, apikey=apikey)):
+        async for item in _retnGenr(
+            self.cell.stream(
+                kind=kind,
+                values=values,
+                query=query,
+                aid=aid,
+                limit=limit,
+                timeout=timeout,
+                apikey=apikey,
+            )
+        ):
             yield item
 
 

@@ -9,7 +9,6 @@ The dicts returned here only hold Telepath (msgpack) safe values: str, int,
 bool, None, lists, and dicts. Bytes are hex encoded and times are epoch millis.
 """
 
-
 import base64
 import binascii
 import datetime
@@ -178,8 +177,9 @@ def normPublicKey(cert: x509.Certificate) -> dict:
         # A key type cryptography doesn't support, only the certificate's hashes are known.
         return retn
 
-    spki = key.public_bytes(serialization.Encoding.DER,
-                            serialization.PublicFormat.SubjectPublicKeyInfo)
+    spki = key.public_bytes(
+        serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
+    )
 
     if isinstance(key, rsa.RSAPublicKey):
         nums = key.public_numbers()
@@ -264,11 +264,14 @@ def normExtensions(cert: x509.Certificate) -> dict:
         elif ext.oid == ExtensionOID.CERTIFICATE_POLICIES:
             retn["policies"] = [p.policy_identifier.dotted_string for p in valu]
         elif ext.oid == ExtensionOID.PRECERT_SIGNED_CERTIFICATE_TIMESTAMPS:
-            retn["scts"] = [{
-                "logid": hexBytes(sct.log_id),
-                "time": toMillis(sct.timestamp),
-                "version": sct.version.name,
-            } for sct in valu]
+            retn["scts"] = [
+                {
+                    "logid": hexBytes(sct.log_id),
+                    "time": toMillis(sct.timestamp),
+                    "version": sct.version.name,
+                }
+                for sct in valu
+            ]
         elif ext.oid == ExtensionOID.TLS_FEATURE:
             retn["mustStaple"] = any(f.value == 5 for f in valu)
 
@@ -276,8 +279,15 @@ def normExtensions(cert: x509.Certificate) -> dict:
 
 
 def _keyUsage(valu: x509.KeyUsage) -> list[str]:
-    names = ("digital_signature", "content_commitment", "key_encipherment", "data_encipherment",
-             "key_agreement", "key_cert_sign", "crl_sign")
+    names = (
+        "digital_signature",
+        "content_commitment",
+        "key_encipherment",
+        "data_encipherment",
+        "key_agreement",
+        "key_cert_sign",
+        "crl_sign",
+    )
     usage = [name for name in names if getattr(valu, name)]
     if valu.key_agreement:
         if valu.encipher_only:
@@ -368,7 +378,9 @@ def parseCert(der: bytes) -> dict:
     exts = normExtensions(cert)
     pubkey = normPublicKey(cert)
 
-    selfsigned = subject["dn"] == issuer["dn"] and (exts["aki"] is None or exts["aki"] == exts["ski"])
+    selfsigned = subject["dn"] == issuer["dn"] and (
+        exts["aki"] is None or exts["aki"] == exts["ski"]
+    )
 
     return {
         "sha256": hashlib.sha256(der).hexdigest(),
@@ -408,8 +420,8 @@ def certDetails(row: dict) -> dict:
             "sha1": hashlib.sha1(der).hexdigest(),
             "md5": hashlib.md5(der).hexdigest(),
             "pem": "-----BEGIN CERTIFICATE-----\n"
-                   + base64.encodebytes(der).decode()
-                   + "-----END CERTIFICATE-----\n",
+            + base64.encodebytes(der).decode()
+            + "-----END CERTIFICATE-----\n",
             "error": f"Unable to parse certificate: {err}",
         }
 
@@ -505,4 +517,3 @@ def fieldValues(details: dict, field: str) -> list[str]:
         vals = [v for _, v in sans] + [v for vs in attrs.values() for v in vs]
         return vals + [subject["dn"]]
     raise ValueError(f"Unknown search field: {field}")
-

@@ -46,7 +46,6 @@ class TestIpApiSvcQueue(s_tests.SynTest):
     async def test_fifo_order(self):
         with self.getTestDir() as dirn:
             async with await IpApiSvc.anit(dirn) as svc:
-
                 seen = []
 
                 async def fake_query(ipaddr):
@@ -72,7 +71,6 @@ class TestIpApiSvcQueue(s_tests.SynTest):
     async def test_preemptive_throttle_on_zero_remaining(self):
         with self.getTestDir() as dirn:
             async with await IpApiSvc.anit(dirn) as svc:
-
                 call_times = []
 
                 async def fake_query(ipaddr):
@@ -97,7 +95,6 @@ class TestIpApiSvcQueue(s_tests.SynTest):
     async def test_429_retry(self):
         with self.getTestDir() as dirn:
             async with await IpApiSvc.anit(dirn) as svc:
-
                 calls = []
 
                 async def fake_query(ipaddr):
@@ -115,7 +112,6 @@ class TestIpApiSvcQueue(s_tests.SynTest):
     async def test_multiple_429_retries(self):
         with self.getTestDir() as dirn:
             async with await IpApiSvc.anit(dirn) as svc:
-
                 calls = []
 
                 async def fake_query(ipaddr):
@@ -133,7 +129,6 @@ class TestIpApiSvcQueue(s_tests.SynTest):
     async def test_checkratelimit_ignores_non_numeric_header(self):
         with self.getTestDir() as dirn:
             async with await IpApiSvc.anit(dirn) as svc:
-
                 slept = []
                 with mock.patch.object(svc, "_sleepTtl", mock.AsyncMock(side_effect=slept.append)):
                     await svc._checkRateLimit({"X-Rl": "not-a-number", "X-Ttl": "5"})

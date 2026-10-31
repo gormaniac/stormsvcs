@@ -24,9 +24,15 @@ def selfSigned(key, signer=None, names=None, sans=None, exts=(), algo=hashes.SHA
 
     signer = signer or key
     subject = x509.Name(names or [x509.NameAttribute(NameOID.COMMON_NAME, "test")])
-    builder = (x509.CertificateBuilder().subject_name(subject).issuer_name(subject)
-               .public_key(key.public_key()).serial_number(1)
-               .not_valid_before(NOW - DAY).not_valid_after(NOW + DAY))
+    builder = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(subject)
+        .public_key(key.public_key())
+        .serial_number(1)
+        .not_valid_before(NOW - DAY)
+        .not_valid_after(NOW + DAY)
+    )
     if sans:
         builder = builder.add_extension(x509.SubjectAlternativeName(sans), critical=False)
     for ext in exts:
@@ -42,14 +48,20 @@ def test_leaf():
     assert leaf["serial"] == "5a0b1c2d3e4f"
     assert leaf["subject"]["dn"] == "CN=www.vertex.link,OU=Engineering,O=The Vertex Project,C=US"
     assert leaf["subject"]["attrs"] == {
-        "c": ["US"], "o": ["The Vertex Project"], "ou": ["Engineering"], "cn": ["www.vertex.link"],
+        "c": ["US"],
+        "o": ["The Vertex Project"],
+        "ou": ["Engineering"],
+        "cn": ["www.vertex.link"],
     }
     assert len(leaf["subject"]["sha1"]) == 40
     assert leaf["issuer"]["attrs"]["cn"] == ["Test Issuing CA 1"]
     assert leaf["notbefore"] == int((NOW - 10 * DAY).timestamp() * 1000)
     assert leaf["notafter"] == int((NOW + 80 * DAY).timestamp() * 1000)
-    assert leaf["sigalgo"] == {"oid": "1.2.840.10045.4.3.2", "name": "ecdsa-with-SHA256",
-                               "hash": "sha256"}
+    assert leaf["sigalgo"] == {
+        "oid": "1.2.840.10045.4.3.2",
+        "name": "ecdsa-with-SHA256",
+        "hash": "sha256",
+    }
     assert leaf["signature"]
     assert leaf["pubkey"]["algo"] == "ec"
     assert leaf["pubkey"]["curve"] == "secp256r1"
@@ -58,7 +70,12 @@ def test_leaf():
     assert leaf["selfsigned"] is False
     assert leaf["precert"] is False
     assert leaf["ca"] is False and leaf["pathlen"] is None
-    assert leaf["keyusage"] == ["digital_signature", "key_agreement", "encipher_only", "decipher_only"]
+    assert leaf["keyusage"] == [
+        "digital_signature",
+        "key_agreement",
+        "encipher_only",
+        "decipher_only",
+    ]
     assert [e["name"] for e in leaf["extkeyusage"]] == ["serverAuth", "clientAuth"]
     assert leaf["ski"] and leaf["aki"] and leaf["ski"] != leaf["aki"]
     assert leaf["crls"] == [CRL_URL]
@@ -67,7 +84,11 @@ def test_leaf():
     assert leaf["policies"] == ["2.23.140.1.2.2"]
     assert leaf["mustStaple"] is True
     assert len(leaf["scts"]) == 2
-    assert leaf["scts"][0] == {"logid": "01" * 32, "time": int(NOW.timestamp() * 1000), "version": "v1"}
+    assert leaf["scts"][0] == {
+        "logid": "01" * 32,
+        "time": int(NOW.timestamp() * 1000),
+        "version": "v1",
+    }
     assert ("dns", "*.vertex.link") in leaf["sans"]
     assert ("ip", "2001:db8::1") in leaf["sans"]
     assert leaf["identities"] == {
@@ -80,8 +101,13 @@ def test_leaf():
     assert {e["name"] for e in leaf["extensions"]} >= {"subjectAltName", "basicConstraints"}
     assert leaf["pem"].startswith("-----BEGIN CERTIFICATE-----")
     assert leaf["crtsh"] == {
-        "id": 10, "url": "https://crt.sh/?id=10", "issuer": {"id": 2, "name": None},
-        "ctlog": [], "logged": None, "revoked": None, "caids": [],
+        "id": 10,
+        "url": "https://crt.sh/?id=10",
+        "issuer": {"id": 2, "name": None},
+        "ctlog": [],
+        "logged": None,
+        "revoked": None,
+        "caids": [],
     }
 
 
@@ -118,11 +144,15 @@ def test_keys():
 
     # A key type that can't sign, and isn't otherwise described.
     xkey = x25519.X25519PrivateKey.generate()
-    builder = (x509.CertificateBuilder()
-               .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "x")]))
-               .issuer_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "x")]))
-               .public_key(xkey.public_key()).serial_number(1)
-               .not_valid_before(NOW - DAY).not_valid_after(NOW + DAY))
+    builder = (
+        x509.CertificateBuilder()
+        .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "x")]))
+        .issuer_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "x")]))
+        .public_key(xkey.public_key())
+        .serial_number(1)
+        .not_valid_before(NOW - DAY)
+        .not_valid_after(NOW + DAY)
+    )
     der = builder.sign(signer, hashes.SHA256()).public_bytes(serialization.Encoding.DER)
     pubkey = norm.parseCert(der)["pubkey"]
     assert pubkey["algo"] is None and pubkey["sha256"]
@@ -142,8 +172,9 @@ def test_names_and_sans():
     names = [
         x509.NameAttribute(NameOID.COMMON_NAME, "visi@vertex.link"),
         x509.NameAttribute(NameOID.EMAIL_ADDRESS, "Admin@Vertex.Link"),
-        x509.NameAttribute(NameOID.X500_UNIQUE_IDENTIFIER, b"\x01\x02",
-                           _type=x509.name._ASN1Type.BitString),
+        x509.NameAttribute(
+            NameOID.X500_UNIQUE_IDENTIFIER, b"\x01\x02", _type=x509.name._ASN1Type.BitString
+        ),
         x509.NameAttribute(x509.ObjectIdentifier("1.2.3.4"), "custom"),
     ]
     sans = [
@@ -166,17 +197,30 @@ def test_names_and_sans():
     assert info["ca"] is None
 
     # An IP address common name.
-    info = norm.parseCert(selfSigned(key, names=[x509.NameAttribute(NameOID.COMMON_NAME, "10.0.0.1")],
-                                     sans=[x509.IPAddress(ipaddress.ip_address("10.0.0.2"))]))
+    info = norm.parseCert(
+        selfSigned(
+            key,
+            names=[x509.NameAttribute(NameOID.COMMON_NAME, "10.0.0.1")],
+            sans=[x509.IPAddress(ipaddress.ip_address("10.0.0.2"))],
+        )
+    )
     assert info["identities"]["ipv4s"] == ["10.0.0.1", "10.0.0.2"]
 
 
 def test_identities():
     subject = {"attrs": {"cn": ["*.Example.COM."]}}
-    sans = [("dns", "a.example.com"), ("dns", "*"), ("ip", "not an ip"), ("uri", "ldap://x"),
-            ("dirname", "CN=x")]
+    sans = [
+        ("dns", "a.example.com"),
+        ("dns", "*"),
+        ("ip", "not an ip"),
+        ("uri", "ldap://x"),
+        ("dirname", "CN=x"),
+    ]
     assert norm.identities(sans, subject) == {
-        "fqdns": ["a.example.com", "example.com"], "emails": [], "ipv4s": [], "ipv6s": [],
+        "fqdns": ["a.example.com", "example.com"],
+        "emails": [],
+        "ipv4s": [],
+        "ipv6s": [],
         "urls": ["ldap://x"],
     }
 
@@ -186,12 +230,26 @@ def test_other_extensions():
     dirname = x509.DirectoryName(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "crl")]))
     exts = [
         x509.CRLDistributionPoints([x509.DistributionPoint([dirname], None, None, None)]),
-        x509.AuthorityInformationAccess([x509.AccessDescription(
-            x509.ObjectIdentifier("1.3.6.1.5.5.7.48.5"), x509.UniformResourceIdentifier("http://x"))]),
+        x509.AuthorityInformationAccess(
+            [
+                x509.AccessDescription(
+                    x509.ObjectIdentifier("1.3.6.1.5.5.7.48.5"),
+                    x509.UniformResourceIdentifier("http://x"),
+                )
+            ]
+        ),
         x509.UnrecognizedExtension(x509.ObjectIdentifier("1.2.3.4.5"), b"\x05\x00"),
-        x509.KeyUsage(digital_signature=False, content_commitment=False, key_encipherment=False,
-                      data_encipherment=False, key_agreement=True, key_cert_sign=False,
-                      crl_sign=False, encipher_only=False, decipher_only=False),
+        x509.KeyUsage(
+            digital_signature=False,
+            content_commitment=False,
+            key_encipherment=False,
+            data_encipherment=False,
+            key_agreement=True,
+            key_cert_sign=False,
+            crl_sign=False,
+            encipher_only=False,
+            decipher_only=False,
+        ),
     ]
     info = norm.parseCert(selfSigned(key, exts=exts))
     assert info["crls"] == [] and info["ocsp"] == [] and info["caissuers"] == []
@@ -219,12 +277,12 @@ def test_helpers():
     assert norm.hexBytes(None) is None
     assert norm.hexBytes(b"\x0a\xff") == "0aff"
 
-    assert norm.serialHex(0xabc) == "0abc"
-    assert norm.serialHex(0xabcd) == "abcd"
+    assert norm.serialHex(0xABC) == "0abc"
+    assert norm.serialHex(0xABCD) == "abcd"
     assert norm.serialHex(-1) == "ff"
     assert norm.serialHex(-129) == "ff7f"
 
-    assert norm.serialBytes(0xabc) == b"\x0a\xbc"
+    assert norm.serialBytes(0xABC) == b"\x0a\xbc"
     assert norm.serialBytes("0x0A:BC") == b"\x0a\xbc"
     assert norm.serialBytes("abc") == b"\x0a\xbc"
     assert norm.normHex(" AB:cd ef ") == "abcdef"
@@ -232,7 +290,11 @@ def test_helpers():
     assert norm.certTime({"notbefore": 5}) == -5
     assert norm.certTime({}) == 0
 
-    assert norm.revocation({"code": 1, "time": 0}) == {"time": 0, "reason": "keyCompromise", "code": 1}
+    assert norm.revocation({"code": 1, "time": 0}) == {
+        "time": 0,
+        "reason": "keyCompromise",
+        "code": 1,
+    }
     assert norm.revocation({"code": 99})["reason"] == "99"
     assert norm.revocation({})["reason"] is None
 
@@ -240,9 +302,13 @@ def test_helpers():
     assert norm.ctlogEntry(dict(entry, extra=True)) == entry
 
     # The crt.sh metadata every certificate query returns.
-    row = dict(PKI.row(10), issuer_name="Issuing CA", caids=[3, 2],
-               ctlog='[{"log": "A", "time": 5}, {"log": "B", "time": 2}, {"log": "C", "time": null}]',
-               revoked='{"code": 4, "time": 7}')
+    row = dict(
+        PKI.row(10),
+        issuer_name="Issuing CA",
+        caids=[3, 2],
+        ctlog='[{"log": "A", "time": 5}, {"log": "B", "time": 2}, {"log": "C", "time": null}]',
+        revoked='{"code": 4, "time": 7}',
+    )
     info = norm.certDetails(row)["crtsh"]
     assert info["issuer"] == {"id": 2, "name": "Issuing CA"}
     assert info["caids"] == [2, 3]

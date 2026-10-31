@@ -6,7 +6,6 @@ limited, how errors are reported, how streams are read) so the rest of the
 service can call any endpoint the same way.
 """
 
-
 import asyncio
 import json
 from collections.abc import AsyncIterator, Mapping
@@ -199,7 +198,12 @@ class ShodanClient:
 
             try:
                 async with self.session.request(
-                    method.upper(), url, params=params, json=json_data, data=data, timeout=self.timeout
+                    method.upper(),
+                    url,
+                    params=params,
+                    json=json_data,
+                    data=data,
+                    timeout=self.timeout,
                 ) as resp:
                     text = await resp.text()
                     code = resp.status
@@ -207,7 +211,7 @@ class ShodanClient:
                 raise ShodanApiError(f"Unable to connect to Shodan ({base}): {err}") from err
 
             if code == 429 and attempt < MAX_RETRIES:
-                await asyncio.sleep(2 ** attempt)
+                await asyncio.sleep(2**attempt)
                 continue
             break
 

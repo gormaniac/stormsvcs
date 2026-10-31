@@ -1,6 +1,5 @@
 """The Python definition of the slib.crtsh Storm package."""
 
-
 from stormlibpp import StormPkg
 
 from . import __version__
@@ -17,10 +16,10 @@ SVC_EVTS = {
             f'[(meta:source={SVC_GUID} :name="crt.sh" :type=slib.crtsh :url=https://crt.sh)] | spin | '
             'if ($lib.globals.get("slib:crtsh:tag:enabled") = $lib.null) { '
             '    $lib.globals.set("slib:crtsh:tag:enabled", (true)) '
-            '} '
+            "} "
             'if ($lib.globals.get("slib:crtsh:tag:prefix") = $lib.null) { '
             '    $lib.globals.set("slib:crtsh:tag:prefix", "rep.crtsh") '
-            '}'
+            "}"
         )
     }
 }

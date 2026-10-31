@@ -1,6 +1,5 @@
 """The CellApi implementation for yarastorm."""
 
-
 from stormlibpp.telepath import BoolRetn
 from stormlibpp.utils import normver
 import synapse.lib.cell as s_cell

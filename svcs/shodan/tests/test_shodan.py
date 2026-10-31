@@ -31,18 +31,67 @@ from .fakeshodan import (
 
 # (ShodanSvc method, args, kwargs, HTTP method, path, expected query params)
 ENDPOINTS = (
-    ("host", ("8.8.8.8",), {"history": True}, "GET", "/api/shodan/host/8.8.8.8", {"history": "true", "minify": "false"}),
-    ("count", ("nginx",), {"facets": "port,country:5"}, "GET", "/api/shodan/host/count", {"query": "nginx", "facets": "port,country:5"}),
-    ("search", ("nginx",), {"page": 2, "fields": ["ip_str", "port"]}, "GET", "/api/shodan/host/search", {"query": "nginx", "page": "2", "fields": "ip_str,port"}),
+    (
+        "host",
+        ("8.8.8.8",),
+        {"history": True},
+        "GET",
+        "/api/shodan/host/8.8.8.8",
+        {"history": "true", "minify": "false"},
+    ),
+    (
+        "count",
+        ("nginx",),
+        {"facets": "port,country:5"},
+        "GET",
+        "/api/shodan/host/count",
+        {"query": "nginx", "facets": "port,country:5"},
+    ),
+    (
+        "search",
+        ("nginx",),
+        {"page": 2, "fields": ["ip_str", "port"]},
+        "GET",
+        "/api/shodan/host/search",
+        {"query": "nginx", "page": "2", "fields": "ip_str,port"},
+    ),
     ("searchFacets", (), {}, "GET", "/api/shodan/host/search/facets", {}),
     ("searchFilters", (), {}, "GET", "/api/shodan/host/search/filters", {}),
-    ("searchTokens", ("nginx port:80",), {}, "GET", "/api/shodan/host/search/tokens", {"query": "nginx port:80"}),
+    (
+        "searchTokens",
+        ("nginx port:80",),
+        {},
+        "GET",
+        "/api/shodan/host/search/tokens",
+        {"query": "nginx port:80"},
+    ),
     ("ports", (), {}, "GET", "/api/shodan/ports", {}),
     ("protocols", (), {}, "GET", "/api/shodan/protocols", {}),
     ("services", (), {}, "GET", "/api/shodan/services", {}),
-    ("scan", (["1.2.3.4", "5.6.7.0/24"],), {"force": True}, "POST", "/api/shodan/scan", {"ips": "1.2.3.4,5.6.7.0/24", "force": "true"}),
-    ("scan", ({"1.2.3.4": [[443, "https"]]},), {}, "POST", "/api/shodan/scan", {"ips": '{"1.2.3.4": [[443, "https"]]}'}),
-    ("scanInternet", (8443, "https"), {}, "POST", "/api/shodan/scan/internet", {"port": "8443", "protocol": "https"}),
+    (
+        "scan",
+        (["1.2.3.4", "5.6.7.0/24"],),
+        {"force": True},
+        "POST",
+        "/api/shodan/scan",
+        {"ips": "1.2.3.4,5.6.7.0/24", "force": "true"},
+    ),
+    (
+        "scan",
+        ({"1.2.3.4": [[443, "https"]]},),
+        {},
+        "POST",
+        "/api/shodan/scan",
+        {"ips": '{"1.2.3.4": [[443, "https"]]}'},
+    ),
+    (
+        "scanInternet",
+        (8443, "https"),
+        {},
+        "POST",
+        "/api/shodan/scan/internet",
+        {"port": "8443", "protocol": "https"},
+    ),
     ("scans", (), {"page": 3}, "GET", "/api/shodan/scans", {"page": "3"}),
     ("scanStatus", ("SCAN1",), {}, "GET", "/api/shodan/scan/SCAN1", {}),
     ("alertCreate", ("corp", ["1.2.3.0/24"]), {"expires": 60}, "POST", "/api/shodan/alert", {}),
@@ -51,41 +100,153 @@ ENDPOINTS = (
     ("alertInfo", (), {"aid": "ALERT1"}, "GET", "/api/shodan/alert/ALERT1/info", {}),
     ("alertDelete", ("ALERT1",), {}, "DELETE", "/api/shodan/alert/ALERT1", {}),
     ("alertTriggers", (), {}, "GET", "/api/shodan/alert/triggers", {}),
-    ("alertTriggerEnable", ("ALERT1", "new_service"), {}, "PUT", "/api/shodan/alert/ALERT1/trigger/new_service", {}),
-    ("alertTriggerDisable", ("ALERT1", "new_service"), {}, "DELETE", "/api/shodan/alert/ALERT1/trigger/new_service", {}),
-    ("alertTriggerIgnore", ("ALERT1", "open_database", "1.2.3.4:9200"), {}, "PUT", "/api/shodan/alert/ALERT1/trigger/open_database/ignore/1.2.3.4:9200", {}),
-    ("alertTriggerUnignore", ("ALERT1", "open_database", "1.2.3.4:9200"), {}, "DELETE", "/api/shodan/alert/ALERT1/trigger/open_database/ignore/1.2.3.4:9200", {}),
-    ("alertNotifierAdd", ("ALERT1", "default"), {}, "PUT", "/api/shodan/alert/ALERT1/notifier/default", {}),
-    ("alertNotifierDel", ("ALERT1", "default"), {}, "DELETE", "/api/shodan/alert/ALERT1/notifier/default", {}),
+    (
+        "alertTriggerEnable",
+        ("ALERT1", "new_service"),
+        {},
+        "PUT",
+        "/api/shodan/alert/ALERT1/trigger/new_service",
+        {},
+    ),
+    (
+        "alertTriggerDisable",
+        ("ALERT1", "new_service"),
+        {},
+        "DELETE",
+        "/api/shodan/alert/ALERT1/trigger/new_service",
+        {},
+    ),
+    (
+        "alertTriggerIgnore",
+        ("ALERT1", "open_database", "1.2.3.4:9200"),
+        {},
+        "PUT",
+        "/api/shodan/alert/ALERT1/trigger/open_database/ignore/1.2.3.4:9200",
+        {},
+    ),
+    (
+        "alertTriggerUnignore",
+        ("ALERT1", "open_database", "1.2.3.4:9200"),
+        {},
+        "DELETE",
+        "/api/shodan/alert/ALERT1/trigger/open_database/ignore/1.2.3.4:9200",
+        {},
+    ),
+    (
+        "alertNotifierAdd",
+        ("ALERT1", "default"),
+        {},
+        "PUT",
+        "/api/shodan/alert/ALERT1/notifier/default",
+        {},
+    ),
+    (
+        "alertNotifierDel",
+        ("ALERT1", "default"),
+        {},
+        "DELETE",
+        "/api/shodan/alert/ALERT1/notifier/default",
+        {},
+    ),
     ("notifiers", (), {}, "GET", "/api/notifier", {}),
     ("notifierProviders", (), {}, "GET", "/api/notifier/provider", {}),
-    ("notifierCreate", ("slack", {"webhook_url": "https://x"}), {"desc": "soc"}, "POST", "/api/notifier", {"provider": "slack", "description": "soc", "webhook_url": "https://x"}),
+    (
+        "notifierCreate",
+        ("slack", {"webhook_url": "https://x"}),
+        {"desc": "soc"},
+        "POST",
+        "/api/notifier",
+        {"provider": "slack", "description": "soc", "webhook_url": "https://x"},
+    ),
     ("notifierGet", ("NOTIF1",), {}, "GET", "/api/notifier/NOTIF1", {}),
-    ("notifierEdit", ("NOTIF1", {"to": "a@b.c"}), {}, "PUT", "/api/notifier/NOTIF1", {"to": "a@b.c"}),
+    (
+        "notifierEdit",
+        ("NOTIF1", {"to": "a@b.c"}),
+        {},
+        "PUT",
+        "/api/notifier/NOTIF1",
+        {"to": "a@b.c"},
+    ),
     ("notifierDelete", ("NOTIF1",), {}, "DELETE", "/api/notifier/NOTIF1", {}),
-    ("queries", (), {"sort": "votes", "order": "asc"}, "GET", "/api/shodan/query", {"page": "1", "sort": "votes", "order": "asc"}),
-    ("queriesSearch", ("webcam",), {}, "GET", "/api/shodan/query/search", {"query": "webcam", "page": "1"}),
+    (
+        "queries",
+        (),
+        {"sort": "votes", "order": "asc"},
+        "GET",
+        "/api/shodan/query",
+        {"page": "1", "sort": "votes", "order": "asc"},
+    ),
+    (
+        "queriesSearch",
+        ("webcam",),
+        {},
+        "GET",
+        "/api/shodan/query/search",
+        {"query": "webcam", "page": "1"},
+    ),
     ("queriesTags", (), {"size": 5}, "GET", "/api/shodan/query/tags", {"size": "5"}),
     ("datasets", (), {}, "GET", "/api/shodan/data", {}),
     ("datasetFiles", ("raw-daily",), {}, "GET", "/api/shodan/data/raw-daily", {}),
     ("org", (), {}, "GET", "/api/org", {}),
-    ("orgMemberAdd", ("visi",), {"notify": False}, "PUT", "/api/org/member/visi", {"notify": "false"}),
+    (
+        "orgMemberAdd",
+        ("visi",),
+        {"notify": False},
+        "PUT",
+        "/api/org/member/visi",
+        {"notify": "false"},
+    ),
     ("orgMemberDel", ("visi",), {}, "DELETE", "/api/org/member/visi", {}),
     ("profile", (), {}, "GET", "/api/account/profile", {}),
     ("apiInfo", (), {}, "GET", "/api/api-info", {}),
     ("myip", (), {}, "GET", "/api/tools/myip", {}),
     ("httpHeaders", (), {}, "GET", "/api/tools/httpheaders", {}),
-    ("dnsDomain", ("vertex.link",), {"history": True, "rtype": "A"}, "GET", "/api/dns/domain/vertex.link", {"history": "true", "type": "A", "page": "1"}),
-    ("dnsResolve", (["vertex.link", "google.com"],), {}, "GET", "/api/dns/resolve", {"hostnames": "vertex.link,google.com"}),
+    (
+        "dnsDomain",
+        ("vertex.link",),
+        {"history": True, "rtype": "A"},
+        "GET",
+        "/api/dns/domain/vertex.link",
+        {"history": "true", "type": "A", "page": "1"},
+    ),
+    (
+        "dnsResolve",
+        (["vertex.link", "google.com"],),
+        {},
+        "GET",
+        "/api/dns/resolve",
+        {"hostnames": "vertex.link,google.com"},
+    ),
     ("dnsReverse", (["8.8.8.8"],), {}, "GET", "/api/dns/reverse", {"ips": "8.8.8.8"}),
-    ("trendsSearch", ("product:openssh",), {"facets": "version"}, "GET", "/trends/api/v1/search", {"query": "product:openssh", "facets": "version"}),
+    (
+        "trendsSearch",
+        ("product:openssh",),
+        {"facets": "version"},
+        "GET",
+        "/trends/api/v1/search",
+        {"query": "product:openssh", "facets": "version"},
+    ),
     ("trendsFacets", (), {}, "GET", "/trends/api/v1/search/facets", {}),
     ("trendsFilters", (), {}, "GET", "/trends/api/v1/search/filters", {}),
     ("internetdb", ("1.1.1.1",), {}, "GET", "/internetdb/1.1.1.1", {}),
     ("cve", ("cve-2021-44228",), {}, "GET", "/cvedb/cve/CVE-2021-44228", {}),
-    ("cves", (), {"product": "log4j", "is_kev": True, "sort_by_epss": True}, "GET", "/cvedb/cves", {"product": "log4j", "is_kev": "true", "sort_by_epss": "true"}),
+    (
+        "cves",
+        (),
+        {"product": "log4j", "is_kev": True, "sort_by_epss": True},
+        "GET",
+        "/cvedb/cves",
+        {"product": "log4j", "is_kev": "true", "sort_by_epss": "true"},
+    ),
     ("cpes", ("nginx",), {"limit": 5}, "GET", "/cvedb/cpes", {"product": "nginx", "limit": "5"}),
-    ("cves", (), {"product": "log4j", "count": True}, "GET", "/cvedb/cves", {"product": "log4j", "count": "true"}),
+    (
+        "cves",
+        (),
+        {"product": "log4j", "count": True},
+        "GET",
+        "/cvedb/cves",
+        {"product": "log4j", "count": "true"},
+    ),
     ("ghsa", ("GHSA-JFH8-C2JP-5V3Q",), {}, "GET", "/cvedb/ghsa/GHSA-JFH8-C2JP-5V3Q", {}),
     ("euvd", ("euvd-2099-0001",), {}, "GET", "/cvedb/euvd/EUVD-2099-0001", {}),
     ("rawRequest", ("get", "shodan/ports"), {}, "GET", "/api/shodan/ports", {}),
@@ -99,20 +260,26 @@ class TestNorm(s_tests.SynTest):
     """Tests for shodansvc.norm."""
 
     def test_norm_cpe(self):
-        assert norm.normCpe("cpe:2.3:a:f5:nginx:1.25.3") == "cpe:2.3:a:f5:nginx:1.25.3:*:*:*:*:*:*:*"
+        assert (
+            norm.normCpe("cpe:2.3:a:f5:nginx:1.25.3") == "cpe:2.3:a:f5:nginx:1.25.3:*:*:*:*:*:*:*"
+        )
         full = "cpe:2.3:a:apache:log4j:2.0:-:*:*:*:*:*:*"
         assert norm.normCpe(full) == full
         assert norm.normCpe("cpe:/a:cloudflare:cloudflare") == "cpe:/a:cloudflare:cloudflare"
 
     def test_norm_vulns(self):
-        vulns = norm.normVulns({"cve-2021-44228": {"cvss": 10.0, "verified": True, "summary": "x"}, "bad": {}})
+        vulns = norm.normVulns(
+            {"cve-2021-44228": {"cvss": 10.0, "verified": True, "summary": "x"}, "bad": {}}
+        )
         assert vulns == [{"cve": "CVE-2021-44228", "cvss": 10.0, "verified": True, "summary": "x"}]
         assert norm.normVulns(["CVE-2023-44487"])[0]["cve"] == "CVE-2023-44487"
         assert norm.normVulns(None) == []
 
     def test_norm_softvers(self):
         # A real scanme.nmap.org banner: the product/version only belong on the matching application CPE.
-        cpes = norm.normCpes(["cpe:2.3:a:openbsd:openssh:6.6.1p1", "cpe:2.3:o:canonical:ubuntu_linux"])
+        cpes = norm.normCpes(
+            ["cpe:2.3:a:openbsd:openssh:6.6.1p1", "cpe:2.3:o:canonical:ubuntu_linux"]
+        )
         assert norm.normSoftvers(cpes, "OpenSSH", "6.6.1p1 Ubuntu 2ubuntu2.13") == [
             {"cpe": cpes[0], "product": "OpenSSH", "version": "6.6.1p1 Ubuntu 2ubuntu2.13"},
             {"cpe": cpes[1], "product": None, "version": None},
@@ -143,7 +310,9 @@ class TestNorm(s_tests.SynTest):
         assert norm.normSoftvers(["cpe:/a:ntp:ntp:3"], "ntpd", "3") == [
             {"cpe": "cpe:/a:ntp:ntp:3", "product": "ntpd", "version": "3"},
         ]
-        assert norm.normSoftvers([], "nginx", None) == [{"cpe": None, "product": "nginx", "version": None}]
+        assert norm.normSoftvers([], "nginx", None) == [
+            {"cpe": None, "product": "nginx", "version": None}
+        ]
         assert norm.normSoftvers([], None, None) == []
 
     def test_norm_host(self):
@@ -153,7 +322,9 @@ class TestNorm(s_tests.SynTest):
         assert host["location"]["country_code"] == "us"
         assert host["location"]["latlong"] == (37.4056, -122.0775)
         # The banner's detailed vuln replaces the host's bare CVE ID.
-        assert host["vulns"] == [{"cve": "CVE-2021-44228", "cvss": 10.0, "verified": False, "summary": "Log4Shell"}]
+        assert host["vulns"] == [
+            {"cve": "CVE-2021-44228", "cvss": 10.0, "verified": False, "summary": "Log4Shell"}
+        ]
         assert len(host["banners"]) == 2
 
         https, dns = host["banners"]
@@ -162,8 +333,16 @@ class TestNorm(s_tests.SynTest):
             "cpe:2.3:o:linux:linux_kernel:*:*:*:*:*:*:*:*",
         ]
         assert https["softvers"] == [
-            {"cpe": "cpe:2.3:a:f5:nginx:1.25.3:*:*:*:*:*:*:*", "product": "nginx", "version": "1.25.3"},
-            {"cpe": "cpe:2.3:o:linux:linux_kernel:*:*:*:*:*:*:*:*", "product": None, "version": None},
+            {
+                "cpe": "cpe:2.3:a:f5:nginx:1.25.3:*:*:*:*:*:*:*",
+                "product": "nginx",
+                "version": "1.25.3",
+            },
+            {
+                "cpe": "cpe:2.3:o:linux:linux_kernel:*:*:*:*:*:*:*:*",
+                "product": None,
+                "version": None,
+            },
         ]
         assert https["module"] == "https"
         assert https["http"]["title"] == "Google DNS"
@@ -176,7 +355,9 @@ class TestNorm(s_tests.SynTest):
         assert dns["http"] is None
 
     def test_norm_banner_truncates(self):
-        banner = norm.normBanner({"ip_str": "1.2.3.4", "port": 1, "data": "x" * (norm.MAX_BANNER_LEN + 10)})
+        banner = norm.normBanner(
+            {"ip_str": "1.2.3.4", "port": 1, "data": "x" * (norm.MAX_BANNER_LEN + 10)}
+        )
         assert len(banner["data"]) == norm.MAX_BANNER_LEN
         assert banner["transport"] == "tcp"
 
@@ -189,7 +370,12 @@ class TestNorm(s_tests.SynTest):
 
     def test_norm_dns(self):
         recs = norm.normDnsRecords(DNS_DOMAIN)
-        assert recs[0] == {"fqdn": "vertex.link", "type": "A", "value": "1.2.3.4", "seen": "2026-10-01T00:00:00.000000"}
+        assert recs[0] == {
+            "fqdn": "vertex.link",
+            "type": "A",
+            "value": "1.2.3.4",
+            "seen": "2026-10-01T00:00:00.000000",
+        }
         assert recs[1]["fqdn"] == "www.vertex.link"
 
     def test_norm_cve(self):
@@ -243,7 +429,9 @@ class TestClient(s_tests.SynTest):
         assert errMesg(500, None, "") == "HTTP 500"
         assert errMesg(500, None, "plain error") == "plain error"
         # The Streaming API wraps an HTML error page in JSON.
-        assert errMesg(401, {"error": "<html><title>401 Unauthorized</title></html>"}, "").startswith("Shodan rejected")
+        assert errMesg(
+            401, {"error": "<html><title>401 Unauthorized</title></html>"}, ""
+        ).startswith("Shodan rejected")
 
     async def test_rate_limiter(self):
         limiter = RateLimiter(20)
@@ -317,11 +505,15 @@ class TestClient(s_tests.SynTest):
         async with FakeShodan() as fake, aiohttp.ClientSession() as sess:
             client = ShodanClient(sess, urls=fake.urls, rate=0)
 
-            banners = [b async for b in client.stream("/shodan/banners", apikey="key", limit=0, timeout=5)]
+            banners = [
+                b async for b in client.stream("/shodan/banners", apikey="key", limit=0, timeout=5)
+            ]
             assert [b["port"] for b in banners] == [443, 53]
             assert fake.last()["query"]["heartbeat"] == "false"
 
-            banners = [b async for b in client.stream("/shodan/banners", apikey="key", limit=1, timeout=5)]
+            banners = [
+                b async for b in client.stream("/shodan/banners", apikey="key", limit=1, timeout=5)
+            ]
             assert len(banners) == 1
 
 
@@ -347,8 +539,14 @@ class TestShodanSvc(s_tests.SynTest):
                 else:
                     assert req["query"]["key"] == "testkey", name
 
-            assert fake.last("/api/shodan/alert")["json"] == {"name": "corp", "filters": {"ip": ["1.2.3.0/24"]}, "expires": 60}
-            assert fake.last("/api/shodan/alert/ALERT1", "POST")["json"] == {"filters": {"ip": ["1.2.3.0/24"]}}
+            assert fake.last("/api/shodan/alert")["json"] == {
+                "name": "corp",
+                "filters": {"ip": ["1.2.3.0/24"]},
+                "expires": 60,
+            }
+            assert fake.last("/api/shodan/alert/ALERT1", "POST")["json"] == {
+                "filters": {"ip": ["1.2.3.0/24"]}
+            }
 
     async def test_cvedb(self):
         async with shodanSvc(self) as (core, svc, fake):
@@ -388,7 +586,10 @@ class TestShodanSvc(s_tests.SynTest):
 
             def paged(request):
                 page = int(request.query["page"])
-                matches = [{"ip_str": f"1.1.1.{page}{i}", "port": 80} for i in range(100 if page < 3 else 5)]
+                matches = [
+                    {"ip_str": f"1.1.1.{page}{i}", "port": 80}
+                    for i in range(100 if page < 3 else 5)
+                ]
                 return (200, {"total": 205, "matches": matches})
 
             fake.routes[("GET", "/api/shodan/host/search")] = paged
@@ -407,10 +608,16 @@ class TestShodanSvc(s_tests.SynTest):
 
             def paged(request):
                 page = int(request.query["page"])
-                return (200, {
-                    "domain": "vertex.link", "tags": [], "subdomains": [f"s{page}"], "more": page < 3,
-                    "data": [{"subdomain": f"s{page}", "type": "A", "value": "1.2.3.4"}],
-                })
+                return (
+                    200,
+                    {
+                        "domain": "vertex.link",
+                        "tags": [],
+                        "subdomains": [f"s{page}"],
+                        "more": page < 3,
+                        "data": [{"subdomain": f"s{page}", "type": "A", "value": "1.2.3.4"}],
+                    },
+                )
 
             fake.routes[("GET", "/api/dns/domain/vertex.link")] = paged
 
@@ -424,7 +631,9 @@ class TestShodanSvc(s_tests.SynTest):
 
     async def test_stream_kinds(self):
         async with shodanSvc(self) as (core, svc, fake):
-            banners = [b async for b in svc.stream("asn", values=["AS15169", "13335"], limit=0, timeout=5)]
+            banners = [
+                b async for b in svc.stream("asn", values=["AS15169", "13335"], limit=0, timeout=5)
+            ]
             assert len(banners) == 2
             assert fake.last()["path"] == "/stream/shodan/asn/AS15169,13335"
 
@@ -457,7 +666,10 @@ class TestShodanSvc(s_tests.SynTest):
                 items = [i async for i in prox.searchGenr("nginx")]
                 assert [i["status"] for i in items] == [True, True]
 
-                fake.routes[("GET", "/api/shodan/host/search")] = (401, {"error": "Invalid API key"})
+                fake.routes[("GET", "/api/shodan/host/search")] = (
+                    401,
+                    {"error": "Invalid API key"},
+                )
                 items = [i async for i in prox.searchGenr("nginx")]
                 assert items == [{"status": False, "mesg": "Invalid API key", "data": None}]
 

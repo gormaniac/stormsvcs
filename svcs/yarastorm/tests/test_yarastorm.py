@@ -1,6 +1,5 @@
 """Pytests for yarastorm."""
 
-
 import binascii
 import hashlib
 
@@ -53,7 +52,9 @@ class TestYaraStorm(s_tests.SynTest):
     async def test_cmd_yara_check(self):
         async with self.getTestCoreProxSvc(YaraSvc) as (core, prox, svc):
             await core.nodes('[ it:app:yara:rule=* :text="test" :name="bad"]')
-            await core.nodes('[ it:app:yara:rule=* :text="rule dummy { condition: true }" :name="dummy"]')
+            await core.nodes(
+                '[ it:app:yara:rule=* :text="rule dummy { condition: true }" :name="dummy"]'
+            )
 
             msgs = await core.stormlist(f"it:app:yara:rule:name=dummy | {SVC_NAME}.check")
             self.stormHasNoWarnErr(msgs)
@@ -69,7 +70,9 @@ class TestYaraStorm(s_tests.SynTest):
     async def test_cmd_yara_enable(self):
         async with self.getTestCoreProxSvc(YaraSvc) as (core, prox, svc):
             rule_id = s_common.guid()
-            await core.nodes(f'[ it:app:yara:rule={rule_id} :text="rule dummy {{ condition: true }}" :name="dummy"]')
+            await core.nodes(
+                f'[ it:app:yara:rule={rule_id} :text="rule dummy {{ condition: true }}" :name="dummy"]'
+            )
             msgs = await core.stormlist(f"it:app:yara:rule={rule_id} | {SVC_NAME}.enable")
             self.stormHasNoWarnErr(msgs)
 
@@ -88,7 +91,9 @@ class TestYaraStorm(s_tests.SynTest):
     async def test_cmd_yara_disable(self):
         async with self.getTestCoreProxSvc(YaraSvc) as (core, prox, svc):
             rule_id = s_common.guid()
-            await core.nodes(f'[ it:app:yara:rule={rule_id} :text="rule dummy {{ condition: true }}" :name="dummy"]')
+            await core.nodes(
+                f'[ it:app:yara:rule={rule_id} :text="rule dummy {{ condition: true }}" :name="dummy"]'
+            )
             await core.stormlist(f"it:app:yara:rule={rule_id} | {SVC_NAME}.enable")
             self.nn(svc.rules.get(rule_id))
 
@@ -104,8 +109,12 @@ class TestYaraStorm(s_tests.SynTest):
             async with self.getTestCoreProxSvc(YaraSvc, ssvc_conf=conf) as (core, prox, svc):
                 hit = s_common.guid()
                 miss = s_common.guid()
-                await core.nodes(f'[ it:app:yara:rule={hit} :text="rule hit {{ strings: $a = \\"test\\" condition: $a }}" :name="hit"]')
-                await core.nodes(f'[ it:app:yara:rule={miss} :text="rule miss {{ condition: false }}" :name="miss"]')
+                await core.nodes(
+                    f'[ it:app:yara:rule={hit} :text="rule hit {{ strings: $a = \\"test\\" condition: $a }}" :name="hit"]'
+                )
+                await core.nodes(
+                    f'[ it:app:yara:rule={miss} :text="rule miss {{ condition: false }}" :name="miss"]'
+                )
                 msgs = await core.stormlist(f"it:app:yara:rule | {SVC_NAME}.enable")
                 self.stormHasNoWarnErr(msgs)
 

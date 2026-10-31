@@ -15,7 +15,6 @@ def loadRules(path=RULES, urlfmt="https://example.com/rules/{version}/{path}"):
 
 
 class TestHelpers:
-
     def test_tags(self):
         assert s_rules.nsTag("anti-analysis/anti-debugging") == "anti_analysis.anti_debugging"
         assert s_rules.nsTag("host-interaction/process/create") == "host_interaction.process.create"
@@ -33,12 +32,14 @@ class TestHelpers:
         assert s_rules.contact("BitsOfBinary") == {"name": "bitsofbinary"}
 
     def test_techniques(self):
-        assert s_rules.techniques([
-            "Defense Evasion::Obfuscated Files or Information [T1027]",
-            "Execution::Command and Scripting Interpreter::PowerShell [T1059.001]",
-            "Defense Evasion::Obfuscated Files or Information [T1027]",
-            "Not an ATT&CK technique",
-        ]) == ["T1027", "T1059.001"]
+        assert s_rules.techniques(
+            [
+                "Defense Evasion::Obfuscated Files or Information [T1027]",
+                "Execution::Command and Scripting Interpreter::PowerShell [T1059.001]",
+                "Defense Evasion::Obfuscated Files or Information [T1027]",
+                "Not an ATT&CK technique",
+            ]
+        ) == ["T1027", "T1059.001"]
 
     def test_guids(self):
         assert s_rules.ruleGuid("a") == s_rules.ruleGuid("a")
@@ -47,20 +48,24 @@ class TestHelpers:
 
     def test_ruleMeta(self):
         assert s_rules.ruleMeta({"a": (1, {2}), "b": {"c": None}, "d": object}) == {
-            "a": [1, [2]], "b": {"c": None}, "d": str(object),
+            "a": [1, [2]],
+            "b": {"c": None},
+            "d": str(object),
         }
 
     def test_ruleDoc(self):
-        doc = s_rules.ruleDoc({
-            "name": "x",
-            "namespace": "a/b",
-            "description": "Does a thing.",
-            "authors": ["a@b.c"],
-            "scopes": {"static": "function", "dynamic": "call"},
-            "att&ck": ["Execution [T1059]"],
-            "references": "https://example.com",
-            "lib": True,
-        })
+        doc = s_rules.ruleDoc(
+            {
+                "name": "x",
+                "namespace": "a/b",
+                "description": "Does a thing.",
+                "authors": ["a@b.c"],
+                "scopes": {"static": "function", "dynamic": "call"},
+                "att&ck": ["Execution [T1059]"],
+                "references": "https://example.com",
+                "lib": True,
+            }
+        )
         assert doc.startswith("Does a thing.\n\nThis is a capa library rule.")
         assert "Namespace: a/b" in doc
         assert "Scopes: static: function, dynamic: call" in doc
@@ -72,7 +77,6 @@ class TestHelpers:
 
 
 class TestCapaRules:
-
     def test_load(self):
         rules = loadRules()
         assert sorted(rules.rules) == [
@@ -165,8 +169,13 @@ class TestCapaRules:
 
         tags = {t["tag"]: t for t in rules.tagRecords()}
         assert sorted(tags) == [
-            "", "testing", "testing.never", "testing.ops", "testing.ops.ret",
-            "testing.ops.xor", "testing.slib_capa",
+            "",
+            "testing",
+            "testing.never",
+            "testing.ops",
+            "testing.ops.ret",
+            "testing.ops.xor",
+            "testing.slib_capa",
         ]
         assert tags[""]["title"] == "capa"
         assert "capa-rules vtest" in tags[""]["doc"]
@@ -208,7 +217,6 @@ class TestCapaRules:
 
 
 class TestRulesVersion:
-
     def test_versions_match(self):
         """The bundled rules (Dockerfile) and RULES_VERSION match the version of capa."""
 

@@ -17,7 +17,6 @@ The platforms, and the base URL names (see ``abusechsvc.client.BASE_URLS``) they
 * Hunting (false positive list) - ``hunting``
 """
 
-
 import asyncio
 import hashlib
 import io
@@ -81,8 +80,22 @@ BAZAAR_EXPORTS = {
 }
 """MalwareBazaar exports: name -> file. ``recent`` is the last 48 hours, ``yara`` the YARA rule statistics."""
 
-BAZAAR_CSV = ("first_seen_utc", "sha256_hash", "md5_hash", "sha1_hash", "reporter", "file_name",
-              "file_type_guess", "mime_type", "signature", "clamav", "vtpercent", "imphash", "ssdeep", "tlsh")
+BAZAAR_CSV = (
+    "first_seen_utc",
+    "sha256_hash",
+    "md5_hash",
+    "sha1_hash",
+    "reporter",
+    "file_name",
+    "file_type_guess",
+    "mime_type",
+    "signature",
+    "clamav",
+    "vtpercent",
+    "imphash",
+    "ssdeep",
+    "tlsh",
+)
 """The columns of the MalwareBazaar CSV export."""
 
 URLHAUS_EXPORTS = {
@@ -94,7 +107,17 @@ URLHAUS_EXPORTS = {
 """URLhaus CSV exports: name -> file. ``recent`` is the last 30 days, ``full`` the last 90 days and every
 online URL, and ``payloads`` every payload URLhaus collected (with the URL that served it)."""
 
-URLHAUS_CSV = ("id", "dateadded", "url", "url_status", "last_online", "threat", "tags", "urlhaus_link", "reporter")
+URLHAUS_CSV = (
+    "id",
+    "dateadded",
+    "url",
+    "url_status",
+    "last_online",
+    "threat",
+    "tags",
+    "urlhaus_link",
+    "reporter",
+)
 """The columns of the URLhaus CSV exports."""
 
 THREATFOX_EXPORTS = {
@@ -117,9 +140,21 @@ SSLBL_BLOCKLISTS = {
 """SSL Blacklist blocklists: name -> file. The botnet C2 IP lists were deprecated on 2025-01-03."""
 
 BAZAAR_UPDATE_KEYS = (
-    "add_tag", "remove_tag", "urlhaus", "any_run", "joe_sandbox", "malpedia", "twitter", "links",
-    "dropped_by_md5", "dropped_by_sha256", "dropped_by_malware", "dropping_md5", "dropping_sha256",
-    "dropping_malware", "comment",
+    "add_tag",
+    "remove_tag",
+    "urlhaus",
+    "any_run",
+    "joe_sandbox",
+    "malpedia",
+    "twitter",
+    "links",
+    "dropped_by_md5",
+    "dropped_by_sha256",
+    "dropped_by_malware",
+    "dropping_md5",
+    "dropping_sha256",
+    "dropping_malware",
+    "comment",
 )
 """The keys MalwareBazaar's ``update`` query accepts."""
 
@@ -337,7 +372,9 @@ class AbuseChSvc(s_cell.Cell):
             except zipfile.BadZipFile as err:
                 raise AbuseChApiError(f"Unable to unzip {path}: {err}") from err
             names = [i.filename for i in zfd.infolist() if not i.is_dir()]
-            streams = (io.TextIOWrapper(zfd.open(n), encoding="utf-8", errors="replace") for n in names)
+            streams = (
+                io.TextIOWrapper(zfd.open(n), encoding="utf-8", errors="replace") for n in names
+            )
         else:
             fd.seek(0)
             streams = iter([io.TextIOWrapper(fd, encoding="utf-8", errors="replace")])
@@ -345,11 +382,17 @@ class AbuseChSvc(s_cell.Cell):
         for stream in streams:
             for num, line in enumerate(stream):
                 # Retired datasets are replaced with a comment saying so (ex. SSLBL's IP lists).
-                if num < 20 and line.startswith("#") and re.search(r"\bhas been deprecated\b", line, re.IGNORECASE):
+                if (
+                    num < 20
+                    and line.startswith("#")
+                    and re.search(r"\bhas been deprecated\b", line, re.IGNORECASE)
+                ):
                     raise AbuseChApiError(f"abuse.ch {base}: {path} {line.strip('#').strip()}")
                 yield line.rstrip("\r\n")
 
-    async def _csvRows(self, base: str, path: str, fields: tuple[str, ...], apikey=None) -> AsyncIterator[dict]:
+    async def _csvRows(
+        self, base: str, path: str, fields: tuple[str, ...], apikey=None
+    ) -> AsyncIterator[dict]:
         """Stream the rows of a (possibly huge, possibly zipped) CSV dataset.
 
         The dataset is downloaded into a temporary file, then parsed line by line (from inside the
@@ -384,27 +427,42 @@ class AbuseChSvc(s_cell.Cell):
         if not byts:
             return None
         if len(byts) > self.maxsize:
-            raise AbuseChApiError(f"The download is {len(byts)} bytes, larger than the max of {self.maxsize}.")
+            raise AbuseChApiError(
+                f"The download is {len(byts)} bytes, larger than the max of {self.maxsize}."
+            )
         if byts[:2] != b"PK":
-            raise AbuseChApiError(f"abuse.ch did not return a zip ({ctype or 'unknown content type'}).")
+            raise AbuseChApiError(
+                f"abuse.ch did not return a zip ({ctype or 'unknown content type'})."
+            )
         return self._sample(unzip(byts, maxsize=self.maxsize))
 
     def _join(self, chunks: Iterable[bytes]) -> bytes:
         byts = b"".join(chunks)
         if len(byts) > self.maxsize:
-            raise AbuseChApiError(f"The file is {len(byts)} bytes, larger than the max of {self.maxsize}.")
+            raise AbuseChApiError(
+                f"The file is {len(byts)} bytes, larger than the max of {self.maxsize}."
+            )
         return byts
 
-    async def rawRequest(self, base: str, path: str = "", method: str = "post", form=None,
-                         json_data=None, params=None, apikey=None) -> Any:
+    async def rawRequest(
+        self,
+        base: str,
+        path: str = "",
+        method: str = "post",
+        form=None,
+        json_data=None,
+        params=None,
+        apikey=None,
+    ) -> Any:
         """Send an arbitrary request to an abuse.ch API and return its parsed JSON. An escape hatch."""
 
         if base not in RAW_BASES:
             raise AbuseChApiError(f"rawRequest only supports the {', '.join(RAW_BASES)} APIs.")
         if form is None and json_data is None and method.lower() == "post":
             form = {}
-        return await self._query(base, path, apikey=apikey, method=method, form=form,
-                                 json_data=json_data, params=params)
+        return await self._query(
+            base, path, apikey=apikey, method=method, form=form, json_data=json_data, params=params
+        )
 
     # ---- MalwareBazaar ----
 
@@ -438,17 +496,23 @@ class AbuseChSvc(s_cell.Cell):
             fields["limit"] = max(1, min(int(limit or 1000), 1000))
         return _data(await self.bazaarQuery(query, fields, apikey=apikey), [])
 
-    async def normBazaarSearch(self, by: str, valu: str, limit: int = 100, apikey=None) -> list[dict]:
+    async def normBazaarSearch(
+        self, by: str, valu: str, limit: int = 100, apikey=None
+    ) -> list[dict]:
         """Like ``bazaarSearch()`` but normalized."""
 
-        return norm.normSamples(await self.bazaarSearch(by, valu, limit=limit, apikey=apikey))[:limit or None]
+        return norm.normSamples(await self.bazaarSearch(by, valu, limit=limit, apikey=apikey))[
+            : limit or None
+        ]
 
     async def bazaarRecent(self, selector: str = "time", apikey=None) -> list:
         """``get_recent`` - The samples added in the last hour (``time``) or the latest 100 (``100``)."""
 
         if str(selector) not in ("time", "100"):
             raise AbuseChApiError("The get_recent selector must be 'time' or '100'.")
-        return _data(await self.bazaarQuery("get_recent", {"selector": str(selector)}, apikey=apikey), [])
+        return _data(
+            await self.bazaarQuery("get_recent", {"selector": str(selector)}, apikey=apikey), []
+        )
 
     async def normBazaarRecent(self, selector: str = "time", apikey=None) -> list[dict]:
         """Like ``bazaarRecent()`` but normalized."""
@@ -459,7 +523,9 @@ class AbuseChSvc(s_cell.Cell):
         """``recent_detections`` - Samples with new detections in the last ``hours`` (1-168)."""
 
         hours = max(1, min(int(hours or 48), 168))
-        return _data(await self.bazaarQuery("recent_detections", {"hours": hours}, apikey=apikey), [])
+        return _data(
+            await self.bazaarQuery("recent_detections", {"hours": hours}, apikey=apikey), []
+        )
 
     async def normBazaarDetections(self, hours: int = 48, apikey=None) -> list[dict]:
         """Like ``bazaarDetections()`` but normalized."""
@@ -482,13 +548,24 @@ class AbuseChSvc(s_cell.Cell):
 
         if hashType(sha256) != "sha256":
             raise AbuseChApiError("MalwareBazaar downloads require a SHA256 hash.")
-        return await self._download("bazaar", method="post", apikey=apikey,
-                                    form={"query": "get_file", "sha256_hash": sha256.lower()})
+        return await self._download(
+            "bazaar",
+            method="post",
+            apikey=apikey,
+            form={"query": "get_file", "sha256_hash": sha256.lower()},
+        )
 
-    async def bazaarUpload(self, chunks: list[bytes], name: str, anonymous: bool = False,
-                           tags: list | None = None, delivery_method: str | None = None,
-                           references: dict | None = None, context: dict | None = None,
-                           apikey=None) -> dict | None:
+    async def bazaarUpload(
+        self,
+        chunks: list[bytes],
+        name: str,
+        anonymous: bool = False,
+        tags: list | None = None,
+        delivery_method: str | None = None,
+        references: dict | None = None,
+        context: dict | None = None,
+        apikey=None,
+    ) -> dict | None:
         """Submit a sample to MalwareBazaar.
 
         ``chunks`` are the file's bytes (in pieces, as read from an Axon).
@@ -500,9 +577,11 @@ class AbuseChSvc(s_cell.Cell):
         def lists(valus: dict | None) -> dict | None:
             if not valus:
                 return None
-            return {k: v if k == "comment" else list(v) if isinstance(v, (list, tuple)) else [v]
-                    for k, v in valus.items() if v}
-
+            return {
+                k: v if k == "comment" else list(v) if isinstance(v, (list, tuple)) else [v]
+                for k, v in valus.items()
+                if v
+            }
 
         body = {
             "anonymous": 1 if anonymous else 0,
@@ -512,24 +591,41 @@ class AbuseChSvc(s_cell.Cell):
             "context": lists(context),
         }
         body = {k: v for k, v in body.items() if v not in (None, [])}
-        return await self._query("bazaar", apikey=apikey, form={"json_data": json.dumps(body)},
-                                 files={"file": (name or "sample", self._join(chunks))}, notfound=False)
+        return await self._query(
+            "bazaar",
+            apikey=apikey,
+            form={"json_data": json.dumps(body)},
+            files={"file": (name or "sample", self._join(chunks))},
+            notfound=False,
+        )
 
     async def bazaarUpdate(self, sha256: str, key: str, valu: str, apikey=None) -> dict | None:
         """``update`` - Add a value to a sample you submitted. ``key`` is one of ``BAZAAR_UPDATE_KEYS``."""
 
         if key not in BAZAAR_UPDATE_KEYS:
-            raise AbuseChApiError(f"Unknown MalwareBazaar update key {key}, use one of: {', '.join(BAZAAR_UPDATE_KEYS)}")
-        return await self._query("bazaar", apikey=apikey, notfound=False,
-                                 form={"query": "update", "sha256_hash": sha256.lower(), "key": key, "value": valu})
+            raise AbuseChApiError(
+                f"Unknown MalwareBazaar update key {key}, use one of: {', '.join(BAZAAR_UPDATE_KEYS)}"
+            )
+        return await self._query(
+            "bazaar",
+            apikey=apikey,
+            notfound=False,
+            form={"query": "update", "sha256_hash": sha256.lower(), "key": key, "value": valu},
+        )
 
     async def bazaarComment(self, sha256: str, comment: str, apikey=None) -> dict | None:
         """``add_comment`` - Comment on a sample."""
 
-        return await self._query("bazaar", apikey=apikey, notfound=False,
-                                 form={"query": "add_comment", "sha256_hash": sha256.lower(), "comment": comment})
+        return await self._query(
+            "bazaar",
+            apikey=apikey,
+            notfound=False,
+            form={"query": "add_comment", "sha256_hash": sha256.lower(), "comment": comment},
+        )
 
-    async def bazaarExport(self, kind: str = "recent", limit: int = 0, apikey=None) -> AsyncIterator[dict]:
+    async def bazaarExport(
+        self, kind: str = "recent", limit: int = 0, apikey=None
+    ) -> AsyncIterator[dict]:
         """Yield normalized samples from a MalwareBazaar CSV export (see ``BAZAAR_EXPORTS``).
 
         The ``yara`` export yields normalized YARA rules instead.
@@ -542,7 +638,9 @@ class AbuseChSvc(s_cell.Cell):
             try:
                 items = norm.normYaraStats(json.loads(text) if text.strip() else {})
             except ValueError as err:
-                raise AbuseChApiError(f"Unable to parse the MalwareBazaar YARA rule statistics: {err}") from err
+                raise AbuseChApiError(
+                    f"Unable to parse the MalwareBazaar YARA rule statistics: {err}"
+                ) from err
             for count, rule in enumerate(items, start=1):
                 yield rule
                 if limit and count >= limit:
@@ -551,7 +649,9 @@ class AbuseChSvc(s_cell.Cell):
 
         # The full export is hundreds of MB, so it's streamed.
         count = 0
-        async for row in self._csvRows("bazaar:export", BAZAAR_EXPORTS[kind], BAZAAR_CSV, apikey=apikey):
+        async for row in self._csvRows(
+            "bazaar:export", BAZAAR_EXPORTS[kind], BAZAAR_CSV, apikey=apikey
+        ):
             sample = norm.normSample(row)
             if sample:
                 yield sample
@@ -571,8 +671,9 @@ class AbuseChSvc(s_cell.Cell):
 
         return await self._query("urlhaus", "urlid/", apikey=apikey, form={"urlid": str(urlid)})
 
-    async def normUrlhausUrl(self, url: str | None = None, urlid: str | int | None = None,
-                             apikey=None) -> dict | None:
+    async def normUrlhausUrl(
+        self, url: str | None = None, urlid: str | int | None = None, apikey=None
+    ) -> dict | None:
         """Like ``urlhausUrl()``/``urlhausUrlId()`` but normalized."""
 
         if urlid is not None:
@@ -600,7 +701,9 @@ class AbuseChSvc(s_cell.Cell):
         htype = hashType(sha)
         if htype not in ("md5", "sha256"):
             raise AbuseChApiError("URLhaus payload lookups require an MD5 or SHA256 hash.")
-        return await self._query("urlhaus", "payload/", apikey=apikey, form={f"{htype}_hash": sha.lower()})
+        return await self._query(
+            "urlhaus", "payload/", apikey=apikey, form={f"{htype}_hash": sha.lower()}
+        )
 
     async def normUrlhausPayload(self, sha: str, apikey=None) -> dict | None:
         """Like ``urlhausPayload()`` but normalized."""
@@ -616,7 +719,9 @@ class AbuseChSvc(s_cell.Cell):
     async def urlhausSignature(self, signature: str, apikey=None) -> dict | None:
         """``/signature/`` - The URLs (and payloads) for a malware signature."""
 
-        return await self._query("urlhaus", "signature/", apikey=apikey, form={"signature": signature})
+        return await self._query(
+            "urlhaus", "signature/", apikey=apikey, form={"signature": signature}
+        )
 
     async def normUrlhausSearch(self, by: str, valu: str, limit: int = 0, apikey=None) -> dict:
         """Normalized ``urlhausTag()`` (``by=tag``) or ``urlhausSignature()`` (``by=signature``).
@@ -659,13 +764,19 @@ class AbuseChSvc(s_cell.Cell):
         path = f"payloads/recent/limit/{int(limit)}/" if limit else "payloads/recent/"
         return await self._query("urlhaus", path, method="get", apikey=apikey)
 
-    async def normUrlhausRecent(self, kind: str = "urls", limit: int | None = None, apikey=None) -> list[dict]:
+    async def normUrlhausRecent(
+        self, kind: str = "urls", limit: int | None = None, apikey=None
+    ) -> list[dict]:
         """Normalized ``urlhausRecentUrls()`` (``kind=urls``) or ``urlhausRecentPayloads()`` (``kind=payloads``)."""
 
         if kind == "urls":
-            return norm.normUrls((await self.urlhausRecentUrls(limit, apikey=apikey) or {}).get("urls"))
+            return norm.normUrls(
+                (await self.urlhausRecentUrls(limit, apikey=apikey) or {}).get("urls")
+            )
         if kind == "payloads":
-            return norm.normSamples((await self.urlhausRecentPayloads(limit, apikey=apikey) or {}).get("payloads"))
+            return norm.normSamples(
+                (await self.urlhausRecentPayloads(limit, apikey=apikey) or {}).get("payloads")
+            )
         raise AbuseChApiError(f"Unknown URLhaus recent list: {kind}")
 
     async def urlhausDownload(self, sha256: str, apikey=None) -> dict | None:
@@ -673,10 +784,18 @@ class AbuseChSvc(s_cell.Cell):
 
         if hashType(sha256) != "sha256":
             raise AbuseChApiError("URLhaus downloads require a SHA256 hash.")
-        return await self._download("urlhaus", f"download/{_seg(sha256.lower())}/", method="get", apikey=apikey)
+        return await self._download(
+            "urlhaus", f"download/{_seg(sha256.lower())}/", method="get", apikey=apikey
+        )
 
-    async def urlhausSubmit(self, urls: list[str], threat: str = "malware_download", tags: list | None = None,
-                            anonymous: bool = False, apikey=None) -> str:
+    async def urlhausSubmit(
+        self,
+        urls: list[str],
+        threat: str = "malware_download",
+        tags: list | None = None,
+        anonymous: bool = False,
+        apikey=None,
+    ) -> str:
         """Report malware URLs to URLhaus. Returns URLhaus' response message."""
 
         body = {
@@ -686,7 +805,9 @@ class AbuseChSvc(s_cell.Cell):
         byts, _ = await self._fetch("urlhaus:submit", method="post", apikey=apikey, json_data=body)
         return byts.decode("utf-8", "replace").strip()
 
-    async def urlhausExport(self, kind: str = "recent", limit: int = 0, apikey=None) -> AsyncIterator[dict]:
+    async def urlhausExport(
+        self, kind: str = "recent", limit: int = 0, apikey=None
+    ) -> AsyncIterator[dict]:
         """Yield normalized URLs from a URLhaus CSV export (see ``URLHAUS_EXPORTS``)."""
 
         if kind not in URLHAUS_EXPORTS:
@@ -694,7 +815,9 @@ class AbuseChSvc(s_cell.Cell):
         # The payloads export is GBs, so the exports are streamed.
         fields, normrow = urlhausReader(kind)
         count = 0
-        async for row in self._csvRows("urlhaus:export", URLHAUS_EXPORTS[kind], fields, apikey=apikey):
+        async for row in self._csvRows(
+            "urlhaus:export", URLHAUS_EXPORTS[kind], fields, apikey=apikey
+        ):
             url = normrow(row)
             if url:
                 yield url
@@ -704,10 +827,14 @@ class AbuseChSvc(s_cell.Cell):
 
     # ---- ThreatFox ----
 
-    async def threatfoxQuery(self, query: str, body: dict | None = None, apikey=None) -> dict | None:
+    async def threatfoxQuery(
+        self, query: str, body: dict | None = None, apikey=None
+    ) -> dict | None:
         """POST a ``query`` (with any other JSON fields) to the ThreatFox API."""
 
-        return await self._query("threatfox", apikey=apikey, json_data=dict(body or {}, query=query))
+        return await self._query(
+            "threatfox", apikey=apikey, json_data=dict(body or {}, query=query)
+        )
 
     async def threatfoxRecent(self, days: int = 1, apikey=None) -> list:
         """``get_iocs`` - IOCs added in the last ``days`` (1-7)."""
@@ -727,31 +854,44 @@ class AbuseChSvc(s_cell.Cell):
     async def threatfoxSearch(self, term: str, exact: bool = False, apikey=None) -> list:
         """``search_ioc`` - Search IOCs by value."""
 
-        return _data(await self.threatfoxQuery("search_ioc", {"search_term": term, "exact_match": bool(exact)},
-                                               apikey=apikey), [])
+        return _data(
+            await self.threatfoxQuery(
+                "search_ioc", {"search_term": term, "exact_match": bool(exact)}, apikey=apikey
+            ),
+            [],
+        )
 
     async def threatfoxHash(self, sha: str, apikey=None) -> list:
         """``search_hash`` - IOCs associated with a malware sample (MD5 or SHA256)."""
 
         if hashType(sha) not in ("md5", "sha256"):
             raise AbuseChApiError("ThreatFox hash searches require an MD5 or SHA256 hash.")
-        return _data(await self.threatfoxQuery("search_hash", {"hash": sha.lower()}, apikey=apikey), [])
+        return _data(
+            await self.threatfoxQuery("search_hash", {"hash": sha.lower()}, apikey=apikey), []
+        )
 
     async def threatfoxTag(self, tag: str, limit: int = 100, apikey=None) -> list:
         """``taginfo`` - IOCs with a tag (max 1000)."""
 
         limit = max(1, min(int(limit or 1000), 1000))
-        return _data(await self.threatfoxQuery("taginfo", {"tag": tag, "limit": limit}, apikey=apikey), [])
+        return _data(
+            await self.threatfoxQuery("taginfo", {"tag": tag, "limit": limit}, apikey=apikey), []
+        )
 
     async def threatfoxMalware(self, malware: str, limit: int = 100, apikey=None) -> list:
         """``malwareinfo`` - IOCs for a malware family (max 1000)."""
 
         limit = max(1, min(int(limit or 1000), 1000))
-        return _data(await self.threatfoxQuery("malwareinfo", {"malware": malware, "limit": limit},
-                                               apikey=apikey), [])
+        return _data(
+            await self.threatfoxQuery(
+                "malwareinfo", {"malware": malware, "limit": limit}, apikey=apikey
+            ),
+            [],
+        )
 
-    async def normThreatfox(self, by: str, valu: Any = None, limit: int = 100, exact: bool = False,
-                            apikey=None) -> list[dict]:
+    async def normThreatfox(
+        self, by: str, valu: Any = None, limit: int = 100, exact: bool = False, apikey=None
+    ) -> list[dict]:
         """Normalized IOCs from any ThreatFox IOC query.
 
         ``by`` is ``recent`` (``valu`` is days), ``id``, ``search``, ``hash``, ``tag``, ``malware``,
@@ -763,7 +903,11 @@ class AbuseChSvc(s_cell.Cell):
             # Exact searches only match whole IOC values, and IPs are listed as ip:port.
             ip = str(valu).strip()
             items = await self.threatfoxSearch(ip, exact=False, apikey=apikey)
-            iocs = [i for i in norm.normIocs(items) if i["ioc"] == ip or (i["obs"] or {}).get("ip") == ip]
+            iocs = [
+                i
+                for i in norm.normIocs(items)
+                if i["ioc"] == ip or (i["obs"] or {}).get("ip") == ip
+            ]
             return iocs[:limit] if limit else iocs
         if by == "file":
             sha = str(valu).strip().lower()
@@ -812,13 +956,27 @@ class AbuseChSvc(s_cell.Cell):
     async def threatfoxLabel(self, malware: str, platform: str | None = None, apikey=None) -> list:
         """``get_label`` - Find the ThreatFox malware label for a family name."""
 
-        return _data(await self.threatfoxQuery("get_label", {"malware": malware, "platform": platform},
-                                               apikey=apikey), [])
+        return _data(
+            await self.threatfoxQuery(
+                "get_label", {"malware": malware, "platform": platform}, apikey=apikey
+            ),
+            [],
+        )
 
-    async def threatfoxSubmit(self, threat_type: str, ioc_type: str, malware: str, iocs: list[str],
-                              confidence: int = 50, reference: str | None = None, comment: str | None = None,
-                              tags: list | None = None, anonymous: bool = False, compromised: bool = False,
-                              apikey=None) -> dict | None:
+    async def threatfoxSubmit(
+        self,
+        threat_type: str,
+        ioc_type: str,
+        malware: str,
+        iocs: list[str],
+        confidence: int = 50,
+        reference: str | None = None,
+        comment: str | None = None,
+        tags: list | None = None,
+        anonymous: bool = False,
+        compromised: bool = False,
+        apikey=None,
+    ) -> dict | None:
         """``submit_ioc`` - Share IOCs with ThreatFox."""
 
         body = {
@@ -833,10 +991,16 @@ class AbuseChSvc(s_cell.Cell):
             "tags": list(tags or []),
             "iocs": list(iocs),
         }
-        return await self._query("threatfox", apikey=apikey, notfound=False,
-                                 json_data=dict({k: v for k, v in body.items() if v is not None}, query="submit_ioc"))
+        return await self._query(
+            "threatfox",
+            apikey=apikey,
+            notfound=False,
+            json_data=dict({k: v for k, v in body.items() if v is not None}, query="submit_ioc"),
+        )
 
-    async def threatfoxExport(self, kind: str = "recent", limit: int = 0, apikey=None) -> AsyncIterator[dict]:
+    async def threatfoxExport(
+        self, kind: str = "recent", limit: int = 0, apikey=None
+    ) -> AsyncIterator[dict]:
         """Yield normalized IOCs from a ThreatFox JSON export (see ``THREATFOX_EXPORTS``)."""
 
         if kind not in THREATFOX_EXPORTS:
@@ -861,9 +1025,15 @@ class AbuseChSvc(s_cell.Cell):
 
         hashType(sha)
         body = {"search_term": sha.lower(), "malpedia-token": malpedia}
-        return _data(await self.yaraifyQuery("lookup_hash", {k: v for k, v in body.items() if v}, apikey=apikey))
+        return _data(
+            await self.yaraifyQuery(
+                "lookup_hash", {k: v for k, v in body.items() if v}, apikey=apikey
+            )
+        )
 
-    async def normYaraifyHash(self, sha: str, malpedia: str | None = None, apikey=None) -> dict | None:
+    async def normYaraifyHash(
+        self, sha: str, malpedia: str | None = None, apikey=None
+    ) -> dict | None:
         """Like ``yaraifyHash()`` but normalized."""
 
         data = await self.yaraifyHash(sha, malpedia=malpedia, apikey=apikey)
@@ -879,7 +1049,9 @@ class AbuseChSvc(s_cell.Cell):
         data = _data(await self.yaraifyQuery(YARAIFY_SEARCHES[by], body, apikey=apikey), [])
         return data if isinstance(data, list) else norm.lst(data)
 
-    async def normYaraifySearch(self, by: str, valu: str, limit: int = 25, apikey=None) -> list[dict]:
+    async def normYaraifySearch(
+        self, by: str, valu: str, limit: int = 25, apikey=None
+    ) -> list[dict]:
         """Like ``yaraifySearch()`` but normalized."""
 
         items = await self.yaraifySearch(by, valu, limit=limit, apikey=apikey)
@@ -941,8 +1113,12 @@ class AbuseChSvc(s_cell.Cell):
     async def yaraifyDeleteRule(self, uuid: str, apikey=None) -> Any:
         """``delete_yara_rule`` - Delete one of your deployed YARA rules."""
 
-        resp = await self._query("yaraify", apikey=apikey, notfound=False,
-                                 json_data={"query": "delete_yara_rule", "yarahub_uuid": uuid})
+        resp = await self._query(
+            "yaraify",
+            apikey=apikey,
+            notfound=False,
+            json_data={"query": "delete_yara_rule", "yarahub_uuid": uuid},
+        )
         return _data(resp, (resp or {}).get("query_status"))
 
     async def yaraifyResults(self, task_id: str, malpedia: str | None = None, apikey=None) -> Any:
@@ -950,14 +1126,20 @@ class AbuseChSvc(s_cell.Cell):
 
         body = {"task_id": task_id, "malpedia-token": malpedia}
         try:
-            return _data(await self.yaraifyQuery("get_results", {k: v for k, v in body.items() if v}, apikey=apikey))
+            return _data(
+                await self.yaraifyQuery(
+                    "get_results", {k: v for k, v in body.items() if v}, apikey=apikey
+                )
+            )
         except AbuseChApiError as err:
             # Unknown tasks come back as {"query_status": "error", "data": "unknown_task_id"}.
             if "unknown_task_id" in err.mesg:
                 return None
             raise
 
-    async def normYaraifyResults(self, task_id: str, malpedia: str | None = None, apikey=None) -> dict | None:
+    async def normYaraifyResults(
+        self, task_id: str, malpedia: str | None = None, apikey=None
+    ) -> dict | None:
         """Like ``yaraifyResults()`` but normalized: ``{status, task_id, file}``."""
 
         data = await self.yaraifyResults(task_id, malpedia=malpedia, apikey=apikey)
@@ -971,14 +1153,23 @@ class AbuseChSvc(s_cell.Cell):
         """``list_tasks`` - The tasks submitted with an identifier (``queued``, ``processed``, or None for all)."""
 
         body = {"identifier": identifier, "task_status": status}
-        data = _data(await self.yaraifyQuery("list_tasks", {k: v for k, v in body.items() if v}, apikey=apikey), [])
+        data = _data(
+            await self.yaraifyQuery(
+                "list_tasks", {k: v for k, v in body.items() if v}, apikey=apikey
+            ),
+            [],
+        )
         # No matches come back as {"query_status": "ok", "data": "no results"}.
         return data if isinstance(data, list) else []
 
-    async def normYaraifyTasks(self, identifier: str, status: str = "processed", apikey=None) -> list[dict]:
+    async def normYaraifyTasks(
+        self, identifier: str, status: str = "processed", apikey=None
+    ) -> list[dict]:
         """Like ``yaraifyTasks()`` but normalized."""
 
-        tasks = (norm.normTask(t) for t in await self.yaraifyTasks(identifier, status, apikey=apikey))
+        tasks = (
+            norm.normTask(t) for t in await self.yaraifyTasks(identifier, status, apikey=apikey)
+        )
         return [t for t in tasks if t]
 
     async def yaraifyIdentifier(self, apikey=None) -> Any:
@@ -992,9 +1183,18 @@ class AbuseChSvc(s_cell.Cell):
         hashType(sha)
         return _data(await self.yaraifyQuery("rescan_file", {"hash": sha.lower()}, apikey=apikey))
 
-    async def yaraifyScan(self, chunks: list[bytes], name: str, identifier: str | None = None,
-                          clamav_scan: bool = True, unpack: bool = False, share_file: bool = False,
-                          skip_known: bool = False, skip_noisy: bool = False, apikey=None) -> Any:
+    async def yaraifyScan(
+        self,
+        chunks: list[bytes],
+        name: str,
+        identifier: str | None = None,
+        clamav_scan: bool = True,
+        unpack: bool = False,
+        share_file: bool = False,
+        skip_known: bool = False,
+        skip_noisy: bool = False,
+        apikey=None,
+    ) -> Any:
         """Submit a file to YARAify for scanning. Returns ``{task_id}``."""
 
         opts = {
@@ -1005,23 +1205,36 @@ class AbuseChSvc(s_cell.Cell):
             "skip_known": int(bool(skip_known)),
             "skip_noisy": int(bool(skip_noisy)),
         }
-        resp = await self._query("yaraify", apikey=apikey, notfound=False,
-                                 form={"json_data": json.dumps({k: v for k, v in opts.items() if v is not None})},
-                                 files={"file": (name or "sample", self._join(chunks))})
+        resp = await self._query(
+            "yaraify",
+            apikey=apikey,
+            notfound=False,
+            form={"json_data": json.dumps({k: v for k, v in opts.items() if v is not None})},
+            files={"file": (name or "sample", self._join(chunks))},
+        )
         return _data(resp)
 
     async def yaraifyDeploy(self, text: str, name: str = "rule.yar", apikey=None) -> Any:
         """Deploy a YARA rule to YARAify for live hunting."""
 
-        resp = await self._query("yaraify", apikey=apikey, form={}, notfound=False,
-                                 files={"yara_file": (name, text.encode("utf-8"))})
+        resp = await self._query(
+            "yaraify",
+            apikey=apikey,
+            form={},
+            notfound=False,
+            files={"yara_file": (name, text.encode("utf-8"))},
+        )
         return _data(resp, (resp or {}).get("query_status"))
 
     async def yaraifyRule(self, uuid: str, apikey=None) -> list[dict]:
         """``get_yara_rule`` - Download a YARAhub rule by its UUID, returning the normalized rule(s)."""
 
-        byts, _ = await self._fetch("yaraify", method="post", apikey=apikey,
-                                    json_data={"query": "get_yara_rule", "uuid": uuid})
+        byts, _ = await self._fetch(
+            "yaraify",
+            method="post",
+            apikey=apikey,
+            json_data={"query": "get_yara_rule", "uuid": uuid},
+        )
         if not byts:
             return []
         if byts[:2] == b"PK":
@@ -1036,22 +1249,32 @@ class AbuseChSvc(s_cell.Cell):
 
         if hashType(sha256) != "sha256":
             raise AbuseChApiError("YARAify downloads require a SHA256 hash.")
-        return await self._download("yaraify", method="post", apikey=apikey,
-                                    json_data={"query": "get_file", "sha256_hash": sha256.lower()})
+        return await self._download(
+            "yaraify",
+            method="post",
+            apikey=apikey,
+            json_data={"query": "get_file", "sha256_hash": sha256.lower()},
+        )
 
     async def yaraifyUnpacked(self, sha256: str, apikey=None) -> dict | None:
         """``get_unpacked`` - Download a file YARAify unpacked, returning ``{name, size, sha256, bytes}`` (unzipped)."""
 
         if hashType(sha256) != "sha256":
             raise AbuseChApiError("YARAify downloads require a SHA256 hash.")
-        return await self._download("yaraify", method="post", apikey=apikey,
-                                    json_data={"query": "get_unpacked", "sha256_hash": sha256.lower()})
+        return await self._download(
+            "yaraify",
+            method="post",
+            apikey=apikey,
+            json_data={"query": "get_unpacked", "sha256_hash": sha256.lower()},
+        )
 
     async def yaraifyRulesExport(self, limit: int = 0, apikey=None) -> AsyncIterator[dict]:
         """Yield every TLP:CLEAR YARAhub rule, normalized, from YARAify's rule export."""
 
         buf = io.BytesIO()
-        await self.client.download("yaraify:export", "yarahub/yaraify-rules.zip", buf, apikey=self.getApiKey(apikey))
+        await self.client.download(
+            "yaraify:export", "yarahub/yaraify-rules.zip", buf, apikey=self.getApiKey(apikey)
+        )
         byts = buf.getvalue()
         files = unzip(byts, password=None) if byts[:2] == b"PK" else [("rules.yar", byts)]
         count = 0
@@ -1064,10 +1287,10 @@ class AbuseChSvc(s_cell.Cell):
 
     # ---- Feodo Tracker ----
 
-    async def feodoBlocklist(self, kind: str = "all", limit: int = 0, apikey=None) -> AsyncIterator[dict]:
-        """Yield normalized C2 servers from a Feodo Tracker blocklist (see ``FEODO_BLOCKLISTS``).
-
-        """
+    async def feodoBlocklist(
+        self, kind: str = "all", limit: int = 0, apikey=None
+    ) -> AsyncIterator[dict]:
+        """Yield normalized C2 servers from a Feodo Tracker blocklist (see ``FEODO_BLOCKLISTS``)."""
 
         if kind not in FEODO_BLOCKLISTS:
             raise AbuseChApiError(f"Unknown Feodo Tracker blocklist: {kind}")
@@ -1080,7 +1303,9 @@ class AbuseChSvc(s_cell.Cell):
             try:
                 rows = json.loads(text) if text.strip() else []
             except ValueError as err:
-                raise AbuseChApiError(f"Unable to parse the Feodo Tracker blocklist: {err}") from err
+                raise AbuseChApiError(
+                    f"Unable to parse the Feodo Tracker blocklist: {err}"
+                ) from err
             items = [norm.normFeodo(r) for r in norm.lst(rows)]
 
         count = 0
@@ -1093,7 +1318,9 @@ class AbuseChSvc(s_cell.Cell):
 
     # ---- SSL Blacklist ----
 
-    async def sslblBlocklist(self, kind: str = "certs", limit: int = 0, apikey=None) -> AsyncIterator[dict]:
+    async def sslblBlocklist(
+        self, kind: str = "certs", limit: int = 0, apikey=None
+    ) -> AsyncIterator[dict]:
         """Yield normalized entries from an SSL Blacklist blocklist (see ``SSLBL_BLOCKLISTS``).
 
         ``certs`` yields certs and ``ja3`` yields JA3 fingerprints.
@@ -1121,7 +1348,9 @@ class AbuseChSvc(s_cell.Cell):
     async def fplist(self, apikey=None) -> Any:
         """``get_fplist`` - The abuse.ch false positive list."""
 
-        resp = await self._query("hunting", apikey=apikey, json_data={"query": "get_fplist", "format": "json"})
+        resp = await self._query(
+            "hunting", apikey=apikey, json_data={"query": "get_fplist", "format": "json"}
+        )
         if resp is None:
             return {}
         # The list is the response itself (a dict keyed by entry ID), not wrapped in "data".
@@ -1168,7 +1397,9 @@ class AbuseChSvc(s_cell.Cell):
         for jobid in stale:
             job = self.bulkjobs.pop(jobid)
             shutil.rmtree(job["dirn"], ignore_errors=True)
-            logger.warning("Removed the idle %s %s bulk import job %s", job["plat"], job["kind"], jobid)
+            logger.warning(
+                "Removed the idle %s %s bulk import job %s", job["plat"], job["kind"], jobid
+            )
         return stale
 
     async def _bulkPruneLoop(self) -> None:
@@ -1197,9 +1428,15 @@ class AbuseChSvc(s_cell.Cell):
         dirn = os.path.join(self.bulkdir, jobid)
         os.makedirs(dirn)
         self.bulkjobs[jobid] = {
-            "plat": plat, "kind": kind, "sha256": sha256.lower(), "dirn": dirn,
-            "source": os.path.join(dirn, "source"), "nodes": os.path.join(dirn, "export.nodes"),
-            "size": 0, "started": s_common.now(), "touched": s_common.now(),
+            "plat": plat,
+            "kind": kind,
+            "sha256": sha256.lower(),
+            "dirn": dirn,
+            "source": os.path.join(dirn, "source"),
+            "nodes": os.path.join(dirn, "export.nodes"),
+            "size": 0,
+            "started": s_common.now(),
+            "touched": s_common.now(),
         }
         return jobid
 
@@ -1226,7 +1463,9 @@ class AbuseChSvc(s_cell.Cell):
             for row in norm.parseCsvLines(lines, fields):
                 yield "url", normrow(row)
 
-    async def bulkBuild(self, jobid: str, prefix: str | None = None, batch: int = BULK_BATCH) -> AsyncIterator[dict]:
+    async def bulkBuild(
+        self, jobid: str, prefix: str | None = None, batch: int = BULK_BATCH
+    ) -> AsyncIterator[dict]:
         """Build the nodes for a staged export into the job's .nodes file, yielding progress.
 
         ``prefix`` is the tag prefix (null when tagging is disabled). Yields
@@ -1239,7 +1478,9 @@ class AbuseChSvc(s_cell.Cell):
         # Hashing a multi-GB file in a thread keeps the service responsive.
         sha256 = await asyncio.to_thread(_sha256File, job["source"])
         if sha256 != job["sha256"]:
-            raise AbuseChApiError(f"The staged file's SHA256 {sha256} doesn't match {job['sha256']}.")
+            raise AbuseChApiError(
+                f"The staged file's SHA256 {sha256} doesn't match {job['sha256']}."
+            )
 
         if self._bulkmodel is None:
             self._bulkmodel = bulk.buildModel()
@@ -1261,7 +1502,11 @@ class AbuseChSvc(s_cell.Cell):
                 return len(nodes)
 
             with open(job["source"], "rb") as fd:  # noqa: ASYNC230 - read a record at a time
-                records = (("ioc", ioc) for ioc in iocs) if iocs is not None else self._bulkRecords(job, fd)
+                records = (
+                    (("ioc", ioc) for ioc in iocs)
+                    if iocs is not None
+                    else self._bulkRecords(job, fd)
+                )
                 for rtype, rec in records:
                     rows += 1
                     if rtype == "sample":
@@ -1283,8 +1528,12 @@ class AbuseChSvc(s_cell.Cell):
             count += write(builder.finish())
 
         yield {
-            "done": True, "rows": rows, "skipped": skipped, "nodes": count,
-            "size": os.path.getsize(job["nodes"]), "builder": bulk.BUILDER_VERSION,
+            "done": True,
+            "rows": rows,
+            "skipped": skipped,
+            "nodes": count,
+            "size": os.path.getsize(job["nodes"]),
+            "builder": bulk.BUILDER_VERSION,
             "seconds": round(time.monotonic() - start, 1),
         }
 

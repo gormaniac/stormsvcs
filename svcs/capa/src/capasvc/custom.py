@@ -8,7 +8,6 @@ Official rules win: a custom rule with the same name as an official rule is skip
 (``shadowed``), and the node is left as it is. Invalid custom rules are skipped too.
 """
 
-
 import hashlib
 import os
 import re
@@ -91,15 +90,21 @@ class CustomRules:
             return
         if name in self.records:
             other = self.records[name]["guid"]
-            self.errors.append({
-                "guid": guid,
-                "mesg": f"Another custom rule (meta:rule={other}) has the same name: {name}",
-            })
+            self.errors.append(
+                {
+                    "guid": guid,
+                    "mesg": f"Another custom rule (meta:rule={other}) has the same name: {name}",
+                }
+            )
             return
 
         self.texts[guid] = text
         self.records[name] = ruleRecord(
-            rule.meta, text, guid=guid, type=CUSTOM_RULE_TYPE, custom=True,
+            rule.meta,
+            text,
+            guid=guid,
+            type=CUSTOM_RULE_TYPE,
+            custom=True,
         )
 
     def _save(self) -> None:

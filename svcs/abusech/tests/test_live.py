@@ -22,8 +22,12 @@ from abusechsvc import AbuseChSvc
 LIVE = os.environ.get("SLIB_ABUSECH_LIVE") == "1"
 APIKEY = os.environ.get("ABUSECH_AUTH_KEY")
 
-pytestmark = pytest.mark.skipif(not LIVE, reason="Set SLIB_ABUSECH_LIVE=1 to run live abuse.ch tests.")
-needkey = pytest.mark.skipif(not APIKEY, reason="Set ABUSECH_AUTH_KEY to run live tests of the keyed APIs.")
+pytestmark = pytest.mark.skipif(
+    not LIVE, reason="Set SLIB_ABUSECH_LIVE=1 to run live abuse.ch tests."
+)
+needkey = pytest.mark.skipif(
+    not APIKEY, reason="Set ABUSECH_AUTH_KEY to run live tests of the keyed APIs."
+)
 
 
 @contextlib.asynccontextmanager
@@ -34,7 +38,6 @@ async def liveSvc(test, apikey=None):
 
 
 class TestLiveDatasets(s_tests.SynTest):
-
     async def test_feodo(self):
         async with liveSvc(self) as (core, svc):
             c2s = [c async for c in svc.feodoBlocklist(limit=5)]
@@ -61,12 +64,13 @@ class TestLiveDatasets(s_tests.SynTest):
 
 @needkey
 class TestLiveKeyed(s_tests.SynTest):
-
     async def test_bazaar(self):
         async with liveSvc(self, APIKEY) as (core, svc):
             samples = await svc.normBazaarRecent("100")
             assert samples and samples[0]["sha256"]
-            msgs = await core.stormlist(f"slib.abusech.bazaar.lookup --hash {samples[0]['sha256']} --yield")
+            msgs = await core.stormlist(
+                f"slib.abusech.bazaar.lookup --hash {samples[0]['sha256']} --yield"
+            )
             self.stormHasNoWarnErr(msgs)
             assert len([m for m in msgs if m[0] == "node"]) == 1
             # Broad tags like exe make abuse.ch time out ("Query execution time exceeded threshold").
@@ -87,7 +91,9 @@ class TestLiveKeyed(s_tests.SynTest):
         async with liveSvc(self, APIKEY) as (core, svc):
             urls = await svc.normUrlhausRecent("urls", limit=3)
             assert urls and urls[0]["url"]
-            msgs = await core.stormlist(f"slib.abusech.urlhaus.lookup --url {urls[0]['url']} --yield")
+            msgs = await core.stormlist(
+                f"slib.abusech.urlhaus.lookup --url {urls[0]['url']} --yield"
+            )
             self.stormHasNoWarnErr(msgs)
             msgs = await core.stormlist("slib.abusech.urlhaus.search recent-payloads --limit 3")
             self.stormHasNoWarnErr(msgs)

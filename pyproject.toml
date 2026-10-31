@@ -27,3 +27,5 @@ dev = [
 target-version = "py311"
 # The line limit from .github/copilot-instructions.md.
 line-length = 100
+# exclude some common directories and file types from Ruff checks
+exclude = [".ruff_cache/", ".git/", ".claude/", "**/*.md", "**/*.yml", "**/*.yaml"]
