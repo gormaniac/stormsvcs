@@ -58,7 +58,7 @@ Each service must have the following:
 - `capa`
   - Run Mandiant's capa against files in the Axon, model the matched rules, and tag files with the rule namespaces.
 - `pcap`
-  - Read PCAPs (pcap, pcapng, gzip) from an Axon and model their network flows as `inet:flow` nodes, with certificates, SSH keys, software, and transferred files from tshark.
+  - Analyze PCAPs (pcap, pcapng, gzip): model their network flows as `inet:flow` nodes with DNS, certificates, SSH keys, software, and transferred files (Suricata, tshark), and match them against Snort and Suricata rules from feeds or the graph, with every engine sandboxed.
 
 
 ## Services Wish List/Plan
