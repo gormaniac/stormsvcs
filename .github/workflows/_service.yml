@@ -24,6 +24,11 @@ on:
         required: false
         type: string
         default: docker/prod/Dockerfile
+      apt-packages:
+        description: Space separated apt packages the service's tests need, ex. tshark.
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -45,6 +50,15 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: svcs/${{ inputs.service }}/uv.lock
+
+      - name: Install apt packages
+        if: inputs.apt-packages != ''
+        env:
+          DEBIAN_FRONTEND: noninteractive
+          PACKAGES: ${{ inputs.apt-packages }}
+        run: |
+          sudo apt-get update
+          sudo -E apt-get install -y --no-install-recommends $PACKAGES
 
       - name: Setup Python
         run: uv python install

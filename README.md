@@ -55,6 +55,8 @@ Each service must have the following:
   - Every Shodan API: host lookups, search, scanning, alerts, DNS, streaming, InternetDB, CVEDB, exploits, and trends.
 - `abusech`
   - Every abuse.ch platform: MalwareBazaar, URLhaus, ThreatFox, YARAify, Feodo Tracker, SSL Blacklist, and the false positive list.
+- `pcap`
+  - Read PCAPs (pcap, pcapng, gzip) from an Axon and model their network flows as `inet:flow` nodes, with certificates, SSH keys, software, and transferred files from tshark.
 
 
 ## Services Wish List/Plan

@@ -76,3 +76,9 @@ jobs:
     if: ${{ !failure() && !cancelled() }}
     uses: ./.github/workflows/crtsh.yml
     secrets: inherit
+
+  pcap:
+    needs: base
+    if: ${{ !failure() && !cancelled() }}
+    uses: ./.github/workflows/pcap.yml
+    secrets: inherit
