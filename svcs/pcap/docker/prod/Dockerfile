@@ -175,8 +175,10 @@ ENV PATH="/opt/wireshark/bin:/opt/snort/bin:/opt/suricata/bin:${PATH}" \
 RUN tshark --version | head -1 && suricata -V && { [ ! -x /opt/snort/bin/snort ] || snort -V; }
 
 # The engines run sandboxed as this unprivileged user (see pcapsvc.sandbox), never as root.
+# Suricata installs its config files 0600, the engine's user has to read them.
 RUN useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin \
-        --uid 2000 slib-pcap-engine
+        --uid 2000 slib-pcap-engine && \
+    chmod -R a+rX /opt/suricata/etc /opt/snort /opt/wireshark
 
 # Copy all the service files into a build dir.
 COPY pyproject.toml /opt/stormsvcs/pcap/pyproject.toml

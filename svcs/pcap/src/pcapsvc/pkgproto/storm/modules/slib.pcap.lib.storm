@@ -100,11 +100,11 @@ function ingest(sha256, opts=$lib.null, file=$lib.null, hits=(false)) {
     }
 
     if (not $summary) { stop }
-    $_report($sha256, $summary, $count, $nhits, $file)
+    $_report($sha256, $summary, $count, $nhits, $file, hits=$hits)
 }
 
 // Print (and warn about) a PCAP's summary.
-function _report(sha256, summary, count, nhits, file) {
+function _report(sha256, summary, count, nhits, file, hits=(false)) {
     $lib.print("slib.pcap: Modeled {count} flows ({hits} rule matches) from {packets} packets in file:bytes={file}",
                count=$count, hits=$nhits, packets=$summary.packets, file=$file.repr())
     if $summary.truncated {
@@ -123,6 +123,9 @@ function _report(sha256, summary, count, nhits, file) {
             $lib.print("slib.pcap: No {engine} details for {sha256}: {err}", engine=$name,
                        sha256=$sha256, err=$info.error)
         }
+    }
+    if ($hits and not $summary.engines.snort.rules and not $summary.engines.suricata.rules) {
+        $lib.warn("slib.pcap: No rules are loaded in the service yet, see slib.pcap.sync.")
     }
     if ($summary.keylogs and not $summary.engines.tshark.enabled) {
         $lib.warn("slib.pcap: TLS key logs need tshark, {sha256} wasn't decrypted.",

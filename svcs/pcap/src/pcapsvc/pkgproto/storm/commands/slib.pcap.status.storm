@@ -29,8 +29,12 @@ init {
         }
 
         $rules = $status.rules
-        $util.printBuild("Rules", ({"changed": (false), "rules": $rules.rules, "loaded": $rules.loaded,
-                                    "engines": $rules.engines, "invalid": $rules.invalid}))
+        $engines = ([])
+        for ($engine, $count) in $rules.engines { $engines.append(`{$engine} {$count}`) }
+        if (not $engines) { $engines.append("no engines") }
+        $lib.print("Rules: {loaded} loaded of {count} pushed ({engines}), {invalid} invalid",
+            loaded=$rules.loaded, count=$rules.rules, engines=$lib.str.join(", ", $engines),
+            invalid=$rules.invalid)
         $lib.print("Last pushed: {pushed}, last built: {built}", pushed=$util.when($rules.pushed),
             built=$util.when($rules.built))
         if $rules.building { $lib.print("The service is building its rules now.") }

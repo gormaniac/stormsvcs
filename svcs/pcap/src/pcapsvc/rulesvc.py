@@ -139,8 +139,9 @@ class RuleMixin:
         # The loaded rules of each engine ("snort", "suricata"): (rules file, gid:sid -> info).
         self.active: dict[str, tuple[str, dict[str, dict]]] = self._loadActive()
 
-        if not self.active and self.ruleinfo.get("rules:count"):
-            # Rules were pushed, but the rules files are gone (ex. a new volume), rebuild them.
+        if self.ruleinfo.get("rules:count") and \
+                set(self.ruleinfo.get("rules:active") or ()) - set(self.active):
+            # Rules were pushed, but rules files are gone (ex. a new volume), rebuild them.
             self.schedCoro(self._initBuild())
 
     # ---- State ----
@@ -315,7 +316,9 @@ class RuleMixin:
         failed)."""
 
         hasrules = next(iter(self.corpus.keys()), None) is not None
-        return (not self.active and hasrules) or bool(self.ruleinfo.get("rules:error"))
+        missing = set(self.ruleinfo.get("rules:active") or ()) - set(self.active)
+        return (hasrules and (not self.active or bool(missing))) or \
+            bool(self.ruleinfo.get("rules:error"))
 
     # ---- Pushes ----
 

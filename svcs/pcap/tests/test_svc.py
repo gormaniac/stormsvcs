@@ -4,9 +4,7 @@
 import gzip
 import hashlib
 import pathlib
-import shutil
 import tomllib
-import unittest
 
 import synapse.tests.utils as s_tests
 import yaml
@@ -17,6 +15,7 @@ from pcapsvc import tshark as p_tshark
 from pcapsvc.defs import SVC_NAME
 
 from . import pcapgen as g
+from .engines import needs
 
 SVCDIR = pathlib.Path(__file__).parent.parent
 
@@ -192,8 +191,7 @@ class TestPcapSvc(s_tests.SynTest):
 
 
 DATA = pathlib.Path(__file__).parent / "data"
-# A unittest skip, SynTest's async test wrappers drop pytest marks on methods.
-needsTshark = unittest.skipIf(shutil.which("tshark") is None, "tshark isn't installed")
+needsTshark = needs("tshark")
 
 
 class TestPcapSvcUploads(s_tests.SynTest):
@@ -266,8 +264,7 @@ class TestPcapSvcUploads(s_tests.SynTest):
 
 
 DATA = pathlib.Path(__file__).parent / "data"
-# A unittest skip, SynTest's async test wrappers drop pytest marks on methods.
-needsTshark = unittest.skipIf(shutil.which("tshark") is None, "tshark isn't installed")
+needsTshark = needs("tshark")
 NOENGINES = {"suricata:bin": "/nonexistent/suricata", "snort:bin": "/nonexistent/snort"}
 
 

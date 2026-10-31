@@ -2,6 +2,7 @@ init {
     $rules = $lib.import(slib.pcap.priv.rules)
     $util = $lib.import(slib.pcap.util)
     $push = ([])
+    $forms = ({})
 }
 
 $form = $node.form()
@@ -15,6 +16,7 @@ if ($form = "it:app:snort:rule" or $form = "it:app:suricata:rule") {
         $lib.warn("slib.pcap.rule.enable: it:app:snort:rule={guid} has an unsupported :engine ({engine}), the service runs engines 2 and 3.",
             guid=$node.repr(), engine=$engine)
     } else {
+        $forms.($node.repr()) = $form
         $push.append(($node.repr(), $form, $node.props.text, $engine))
     }
 }
@@ -25,7 +27,8 @@ fini {
         if $summary {
             $util.printBuild("slib.pcap.rule.enable", $summary)
             for ($guid, $mesg) in $summary.errors {
-                $lib.warn("slib.pcap.rule.enable: Rule {guid} couldn't be loaded: {err}", guid=$guid, err=$mesg)
+                $lib.warn("slib.pcap.rule.enable: {form}={guid} couldn't be loaded: {err}",
+                    form=$forms.$guid, guid=$guid, err=$mesg)
             }
         }
     }

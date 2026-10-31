@@ -1,8 +1,6 @@
 init {
     $sync = $lib.import(slib.pcap.priv.sync)
     $util = $lib.import(slib.pcap.util)
-    $priv = $lib.import(slib.pcap.priv.user)
-    $util.warnNoAxon("slib.pcap.sync", $priv.hasAxon())
 
     if (not $cmdopts.no_feeds) {
         $feeds = $util.data($sync.feeds(), "Listing the feeds")

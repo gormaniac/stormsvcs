@@ -358,14 +358,10 @@ function nodes(items) {
 
 // Yield the rule nodes (either form) with these guids (that exist).
 function rules(guids) {
-    for $guid in $guids {
-        it:app:snort:rule=$guid
-        emit $node
-    }
-    for $guid in $guids {
-        it:app:suricata:rule=$guid
-        emit $node
-    }
+    if (not $guids) { stop }
+    // One pipeline, a second for loop would run once per node the first one lifted.
+    it:app:snort:rule*in=$guids it:app:suricata:rule*in=$guids
+    emit $node
 }
 
 // Yield the meta:ruleset nodes with these guids (that exist).

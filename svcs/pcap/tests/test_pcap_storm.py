@@ -4,9 +4,7 @@
 import contextlib
 import hashlib
 import pathlib
-import shutil
 
-import pytest
 import synapse.tests.utils as s_tests
 
 from pcapsvc import PcapSvc
@@ -14,6 +12,7 @@ from pcapsvc import tshark as p_tshark
 from pcapsvc.defs import SVC_GUID
 
 from . import pcapgen as g
+from .engines import needs
 
 
 @contextlib.asynccontextmanager
@@ -222,7 +221,7 @@ class TestPcapStorm(s_tests.SynTest):
 
 
 DATA = pathlib.Path(__file__).parent / "data"
-needsTshark = pytest.mark.skipif(shutil.which("tshark") is None, reason="tshark isn't installed")
+needsTshark = needs("tshark")
 CAPTURES = ("http", "tls", "ssh", "ftp", "smtp", "rdp")
 
 

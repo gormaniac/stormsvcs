@@ -8,8 +8,6 @@ import hashlib
 import io
 import os
 import pathlib
-import shutil
-import stat
 
 import pytest
 
@@ -18,6 +16,7 @@ from pcapsvc import flows as p_flows
 from pcapsvc import tshark as p_tshark
 
 from . import pcapgen as g
+from .engines import needs
 
 DATA = pathlib.Path(__file__).parent / "data"
 
@@ -28,7 +27,7 @@ UPLOAD = hashlib.sha256(b"uploaded file contents\n" * 100).hexdigest()
 ATTACHMENT = hashlib.sha256(b"%PDF-1.4 not really a pdf\n" * 20).hexdigest()
 """The SHA-256 of the email's attachment."""
 
-needsTshark = pytest.mark.skipif(shutil.which("tshark") is None, reason="tshark isn't installed")
+needsTshark = needs("tshark")
 
 
 async def enriched(name: str, tmp_path, files: bool = True) -> tuple[list[dict], dict]:

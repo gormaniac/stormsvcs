@@ -6,18 +6,20 @@ init {
 
     $nodes = ([])
     $push = ([])
+    $forms = ({})
     $dels = ([])
     for $text in $cmdopts.text {
         $r = $util.data($priv.ruleParse($text, engine=$cmdopts.engine), "Parsing the rule")
         if (not $r) { continue }
 
         $rule = $model.rule($r, enabled=(not $cmdopts.disabled))
-        if $r.refs { $model.refs($rule, $r.refs) }
+        if $r.refs { $model.ruleRefs($rule, $r.refs) }
         $nodes.append($rule)
 
         if $cmdopts.disabled {
             $dels.append($rule.repr())
         } else {
+            $forms.($rule.repr()) = $rule.form()
             $push.append(($rule.repr(), $rule.form(), $rule.props.text, $rule.props.engine))
         }
         $lib.print("slib.pcap.rule.add: {form}={guid} (sid {id}, rev {rev}): {msg}",
@@ -29,7 +31,8 @@ init {
         if $summary {
             $util.printBuild("slib.pcap.rule.add", $summary)
             for ($guid, $mesg) in $summary.errors {
-                $lib.warn("slib.pcap.rule.add: Rule {guid} couldn't be loaded: {err}", guid=$guid, err=$mesg)
+                $lib.warn("slib.pcap.rule.add: {form}={guid} couldn't be loaded: {err}",
+                    form=$forms.$guid, guid=$guid, err=$mesg)
             }
         }
     }
