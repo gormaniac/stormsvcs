@@ -68,13 +68,11 @@ commands:
             
             A bit redundant when not using --query because nodes stay in the pipeline otherwise.
 
-    forms:
-      input:
-        - inet:ipv4
-        - inet:ipv6
-      output:
-        - inet:ipv4
-        - inet:ipv6
+    cmdinputs:
+      - form: inet:ipv4
+        help: IPs to query ip-api.com for (ignored when --query is used).
+      - form: inet:ipv6
+        help: IPs to query ip-api.com for (ignored when --query is used).
 
   - name: slib.ipapi.admin.settag
     perms:
