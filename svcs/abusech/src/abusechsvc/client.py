@@ -13,7 +13,7 @@ import asyncio
 import io
 import json
 import zipfile
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Mapping
 from typing import Any
 from urllib.parse import quote
 
@@ -379,11 +379,11 @@ class AbuseChClient:
             return None
         return data
 
-    async def download(self, base: str, path: str, fd: Any, *, apikey: str | None = None,
-                       chunk: int = 1024 * 1024) -> str:
-        """Stream a (large) dataset into a writable binary file object, returning its content type.
+    async def stream(self, base: str, path: str, *, apikey: str | None = None,
+                     chunk: int = 1024 * 1024) -> AsyncIterator[bytes]:
+        """Stream a (large) dataset's raw bytes, as abuse.ch serves them (zipped or not).
 
-        Exports can be hundreds of MB, so the body is written in chunks with only a read timeout
+        Exports can be hundreds of MB, so the body is read in chunks with only a read timeout
         (no total timeout). Error responses (JSON statuses or HTTP errors) are raised.
         """
 
@@ -406,14 +406,19 @@ class AbuseChClient:
                     except ValueError:
                         pass
                     checkStatus(base, resp.status, data, body.decode("utf-8", "replace"), notfound=False)
-                    fd.write(body)
-                    return ctype
+                    yield body
+                    return
                 async for byts in resp.content.iter_chunked(chunk):
-                    fd.write(byts)
-                return ctype
+                    yield byts
         except (TimeoutError, aiohttp.ClientError) as err:
             mesg = str(err).replace(apikey, "<auth-key>") if apikey else str(err)
             raise AbuseChApiError(f"Unable to download from abuse.ch ({base}): {mesg}") from err
+
+    async def download(self, base: str, path: str, fd: Any, *, apikey: str | None = None) -> None:
+        """Stream a (large) dataset into a writable binary file object (see ``stream()``)."""
+
+        async for byts in self.stream(base, path, apikey=apikey):
+            fd.write(byts)
 
     async def fetch(
         self,

@@ -1,12 +1,21 @@
 init {
     $abusech = $lib.import(slib.abusech.lib)
-    if ($cmdopts.kind = "full") {
+    if $cmdopts.bulk {
+        $bulk = $lib.import(slib.abusech.bulk)
+        $bulk.run(threatfox, $cmdopts.kind, reuse=$cmdopts.reuse, repull=$cmdopts.repull)
+    }
+    elif ($cmdopts.reuse or $cmdopts.repull) {
+        $lib.raise(BadArg, "slib.abusech.threatfox.export: --reuse and --repull are only used with --bulk.")
+    }
+    elif ($cmdopts.kind = "full") {
         $lib.warn("slib.abusech.threatfox.export: The full export has every ThreatFox IOC, this may take a while.")
     }
 }
 
 spin |
 
-for $ioc in $abusech.threatfoxExport(kind=$cmdopts.kind, limit=$cmdopts.limit) {
-    if $cmdopts.yield { yield $ioc }
+if (not $cmdopts.bulk) {
+    for $ioc in $abusech.threatfoxExport(kind=$cmdopts.kind, limit=$cmdopts.limit) {
+        if $cmdopts.yield { yield $ioc }
+    }
 }

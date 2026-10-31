@@ -1,0 +1,80 @@
+// Privileged (asroot) wrappers for slib.abusech.bulk: moving export files between abuse.ch, the
+// Axon, and the service, and the slib:abusech:datasets global that records every bulk pull.
+
+init {
+    $svc = $lib.service.get("slib.abusech")
+    $util = $lib.import(slib.abusech.util)
+}
+
+// Unwrap a service generator of {status, mesg, data} bytes chunks, raising on an error.
+function _bytes(genr) {
+    for $retn in $genr {
+        if (not $retn.status) { $lib.raise(AbuseChError, $retn.mesg) }
+        emit $retn.data
+    }
+}
+
+function tagPrefix() {
+    if $lib.globals.get("slib:abusech:tag:enabled") {
+        return($lib.globals.get("slib:abusech:tag:prefix"))
+    }
+    return($lib.null)
+}
+
+// The slib:abusech:datasets global: {"<plat>:<kind>": {"sha256", "size", "time", "file", "nodes"}}.
+function datasets() {
+    $sets = $lib.globals.get("slib:abusech:datasets")
+    if ($sets = $lib.null) { return(({})) }
+    return($sets)
+}
+
+function dataset(plat, kind) {
+    $key = `{$plat}:{$kind}`
+    return($datasets().$key)
+}
+
+function setDataset(plat, kind, info) {
+    $sets = $datasets()
+    $key = `{$plat}:{$kind}`
+    $sets.$key = $info
+    $lib.globals.set("slib:abusech:datasets", $sets)
+    return($info)
+}
+
+function hasFile(sha256) { return($lib.axon.has($sha256)) }
+
+// Pull an export from abuse.ch into the Axon, recording it in slib:abusech:datasets.
+function pull(plat, kind) {
+    ($size, $sha256) = $lib.axon.upload($_bytes($svc.bulkPull($plat, $kind, apikey=$util.userKey())))
+    $info = ({"sha256": $sha256, "size": $size, "time": $lib.time.now(), "file": `{$plat}:{$kind}`,
+              "nodes": $lib.null})
+    return($setDataset($plat, $kind, $info))
+}
+
+// Copy an export file from the Axon into a new service job. Returns the job ID.
+function stage(plat, kind, sha256, size) {
+    $retn = $svc.bulkStart($plat, $kind, $sha256)
+    if (not $retn.status) { $lib.raise(AbuseChError, $retn.mesg) }
+    $jobid = $retn.data
+    $offs = (0)
+    while ($offs < $size) {
+        $byts = $lib.axon.read($sha256, offs=$offs, size=(1048576))
+        if (not $byts) { break }
+        $retn = $svc.bulkStage($jobid, $byts)
+        if (not $retn.status) { $lib.raise(AbuseChError, $retn.mesg) }
+        $offs = ($offs + $lib.len($byts))
+    }
+    return($jobid)
+}
+
+// Build a job's nodes, emitting the service's progress {status, mesg, data}.
+function build(jobid, prefix=$lib.null) {
+    for $retn in $svc.bulkBuild($jobid, prefix=$prefix) { emit $retn }
+}
+
+// Save a job's .nodes file into the Axon. Returns ($size, $sha256).
+function storeNodes(jobid) {
+    return($lib.axon.upload($_bytes($svc.bulkNodes($jobid))))
+}
+
+function done(jobid) { return($svc.bulkDone($jobid)) }

@@ -22,8 +22,11 @@ import asyncio
 import hashlib
 import io
 import json
+import os
 import re
+import shutil
 import tempfile
+import time
 import zipfile
 from collections.abc import AsyncIterator, Iterable, Iterator
 from typing import Any
@@ -32,7 +35,10 @@ from urllib.parse import quote
 import aiohttp
 import synapse.lib.cell as s_cell
 
-from . import norm
+import synapse.common as s_common
+import synapse.lib.msgpack as s_msgpack
+
+from . import bulk, norm
 from .api import AbuseChCellApi
 from .client import AbuseChApiError, AbuseChClient, unzip
 
@@ -114,8 +120,33 @@ BAZAAR_UPDATE_KEYS = (
 )
 """The keys MalwareBazaar's ``update`` query accepts."""
 
+BULK_EXPORTS = {
+    ("bazaar", "recent"): ("bazaar:export", BAZAAR_EXPORTS["recent"]),
+    ("bazaar", "full"): ("bazaar:export", BAZAAR_EXPORTS["full"]),
+    ("urlhaus", "recent"): ("urlhaus:export", URLHAUS_EXPORTS["recent"]),
+    ("urlhaus", "online"): ("urlhaus:export", URLHAUS_EXPORTS["online"]),
+    ("urlhaus", "full"): ("urlhaus:export", URLHAUS_EXPORTS["full"]),
+    ("urlhaus", "payloads"): ("urlhaus:export", URLHAUS_EXPORTS["payloads"]),
+    ("threatfox", "recent"): ("threatfox:export", THREATFOX_EXPORTS["recent"]),
+    ("threatfox", "full"): ("threatfox:export", THREATFOX_EXPORTS["full"]),
+}
+"""The exports that can be bulk imported: (platform, kind) -> (base, file)."""
+
+BULK_BATCH = 1000
+"""How many export records are built before their nodes are written to the job's .nodes file."""
+
 RAW_BASES = ("bazaar", "urlhaus", "urlhaus:submit", "threatfox", "yaraify", "hunting")
 """The APIs that ``rawRequest`` can send JSON/form requests to."""
+
+
+def _sha256File(path: str) -> str:
+    """The SHA256 of a file, read in chunks."""
+
+    sha = hashlib.sha256()
+    with open(path, "rb") as fd:
+        for byts in iter(lambda: fd.read(1024 * 1024), b""):
+            sha.update(byts)
+    return sha.hexdigest()
 
 
 def _seg(valu: Any) -> str:
@@ -196,6 +227,14 @@ class AbuseChSvc(s_cell.Cell):
             rate=self.conf.get("abusech:ratelimit"),
             timeout=self.conf.get("abusech:timeout"),
         )
+
+        # Bulk import jobs stage their files here, in the service's own storage. Any left over
+        # from a previous run (ex. a restart mid-import) are removed.
+        self.bulkdir = os.path.join(self.dirn, "tmp", "bulk")
+        shutil.rmtree(self.bulkdir, ignore_errors=True)
+        os.makedirs(self.bulkdir, exist_ok=True)
+        self.bulkjobs: dict[str, dict] = {}
+        self._bulkmodel = None
 
     # ---- Auth-Key management ----
 
@@ -1070,3 +1109,161 @@ class AbuseChSvc(s_cell.Cell):
             platform = norm.normTag(platform)
             fps = [f for f in fps if f["platform"] == platform]
         return fps
+
+    # ---- Bulk imports ----
+    #
+    # A bulk import moves an export through these steps, driven by the slib.abusech.priv.bulk
+    # Storm module: bulkPull() streams the export into the Cortex's Axon; bulkStart() and
+    # bulkStage() copy it from the Axon into a job dir in the service's storage; bulkBuild()
+    # turns its records into a syn.nodes .nodes file (see abusechsvc.bulk); bulkNodes() streams
+    # that file back into the Axon, where the Cortex ingests it; and bulkDone() removes the job.
+
+    def _bulkExport(self, plat: str, kind: str) -> tuple[str, str]:
+        info = BULK_EXPORTS.get((plat, kind))
+        if info is None:
+            raise AbuseChApiError(f"The {plat} {kind} export can't be bulk imported.")
+        return info
+
+    def _bulkJob(self, jobid: str) -> dict:
+        job = self.bulkjobs.get(jobid)
+        if job is None:
+            raise AbuseChApiError(f"Unknown bulk import job: {jobid}")
+        return job
+
+    async def bulkExports(self) -> list[list[str]]:
+        """The (platform, kind) of every export that can be bulk imported."""
+
+        return [list(k) for k in BULK_EXPORTS]
+
+    async def bulkPull(self, plat: str, kind: str, apikey=None) -> AsyncIterator[bytes]:
+        """Stream an export's raw bytes (as abuse.ch serves them, zipped or not), to save in an Axon."""
+
+        base, path = self._bulkExport(plat, kind)
+        async for byts in self.client.stream(base, path, apikey=self.getApiKey(apikey)):
+            yield byts
+
+    async def bulkStart(self, plat: str, kind: str, sha256: str) -> str:
+        """Start a bulk import job for an export file (by its SHA256 in the Axon). Returns the job ID."""
+
+        self._bulkExport(plat, kind)
+        if norm.lower(sha256) is None or not norm.isHex(sha256, 64):
+            raise AbuseChApiError(f"Not a SHA256 hash: {sha256}")
+        jobid = s_common.guid()
+        dirn = os.path.join(self.bulkdir, jobid)
+        os.makedirs(dirn)
+        self.bulkjobs[jobid] = {
+            "plat": plat, "kind": kind, "sha256": sha256.lower(), "dirn": dirn,
+            "source": os.path.join(dirn, "source"), "nodes": os.path.join(dirn, "export.nodes"),
+            "size": 0, "started": s_common.now(),
+        }
+        return jobid
+
+    async def bulkStage(self, jobid: str, byts: bytes) -> int:
+        """Append a chunk of the export file (read from the Axon) to the job's copy. Returns the size so far."""
+
+        job = self._bulkJob(jobid)
+        with open(job["source"], "ab") as fd:  # noqa: ASYNC230 - a small append per chunk
+            fd.write(byts)
+        job["size"] += len(byts)
+        return job["size"]
+
+    def _bulkRecords(self, job: dict, fd: Any) -> Iterator[tuple[str, dict | None]]:
+        """Yield (record type, normalized record) for each record in a staged export file."""
+
+        plat, kind = job["plat"], job["kind"]
+        path = BULK_EXPORTS[(plat, kind)][1]
+        if plat == "threatfox":
+            byts = fd.read()
+            if byts[:2] == b"PK":
+                byts = b"\n".join(b for _, b in unzip(byts, password=None))
+            try:
+                data = json.loads(byts) if byts.strip() else {}
+            except ValueError as err:
+                raise AbuseChApiError(f"Unable to parse the ThreatFox {kind} export: {err}") from err
+            for ioc in norm.normThreatFoxExport(data):
+                yield "ioc", ioc
+            return
+
+        lines = self._fileLines(fd, BULK_EXPORTS[(plat, kind)][0], path)
+        if plat == "bazaar":
+            for row in norm.parseCsvLines(lines, BAZAAR_CSV):
+                yield "sample", norm.normSample(row)
+        elif kind == "payloads":
+            for row in norm.parseCsvLines(lines, norm.URLHAUS_PAYLOAD_CSV):
+                yield "url", norm.normUrlhausPayloadRow(row)
+        else:
+            for row in norm.parseCsvLines(lines, URLHAUS_CSV):
+                yield "url", norm.normUrl(row)
+
+    async def bulkBuild(self, jobid: str, prefix: str | None = None, batch: int = BULK_BATCH) -> AsyncIterator[dict]:
+        """Build the nodes for a staged export into the job's .nodes file, yielding progress.
+
+        ``prefix`` is the tag prefix (null when tagging is disabled). Yields
+        ``{"rows", "nodes"}`` after each batch, then ``{"done": True, "rows", "skipped", "nodes",
+        "sha256", "size", "builder", "seconds"}``.
+        """
+
+        job = self._bulkJob(jobid)
+
+        # Hashing a multi-GB file in a thread keeps the service responsive.
+        sha256 = await asyncio.to_thread(_sha256File, job["source"])
+        if sha256 != job["sha256"]:
+            raise AbuseChApiError(f"The staged file's SHA256 {sha256} doesn't match {job['sha256']}.")
+
+        if self._bulkmodel is None:
+            self._bulkmodel = bulk.buildModel()
+        builder = bulk.NodeBuilder(self._bulkmodel, prefix)
+
+        start = time.monotonic()
+        rows = skipped = count = 0
+        plat = job["plat"]
+
+        with open(job["nodes"], "wb") as out:  # noqa: ASYNC230 - written a batch at a time
+
+            def write(nodes):
+                out.writelines(s_msgpack.en(nodedef) for nodedef in nodes)
+                return len(nodes)
+
+            with open(job["source"], "rb") as fd:  # noqa: ASYNC230 - read a record at a time
+                for rtype, rec in self._bulkRecords(job, fd):
+                    rows += 1
+                    if rtype == "sample":
+                        ndef = builder.sample(rec, plat)
+                    elif rtype == "url":
+                        ndef = builder.url(rec, plat)
+                    else:
+                        ndef = builder.ioc(rec, plat)
+                    if ndef is None:
+                        skipped += 1
+
+                    if rows % batch == 0:
+                        count += write(builder.flush())
+                        yield {"rows": rows, "nodes": count}
+                    if rows % 100 == 0:
+                        await asyncio.sleep(0)
+
+            count += write(builder.finish())
+
+        yield {
+            "done": True, "rows": rows, "skipped": skipped, "nodes": count,
+            "sha256": await asyncio.to_thread(_sha256File, job["nodes"]),
+            "size": os.path.getsize(job["nodes"]), "builder": bulk.BUILDER_VERSION,
+            "seconds": round(time.monotonic() - start, 1),
+        }
+
+    async def bulkNodes(self, jobid: str, chunk: int = 1024 * 1024) -> AsyncIterator[bytes]:
+        """Stream a job's .nodes file, to save in an Axon."""
+
+        job = self._bulkJob(jobid)
+        with open(job["nodes"], "rb") as fd:  # noqa: ASYNC230 - read a chunk at a time
+            for byts in iter(lambda: fd.read(chunk), b""):
+                yield byts
+                await asyncio.sleep(0)
+
+    async def bulkDone(self, jobid: str) -> bool:
+        """Remove a job and its files."""
+
+        job = self.bulkjobs.pop(jobid, None)
+        if job is not None:
+            shutil.rmtree(job["dirn"], ignore_errors=True)
+        return True

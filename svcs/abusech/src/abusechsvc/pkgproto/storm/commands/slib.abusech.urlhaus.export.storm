@@ -1,9 +1,18 @@
 init {
     $abusech = $lib.import(slib.abusech.lib)
+    if $cmdopts.bulk {
+        $bulk = $lib.import(slib.abusech.bulk)
+        $bulk.run(urlhaus, $cmdopts.kind, reuse=$cmdopts.reuse, repull=$cmdopts.repull)
+    }
+    elif ($cmdopts.reuse or $cmdopts.repull) {
+        $lib.raise(BadArg, "slib.abusech.urlhaus.export: --reuse and --repull are only used with --bulk.")
+    }
 }
 
 spin |
 
-for $url in $abusech.urlhausExport(kind=$cmdopts.kind, limit=$cmdopts.limit) {
-    if $cmdopts.yield { yield $url }
+if (not $cmdopts.bulk) {
+    for $url in $abusech.urlhausExport(kind=$cmdopts.kind, limit=$cmdopts.limit) {
+        if $cmdopts.yield { yield $url }
+    }
 }

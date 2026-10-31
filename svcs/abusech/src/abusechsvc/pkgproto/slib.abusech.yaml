@@ -27,6 +27,9 @@ perms:
   - perm: [ slib, abusech, submit ]
     gate: cortex
     desc: Send data to abuse.ch (samples, URLs, IOCs, comments, scans, and YARA rules).
+  - perm: [ slib, abusech, bulk ]
+    gate: cortex
+    desc: Bulk import abuse.ch exports (the --bulk option of the export commands), and pull exports into the Axon.
   - perm: [ slib, abusech, admin ]
     gate: cortex
     desc: Manage the service-wide Auth-Key, tag settings, and raw API requests.
@@ -47,6 +50,9 @@ modules:
   - name: slib.abusech.priv.admin
     asroot:perms:
       - [ slib, abusech, admin ]
+  - name: slib.abusech.priv.bulk
+    asroot:perms:
+      - [ slib, abusech, bulk ]
 
   # Unprivileged modules - node edits here run as the calling user.
   - name: slib.abusech.lib
@@ -55,6 +61,9 @@ modules:
   - name: slib.abusech.model
   - name: slib.abusech.util
   - name: slib.abusech.download
+  - name: slib.abusech.bulk
+    perms:
+      - [ slib, abusech, bulk ]
 
 commands:
 
@@ -329,7 +338,28 @@ commands:
         full   - Every sample (a ~230 MB download, streamed)
         yara   - The YARA rule statistics: every rule MalwareBazaar matches samples with (it:app:yara:rule)
 
+      --bulk imports the whole export at once instead: the export is pulled into the Axon, the
+      service builds every node (the same nodes this command models) into a .nodes file, and the
+      file is ingested with $lib.feed.fromAxon(). It's much faster for large exports, but can still
+      take hours for the full ones, so run it in the background:
+
+        background { slib.abusech.bazaar.export full --bulk }
+
+      Each pull is recorded in the slib:abusech:datasets global (its SHA256, size, and time). Later
+      bulk imports of a full export reuse that file, so a service update can rebuild the same data
+      without pulling it again; use --repull to pull a new one. Recent exports (recent, online) can
+      only be pulled once an hour: use --reuse to import the last pull again, or --repull to pull a
+      new one anyway.
+
+      --bulk requires the slib.abusech.bulk permission and permission to add any node (node) in the
+      layer. Unlike the normal import, it doesn't remove old status tags, and it replaces (instead
+      of adding to) file:bytes:ssdeeps and risk:tool:software:soft:names on existing nodes.
+
       Examples:
+
+        // Bulk import the recent export, then rerun it on the same file after a service update.
+        slib.abusech.bazaar.export recent --bulk
+        slib.abusech.bazaar.export recent --bulk --reuse
 
         slib.abusech.bazaar.export
 
@@ -345,6 +375,18 @@ commands:
         - type: int
           default: 0
           help: The max number of samples to model (0 for all of them).
+      - - --bulk
+        - default: false
+          action: store_true
+          help: Bulk import the whole export (see above). Run it in the background.
+      - - --reuse
+        - default: false
+          action: store_true
+          help: With --bulk, import the last pull of the export again instead of pulling a new one.
+      - - --repull
+        - default: false
+          action: store_true
+          help: With --bulk, pull a new copy of the export even if one was pulled recently.
       - - --yield
         - default: false
           action: store_true
@@ -517,12 +559,33 @@ commands:
       Modeling runs at roughly 50 rows/second, so use --limit with the full and payloads exports
       (millions of rows).
 
-        recent - URLs added in the last 30 days
-        online - URLs that are currently online
+        recent   - URLs added in the last 30 days
+        online   - URLs that are currently online
         full     - URLs that are online or were added in the last 90 days (large)
         payloads - Every payload URLhaus collected, with the URL that served it (a ~800 MB download, streamed)
 
+      --bulk imports the whole export at once instead: the export is pulled into the Axon, the
+      service builds every node (the same nodes this command models) into a .nodes file, and the
+      file is ingested with $lib.feed.fromAxon(). It's much faster for large exports, but can still
+      take hours for the full ones, so run it in the background:
+
+        background { slib.abusech.urlhaus.export full --bulk }
+
+      Each pull is recorded in the slib:abusech:datasets global (its SHA256, size, and time). Later
+      bulk imports of a full export reuse that file, so a service update can rebuild the same data
+      without pulling it again; use --repull to pull a new one. Recent exports (recent, online) can
+      only be pulled once an hour: use --reuse to import the last pull again, or --repull to pull a
+      new one anyway.
+
+      --bulk requires the slib.abusech.bulk permission and permission to add any node (node) in the
+      layer. Unlike the normal import, it doesn't remove old status tags, and it replaces (instead
+      of adding to) file:bytes:ssdeeps and risk:tool:software:soft:names on existing nodes.
+
       Examples:
+
+        // Bulk import the recent export, then rerun it on the same file after a service update.
+        slib.abusech.urlhaus.export recent --bulk
+        slib.abusech.urlhaus.export recent --bulk --reuse
 
         slib.abusech.urlhaus.export online
     cmdargs:
@@ -536,6 +599,18 @@ commands:
         - type: int
           default: 0
           help: The max number of URLs to model (0 for all of them).
+      - - --bulk
+        - default: false
+          action: store_true
+          help: Bulk import the whole export (see above). Run it in the background.
+      - - --reuse
+        - default: false
+          action: store_true
+          help: With --bulk, import the last pull of the export again instead of pulling a new one.
+      - - --repull
+        - default: false
+          action: store_true
+          help: With --bulk, pull a new copy of the export even if one was pulled recently.
       - - --yield
         - default: false
           action: store_true
@@ -756,7 +831,28 @@ commands:
         recent - IOCs added in the last 48 hours
         full   - Every IOC (large)
 
+      --bulk imports the whole export at once instead: the export is pulled into the Axon, the
+      service builds every node (the same nodes this command models) into a .nodes file, and the
+      file is ingested with $lib.feed.fromAxon(). It's much faster for large exports, but can still
+      take hours for the full ones, so run it in the background:
+
+        background { slib.abusech.threatfox.export full --bulk }
+
+      Each pull is recorded in the slib:abusech:datasets global (its SHA256, size, and time). Later
+      bulk imports of a full export reuse that file, so a service update can rebuild the same data
+      without pulling it again; use --repull to pull a new one. Recent exports (recent, online) can
+      only be pulled once an hour: use --reuse to import the last pull again, or --repull to pull a
+      new one anyway.
+
+      --bulk requires the slib.abusech.bulk permission and permission to add any node (node) in the
+      layer. Unlike the normal import, it doesn't remove old status tags, and it replaces (instead
+      of adding to) file:bytes:ssdeeps and risk:tool:software:soft:names on existing nodes.
+
       Examples:
+
+        // Bulk import the recent export, then rerun it on the same file after a service update.
+        slib.abusech.threatfox.export recent --bulk
+        slib.abusech.threatfox.export recent --bulk --reuse
 
         slib.abusech.threatfox.export
     cmdargs:
@@ -770,6 +866,18 @@ commands:
         - type: int
           default: 0
           help: The max number of IOCs to model (0 for all of them).
+      - - --bulk
+        - default: false
+          action: store_true
+          help: Bulk import the whole export (see above). Run it in the background.
+      - - --reuse
+        - default: false
+          action: store_true
+          help: With --bulk, import the last pull of the export again instead of pulling a new one.
+      - - --repull
+        - default: false
+          action: store_true
+          help: With --bulk, pull a new copy of the export even if one was pulled recently.
       - - --yield
         - default: false
           action: store_true

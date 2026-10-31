@@ -75,6 +75,14 @@ class TestLiveKeyed(s_tests.SynTest):
             msgs = await core.stormlist("slib.abusech.bazaar.cscb")
             self.stormHasNoWarnErr(msgs)
 
+    async def test_bulk(self):
+        # The smallest export (~400 KB), built and ingested in bulk.
+        async with liveSvc(self, APIKEY) as (core, svc):
+            msgs = await core.stormlist("slib.abusech.bazaar.export recent --bulk")
+            self.stormIsInPrint("Ingested", msgs)
+            assert not [m for m in msgs if m[0] == "err"]
+            assert await core.count("file:bytes") > 0
+
     async def test_urlhaus(self):
         async with liveSvc(self, APIKEY) as (core, svc):
             urls = await svc.normUrlhausRecent("urls", limit=3)

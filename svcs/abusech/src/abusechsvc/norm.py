@@ -62,6 +62,18 @@ def ts(valu: Any) -> str | None:
     return valu or None
 
 
+def timePair(first: str | None, last: str | None) -> tuple[str | None, str | None]:
+    """Order a (first, last) pair of ``ts()`` times.
+
+    abuse.ch sometimes reports a last seen before the first seen. Left as is, the pair is an
+    invalid interval and Storm drops every tag set with it.
+    """
+
+    if first and last and last < first:
+        return last, first
+    return first, last
+
+
 def lst(valu: Any) -> list:
     """Make a value a list, dropping nulls and empty strings."""
 
@@ -713,8 +725,10 @@ def normSample(data: dict) -> dict | None:
         retn["names"] = [name.strip()]
     retn["mime"] = lower(data.get("file_type_mime") or data.get("mime_type"))
     retn["type"] = lower(data.get("file_type") or data.get("file_type_guess"))
-    retn["first_seen"] = ts(data.get("first_seen") or data.get("firstseen") or data.get("first_seen_utc"))
-    retn["last_seen"] = ts(data.get("last_seen") or data.get("lastseen"))
+    retn["first_seen"], retn["last_seen"] = timePair(
+        ts(data.get("first_seen") or data.get("firstseen") or data.get("first_seen_utc")),
+        ts(data.get("last_seen") or data.get("lastseen")),
+    )
 
     signature = data.get("signature")
     if isinstance(signature, str) and signature.strip() and signature.lower() not in ("none", "n/a"):
@@ -966,8 +980,8 @@ def normUrl(data: dict) -> dict | None:
         "url": data["url"].strip(),
         "status": status,
         "host": normHost(host) if host else None,
-        "added": ts(data.get("date_added") or data.get("dateadded")),
-        "last_online": ts(data.get("last_online")),
+        "added": timePair(ts(data.get("date_added") or data.get("dateadded")), ts(data.get("last_online")))[0],
+        "last_online": timePair(ts(data.get("date_added") or data.get("dateadded")), ts(data.get("last_online")))[1],
         "threat": normTag(data.get("threat")),
         "tags": normTags(data.get("tags")),
         "reporter": data.get("reporter") if data.get("reporter") not in (None, "anonymous") else None,
@@ -1084,6 +1098,9 @@ def normIoc(data: dict) -> dict | None:
                 sample["links"].append({"context": "malware_bazaar", "url": link})
             samples.append(sample)
 
+    seen = timePair(ts(data.get("first_seen") or data.get("first_seen_utc")),
+                    ts(data.get("last_seen") or data.get("last_seen_utc")))
+
     family = data.get("malware_printable") or data.get("fk_malware")
     # ThreatFox uses placeholders like "Unknown malware" and "Unknown Stealer" for unattributed IOCs.
     if not isinstance(family, str) or not family.strip() or re.match(r"(?i)^(unknown\b|none$)", family.strip()):
@@ -1104,8 +1121,8 @@ def normIoc(data: dict) -> dict | None:
         "aliases": aliases,
         "malpedia": data.get("malware_malpedia"),
         "confidence": toInt(data.get("confidence_level")),
-        "first_seen": ts(data.get("first_seen") or data.get("first_seen_utc")),
-        "last_seen": ts(data.get("last_seen") or data.get("last_seen_utc")),
+        "first_seen": seen[0],
+        "last_seen": seen[1],
         "reference": data.get("reference") if isinstance(data.get("reference"), str) and "://" in data.get("reference", "") else None,
         "reporter": data.get("reporter") if data.get("reporter") not in (None, "anonymous") and not toBool(data.get("anonymous")) else None,
         "tags": normTags(data.get("tags")),

@@ -16,6 +16,8 @@ from .defs import SVC_EVTS, PKGDEFS, SVC_NAME, SVC_VER
 # See AbuseChSvc for each method's arguments and the abuse.ch endpoint it calls.
 RETN_METHS = (
     "rawRequest", "maxSize",
+    # Bulk imports
+    "bulkExports", "bulkStart", "bulkStage", "bulkDone",
     # MalwareBazaar
     "bazaarQuery", "bazaarInfo", "normBazaarInfo", "bazaarSearch", "normBazaarSearch",
     "bazaarRecent", "normBazaarRecent", "bazaarDetections", "normBazaarDetections", "bazaarCscb", "normBazaarCscb", "bazaarFile",
@@ -40,6 +42,7 @@ RETN_METHS = (
 
 # AbuseChSvc async generators that are exposed over Telepath, each item wrapped in a TelepathRetn.
 GENR_METHS = (
+    "bulkPull", "bulkBuild", "bulkNodes",
     "bazaarExport", "urlhausExport", "threatfoxExport", "yaraifyRulesExport",
     "feodoBlocklist", "sslblBlocklist",
 )

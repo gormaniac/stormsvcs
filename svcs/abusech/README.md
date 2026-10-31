@@ -68,6 +68,7 @@ sent when available). The MalwareBazaar, URLhaus, and ThreatFox exports take the
 |---|---|
 | `slib.abusech.user` | Lookups, searches, exports, blocklists, and setting your own key. |
 | `slib.abusech.download` | Downloading malware samples into the Axon. |
+| `slib.abusech.bulk` | Bulk importing exports (`--bulk`). Ingesting also needs the `node` permission on the layer. |
 | `slib.abusech.submit` | Sending data to abuse.ch: samples, URLs, IOCs, comments, YARAify scans, and YARA rules. |
 | `slib.abusech.admin` | The service-wide key, tag settings, and raw API requests. |
 
@@ -86,17 +87,17 @@ permission. Users still need the normal node permissions for the nodes the comma
 | `slib.abusech.bazaar.download` | Download samples into the Axon (unzipped). |
 | `slib.abusech.bazaar.submit` | Submit `file:bytes` from the Axon, with tags, delivery method, links, typed references (`--ref any_run=<url>`), and context. |
 | `slib.abusech.bazaar.update` | Comment on samples, or update samples you submitted (`--add add_tag=x`, `--add urlhaus=<url>`, ...). |
-| `slib.abusech.bazaar.export` | Model the `recent` or `full` CSV export, or the `yara` rule statistics. |
+| `slib.abusech.bazaar.export` | Model the `recent` or `full` CSV export, or the `yara` rule statistics. `--bulk` imports the whole export at once (see [Bulk imports](#bulk-imports)). |
 | `slib.abusech.urlhaus.lookup` | Look up URLs (or URL IDs), hosts (FQDNs and IPv4, URLhaus doesn't support IPv6), and payloads. |
 | `slib.abusech.urlhaus.search` | URLs by `tag` or `signature`, and `recent-urls`/`recent-payloads`. |
 | `slib.abusech.urlhaus.download` | Download payloads into the Axon (unzipped). |
 | `slib.abusech.urlhaus.submit` | Report malware URLs. |
-| `slib.abusech.urlhaus.export` | Model the `recent`, `online`, or `full` CSV export, or every collected `payloads` URL. |
+| `slib.abusech.urlhaus.export` | Model the `recent`, `online`, or `full` CSV export, or every collected `payloads` URL. `--bulk` imports the whole export at once. |
 | `slib.abusech.threatfox.lookup` | Look up IOCs by value, ID, IP (its `ip:port` C2s), or sample hash (the hash's own IOC and the IOCs associated with the sample). |
 | `slib.abusech.threatfox.search` | IOCs by `recent` (days), `tag`, or `malware`. Returns every match by default. |
 | `slib.abusech.threatfox.ref` | Print the IOC/threat `types`, every `tags` and `malware` family, or find a malware `label`. |
 | `slib.abusech.threatfox.submit` | Share IOCs (`inet:url`, `inet:fqdn`, `inet:server`, `file:bytes`, or `--ioc`). |
-| `slib.abusech.threatfox.export` | Model the `recent` or `full` JSON export. |
+| `slib.abusech.threatfox.export` | Model the `recent` or `full` JSON export. `--bulk` imports the whole export at once. |
 | `slib.abusech.yaraify.lookup` | Look up files by hash, or scan task results by `--task`. |
 | `slib.abusech.yaraify.search` | Files by `yara`, `clamav`, `imphash`, `gimphash`, `dhash`, `tlsh`, or `telfhash`. |
 | `slib.abusech.yaraify.scan` | Scan files from the Axon (or rescan known files by hash), `--wait` models the results. |
@@ -142,6 +143,48 @@ $file = $abusech.bazaarLookup(<sha256>)
 $urls = $abusech.urlhausSearch(tag, Mozi)
 $iocs = $abusech.threatfox(malware, win.cobalt_strike, limit=(500))
 ```
+
+## Bulk imports
+
+Modeling an export row by row in Storm runs at about 50 rows/second, so the large exports
+(MalwareBazaar `full`, URLhaus `full` and `payloads`, millions of rows) would take days. The
+export commands' `--bulk` option imports a whole export at once instead:
+
+1. The export is pulled from abuse.ch into the Cortex's Axon (the service streams it, so the
+   Auth-Key never reaches Storm).
+2. The file is copied from the Axon into a job directory in the service's storage
+   (`<cell dir>/tmp/bulk/`), and its SHA256 is checked.
+3. The service builds every node in Python (`abusechsvc.bulk`), the same nodes the Storm model
+   creates, normalized with a copy of the Synapse data model so values and guids match. Nodes are
+   written in batches to a `syn.nodes` msgpack `.nodes` file.
+4. The `.nodes` file is saved into the Axon and ingested with `$lib.feed.fromAxon()`, as the
+   calling user.
+
+Bulk imports can take hours for the full exports, so run them in the background:
+
+```
+background { slib.abusech.urlhaus.export full --bulk }
+```
+
+Every pull is recorded in the `slib:abusech:datasets` global, keyed `<platform>:<export>`
+(ex. `urlhaus:full`): the export file's `sha256`, `size`, and pull `time`, and its `nodes` file
+(`sha256`, `size`, node `count`, `rows`, `skipped`, `builder` version, and `time`).
+
+- **Full exports** (`full`, `payloads`) reuse their last pull by default, so a service update can
+  rebuild the same data without pulling it again. `--repull` pulls a new one.
+- **Recent exports** (`recent`, `online`) can only be pulled once an hour, as abuse.ch asks.
+  Within the hour, the command warns and stops: `--reuse` imports the last pull again, and
+  `--repull` pulls a new one anyway.
+
+Measured on the live recent exports: URLhaus `recent` (122,103 rows) built in 64s and ingested in
+369s (~280 rows/s overall, vs ~51 rows/s modeling in Storm), ThreatFox `recent` (9,027 IOCs) in
+32s, and MalwareBazaar `recent` (881 samples) in 5s. The bulk path's nodes were compared with the
+Storm path's on that same live data and matched exactly (`tests/test_bulk.py` keeps checking it).
+
+Since a bulk import can only add and set, it differs from the Storm model on nodes that already
+exist: old `status.*` tags aren't removed, `file:bytes:ssdeeps` and
+`risk:tool:software:soft:names` are replaced instead of added to, `file:bytes:name` is replaced,
+and files only known by an MD5/SHA1 get their own `guid:` node instead of reusing an existing one.
 
 ## Data model
 
