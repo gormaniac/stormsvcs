@@ -1,0 +1,87 @@
+// Unprivileged helpers shared by the slib.hatching commands.
+
+// Warn about a failed service call. Returns true if the call failed.
+function failed(retn, what) {
+    if $retn.status { return((false)) }
+    $lib.warn("slib.hatching: {what} failed: {err}", what=$what, err=$retn.mesg)
+    return((true))
+}
+
+// The type of a hex hash by its length (md5, sha1, sha256, sha512), or null.
+function hashType(valu) {
+    $valu = $lib.cast(str, $valu)
+    if (not $lib.regex.matches("^[0-9a-fA-F]+$", $valu)) { return($lib.null) }
+    switch $lib.len($valu) {
+        "32": { return(md5) }
+        "40": { return(sha1) }
+        "64": { return(sha256) }
+        "128": { return(sha512) }
+    }
+    return($lib.null)
+}
+
+// The best hash to look a file:bytes/hash:* node up by, preferring SHA256. Returns null if there isn't one.
+function nodeHash(node) {
+    switch $node.form() {
+        "file:bytes": {
+            if $node.props.sha256 { return($node.props.sha256) }
+            if $node.props.sha1 { return($node.props.sha1) }
+            if $node.props.md5 { return($node.props.md5) }
+            if $node.props.sha512 { return($node.props.sha512) }
+            return($lib.null)
+        }
+        "hash:md5": { return($node.repr()) }
+        "hash:sha1": { return($node.repr()) }
+        "hash:sha256": { return($node.repr()) }
+        "hash:sha512": { return($node.repr()) }
+    }
+    return($lib.null)
+}
+
+// Print a table. columns is a list of (name, width) and rows is a list of lists.
+function table(columns, rows) {
+    $cols = ([])
+    for ($name, $width) in $columns {
+        // Widths in tuple literals are strings.
+        $cols.append(({"name": $name, "width": $lib.cast(int, $width)}))
+    }
+    $printer = $lib.tabular.printer(({"columns": $cols}))
+    $lib.print($printer.header())
+    for $row in $rows {
+        $lib.print($printer.row($row))
+    }
+}
+
+// Print any value as indented JSON.
+function printJson(valu) {
+    $lib.print($lib.json.save($valu, indent=(true)))
+}
+
+// Print a list of samples (GET /samples, search, and events results).
+function printSamples(samples) {
+    $rows = ([])
+    for $s in $samples {
+        if $s.url { $target = $s.url } else { $target = $s.filename }
+        $rows.append(($s.id, $s.status, $s.kind, $target, $s.submitted))
+    }
+    $table((("id", 20), ("status", 16), ("kind", 6), ("target", 48), ("submitted", 22)), $rows)
+}
+
+// The names of a sample's behavioral tasks, from its metadata.
+function behavioralTasks(sample) {
+    $ret = ([])
+    for $task in $sample.tasks {
+        $name = $task.id
+        if $name.startswith(`{$sample.id}-`) { $name = $name.slice($lib.len(`{$sample.id}-`)) }
+        if $name.startswith("behavioral") { $ret.append($name) }
+    }
+    return($ret)
+}
+
+// The last part of a file path (Windows or POSIX).
+function basename(path) {
+    if ($path = $lib.null) { return($lib.null) }
+    $path = $lib.cast(str, $path).replace("\\", "/")
+    $parts = $path.split("/")
+    return($parts.index(-1))
+}

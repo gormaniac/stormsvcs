@@ -1,0 +1,12 @@
+init {
+    $padmin = $lib.import(slib.hatching.priv.admin)
+    $util = $lib.import(slib.hatching.util)
+
+    $perms = $lib.null
+    if $cmdopts.permission { $perms = $cmdopts.permission }
+    $retn = $padmin.addUser($cmdopts.username, $cmdopts.email, password=$cmdopts.password, first=$cmdopts.first,
+                            last=$cmdopts.last, permissions=$perms)
+    if (not $util.failed($retn, `Adding user {$cmdopts.username}`)) {
+        $lib.print("slib.hatching.admin.user.add: Added user {name} ({id}).", name=$retn.data.username, id=$retn.data.id)
+    }
+}

@@ -1,0 +1,292 @@
+// Model normalized Hatching Triage data (see hatchingsvc.norm) in Synapse.
+//
+// Node edits here run as the calling user. Observables are linked to the Hatching Triage
+// meta:source with a -(seen)> edge, and Triage's tags and families are applied as
+// "<prefix>.<tag>" tags with the analysis time as the interval (no tags when prefix is null).
+//
+// Guids are derived from the sample ID (and the task and Triage's IDs), so modeling a
+// sample again updates the same nodes.
+//
+// NOTE: A for loop that runs while a node is in a function's pipeline sends the node
+// downstream after its first iteration, reaching return() and ending the function early.
+// So functions here only yield a node when they don't loop, and loops call helpers that
+// yield/edit the node in their own runtime instead.
+
+init {
+    $source = "76172c35a9074f998791a9d2b69ff6d8"
+    $scanner = "hatching triage"
+}
+
+// ---- Generic helpers, each returns a single node (or null) ----
+
+// Link the node to the Hatching Triage meta:source.
+function seen(n) {
+    if ($n = $lib.null) { return($n) }
+    yield $n
+    [ <(seen)+ { meta:source=$source } ]
+    return($n)
+}
+
+// Tag a node with "<prefix>.<name>", for the interval ival (a [min, max] list or null).
+function tag(n, prefix, name, ival=$lib.null) {
+    if ($n = $lib.null or $prefix = $lib.null or not $name) { return($n) }
+    $tagname = `{$prefix}.{$name}`
+    yield $n
+    if $ival { [ +?#$tagname=$ival ] }
+    else { [ +?#$tagname ] }
+    return($n)
+}
+
+// Link two nodes with a light edge, n1 -(verb)> n2.
+function edge(n1, verb, n2) {
+    if ($n1 = $lib.null or $n2 = $lib.null) { return($n1) }
+    yield $n1
+    [ +($verb)> { yield $n2 } ]
+    return($n1)
+}
+
+// ---- Observables ----
+
+function ipNode(ip, ver=$lib.null) {
+    if ($ip = $lib.null) { return($lib.null) }
+    if ($ver = $lib.null) {
+        if ($lib.cast(str, $ip) ~= ":") { $ver = ipv6 } else { $ver = ipv4 }
+    }
+    if ($ver = "ipv6") { [ inet:ipv6?=$ip ] }
+    else { [ inet:ipv4?=$ip ] }
+    return($seen($node))
+}
+
+// An IP or FQDN node for a host.
+function hostNode(host) {
+    if ($host = $lib.null) { return($lib.null) }
+    ($ok, $valu) = $lib.trycast(inet:ipv4, $host)
+    if $ok { return($ipNode($host, ver=ipv4)) }
+    if ($lib.cast(str, $host) ~= ":") { return($ipNode($host, ver=ipv6)) }
+    [ inet:fqdn?=$host ]
+    return($seen($node))
+}
+
+function urlNode(url) {
+    if ($url = $lib.null) { return($lib.null) }
+    [ inet:url?=$url ]
+    return($seen($node))
+}
+
+function emailNode(email) {
+    if ($email = $lib.null) { return($lib.null) }
+    [ inet:email?=$email ]
+    return($seen($node))
+}
+
+function mutexNode(mutex) {
+    if ($mutex = $lib.null) { return($lib.null) }
+    [ it:dev:mutex?=$mutex ]
+    return($seen($node))
+}
+
+function techniqueNode(ttp) {
+    [ it:mitre:attack:technique?=$ttp ]
+    return($node)
+}
+
+// A file:bytes node from normalized hashes ({sha256, md5, sha1, sha512, size, name, mime}).
+function fileNode(file) {
+    if ($file = $lib.null or $file.sha256 = $lib.null) { return($lib.null) }
+    [ file:bytes?=`sha256:{$file.sha256}`
+        :sha256?=$file.sha256 :md5?=$file.md5 :sha1?=$file.sha1 :sha512?=$file.sha512
+        :size?=$file.size :name?=$file.name :mime?=$file.mime ]
+    return($seen($node))
+}
+
+// A file:bytes node for a file saved in the Axon.
+function axonFile(sha256, size=$lib.null, name=$lib.null) {
+    return($fileNode(({"sha256": $sha256, "size": $size, "name": $name})))
+}
+
+// ---- The sample ----
+
+// Model a normalized sample (slib.hatching.priv.user.normSample). Returns the sample's node
+// (file:bytes, or inet:url for URL analyses), or null if it has nothing to model it by.
+function sample(data, prefix=$lib.null) {
+    if ($data.kind = "url") { $snode = $urlNode($data.url) }
+    else { $snode = $fileNode($data.file) }
+    if ($snode = $lib.null) { return($lib.null) }
+
+    $ival = $data.ival
+    for $name in $data.tags { $tag($snode, $prefix, $name, $ival) }
+
+    $scan($snode, $data)
+    for $item in $data.families { $family($item, $prefix) }
+    for $ttp in $data.ttps { $edge($snode, uses, $techniqueNode($ttp)) }
+
+    for $url in $data.iocs.urls { $edge($snode, refs, $urlNode($url)) }
+    for $host in $data.iocs.hosts { $edge($snode, refs, $hostNode($host)) }
+
+    for $item in $data.configs { $c2config($snode, $data, $item, $prefix) }
+    for $item in $data.droppers { $dropperUrls($snode, $data, $item, $prefix) }
+    for $item in $data.ransom { $ransomNote($snode, $data, $item, $prefix) }
+
+    for $item in $data.tasks { $taskNodes($snode, $data, $item) }
+    return($snode)
+}
+
+// Triage's verdict on the sample.
+function scan(snode, data) {
+    if ($data.score = $lib.null) { return($lib.null) }
+    if ($snode.form() = "inet:url") { $target = "target:url" } else { $target = "target:file" }
+    $signame = $lib.null
+    if $data.families { $signame = $data.families.index(0) }
+    [ it:av:scan:result=$lib.guid(slib.hatching, $data.id, scan)
+        :scanner:name=$scanner :$target=$snode.repr() :time?=$data.time :verdict?=$data.verdict
+        :signame?=$signame :categories?=$data.categories ]
+    return($seen($node))
+}
+
+// A malware family as a risk:tool:software, with :tag set to its tag.
+function family(fam, prefix) {
+    $famtag = $lib.null
+    $part = $lib.regex.replace("[^a-z0-9_]+", "_", $fam.lower()).strip("_")
+    if ($prefix and $part) { $famtag = `{$prefix}.{$part}` }
+    [ risk:tool:software=$lib.guid(slib.hatching, family, $fam)
+        :soft:name?=$fam :reporter:name=$scanner :tag?=$famtag ]
+    return($node)
+}
+
+// Tag the C2 servers of a malware config and model the config.
+function c2config(snode, data, config, prefix) {
+    $famtag = $lib.null
+    if $config.family { $famtag = $lib.regex.replace("[^a-z0-9_]+", "_", $config.family).strip("_") }
+    for $url in $config.servers { $c2($urlNode($url), $prefix, $famtag, $data.ival) }
+    for $host in $config.hosts { $c2($hostNode($host), $prefix, $famtag, $data.ival) }
+    for $mutex in $config.mutexes { $edge($snode, refs, $mutexNode($mutex)) }
+
+    $file = $lib.null
+    if ($snode.form() = "file:bytes") { $file = $snode.repr() }
+    // The config holds a single mutex, the rest are linked to the sample above.
+    $mutex = $lib.null
+    if $config.mutexes { $mutex = $config.mutexes.index(0) }
+    [ it:sec:c2:config=$lib.guid(slib.hatching, $data.id, config, $config.family, $config.servers)
+        :family?=$config.family :file?=$file :servers?=$config.servers :mutex?=$mutex
+        :decoys?=$config.decoys :campaigncode?=$config.campaign :raw?=$config.raw ]
+    return($seen($node))
+}
+
+function c2(n, prefix, famtag, ival) {
+    $tag($n, $prefix, c2, $ival)
+    return($tag($n, $prefix, $famtag, $ival))
+}
+
+// The URLs a dropper downloads from.
+function dropperUrls(snode, data, dropper, prefix) {
+    $famtag = $lib.null
+    if $dropper.family { $famtag = $lib.regex.replace("[^a-z0-9_]+", "_", $dropper.family).strip("_") }
+    for $url in $dropper.urls {
+        $n = $urlNode($url)
+        $tag($n, $prefix, dropper, $data.ival)
+        $tag($n, $prefix, $famtag, $data.ival)
+        $edge($snode, refs, $n)
+    }
+    return($snode)
+}
+
+// The email addresses and URLs in a ransom note.
+function ransomNote(snode, data, note, prefix) {
+    $famtag = $lib.null
+    if $note.family { $famtag = $lib.regex.replace("[^a-z0-9_]+", "_", $note.family).strip("_") }
+    $nodes = ([])
+    for $email in $note.emails { $nodes.append($emailNode($email)) }
+    for $url in $note.urls { $nodes.append($urlNode($url)) }
+    for $n in $nodes {
+        $tag($n, $prefix, ransom, $data.ival)
+        $tag($n, $prefix, $famtag, $data.ival)
+        $edge($snode, refs, $n)
+    }
+    return($snode)
+}
+
+// ---- Behavioral tasks ----
+
+// The guid of a task's process, flow, etc.
+function taskGuid(data, task, kind, id) {
+    if ($id = $lib.null) { return($lib.null) }
+    return($lib.guid(slib.hatching, $data.id, $task.name, $kind, $id))
+}
+
+// Model a behavioral task's processes, network activity, and dropped files, linked to the
+// sample with :sandbox:file (when the sample is a file).
+function taskNodes(snode, data, task) {
+    $sandbox = $lib.null
+    if ($snode.form() = "file:bytes") { $sandbox = $snode.repr() }
+
+    for $proc in $task.procs { $procNode($data, $task, $proc, $sandbox) }
+    for $flow in $task.flows { $flowNode($data, $task, $flow, $sandbox) }
+    for $req in $task.dns { $dnsNode($data, $task, $req, $sandbox) }
+    for $ans in $task.answers { $answerNode($ans) }
+    for $req in $task.http { $httpNode($data, $task, $req, $sandbox) }
+    for $file in $task.files { $edge($snode, refs, $fileAdd($data, $task, $file, $sandbox)) }
+    return($snode)
+}
+
+function procNode(data, task, proc, sandbox) {
+    $exe = $lib.null
+    if $proc.orig { $exe = $sandbox }
+    [ it:exec:proc=$taskGuid($data, $task, proc, $proc.procid)
+        :sandbox:file?=$sandbox :exe?=$exe :pid?=$proc.pid :cmd?=$proc.cmd :path?=$proc.path
+        :src:proc?=$taskGuid($data, $task, proc, $proc.parent) ]
+    return($node)
+}
+
+function flowNode(data, task, flow, sandbox) {
+    $ipprop = $lib.null
+    if $flow.ipver { $ipprop = `dst:{$flow.ipver}` $ipNode($flow.ip, ver=$flow.ipver) }
+    if $flow.domain { $hostNode($flow.domain) }
+    [ inet:flow=$taskGuid($data, $task, flow, $flow.id)
+        :sandbox:file?=$sandbox :dst?=$flow.server :dst:port?=$flow.port :dst:proto?=$flow.proto
+        :src:proc?=$taskGuid($data, $task, proc, $flow.procid)
+        :src:txbytes?=$flow.txbytes :dst:txbytes?=$flow.rxbytes ]
+    if $ipprop { [ :$ipprop?=$flow.ip ] }
+    return($node)
+}
+
+function dnsNode(data, task, req, sandbox) {
+    [ inet:dns:request=$lib.guid(slib.hatching, $data.id, $task.name, dns, $req.flow, $req.index, $req.name)
+        :sandbox:file?=$sandbox :query:name?=$req.name ]
+    return($node)
+}
+
+function answerNode(ans) {
+    switch $ans.type {
+        "a": { [ inet:dns:a?=($ans.name, $ans.value) ] }
+        "aaaa": { [ inet:dns:aaaa?=($ans.name, $ans.value) ] }
+        "cname": { [ inet:dns:cname?=($ans.name, $ans.value) ] }
+        *: { return($lib.null) }
+    }
+    return($seen($node))
+}
+
+function httpNode(data, task, req, sandbox) {
+    $urlNode($req.url)
+    [ inet:http:request=$lib.guid(slib.hatching, $data.id, $task.name, http, $req.flow, $req.index, $req.url)
+        :sandbox:file?=$sandbox :flow?=$taskGuid($data, $task, flow, $req.flow)
+        :method?=$req.method :url?=$req.url :response:code?=$req.code ]
+    return($node)
+}
+
+// A file dropped during the task. Returns the dropped file's file:bytes node.
+function fileAdd(data, task, file, sandbox) {
+    $fnode = $fileNode(({"sha256": $file.sha256, "md5": $file.md5, "sha1": $file.sha1,
+                         "sha512": $file.sha512, "size": $file.size}))
+    if ($fnode = $lib.null) { return($lib.null) }
+    [ it:exec:file:add=$lib.guid(slib.hatching, $data.id, $task.name, file, $file.name, $file.sha256)
+        :sandbox:file?=$sandbox :file=$fnode.repr() :path?=$file.path
+        :proc?=$taskGuid($data, $task, proc, $file.procid) ]
+    return($fnode)
+}
+
+// Yield the non-null nodes of a list.
+function nodes(items) {
+    for $item in $items {
+        if $item { yield $item }
+    }
+}

@@ -1,0 +1,44 @@
+[project]
+name = "hatchingsvc"
+version = "0.1.0"
+description = "A Hatching Triage Sandbox Storm Service"
+readme = "README.md"
+license-files = ["LICENSE"]
+authors = [
+    { name = "John Gorman", email = "83027042+gormaniac@users.noreply.github.com" }
+]
+
+# Stick with 3.11 until Synapse's base image changes
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "pyhatching>=0.3.1",
+    "stormlibpp>=0.10.1",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.32,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+source-include = [
+    "pkgproto/*.yaml",
+    "pkgproto/storm/*/*.storm",
+]
+
+# The service needs pyhatching's full API support, which isn't on PyPI yet. A source archive
+# (instead of a git source) means building the image doesn't need git. Switch back to PyPI
+# once pyhatching's next release is published.
+[tool.uv.sources]
+pyhatching = { url = "https://github.com/gormaniac/pyhatching/archive/9697212ff7b17190aa03156810224b7cdf612126.tar.gz" }
+
+[tool.pytest]
+testpaths = [
+    "tests",
+]
+asyncio_mode = "auto"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+]

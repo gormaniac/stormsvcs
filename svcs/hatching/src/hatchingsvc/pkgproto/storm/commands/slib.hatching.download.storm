@@ -1,0 +1,58 @@
+init {
+    $hatching = $lib.import(slib.hatching.lib)
+    $priv = $lib.import(slib.hatching.priv.user)
+    $model = $lib.import(slib.hatching.model)
+    $util = $lib.import(slib.hatching.util)
+
+    if ($cmdopts.file and (not $cmdopts.task)) {
+        $lib.raise(BadArg, "slib.hatching.download: --file requires --task.")
+    }
+
+    // Download everything the options ask for from a sample. Returns a list of file:bytes nodes.
+    function download(sample) {
+        $nodes = ([])
+        $any = (false)
+        if $cmdopts.file {
+            $any = (true)
+            $nodes.append($hatching.downloadTaskFile($sample, $cmdopts.task, $cmdopts.file))
+        }
+        if $cmdopts.pcap {
+            $any = (true)
+            $nodes.extend($hatching.downloadPcaps($sample, task=$cmdopts.task))
+        }
+        if $cmdopts.pcapng {
+            $any = (true)
+            $nodes.extend($hatching.downloadPcaps($sample, task=$cmdopts.task, pcapng=(true)))
+        }
+        if $cmdopts.archive {
+            $any = (true)
+            $nodes.append($hatching.downloadArchive($sample, fmt=$cmdopts.archive))
+        }
+        if $cmdopts.dumped {
+            $any = (true)
+            $nodes.extend($hatching.downloadDumped($sample))
+        }
+        if (not $any) { $nodes.append($hatching.downloadSample($sample)) }
+        return($nodes)
+    }
+}
+
+if $cmdopts.sample {
+    // --sample ignores inbound nodes.
+    spin |
+    for $sid in $cmdopts.sample {
+        for $n in $download($sid) {
+            if ($cmdopts.yield and $n) { yield $n }
+        }
+    }
+}
+else {
+    $hash = $util.nodeHash($node)
+    if ($hash = $lib.null) {
+        $lib.warn("slib.hatching.download: {form} {repr} has no hash to find a sample by.", form=$node.form(), repr=$node.repr())
+        spin
+    }
+    $retn = $priv.resolve($hash)
+    if $util.failed($retn, `Finding the sample of {$hash}`) { spin }
+    divert $cmdopts.yield $model.nodes($download($retn.data))
+}

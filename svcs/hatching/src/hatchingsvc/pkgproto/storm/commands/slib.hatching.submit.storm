@@ -1,0 +1,44 @@
+init {
+    $hatching = $lib.import(slib.hatching.lib)
+    $model = $lib.import(slib.hatching.model)
+
+    $profiles = ([])
+    for $p in $cmdopts.profile { $profiles.append($p) }
+    $opts = ({
+        "fetch": $cmdopts.fetch,
+        "interactive": $cmdopts.interactive,
+        "password": $cmdopts.password,
+        "profiles": $profiles,
+        "tags": $cmdopts.tag,
+        "timeout": $cmdopts.timeout,
+        "network": $cmdopts.network,
+        "name": $cmdopts.name,
+        "wait": $cmdopts.wait,
+        "tasks": $cmdopts.tasks,
+    })
+
+    function asNode(valu) {
+        if ($lib.vars.type($valu) = "node") { return($valu) }
+        return($lib.null)
+    }
+}
+
+if $cmdopts.url {
+    // --url ignores inbound nodes.
+    spin |
+    for $url in $cmdopts.url {
+        $n = $asNode($hatching.submitUrl($url, $opts))
+        if ($cmdopts.yield and $n) { yield $n }
+    }
+}
+else {
+    switch $node.form() {
+        "file:bytes": { }
+        "inet:url": { }
+        *: {
+            $lib.warn("slib.hatching.submit: The node form {form} is not supported.", form=$node.form())
+            spin
+        }
+    }
+    divert $cmdopts.yield $model.nodes(($asNode($hatching.submitNode($node, $opts)),))
+}

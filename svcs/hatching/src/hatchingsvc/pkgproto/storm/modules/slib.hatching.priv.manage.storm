@@ -1,0 +1,30 @@
+// Privileged (asroot) wrappers around the slib.hatching service for slib.hatching.manage.
+// These change the account's analysis profiles and Yara rules.
+
+init {
+    $svc = $lib.service.get("slib.hatching")
+}
+
+// Only reads the calling user's own vault, see slib.hatching.priv.user.
+function userKey() {
+    $vault = $lib.vault.bytype(hatching, scope=user)
+    if ($vault = $lib.null) { return($lib.null) }
+    $secrets = $vault.secrets
+    if ($secrets = $lib.null) { return($lib.null) }
+    return($secrets.apikey)
+}
+
+function addProfile(name, tags=$lib.null, timeout=$lib.null, network=$lib.null) {
+    return($svc.addProfile($name, tags=$tags, timeout=$timeout, network=$network, apikey=$userKey()))
+}
+
+function editProfile(profile, name=$lib.null, tags=$lib.null, timeout=$lib.null, network=$lib.null) {
+    return($svc.editProfile($profile, name=$name, tags=$tags, timeout=$timeout, network=$network,
+                            apikey=$userKey()))
+}
+
+function delProfile(profile) { return($svc.delProfile($profile, apikey=$userKey())) }
+
+function addRule(name, text) { return($svc.addRule($name, $text, apikey=$userKey())) }
+function editRule(name, text) { return($svc.editRule($name, $text, apikey=$userKey())) }
+function delRule(name) { return($svc.delRule($name, apikey=$userKey())) }

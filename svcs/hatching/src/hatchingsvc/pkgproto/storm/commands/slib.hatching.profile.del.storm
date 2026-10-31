@@ -1,0 +1,11 @@
+init {
+    $pman = $lib.import(slib.hatching.priv.manage)
+    $util = $lib.import(slib.hatching.util)
+
+    for $profile in $cmdopts.profile {
+        $retn = $pman.delProfile($profile)
+        if (not $util.failed($retn, `Deleting profile {$profile}`)) {
+            $lib.print("slib.hatching.profile.del: Deleted profile {name}.", name=$profile)
+        }
+    }
+}

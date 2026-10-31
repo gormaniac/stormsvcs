@@ -1,0 +1,15 @@
+init {
+    $padmin = $lib.import(slib.hatching.priv.admin)
+    $util = $lib.import(slib.hatching.util)
+
+    $retn = $padmin.users(limit=$cmdopts.limit)
+    if (not $util.failed($retn, "Listing users")) {
+        $rows = ([])
+        for $u in $retn.data {
+            $perms = ""
+            if $u.permissions { $perms = (",").join($u.permissions) }
+            $rows.append(($u.username, $u.email, $perms, $u.id))
+        }
+        $util.table((("username", 20), ("email", 32), ("permissions", 32), ("id", 36)), $rows)
+    }
+}

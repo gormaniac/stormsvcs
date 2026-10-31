@@ -1,0 +1,11 @@
+init {
+    $psub = $lib.import(slib.hatching.priv.submit)
+    $util = $lib.import(slib.hatching.util)
+
+    for $sample in $cmdopts.sample {
+        $retn = $psub.deleteSample($sample)
+        if (not $util.failed($retn, `Deleting sample {$sample}`)) {
+            $lib.print("slib.hatching.sample.delete: Deleted sample {id}.", id=$sample)
+        }
+    }
+}

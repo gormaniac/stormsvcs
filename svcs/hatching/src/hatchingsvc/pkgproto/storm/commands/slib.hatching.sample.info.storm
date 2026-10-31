@@ -1,0 +1,10 @@
+init {
+    $priv = $lib.import(slib.hatching.priv.user)
+    $util = $lib.import(slib.hatching.util)
+
+    for $sample in $cmdopts.sample {
+        if $cmdopts.summary { $retn = $priv.summary($sample) }
+        else { $retn = $priv.sample($sample) }
+        if (not $util.failed($retn, `Getting sample {$sample}`)) { $util.printJson($retn.data) }
+    }
+}

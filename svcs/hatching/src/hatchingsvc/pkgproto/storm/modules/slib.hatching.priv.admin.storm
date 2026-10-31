@@ -1,0 +1,47 @@
+// Privileged (asroot) wrappers around the slib.hatching service for slib.hatching.admin.
+
+init {
+    $svc = $lib.service.get("slib.hatching")
+}
+
+// Only reads the calling user's own vault, see slib.hatching.priv.user.
+function userKey() {
+    $vault = $lib.vault.bytype(hatching, scope=user)
+    if ($vault = $lib.null) { return($lib.null) }
+    $secrets = $vault.secrets
+    if ($secrets = $lib.null) { return($lib.null) }
+    return($secrets.apikey)
+}
+
+// API key and tag settings
+
+function setApiKey(apikey) { return($svc.setApiKey($apikey)) }
+function hasApiKey() { return($svc.hasApiKey()) }
+
+function tagSettings() {
+    return(({
+        "enabled": $lib.globals.get("slib:hatching:tag:enabled"),
+        "prefix": $lib.globals.get("slib:hatching:tag:prefix"),
+    }))
+}
+function setTagPrefix(prefix) { $lib.globals.set("slib:hatching:tag:prefix", $prefix) }
+function setTagsEnabled(enabled) { $lib.globals.set("slib:hatching:tag:enabled", $enabled) }
+
+// Users and API keys (private and self-hosted Triage instances)
+
+function users(limit=$lib.null) { return($svc.users(limit=$limit, apikey=$userKey())) }
+function user(user) { return($svc.user($user, apikey=$userKey())) }
+function addUser(username, email, password=$lib.null, first=$lib.null, last=$lib.null, permissions=$lib.null) {
+    return($svc.addUser($username, $email, password=$password, first=$first, last=$last,
+                        permissions=$permissions, apikey=$userKey()))
+}
+function delUser(user) { return($svc.delUser($user, apikey=$userKey())) }
+function userKeys(user) { return($svc.userKeys($user, apikey=$userKey())) }
+function addUserKey(user, name) { return($svc.addUserKey($user, $name, apikey=$userKey())) }
+function delUserKey(user, name) { return($svc.delUserKey($user, $name, apikey=$userKey())) }
+
+// Raw requests
+
+function rawRequest(path, method=get, params=$lib.null, json=$lib.null) {
+    return($svc.rawRequest($method, $path, params=$params, json_data=$json, apikey=$userKey()))
+}

@@ -1,0 +1,7 @@
+init {
+    $padmin = $lib.import(slib.hatching.priv.admin)
+    $util = $lib.import(slib.hatching.util)
+
+    $retn = $padmin.rawRequest($cmdopts.path, method=$cmdopts.method, params=$cmdopts.params, json=$cmdopts.json)
+    if (not $util.failed($retn, `{$cmdopts.method} {$cmdopts.path}`)) { $util.printJson($retn.data) }
+}
