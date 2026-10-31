@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import sys
 from collections.abc import AsyncIterator
 from typing import Any
@@ -23,6 +24,7 @@ import synapse.lib.coro as s_coro
 import synapse.telepath as s_telepath
 
 from .api import CapaCellApi, CapaSvcError
+from .custom import CustomRules
 from .defs import RULES_URL, RULES_VERSION
 from .rules import CapaRules, CapaRulesError, nsTag, ruleGuid, rulesSha256, rulesStat
 
@@ -159,6 +161,12 @@ class CapaSvc(s_cell.Cell):
         self.workdir = s_common.gendir(self.dirn, "capa", "work")
         self.cachedir = s_common.gendir(self.dirn, "capa", "cache")
         self.nosigsdir = s_common.gendir(self.dirn, "capa", "nosigs")
+        # Custom rule sets are sent again by Storm before it scans, so they don't outlive a run.
+        shutil.rmtree(s_common.genpath(self.dirn, "capa", "custom"), ignore_errors=True)
+        self.customdir = s_common.gendir(self.dirn, "capa", "custom")
+        # Custom rule sets by key, and the error (or None) from building capa's cache for each.
+        self.customSets: dict[str, CustomRules] = {}
+        self.customBuilt: dict[str, str | None] = {}
 
         # Leftovers from a run that was killed with the service.
         for name in os.listdir(self.workdir):
@@ -223,6 +231,9 @@ class CapaSvc(s_cell.Cell):
             raise
 
         self.rulesErr = None
+        # Custom rule sets were checked against the old rules, Storm sends them again.
+        self.customSets.clear()
+        self.customBuilt.clear()
         info = self.capaRules.info()
         logger.info(
             f"Loaded {info['rules']} capa rules ({info['version']}, sha256={info['sha256']})"
@@ -247,13 +258,29 @@ class CapaSvc(s_cell.Cell):
 
     async def _buildCache(self, rules: CapaRules) -> None:
 
+        if (mesg := await self._runCacheBuild([rules.path])) is not None:
+            logger.warning(f"Unable to build the capa rules cache: {mesg}")
+            return
+
+        self._cleanCache(rules)
+
+    async def _runCacheBuild(self, paths: list[str]) -> str | None:
+        """Have capa load (and cache) the rules in these directories.
+
+        Returns
+        -------
+        str | None
+            capa's error if it couldn't load the rules (ex. a rule needs a missing rule).
+        """
+
         code = (
             "import pathlib, sys, capa.rules; "
-            "capa.rules.get_rules([pathlib.Path(sys.argv[1])], cache_dir=pathlib.Path(sys.argv[2]))"
+            "capa.rules.get_rules([pathlib.Path(p) for p in sys.argv[2:]], "
+            "cache_dir=pathlib.Path(sys.argv[1]))"
         )
         try:
             proc = await asyncio.create_subprocess_exec(
-                sys.executable, "-c", code, rules.path, self.cachedir,
+                sys.executable, "-c", code, self.cachedir, *paths,
                 stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
             )
             self.procs.add(proc)
@@ -262,22 +289,24 @@ class CapaSvc(s_cell.Cell):
             finally:
                 self._endProc(proc)
         except Exception as err:  # pragma: no cover - the cache is only an optimization
-            logger.warning(f"Unable to build the capa rules cache: {err}")
-            return
+            return str(err)
 
         if proc.returncode != 0:
-            mesg = stderrMesg(stderr.decode("utf-8", "replace"))
-            logger.warning(f"Unable to build the capa rules cache: {mesg}")
-            return
-
-        self._cleanCache(rules)
+            return stderrMesg(stderr.decode("utf-8", "replace")) or f"exit code {proc.returncode}"
+        return None
 
     def _cleanCache(self, rules: CapaRules) -> None:
-        """Delete capa's caches of rules other than these (ex. an older version of the rules)."""
+        """Delete capa's caches of rules other than these (ex. an older version of the rules).
 
-        keep = rules.cacheName(self.cachedir)
+        The caches of the custom rule sets in use with these rules are kept.
+        """
+
+        keep = {rules.cacheName(self.cachedir)}
+        keep.update(
+            cs.cacheName(self.cachedir) for cs in self.customSets.values() if cs.official is rules
+        )
         for name in os.listdir(self.cachedir):
-            if name == keep or not (name.startswith("capa-") and name.endswith(".cache")):
+            if name in keep or not (name.startswith("capa-") and name.endswith(".cache")):
                 continue
             try:
                 os.unlink(os.path.join(self.cachedir, name))
@@ -316,6 +345,62 @@ class CapaSvc(s_cell.Cell):
             yield rules[name]
             await asyncio.sleep(0)
 
+    async def custom(self, rules: list[dict[str, Any]]) -> dict[str, Any]:
+        """Check a set of custom capa rules and save them for scans.
+
+        Parameters
+        ----------
+        rules : list[dict]
+            The custom rules, each a dict of the ``guid`` of its ``meta:rule`` and its ``text``.
+
+        Returns
+        -------
+        dict
+            The set's ``key`` (pass it to ``scan``, None if no rule can be used), its ``rules``,
+            and the rules that were skipped: ``errors`` (invalid rules) and ``shadowed`` (an
+            official rule has the same name).
+        """
+
+        official = self._getRules()
+        if not isinstance(rules, (list, tuple)):
+            raise CapaSvcError("Custom rules must be a list of {guid, text} dicts.")
+        rules = [dict(r) if isinstance(r, dict) else {} for r in rules]
+
+        cset = await s_coro.executor(CustomRules, official, rules, self.customdir)
+        if cset.key is not None and self.capaRules is official:
+            known = self.customSets.get(cset.key)
+            if known is None or known.official is not official:
+                self.customSets[cset.key] = cset
+        return cset.info()
+
+    async def _prepCustom(self, rules: CapaRules, key: str) -> CustomRules:
+        """The custom rule set for a scan, with capa's cache of it built (once).
+
+        Raises
+        ------
+        CapaSvcError
+            If the set is unknown, or capa can't load it with the official rules.
+        """
+
+        cset = self.customSets.get(key)
+        if cset is None or cset.official is not rules:
+            raise CapaSvcError(
+                "Unknown custom capa rules (the service restarted or reloaded its rules), "
+                "send them again with custom()."
+            )
+
+        if key not in self.customBuilt:
+            async with self.cacheLock:
+                if key not in self.customBuilt:
+                    mesg = await self._runCacheBuild([rules.path, cset.path])
+                    self.customBuilt[key] = mesg
+                    if mesg is None:
+                        self._cleanCache(rules)
+
+        if (mesg := self.customBuilt[key]) is not None:
+            raise CapaSvcError(f"capa can't use the custom rules: {mesg}")
+        return cset
+
     async def tags(self) -> list[dict[str, Any]]:
         """The record of every tag (without a prefix) the rules' namespaces become."""
 
@@ -323,7 +408,9 @@ class CapaSvc(s_cell.Cell):
 
     # ---- Scanning ----
 
-    async def scan(self, sha256: str, fmt: str = "auto", osname: str = "auto") -> dict[str, Any]:
+    async def scan(
+        self, sha256: str, fmt: str = "auto", osname: str = "auto", custom: str | None = None,
+    ) -> dict[str, Any]:
         """Pull a file from the Axon, run capa against it, and return a summary of the results.
 
         Parameters
@@ -334,6 +421,8 @@ class CapaSvc(s_cell.Cell):
             The capa input format, one of ``FORMATS``.
         osname : str
             The OS of the file, one of ``OSES``.
+        custom : str | None
+            The key of a custom rule set (see ``custom``) to scan with, with the official rules.
 
         Returns
         -------
@@ -353,6 +442,7 @@ class CapaSvc(s_cell.Cell):
 
         rules = self._getRules()
         await self.cacheReady.wait()
+        cset = await self._prepCustom(rules, custom) if custom else None
 
         async with self.sema:
             path = s_common.genpath(self.workdir, f"{sha256}.{s_common.guid()}")
@@ -360,12 +450,12 @@ class CapaSvc(s_cell.Cell):
                 await self._fetch(sha256, path)
                 # Checked right before capa runs, after any wait for a worker or the download.
                 await self._checkRules(rules)
-                doc = await self._runCapa(rules, path, fmt, osname)
+                doc = await self._runCapa(rules, path, fmt, osname, cset)
             finally:
                 if os.path.exists(path):
                     os.unlink(path)
 
-        return self._summarize(rules, sha256, doc)
+        return self._summarize(rules, sha256, doc, cset)
 
     async def _checkRules(self, rules: CapaRules) -> None:
         """Make sure the rules on disk (that capa reads) are still the loaded rules.
@@ -427,18 +517,25 @@ class CapaSvc(s_cell.Cell):
         except Exception as err:
             raise CapaSvcError(f"Unable to read {sha256} from the Axon: {err}") from None
 
-    def _capaCmd(self, rules: CapaRules, path: str, fmt: str, osname: str) -> list[str]:
+    def _capaCmd(
+        self, rules: CapaRules, path: str, fmt: str, osname: str,
+        cset: CustomRules | None = None,
+    ) -> list[str]:
         """The command line that runs capa against a file and prints its JSON results."""
 
         sigs = self.conf.get("capa:sigs") or self.nosigsdir
+        custom = ["--rules", cset.path] if cset is not None else []
         return [
             sys.executable, "-m", "capa.main", "--json", "--quiet",
-            "--rules", rules.path, "--signatures", sigs,
+            "--rules", rules.path, *custom, "--signatures", sigs,
             "--format", fmt, "--os", osname,
             path,
         ]
 
-    async def _runCapa(self, rules: CapaRules, path: str, fmt: str, osname: str) -> dict[str, Any]:
+    async def _runCapa(
+        self, rules: CapaRules, path: str, fmt: str, osname: str,
+        cset: CustomRules | None = None,
+    ) -> dict[str, Any]:
         """Run capa against a file in a subprocess and return its result document."""
 
         timeout = self.conf.get("capa:timeout")
@@ -448,7 +545,7 @@ class CapaSvc(s_cell.Cell):
         env["COLUMNS"] = "1000"
 
         proc = await asyncio.create_subprocess_exec(
-            *self._capaCmd(rules, path, fmt, osname),
+            *self._capaCmd(rules, path, fmt, osname, cset),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=env,
@@ -477,7 +574,10 @@ class CapaSvc(s_cell.Cell):
         except ValueError:
             raise CapaSvcError(f"capa returned invalid JSON: {errmesg}") from None
 
-    def _summarize(self, rules: CapaRules, sha256: str, doc: dict[str, Any]) -> dict[str, Any]:
+    def _summarize(
+        self, rules: CapaRules, sha256: str, doc: dict[str, Any],
+        cset: CustomRules | None = None,
+    ) -> dict[str, Any]:
         """Condense a capa result document into the results slib.capa models."""
 
         meta = doc.get("meta", {})
@@ -492,6 +592,8 @@ class CapaSvc(s_cell.Cell):
                 continue
 
             record = rules.rules.get(name)
+            if record is None and cset is not None:
+                record = cset.records.get(name)
             if record is None:
                 # The rules on disk changed since they were loaded, model what capa reported.
                 namespace = rmeta.get("namespace") or None
@@ -531,7 +633,11 @@ class CapaSvc(s_cell.Cell):
             "sha1": sample.get("sha1"),
             "time": s_common.now(),
             "capa": meta.get("version"),
-            "rules": {"version": rules.version, "sha256": rules.sha256},
+            "rules": {
+                "version": rules.version,
+                "sha256": rules.sha256,
+                "custom": cset.key if cset is not None else None,
+            },
             "flavor": meta.get("flavor"),
             "format": analysis.get("format"),
             "arch": analysis.get("arch"),

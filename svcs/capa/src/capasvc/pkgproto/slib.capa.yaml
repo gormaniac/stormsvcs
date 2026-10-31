@@ -1,5 +1,5 @@
 name: slib.capa
-version: 0.1.4
+version: 0.2.0
 guid: debecd104d154eed9c8bec53a6b2531f
 
 synapse_minversion: [2, 137, 0]
@@ -62,7 +62,11 @@ commands:
       with the rule's namespace (ex. "<prefix>.host_interaction.process.create", see
       slib.capa.admin.tags). The full results are saved in the file's "slib:capa" node data.
 
-      Files already scanned with the same capa rules are skipped unless --force is used.
+      Custom capa rules (meta:rule nodes with :type=capa.custom and the rule's YAML in :text)
+      in the view are used too. An official rule with the same name wins.
+
+      Files already scanned with the same capa rules (and custom rules) are skipped unless
+      --force is used.
 
       Examples:
 

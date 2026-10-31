@@ -31,9 +31,12 @@ function syncState() {
 function rulesInfo() { return($svc.rulesInfo()) }
 function tags() { return($svc.tags()) }
 
-function scan(sha256, fmt=auto, osname=auto) {
-    return($svc.scan($sha256, fmt=$fmt, osname=$osname))
+function scan(sha256, fmt=auto, osname=auto, custom=$lib.null) {
+    return($svc.scan($sha256, fmt=$fmt, osname=$osname, custom=$custom))
 }
+
+// Check and save a set of custom rules, a list of ({"guid": ..., "text": ...}) dicts.
+function custom(rules) { return($svc.custom($rules)) }
 
 function rules(names=$lib.null) {
     for $retn in $svc.rules(names=$names) { emit $retn }

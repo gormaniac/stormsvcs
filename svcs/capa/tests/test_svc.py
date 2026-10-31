@@ -60,7 +60,9 @@ class TestCapaSvc(s_tests.SynTest):
                 assert res["sha256"] == SAMPLE_SHA256
                 assert res["md5"] and res["sha1"]
                 assert res["capa"] == "10.0.0"
-                assert res["rules"] == {"version": RULES_VERSION, "sha256": svc.capaRules.sha256}
+                assert res["rules"] == {
+                    "version": RULES_VERSION, "sha256": svc.capaRules.sha256, "custom": None,
+                }
                 assert res["flavor"] == "static"
                 assert res["format"] == "sc64"
                 assert res["arch"] == "amd64"

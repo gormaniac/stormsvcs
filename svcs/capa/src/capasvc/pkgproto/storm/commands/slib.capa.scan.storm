@@ -1,6 +1,8 @@
 init {
     $capa = $lib.import(slib.capa.lib)
     $util = $lib.import(slib.capa.util)
+    // The view's custom rules, sent to the service once for every file.
+    $custom = $capa.customKey()
     // Looked up once, to skip files already scanned with these rules.
     $info = $lib.null
     $force = $cmdopts.force
@@ -18,5 +20,5 @@ if ($node.form() != "file:bytes") {
     if $cmdopts.yield { spin }
 } else {
     divert $cmdopts.yield $util.nodes($capa.scan($node, fmt=$cmdopts.format, osname=$cmdopts.os,
-                                                 force=$force, rinfo=$info))
+                                                 force=$force, rinfo=$info, custom=$custom))
 }

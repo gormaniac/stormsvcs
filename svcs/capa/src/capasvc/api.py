@@ -24,7 +24,7 @@ ERRORS = (CapaSvcError, CapaRulesError)
 
 # CapaSvc methods that are exposed over Telepath as-is, wrapped in a TelepathRetn.
 # See CapaSvc for each method's arguments.
-RETN_METHS = ("scan", "rulesInfo", "tags", "reload")
+RETN_METHS = ("scan", "rulesInfo", "tags", "reload", "custom")
 
 # CapaSvc generators that are exposed over Telepath, each item wrapped in a TelepathRetn.
 GENR_METHS = ("rules",)

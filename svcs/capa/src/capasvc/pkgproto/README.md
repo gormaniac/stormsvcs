@@ -9,6 +9,8 @@ and models the capa rules they match.
   `#rep.capa.host_interaction.process.create`.
 - Scanning a `file:bytes` links every matched rule to it with a `-(matches)>` edge and tags the file with
   the rules' namespaces.
+- Custom capa rules can be written as `meta:rule` nodes (`:type=capa.custom`), scans use them with the
+  official rules.
 
 The service pulls the files from the Axon itself, by `:sha256`, so they're never sent through Storm.
 
@@ -51,6 +53,30 @@ $capa = $lib.import(slib.capa.lib)
 file:bytes=<sha256>
 for $rule in $capa.scan($node, fmt=auto, osname=auto, force=(false)) { $lib.print($rule.props.name) }
 ```
+
+## Custom rules
+
+A custom capa rule is a `meta:rule` with a `:type` of `capa.custom` (or a type below it, ex.
+`capa.custom.myteam`) and the [capa rule](https://github.com/mandiant/capa-rules/blob/master/doc/format.md)'s
+YAML in its `:text`:
+
+```
+[ meta:rule=* :name="my capa rule" :type=capa.custom :text=$yaml ]
+```
+
+- Every `slib.capa.scan` sends the custom rules in the view to the service, and capa runs with them and
+  the official rules. Edits to a rule's `:text` are used by the next scan, deleted rules are dropped.
+- Matches link the custom rule's own node with a `-(matches)>` edge, and tag the file with the rule's
+  namespace, like the official rules. Custom namespaces don't get tag docs.
+- The service never edits or deletes custom rule nodes, `slib.capa.admin.sync` only touches the official
+  rules.
+- Official rules win: a custom rule with the same name as an official rule is skipped (the node stays, and
+  is used again if the official rule goes away). Invalid custom rules are skipped too. Both are warned
+  about on every scan, and listed by `slib.capa.info`.
+- Custom rules can use official rules (ex. `match: contain loop`) and each other. A custom rule capa can't
+  load with the others (ex. it needs a rule that doesn't exist) fails the scans until it's fixed.
+- A file's results record the custom rules it was scanned with, so a file is scanned again (without
+  `--force`) when the custom rules change.
 
 ## Model
 

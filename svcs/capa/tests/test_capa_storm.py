@@ -10,6 +10,7 @@ from capasvc.defs import PKGDEFS, SVC_GUID, SVC_NAME
 from capasvc.rules import ruleGuid, rulesetGuid
 
 from .capatest import MATCHED, RULES_VERSION, SAMPLE_SHA256, capaSvc, putSample
+from .test_custom import MARKER, customRule
 
 
 FILE = f"file:bytes:sha256={SAMPLE_SHA256}"
@@ -229,7 +230,9 @@ class TestCapaStormScan(s_tests.SynTest):
 
             data = await file.getData("slib:capa")
             assert data["capa"] == "10.0.0"
-            assert data["rules"] == {"version": RULES_VERSION, "sha256": svc.capaRules.sha256}
+            assert data["rules"] == {
+                "version": RULES_VERSION, "sha256": svc.capaRules.sha256, "custom": None,
+            }
             assert (data["format"], data["arch"], data["flavor"]) == ("sc64", "amd64", "static")
             assert [m["rule"] for m in data["matches"]] == MATCHED
             xor = [m for m in data["matches"] if m["rule"] == "contain xor"][0]
@@ -437,3 +440,113 @@ class TestCapaStormScan(s_tests.SynTest):
             msgs = await core.stormlist("slib.capa.admin.sync --force", opts=opts)
             self.stormHasNoWarnErr(msgs)
             self.stormIsInPrint("Imported 6 capa rules", msgs)
+
+
+class TestCapaStormCustom(s_tests.SynTest):
+
+    async def addCustom(self, core, text, type="capa.custom"):
+        """Make a custom rule meta:rule, returns its guid."""
+
+        opts = {"vars": {"text": text, "type": type}}
+        nodes = await core.nodes("[ meta:rule=* :name=mine :type=$type :text=$text ]", opts=opts)
+        return nodes[0].ndef[1]
+
+    async def test_custom(self):
+        async with capaSvc(self) as (core, svc, axon):
+            await putSample(core, axon)
+            guid = await self.addCustom(core, MARKER)
+
+            msgs = await core.stormlist("slib.capa.info")
+            self.stormIsInPrint("custom rules: 1 (0 skipped)", msgs)
+            self.stormIsInPrint(f"custom marker rule (meta:rule={guid})", msgs)
+
+            msgs = await core.stormlist(SCAN)
+            self.stormHasNoWarnErr(msgs)
+            file = (await core.nodes(FILE))[0]
+            assert leafTags(file) == TAGS | {"rep.capa.custom.marker"}
+            names = {n.ndef[1] for n in await core.nodes(f"{FILE} <(matches)- meta:rule")}
+            assert guid in names and len(names) == 5
+            data = await file.getData("slib:capa")
+            assert data["rules"]["custom"]
+            assert {"rule": "custom marker rule", "guid": guid, "namespace": "custom/marker",
+                    "count": 1, "addrs": ()} in data["matches"]
+
+            # The custom rule node is the user's, scans and syncs don't edit it.
+            node = (await core.nodes(f"meta:rule={guid}"))[0]
+            assert node.get("name") == "mine" and node.get("desc") is None
+            await core.nodes("slib.capa.admin.sync --force")
+            node = (await core.nodes(f"meta:rule={guid}"))[0]
+            assert node.get("name") == "mine" and node.get("text") == MARKER
+
+            # Scanning again with the same custom rules is skipped.
+            msgs = await core.stormlist(SCAN)
+            self.stormIsInPrint("already scanned with these rules", msgs)
+
+            # An edited custom rule is used by the next scan, which re-scans the file.
+            opts = {"vars": {"text": customRule("custom marker rule", "string: newp")}}
+            await core.nodes(f"meta:rule={guid} [ :text=$text ]", opts=opts)
+            msgs = await core.stormlist(SCAN)
+            self.stormNotInPrint("already scanned", msgs)
+            file = (await core.nodes(FILE))[0]
+            assert leafTags(file) == TAGS
+            assert len(await core.nodes(f"{FILE} <(matches)- meta:rule")) == 4
+
+            # So is a new custom rule type below capa.custom, and a deleted rule is dropped.
+            other = await self.addCustom(core, customRule("team rule"), type="capa.custom.team")
+            await core.nodes(f"meta:rule={guid} | delnode")
+            await core.nodes(SCAN)
+            names = {n.ndef[1] for n in await core.nodes(f"{FILE} <(matches)- meta:rule")}
+            assert other in names and guid not in names
+
+            # Without custom rules, the next scan re-scans with only the official rules.
+            await core.nodes(f"meta:rule={other} | delnode --force")
+            msgs = await core.stormlist(SCAN)
+            self.stormNotInPrint("already scanned", msgs)
+            assert leafTags((await core.nodes(FILE))[0]) == TAGS
+            msgs = await core.stormlist("slib.capa.info")
+            self.stormIsInPrint("custom rules: 0", msgs)
+
+    async def test_custom_skipped(self):
+        async with capaSvc(self) as (core, svc, axon):
+            await putSample(core, axon)
+
+            # An official rule with the same name wins, the custom rule node stays.
+            shadowed = await self.addCustom(core, customRule("contain xor"))
+            invalid = await self.addCustom(core, "rule:\n  meta:\n    name: bad\n")
+            await core.nodes("[ meta:rule=* :type=capa.custom :name=notext ]")
+            await core.nodes("[ meta:rule=* :type=yara :text=newp ]")
+
+            msgs = await core.stormlist(SCAN)
+            self.stormIsInWarn(f"Skipping the custom capa rule meta:rule={shadowed}, an official "
+                               "capa rule has the same name: contain xor", msgs)
+            self.stormIsInWarn(f"Skipping the custom capa rule meta:rule={invalid}: Invalid capa "
+                               "rule", msgs)
+            assert len([m for m in msgs if m[0] == "warn"]) == 2
+            # The scan still works, with only the official rules.
+            file = (await core.nodes(FILE))[0]
+            assert leafTags(file) == TAGS
+            assert (await file.getData("slib:capa"))["rules"]["custom"] is None
+            assert len(await core.nodes(f"meta:rule={shadowed}")) == 1
+
+            msgs = await core.stormlist("slib.capa.info")
+            self.stormIsInPrint("custom rules: 0 (2 skipped)", msgs)
+
+            # A custom rule capa can't load with the official rules fails the scans.
+            await core.nodes(f"meta:rule={shadowed} | delnode")
+            await core.nodes(f"meta:rule={invalid} | delnode")
+            await self.addCustom(core, customRule("needs", "match: newp rule"))
+            msgs = await core.stormlist(SCAN + " --force")
+            self.stormIsInWarn("capa can't use the custom rules", msgs)
+
+    async def test_custom_perms(self):
+        async with capaSvc(self) as (core, svc, axon):
+            await putSample(core, axon)
+            guid = await self.addCustom(core, MARKER)
+
+            user = await core.auth.addUser("visi")
+            await user.addRule((True, USER_PERM))
+            await user.addRule((True, ("node",)))
+            msgs = await core.stormlist(SCAN, opts={"user": user.iden})
+            self.stormHasNoWarnErr(msgs)
+            names = {n.ndef[1] for n in await core.nodes(f"{FILE} <(matches)- meta:rule")}
+            assert guid in names
