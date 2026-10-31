@@ -240,9 +240,10 @@ class CrtshDb:
 
     def __init__(self, dsn: str = DEFAULT_DSN, timeout: float | None = None, retries: int = 3,
                  keepalive: float = 10, idle: float = 300, connect_timeout: float = 300,
-                 backoff: float = 1.0, connect=None):
+                 backoff: float = 1.0, statement_timeout: float = 0, connect=None):
         self.dsn = dsn
         self.timeout = timeout or None
+        self.statement_timeout = statement_timeout
         self.retries = retries
         self.keepalive = keepalive
         self.idle = idle
@@ -260,7 +261,16 @@ class CrtshDb:
     async def _connectOnce(self) -> asyncpg.Connection:
         # PgBouncer may pool by transaction, so no prepared statements are cached, and
         # the read-only replica means statements run outside explicit transactions.
-        return await self._connectFn(self.dsn, statement_cache_size=0, timeout=30)
+        conn = await self._connectFn(self.dsn, statement_cache_size=0, timeout=30)
+
+        # crt.sh's default statement_timeout cancels big queries (chains, wide searches) that
+        # finish fine given time, so the session's is set (0 is no limit). It's a SET, not a
+        # startup parameter, since PgBouncer rejects startup parameters it doesn't know.
+        try:
+            await conn.execute(f"SET statement_timeout = {int(self.statement_timeout * 1000)}")
+        except asyncpg.PostgresError as err:
+            logger.warning("Unable to set the crt.sh statement_timeout, using the server's: %s", err)
+        return conn
 
     async def _connect(self) -> asyncpg.Connection:
         """Open the connection, backing off while crt.sh refuses it."""
@@ -482,27 +492,31 @@ class CrtshDb:
                  f"WHERE {' AND '.join(clauses)} {order}LIMIT {params.add(limit)}")
         return await self.fetch(_withMeta(inner), *params.args)
 
-    async def chain(self, cert: dict[str, list], maxdepth: int = 10) -> list[dict]:
+    async def chain(self, cert: dict[str, list], maxdepth: int = 10, maxrows: int = 500) -> list[dict]:
         """Every certificate in the chains of ``cert`` ({kind: [values]}), in one recursive query.
 
         Rows include ``child_id`` (the certificate this one may have issued, null for the
         leaf) and ``depth`` (0 for the leaf). A certificate can be a row more than once,
         once per child. Self-issued roots (certificates belonging to the CA that issued
         them) end a chain.
+
+        CAs cross-sign each other (ex. Sectigo's, USERTrust's, and AAA's roots), so each
+        row tracks its path and never revisits a certificate on it. ``maxrows`` caps the
+        rows, the recursion stops once it's reached.
         """
 
         params = Params()
         cond = _alias(_lookup(params, cert))
         ctes = ("RECURSIVE chain AS ("
-                "(SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE, NULL::bigint AS CHILD_ID, 0 AS DEPTH "
-                f"FROM certificate c WHERE {cond} LIMIT 1) "
+                "(SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE, NULL::bigint AS CHILD_ID, 0 AS DEPTH, "
+                f"ARRAY[c.ID] AS PATH FROM certificate c WHERE {cond} LIMIT 1) "
                 "UNION ALL "
-                "SELECT p.ID, p.ISSUER_CA_ID, p.CERTIFICATE, ch.ID, ch.DEPTH + 1 FROM chain ch "
+                "SELECT p.ID, p.ISSUER_CA_ID, p.CERTIFICATE, ch.ID, ch.DEPTH + 1, ch.PATH || p.ID FROM chain ch "
                 "JOIN ca_certificate cac ON cac.CA_ID = ch.ISSUER_CA_ID "
                 "JOIN certificate p ON p.ID = cac.CERTIFICATE_ID "
-                f"WHERE ch.DEPTH < {params.add(maxdepth)} AND NOT EXISTS ("
+                f"WHERE ch.DEPTH < {params.add(maxdepth)} AND NOT p.ID = ANY(ch.PATH) AND NOT EXISTS ("
                 "SELECT 1 FROM ca_certificate r WHERE r.CERTIFICATE_ID = ch.ID AND r.CA_ID = ch.ISSUER_CA_ID))")
-        inner = "SELECT ID, ISSUER_CA_ID, CERTIFICATE, CHILD_ID, DEPTH FROM chain"
+        inner = f"SELECT ID, ISSUER_CA_ID, CERTIFICATE, CHILD_ID, DEPTH FROM chain LIMIT {params.add(maxrows)}"
         return await self.fetch(_withMeta(inner, extra=("CHILD_ID", "DEPTH"), ctes=ctes), *params.args)
 
     # ---- CAs ----

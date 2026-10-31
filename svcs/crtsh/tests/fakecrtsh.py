@@ -447,22 +447,23 @@ class FakeCrtshDb:
             rows = self._newest(rows)
         return [self._row(r) for r in rows[:limit]]
 
-    async def chain(self, cert, maxdepth=10):
-        self._call("chain", cert=cert, maxdepth=maxdepth)
+    async def chain(self, cert, maxdepth=10, maxrows=500):
+        self._call("chain", cert=cert, maxdepth=maxdepth, maxrows=maxrows)
         leaf = next((r for r in self.pki.rows if self._match(r, cert)), None)
         if leaf is None:
             return []
         out = [self._row(leaf, child_id=None, depth=0)]
-        frontier = [(leaf, 0)]
-        while frontier:
-            child, depth = frontier.pop(0)
+        frontier = [(leaf, 0, [leaf["id"]])]
+        while frontier and len(out) < maxrows:
+            child, depth, path = frontier.pop(0)
             if depth >= maxdepth or self.pki.cacerts.get(child["id"]) == child["issuer_ca_id"]:
                 continue  # Too deep, or a self-issued root.
             for row in self.pki.rows:
-                if self.pki.cacerts.get(row["id"]) == child["issuer_ca_id"]:
+                # Never revisit a certificate on the path, CAs cross-sign each other.
+                if self.pki.cacerts.get(row["id"]) == child["issuer_ca_id"] and row["id"] not in path:
                     out.append(self._row(row, child_id=child["id"], depth=depth + 1))
-                    frontier.append((row, depth + 1))
-        return out
+                    frontier.append((row, depth + 1, path + [row["id"]]))
+        return out[:maxrows]
 
     async def cas(self, caids=None, name=None, certs=False, limit=100):
         self._call("cas", caids=caids, name=name, certs=certs, limit=limit)

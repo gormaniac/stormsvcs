@@ -83,13 +83,13 @@ commands:
         - default: false
           action: store_true
           help: Yield the crypto:x509:cert nodes instead of the inbound nodes.
-    forms:
-      input:
-        - crypto:x509:cert
-        - hash:sha256
-        - hash:sha1
-      output:
-        - crypto:x509:cert
+    cmdinputs:
+      - form: crypto:x509:cert
+        help: Certificates to look up in crt.sh, by :sha256 (or :sha1).
+      - form: hash:sha256
+        help: SHA-256 fingerprints to look up in crt.sh.
+      - form: hash:sha1
+        help: SHA-1 fingerprints to look up in crt.sh.
 
   - name: slib.crtsh.search
     perms:
@@ -183,17 +183,21 @@ commands:
         - default: false
           action: store_true
           help: Also model each certificate's chain up to its root(s).
-    forms:
-      input:
-        - inet:fqdn
-        - inet:email
-        - inet:ipv4
-        - inet:ipv6
-        - inet:url
-        - ou:name
-        - ou:org
-      output:
-        - crypto:x509:cert
+    cmdinputs:
+      - form: inet:fqdn
+        help: Searched for as a DNS name (--dns), including subdomains.
+      - form: inet:email
+        help: Searched for as an email address (--email).
+      - form: inet:ipv4
+        help: Searched for as an IP address SAN (--ip).
+      - form: inet:ipv6
+        help: Searched for as an IP address SAN (--ip).
+      - form: inet:url
+        help: Searched for as a URI SAN (--uri).
+      - form: ou:name
+        help: Searched for as a subject organization (--org).
+      - form: ou:org
+        help: Searched for as a subject organization (--org), using :name.
 
   - name: slib.crtsh.pivot
     perms:
@@ -240,11 +244,9 @@ commands:
         - default: false
           action: store_true
           help: Also model each certificate's chain up to its root(s).
-    forms:
-      input:
-        - crypto:x509:cert
-      output:
-        - crypto:x509:cert
+    cmdinputs:
+      - form: crypto:x509:cert
+        help: Certificates to pivot from, by :sha256 (or :sha1).
 
   - name: slib.crtsh.chain
     perms:
@@ -270,11 +272,9 @@ commands:
         - default: false
           action: store_true
           help: Print each chain.
-    forms:
-      input:
-        - crypto:x509:cert
-      output:
-        - crypto:x509:cert
+    cmdinputs:
+      - form: crypto:x509:cert
+        help: Certificates to build the chains of, by :sha256 (or :sha1).
 
   - name: slib.crtsh.ca
     perms:
@@ -331,9 +331,6 @@ commands:
         - default: false
           action: store_true
           help: With --issued, also model each certificate's chain.
-    forms:
-      output:
-        - crypto:x509:cert
 
   - name: slib.crtsh.admin.tags
     perms:

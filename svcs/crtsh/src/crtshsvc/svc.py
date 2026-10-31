@@ -138,6 +138,14 @@ class CrtshSvc(s_cell.Cell):
                 "big searches can take minutes."
             ),
         },
+        "crtsh:statement:timeout": {
+            "type": "number",
+            "default": 0,
+            "description": (
+                "The statement_timeout, in seconds, set on crt.sh connections, 0 for no limit. "
+                "crt.sh's default cancels big queries (chains, wide searches) that finish given time."
+            ),
+        },
         "crtsh:retries": {
             "type": "integer",
             "default": 3,
@@ -192,6 +200,7 @@ class CrtshSvc(s_cell.Cell):
             keepalive=self.conf.get("crtsh:keepalive"),
             idle=self.conf.get("crtsh:idle"),
             connect_timeout=self.conf.get("crtsh:connect:timeout"),
+            statement_timeout=self.conf.get("crtsh:statement:timeout"),
         )
         self.onfini(self.db.close)
 

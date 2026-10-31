@@ -317,6 +317,18 @@ class TestCrtshSvc(s_tests.SynTest):
             rows = await fake.chain({"id": [10]})
             assert [r["id"] for r, _ in svc._parse(rows + rows)] == [r["id"] for r in rows]
 
+        # CAs that cross-sign each other: CA 2 (certs 2, 4) is signed by CA 3, whose certificate
+        # (14) is signed by CA 2. The chain never revisits a certificate on its path.
+        pki = copy.copy(PKI)
+        pki.cacerts = {1: 1, 2: 2, 4: 2, 14: 3}
+        async with svcCtx(self, fake=FakeCrtshDb(pki)) as (svc, fake):
+            chain = await svc.chain(10)
+            assert [c["crtsh"]["id"] for c in chain["certs"]] == [10, 2, 4, 1, 14]
+            assert all(len(path) == len(set(path)) for path in chain["paths"])
+            assert [PKI.sha256(c) for c in (10, 4, 14, 2, 1)] in chain["paths"]
+            rows = await fake.chain({"id": [10]}, maxrows=3)
+            assert len(rows) == 3
+
         # crt.sh doesn't know the issuer's certificate.
         pki = copy.copy(PKI)
         pki.cacerts = {}
@@ -372,8 +384,8 @@ class TestCrtshSvc(s_tests.SynTest):
     async def test_db_conf(self):
         conf = {"crtsh:dsn": "postgresql://u@db.example:5433/certs", "crtsh:timeout": 5,
                 "crtsh:retries": 1, "crtsh:keepalive": 2, "crtsh:idle": 3,
-                "crtsh:connect:timeout": 4}
+                "crtsh:connect:timeout": 4, "crtsh:statement:timeout": 6}
         async with self.getTestCell(CrtshSvc, conf=conf) as svc:
             db = svc.db
-            assert (db.dsn, db.timeout, db.retries, db.keepalive, db.idle, db.connect_timeout) == (
-                "postgresql://u@db.example:5433/certs", 5, 1, 2, 3, 4)
+            assert (db.dsn, db.timeout, db.retries, db.keepalive, db.idle, db.connect_timeout,
+                    db.statement_timeout) == ("postgresql://u@db.example:5433/certs", 5, 1, 2, 3, 4, 6)

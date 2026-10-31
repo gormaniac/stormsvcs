@@ -52,6 +52,7 @@ on the same IP (ex. psql) are refused, and vice versa.
 |---|---|---|
 | `crtsh:dsn` | `postgresql://guest@crt.sh:5432/certwatch` | The database DSN (or a mirror's). |
 | `crtsh:timeout` | `0` | Seconds before a query times out, `0` for none. crt.sh can be very slow. |
+| `crtsh:statement:timeout` | `0` | The `statement_timeout` set on each connection, in seconds, `0` for none. crt.sh's default cancels big queries. |
 | `crtsh:retries` | `3` | Retries when the connection drops mid-query. |
 | `crtsh:keepalive` | `10` | Seconds between keepalive pings while the connection is in use. |
 | `crtsh:idle` | `300` | Seconds without a query before the connection is closed. |

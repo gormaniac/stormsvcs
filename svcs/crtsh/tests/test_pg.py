@@ -7,6 +7,7 @@ with the fake PKI, so this checks every query parses, plans, and returns what th
 FakeCrtshDb-backed tests expect, through asyncpg.
 """
 
+import copy
 import os
 
 import pytest
@@ -101,3 +102,17 @@ class TestPostgres(s_tests.SynTest):
 
             rows = await svc.rawQuery("SELECT ID, NAME FROM ca WHERE ID = $1", [1])
             assert rows == [{"id": 1, "name": "C=US, O=Test Trust, CN=Test Root R1"}]
+
+    async def test_cycles(self):
+        # CAs that cross-sign each other: CA 2 (certs 2, 4) is signed by CA 3, whose certificate
+        # (14) is signed by CA 2. Without the path check the recursion bounces between them.
+        pki = copy.copy(PKI)
+        pki.cacerts = {1: 1, 2: 2, 4: 2, 14: 3}
+        await pgstub.load(DSN, pki)
+        conf = {"crtsh:dsn": DSN, "crtsh:statement:timeout": 30}
+        async with self.getTestCell(CrtshSvc, conf=conf) as svc:
+            chain = await svc.chain(10)
+            assert [c["crtsh"]["id"] for c in chain["certs"]] == [10, 2, 4, 1, 14]
+            assert all(len(path) == len(set(path)) for path in chain["paths"])
+            assert len(await svc.db.chain({"id": [10]}, maxrows=3)) == 3
+            assert (await svc.rawQuery("SHOW statement_timeout"))[0]["statement_timeout"] == "30s"

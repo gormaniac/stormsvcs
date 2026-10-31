@@ -79,6 +79,13 @@ class TestCrtshStormPkg(s_tests.SynTest):
 
             for cmd in PKGDEFS[0]["commands"]:
                 assert cmd["name"] in core.stormcmds
+                # The "forms" key is deprecated and removed in Synapse 3.0.0, use "cmdinputs".
+                assert "forms" not in cmd, cmd["name"]
+                for cmdinput in cmd.get("cmdinputs", ()):
+                    assert core.model.form(cmdinput["form"]) is not None, (cmd["name"], cmdinput)
+
+            msgs = await core.stormlist("slib.crtsh.search --help")
+            self.stormIsInPrint("Searched for as a DNS name", msgs)
             for mod in PKGDEFS[0]["modules"]:
                 self.stormHasNoErr(await core.stormlist(f"$mod = $lib.import({mod['name']})"))
 

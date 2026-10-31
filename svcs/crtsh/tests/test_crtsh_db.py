@@ -51,6 +51,11 @@ class FakeConn:
         finally:
             self.server.busy = False
 
+    async def execute(self, sql):
+        self.server.executed.append(sql)
+        if self.server.setfail:
+            raise asyncpg.exceptions.InsufficientPrivilegeError("permission denied to set parameter")
+
     async def fetchval(self, sql, timeout=None):
         if self.server.pingfail:
             raise asyncpg.exceptions.ProtocolViolationError("client_idle_timeout")
@@ -76,6 +81,8 @@ class FakeServer:
         self.closefail = False
         self.pingfail = False
         self.terminated = 0
+        self.executed: list[str] = []
+        self.setfail = False
 
     async def connect(self, dsn, **kwargs):
         self.attempts += 1
@@ -198,6 +205,30 @@ async def test_keepalive_and_idle_close():
     finally:
         await db.close()
     assert server.open == 0
+
+
+async def test_statement_timeout():
+    # crt.sh's default statement_timeout cancels big queries, every connection sets its own.
+    server = FakeServer()
+    db = makeDb(server, statement_timeout=90)
+    try:
+        await db.fetch("SELECT 1")
+        assert server.executed == ["SET statement_timeout = 90000"]
+        server.errors = [asyncpg.exceptions.ProtocolViolationError("client_idle_timeout")]
+        await db.fetch("SELECT 2")
+        assert server.executed == ["SET statement_timeout = 90000"] * 2
+    finally:
+        await db.close()
+
+    # The default is no limit, and a server that refuses the SET is still used.
+    server = FakeServer()
+    server.setfail = True
+    db = makeDb(server)
+    try:
+        assert (await db.fetch("SELECT 1"))[0]["conn"] == 0
+        assert server.executed == ["SET statement_timeout = 0"]
+    finally:
+        await db.close()
 
 
 async def test_keepalive_edges():
@@ -393,14 +424,16 @@ async def test_sql_chain():
     sql = db.sql
     assertMeta(sql, extra=", m.CHILD_ID AS child_id, m.DEPTH AS depth")
     assert sql.startswith("WITH RECURSIVE chain AS ((SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE, "
-                          "NULL::bigint AS CHILD_ID, 0 AS DEPTH FROM certificate c WHERE "
+                          "NULL::bigint AS CHILD_ID, 0 AS DEPTH, ARRAY[c.ID] AS PATH FROM certificate c WHERE "
                           "(digest(c.CERTIFICATE, 'sha256') = ANY($1::bytea[])) LIMIT 1) UNION ALL ")
+    # Cross-signing CAs can cycle, a certificate is never revisited on its path.
+    assert "SELECT p.ID, p.ISSUER_CA_ID, p.CERTIFICATE, ch.ID, ch.DEPTH + 1, ch.PATH || p.ID FROM chain ch" in sql
     assert "JOIN ca_certificate cac ON cac.CA_ID = ch.ISSUER_CA_ID JOIN certificate p ON p.ID = cac.CERTIFICATE_ID" in sql
     # Self-issued roots end the chain.
-    assert ("WHERE ch.DEPTH < $2 AND NOT EXISTS (SELECT 1 FROM ca_certificate r WHERE "
-            "r.CERTIFICATE_ID = ch.ID AND r.CA_ID = ch.ISSUER_CA_ID))") in sql
-    assert ", m AS MATERIALIZED (SELECT ID, ISSUER_CA_ID, CERTIFICATE, CHILD_ID, DEPTH FROM chain)" in sql
-    assert db.args == ([b"\x01"], 4)
+    assert ("WHERE ch.DEPTH < $2 AND NOT p.ID = ANY(ch.PATH) AND NOT EXISTS (SELECT 1 FROM ca_certificate r "
+            "WHERE r.CERTIFICATE_ID = ch.ID AND r.CA_ID = ch.ISSUER_CA_ID))") in sql
+    assert ", m AS MATERIALIZED (SELECT ID, ISSUER_CA_ID, CERTIFICATE, CHILD_ID, DEPTH FROM chain LIMIT $3)" in sql
+    assert db.args == ([b"\x01"], 4, 500)
 
 
 async def test_sql_cas():
