@@ -15,7 +15,7 @@ SVC_SYN_MIN_VER = (2, 137, 0)
 SVC_EVTS = {
     "add": {
         "storm": (
-            f'[(meta:source={SVC_GUID} :name={SVC_NAME})] | spin | '
+            f"[(meta:source={SVC_GUID} :name={SVC_NAME})] | spin | "
             'if ($lib.globals.get("slib:ipapi:tag:enabled") = (null)) '
             '{ $lib.globals.set("slib:ipapi:tag:enabled", (true)) } '
             'if ($lib.globals.get("slib:ipapi:tag:prefix") = (null)) '
