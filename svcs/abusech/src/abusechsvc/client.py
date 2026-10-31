@@ -111,11 +111,26 @@ def normJson(data: Mapping[str, Any] | None) -> dict[str, Any]:
     return {k: v for k, v in data.items() if v is not None}
 
 
+def statusMesg(data: Mapping[str, Any]) -> str:
+    """Describe a ``query_status``, with abuse.ch's explanation when ``data`` is a string.
+
+    Errors like timeouts come back as ``{"query_status": "error", "data": "Query execution ..."}``.
+    """
+
+    status = str(data.get("query_status"))
+    detail = data.get("data")
+    if isinstance(detail, str) and detail.strip() and not detail.lstrip().startswith("<"):
+        return f"{status}: {detail.strip()[:500]}"
+    return status
+
+
 def errMesg(code: int, data: Any, text: str) -> str:
     """Pull the most useful error message out of an abuse.ch response."""
 
     if isinstance(data, dict):
-        for key in ("query_status", "error", "detail", "message"):
+        if data.get("query_status") and not str(data["query_status"]).lstrip().startswith("<"):
+            return statusMesg(data)
+        for key in ("error", "detail", "message"):
             valu = data.get(key)
             if valu and not str(valu).lstrip().startswith("<"):
                 return str(valu)
@@ -323,7 +338,7 @@ class AbuseChClient:
             raise AbuseChApiError(errMesg(code, data, text), code=code, status=status)
 
         if status is not None and str(status).lower() not in OK_STATUSES:
-            raise AbuseChApiError(f"abuse.ch {base}: {status}", code=code, status=status)
+            raise AbuseChApiError(f"abuse.ch {base}: {statusMesg(data)}", code=code, status=status)
 
         return data
 
@@ -364,6 +379,6 @@ class AbuseChClient:
                                   status=status)
 
         if status is not None and str(status).lower() not in OK_STATUSES:
-            raise AbuseChApiError(f"abuse.ch {base}: {status}", code=code, status=status)
+            raise AbuseChApiError(f"abuse.ch {base}: {statusMesg(data)}", code=code, status=status)
 
         return body, ctype

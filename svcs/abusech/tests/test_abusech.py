@@ -16,6 +16,7 @@ from abusechsvc.client import (
     isNotFound,
     normForm,
     normJson,
+    statusMesg,
     unzip,
 )
 
@@ -436,6 +437,11 @@ class TestClient(s_tests.SynTest):
         assert normJson(None) == {}
 
         assert errMesg(400, {"query_status": "illegal_hash"}, "") == "illegal_hash"
+        assert errMesg(400, {"query_status": "error", "data": "Too slow."}, "") == "error: Too slow."
+        assert statusMesg({"query_status": "error", "data": "Query execution time exceeded threshold."}) == \
+            "error: Query execution time exceeded threshold."
+        assert statusMesg({"query_status": "error", "data": []}) == "error"
+        assert statusMesg({"query_status": "error", "data": "<html>"}) == "error"
         assert errMesg(500, {"error": "<html>"}, "<html>") == "HTTP 500"
         assert errMesg(500, None, "Server exploded") == "Server exploded"
         assert errMesg(401, None, "") == "Invalid or missing abuse.ch Auth-Key"

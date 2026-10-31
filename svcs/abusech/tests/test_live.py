@@ -63,7 +63,8 @@ class TestLiveKeyed(s_tests.SynTest):
             msgs = await core.stormlist(f"slib.abusech.bazaar.lookup --hash {samples[0]['sha256']} --yield")
             self.stormHasNoWarnErr(msgs)
             assert len([m for m in msgs if m[0] == "node"]) == 1
-            msgs = await core.stormlist("slib.abusech.bazaar.search tag exe --limit 5")
+            # Broad tags like exe make abuse.ch time out ("Query execution time exceeded threshold").
+            msgs = await core.stormlist("slib.abusech.bazaar.search tag guloader --limit 5")
             self.stormHasNoWarnErr(msgs)
             msgs = await core.stormlist("slib.abusech.bazaar.cscb")
             self.stormHasNoWarnErr(msgs)
