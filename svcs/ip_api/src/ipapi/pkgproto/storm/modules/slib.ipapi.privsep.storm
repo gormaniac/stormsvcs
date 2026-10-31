@@ -5,7 +5,7 @@ function getIpApiTag() {
         return($tagPrefix)
     }
     elif ($tagEnabled and $tagPrefix = (null)) {
-        $lib.raise("The slib.ipapi tag prefix is not set. Please set it with the slib.ipapi.admin.settagprefix command.")
+        $lib.raise(BadConfValu, "The slib.ipapi tag prefix is not set. Please set it with the slib.ipapi.admin.settag command.")
     }
 
     return((null))

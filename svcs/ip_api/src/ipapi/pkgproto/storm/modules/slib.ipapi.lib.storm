@@ -15,7 +15,7 @@ function buildGeoTelemNode (ipNode, placeNode, data) {
         :place:latlong = $placeNode.props.latlong
         :place:country ?= $countryNode
         :place:country:code ?= $data.countryCode
-        :desc = (`IP geolocation data for {$ipNode.form()}={$ipNode.value()} at the coordinates {$data.lat}, {$data.lon} per ip-api.com.`)
+        :desc = (`IP geolocation data for {$ipNode.form()}={$ipNode.repr()} at the coordinates {$data.lat}, {$data.lon} per ip-api.com.`)
     ]
 
     return((null))

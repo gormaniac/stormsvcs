@@ -1,11 +1,17 @@
 """The CellApi implementation for ipapi."""
 
 from stormlibpp.telepath import BoolRetn
+
+from typing import TYPE_CHECKING
+
 from stormlibpp.utils import normver
 import synapse.lib.cell as s_cell
 import synapse.lib.stormsvc as s_stormsvc
 
 from .defs import SVC_EVTS, PKGDEFS, SVC_NAME, SVC_VER
+
+if TYPE_CHECKING:
+    from .svc import IpRetn
 
 
 class IpApiCellApi(s_cell.CellApi, s_stormsvc.StormSvc):
@@ -16,7 +22,7 @@ class IpApiCellApi(s_cell.CellApi, s_stormsvc.StormSvc):
     _storm_svc_evts = SVC_EVTS
     _storm_svc_pkgs = PKGDEFS
 
-    async def queryIp(self, ipaddr: str) -> BoolRetn:
+    async def queryIp(self, ipaddr: str) -> "IpRetn":
         """Query information about the given IP address."""
 
         return await self.cell.queryIp(ipaddr)
