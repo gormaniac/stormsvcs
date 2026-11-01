@@ -1,5 +1,5 @@
 name: slib.pcap
-version: 0.5.0
+version: 0.6.0
 guid: e02a89d21d5b4eb588a03a7156b3b467
 
 synapse_minversion: [2, 234, 0]

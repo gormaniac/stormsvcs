@@ -138,7 +138,8 @@ class TestSandbox:
     def test_spec(self):
         spec = p_sandbox.Sandbox(mode="strict").spec(["/x"], ["/y"], ["/z"], {"A": "b"}, "/y")
         assert spec["strict"] and spec["landlock"] and spec["seccomp"]
-        assert "/x" in spec["read"] and "/etc" in spec["read"]
+        assert "/x" in spec["read"] and "/etc/ld.so.cache" in spec["read"]
+        assert "/etc" not in spec["read"] and "/etc/shadow" not in spec["read"]
         assert "/y" in spec["write"] and "/dev/null" in spec["write"]
         assert "/z" in spec["exec"] and "/usr" in spec["exec"]
         assert spec["env"] == {"A": "b"} and spec["cwd"] == "/y"
@@ -155,3 +156,77 @@ class TestSandbox:
         res = subprocess.run([sys.executable, "-I", _sbxexec.__file__, "{}", "--",
                               "/nonexistent/x"], capture_output=True)
         assert res.returncode == _sbxexec.EXIT_SANDBOX and b"unable to run" in res.stderr
+
+
+@needsLandlock
+class TestProbes:
+    """What a compromised engine tries, through the same wrapper the engines run in."""
+
+    @pytest.fixture
+    def run(self, tmp_path):
+        # The run's input (read only), its output dir, and another run's capture next to it.
+        work = tmp_path / "run"
+        out = work / "out"
+        out.mkdir(parents=True)
+        capture = work / "capture.pcap"
+        capture.write_bytes(b"pcap")
+        other = tmp_path / "other"
+        other.mkdir()
+        (other / "capture.pcap").write_bytes(b"someone else's capture")
+        sbx = p_sandbox.Sandbox(rlimits={"cpu": 1})
+
+        async def probe(code, **kwargs):
+            py = os.path.realpath(sys.executable)
+            sbx.prepare(str(work))
+            return await sbx.run(
+                [py, "-I", "-S", "-c", code],
+                read=[str(capture)],
+                write=[str(out)],
+                execs=[sys.prefix, sys.base_prefix],
+                **kwargs,
+            )
+
+        return probe, tmp_path
+
+    async def test_reads(self, run):
+        probe, tmp = run
+        for path in ("/etc/shadow", "/proc/1/environ", str(tmp / "other/capture.pcap"),
+                     "/root/.bashrc", "/vertex/storage/cell.yaml", str(tmp)):
+            res = await probe(f"import os; print(open({path!r}).read() if os.path.isfile({path!r}) "
+                              f"else os.listdir({path!r}))")
+            assert res.code != 0, (path, res.stdout)
+            assert b"PermissionError" in res.stderr or b"FileNotFoundError" in res.stderr, path
+        # Its own input is readable.
+        res = await probe(f"print(open({str(tmp / 'run/capture.pcap')!r}).read())")
+        assert res.stdout.strip() == b"pcap"
+
+    async def test_writes(self, run):
+        probe, tmp = run
+        for path in ("/tmp/x", str(tmp / "run/capture.pcap"), str(tmp / "other/x"),
+                     "/dev/shm/x"):
+            res = await probe(f"open({path!r}, 'w').write('x')")
+            assert res.code != 0 and b"PermissionError" in res.stderr, path
+        assert (tmp / "run/capture.pcap").read_bytes() == b"pcap"
+        res = await probe(f"open({str(tmp / 'run/out/x')!r}, 'w').write('x')")
+        assert res.code == 0
+
+    async def test_network(self, run):
+        probe, _ = run
+        for code in (
+            "import socket; socket.create_connection(('127.0.0.1', 1), timeout=1)",
+            "import socket; s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); "
+            "s.sendto(b'x', ('127.0.0.1', 9))",
+            "import socket; socket.socket(socket.AF_INET6, socket.SOCK_STREAM)",
+            "import socket; socket.socket(socket.AF_PACKET, socket.SOCK_RAW)",
+        ):
+            res = await probe(code)
+            assert res.code != 0 and b"PermissionError" in res.stderr, code
+
+    async def test_limits(self, run):
+        probe, _ = run
+        # A busy loop is killed by the CPU limit (1 second), well before the timeout.
+        res = await probe("while True: pass", timeout=30)
+        assert res.code != 0
+        # Endless output is killed by the output cap.
+        with pytest.raises(p_sandbox.SandboxError, match="wrote more than"):
+            await probe("import sys\nwhile True: sys.stdout.write('x' * 65536)", maxoutput=1 << 20)

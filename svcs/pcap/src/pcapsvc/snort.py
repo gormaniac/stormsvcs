@@ -48,6 +48,7 @@ ALERT_FIELDS = (
     "action",
     "dir",
     "pkt_num",
+    "vlan",
 )
 """The alert_json fields the service reads."""
 

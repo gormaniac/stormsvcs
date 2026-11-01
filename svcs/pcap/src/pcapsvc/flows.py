@@ -11,6 +11,7 @@ two together and returns the flows plus a summary of the capture.
 
 import gzip
 import ipaddress
+import os
 import struct
 from collections.abc import Iterator
 from typing import Any, BinaryIO, NamedTuple
@@ -298,6 +299,53 @@ def _readPcapng(fd: BinaryIO, header: bytes, state: dict) -> Iterator[Packet]:
             yield Packet(lastts, ifaces[0][0], body[4 : 4 + origlen], num)
 
         # Every other block type (stats, name resolution, custom, etc.) is ignored.
+
+
+def splitLinktypes(path: str, dirn: str) -> list[tuple[str, list[int]]] | None:
+    """Split a capture with more than one link type (ex. a pcapng of an Ethernet and a Linux
+    cooked capture interface) into one pcap per link type, for engines that read captures
+    with libpcap, which can't read those.
+
+    Returns (the pcap's path, the frame number of each of its packets) for each link type, or
+    None if the capture has one link type.
+    """
+
+    with open(path, "rb") as fd:
+        linktypes = set()
+        try:
+            for pkt in readPackets(fd):
+                linktypes.add(pkt.linktype)
+                if len(linktypes) > 1:
+                    break
+        except PcapError:
+            return None
+    if len(linktypes) < 2:
+        return None
+
+    outs: dict[int, tuple[BinaryIO, str, list[int]]] = {}
+    try:
+        with open(path, "rb") as fd:
+            try:
+                for pkt in readPackets(fd):
+                    out = outs.get(pkt.linktype)
+                    if out is None:
+                        opath = os.path.join(dirn, f"linktype-{pkt.linktype}.pcap")
+                        ofd = open(opath, "wb")  # noqa: SIM115 - closed below
+                        # A nanosecond pcap, so timestamps keep their precision.
+                        ofd.write(
+                            struct.pack("<IHHiIII", 0xA1B23C4D, 2, 4, 0, 0, 262144, pkt.linktype)
+                        )
+                        out = outs[pkt.linktype] = (ofd, opath, [])
+                    sec, nsec = divmod(pkt.ts, 1_000_000_000)
+                    out[0].write(struct.pack("<IIII", sec, nsec, len(pkt.data), len(pkt.data)))
+                    out[0].write(pkt.data)
+                    out[2].append(pkt.num)
+            except PcapError:
+                pass
+    finally:
+        for ofd, _, _ in outs.values():
+            ofd.close()
+    return [(opath, nums) for _, opath, nums in outs.values()]
 
 
 def readPackets(fd: BinaryIO, state: dict | None = None) -> Iterator[Packet]:
@@ -895,6 +943,20 @@ def _ownEvents(rec: dict, cid: str, misplaced: list) -> dict:
     return rec
 
 
+def _recVlans(rec: Any) -> list[int] | None:
+    """The VLAN IDs of an engine record (EVE ``vlan``, a list; Snort ``vlan``, an int)."""
+
+    if not isinstance(rec, dict) or "vlan" not in rec:
+        return None
+    valu = rec["vlan"]
+    if valu in (None, 0, []):
+        return []
+    try:
+        return [int(v) for v in valu] if isinstance(valu, list) else [int(valu)]
+    except (TypeError, ValueError):
+        return None
+
+
 def matchLoose(
     flows: list[dict], loose: list[tuple[str, int | None, str, Any]]
 ) -> tuple[dict[str, list[tuple[str, Any]]], int]:
@@ -926,13 +988,20 @@ def matchLoose(
         if not cands:
             unmatched += 1
             continue
+        # Community IDs don't include VLANs, Suricata's (and Snort's) records do.
+        vlans = _recVlans(rec)
+        if vlans is not None and len(cands) > 1:
+            cands = [f for f in cands if list(f.get("vlans") or ()) == vlans] or cands
         best = cands[0]
         if tick is not None and len(cands) > 1:
 
-            def dist(flow: dict, tick: int = tick) -> int:
+            def dist(flow: dict, tick: int = tick) -> tuple[int, int]:
+                # Active at the time (within a second) first, then the closest end, so a
+                # 5-tuple reused within a second goes to the connection that just ended.
+                near = abs(tick - flow["last"])
                 if flow["time"] - 1000 <= tick <= flow["last"] + 1000:
-                    return 0
-                return min(abs(tick - flow["time"]), abs(tick - flow["last"]))
+                    return 0, near
+                return min(abs(tick - flow["time"]), near), near
 
             best = min(cands, key=dist)
         matched.setdefault(best["iden"], []).append((kind, rec))

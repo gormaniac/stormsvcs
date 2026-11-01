@@ -27,6 +27,7 @@ import contextlib
 import gzip
 import hashlib
 import ipaddress
+import json
 import logging
 import os
 import re
@@ -107,6 +108,49 @@ def _gunzip(src: str, dst: str) -> None:
 def _isGzip(path: str) -> bool:
     with open(path, "rb") as fd:
         return fd.read(2) == b"\x1f\x8b"
+
+
+def _remapNum(rec: dict, key: str, nums: list[int] | None) -> None:
+    """Map a packet number in a part of a split capture to the capture's frame number."""
+
+    if nums is None or not rec.get(key):
+        return
+    try:
+        idx = int(rec[key]) - 1
+    except (TypeError, ValueError):
+        rec[key] = None
+        return
+    rec[key] = nums[idx] if 0 <= idx < len(nums) else None
+
+
+def _mergeSuricata(runs: list[tuple[dict, list[int] | None]], outdir: str) -> dict[str, Any]:
+    """Merge the Suricata runs over the parts of a split capture into one EVE file (with the
+    capture's frame numbers) and one file store."""
+
+    eve = os.path.join(outdir, "eve.json")
+    store = os.path.join(outdir, "filestore")
+    os.makedirs(store, exist_ok=True)
+    warnings: list[str] = []
+    with open(eve, "w", encoding="utf-8") as fd:
+        for res, nums in runs:
+            warnings.extend(res["warnings"])
+            for ev in p_suricata.iterEve(res["eve"]):
+                _remapNum(ev, "pcap_cnt", nums)
+                fd.write(json.dumps(ev) + "\n")
+            # Files are checked again when they're stored (see FileStore.addPath).
+            src = res.get("filestore")
+            if not src or not os.path.isdir(src):
+                continue
+            for sub in os.listdir(src):
+                subdir = os.path.join(src, sub)
+                if len(sub) != 2 or os.path.islink(subdir) or not os.path.isdir(subdir):
+                    continue
+                os.makedirs(os.path.join(store, sub), exist_ok=True)
+                for name in os.listdir(subdir):
+                    dst = os.path.join(store, sub, name)
+                    if not os.path.lexists(dst):
+                        os.rename(os.path.join(subdir, name), dst)
+    return {"eve": eve, "filestore": store, "warnings": warnings}
 
 
 def alertCommunityId(proto: str, src: str, sport: Any, dst: str, dport: Any) -> str | None:
@@ -668,28 +712,41 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
 
     async def _runSuricata(
         self,
-        path: str,
+        parts: list[tuple[str, list[int] | None]],
         outdir: str,
         decode: list[str],
         files: bool,
         rules: bool,
         netvars: dict[str, str],
     ) -> tuple[dict | None, dict]:
+        """Run Suricata over a capture, or each part of one split by link type (see
+        ``pcapsvc.flows.splitLinktypes``), whose packet counts are mapped back to the
+        capture's frame numbers."""
+
         info: dict[str, Any] = {"enabled": True, "error": None, "rules": 0, "warnings": []}
         active = self._acquire("suricata") if rules else None
         try:
             if active is not None:
                 info["rules"] = len(active[1])
-            res = await self.suricata.run(
-                path,
-                outdir,
-                rulespath=active[0] if active else None,
-                decode=decode,
-                filestore=files,
-                maxbody=self.conf.get("pcap:files:maxsize"),
-                netvars=netvars,
-            )
-            info["warnings"] = res["warnings"]
+            runs = []
+            for idx, (path, nums) in enumerate(parts):
+                odir = outdir if len(parts) == 1 else os.path.join(outdir, f"part{idx}")
+                os.makedirs(odir, exist_ok=True)
+                res = await self.suricata.run(
+                    path,
+                    odir,
+                    rulespath=active[0] if active else None,
+                    decode=decode,
+                    filestore=files,
+                    maxbody=self.conf.get("pcap:files:maxsize"),
+                    netvars=netvars,
+                )
+                info["warnings"].extend(res["warnings"])
+                runs.append((res, nums))
+            if len(runs) == 1:
+                res = runs[0][0]
+            else:
+                res = await s_coro.executor(_mergeSuricata, runs, outdir)
             return {**res, "index": active[1] if active else {}}, info
         except p_suricata.SuricataError as err:
             info["error"] = err.mesg
@@ -698,7 +755,9 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
             if active is not None:
                 self._release(active[0])
 
-    async def _runSnort(self, path: str, netvars: dict[str, str]) -> tuple[dict | None, dict]:
+    async def _runSnort(
+        self, parts: list[tuple[str, list[int] | None]], netvars: dict[str, str]
+    ) -> tuple[dict | None, dict]:
         info: dict[str, Any] = {"enabled": True, "error": None, "rules": 0, "warnings": []}
         active = self._acquire("snort")
         if active is None:
@@ -707,9 +766,17 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
         alerts: list[dict] = []
         try:
             info["rules"] = len(active[1])
-            count, warnings = await self.snort.scan(active[0], path, alerts.append, netvars=netvars)
-            info["warnings"] = warnings
-            info["alerts"] = count
+            info["alerts"] = 0
+            for path, nums in parts:
+                found: list[dict] = []
+                count, warnings = await self.snort.scan(
+                    active[0], path, found.append, netvars=netvars
+                )
+                for alert in found:
+                    _remapNum(alert, "pkt_num", nums)
+                alerts.extend(found)
+                info["warnings"].extend(warnings)
+                info["alerts"] += count
             return {"alerts": alerts, "index": active[1]}, info
         except p_snort.SnortError as err:
             info["error"] = err.mesg
@@ -902,6 +969,15 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
 
         suridir = os.path.join(tmp, "suricata")
         os.makedirs(suridir)
+        # libpcap (Suricata and Snort read captures with it) can't read a pcapng with
+        # interfaces of different link types, so those are split.
+        parts: list[tuple[str, list[int] | None]] = [(plain, None)]
+        if (opts["suricata"] and self.suricata.available()) or (
+            opts["snort"] and opts["rules"] and self.snort.available()
+        ):
+            splitdir = os.path.join(tmp, "split")
+            os.makedirs(splitdir)
+            parts = await s_coro.executor(p_flows.splitLinktypes, plain, splitdir) or parts
         self.sandbox.prepare(tmp)
 
         info: dict[str, dict] = {
@@ -910,12 +986,12 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
         tasks: dict[str, Any] = {}
         if opts["suricata"] and self.suricata.available():
             tasks["suricata"] = self._runSuricata(
-                plain, suridir, decode, saving, opts["rules"], opts["netvars"]
+                parts, suridir, decode, saving, opts["rules"], opts["netvars"]
             )
         elif opts["suricata"]:
             info["suricata"]["error"] = "Suricata is not installed"
         if opts["snort"] and opts["rules"] and self.snort.available():
-            tasks["snort"] = self._runSnort(plain, opts["netvars"])
+            tasks["snort"] = self._runSnort(parts, opts["netvars"])
         if opts["tshark"] and self.tshark.available:
             tasks["tshark"] = self._runTshark(path, keylog, decode, gaps="suricata" in tasks)
         elif opts["tshark"]:

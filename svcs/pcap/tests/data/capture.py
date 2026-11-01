@@ -15,6 +15,7 @@ deterministic, so the tests can check their hashes; keys and certificates are ge
 
 import email.message
 import ftplib
+import gzip
 import http.server
 import os
 import pathlib
@@ -574,6 +575,205 @@ def scenario_krb5(tmp: pathlib.Path) -> None:
         client.close()
     usock.close()
     tsock.close()
+
+
+def scenario_ssh_pq(tmp: pathlib.Path) -> None:
+    """An SSH key exchange with the post-quantum sntrup761x25519 KEX and an RSA host key.
+
+    OpenSSH 9.6 doesn't have mlkem768x25519 (9.9 does), so it isn't recorded.
+    """
+
+    key = tmp / "host_rsa"
+    subprocess.run(["ssh-keygen", "-q", "-t", "rsa", "-b", "2048", "-N", "", "-f", str(key)],
+                   check=True)
+    os.makedirs("/run/sshd", exist_ok=True)
+    server = subprocess.Popen(
+        ["/usr/sbin/sshd", "-D", "-p", "2200", "-h", str(key), "-o", "ListenAddress=127.0.0.1",
+         "-o", f"PidFile={tmp / 'sshd.pid'}", "-o", "PasswordAuthentication=no",
+         "-o", "KbdInteractiveAuthentication=no"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    waitPort(2200)
+    with Capture("ssh_pq", "tcp port 2200"):
+        subprocess.run(["ssh", "-p", "2200", "-o", "BatchMode=yes",
+                        "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
+                        "-o", "KexAlgorithms=sntrup761x25519-sha512@openssh.com",
+                        "-o", "HostKeyAlgorithms=rsa-sha2-512", "nobody@127.0.0.1", "true"],
+                       capture_output=True, timeout=20)
+    server.kill()
+
+
+SIP_OPTIONS = (
+    "OPTIONS sip:pbx@127.0.0.1 SIP/2.0\r\n"
+    "Via: SIP/2.0/UDP 127.0.0.1:5070;branch=z9hG4bK776asdhds\r\n"
+    "Max-Forwards: 70\r\n"
+    "To: <sip:pbx@127.0.0.1>\r\n"
+    "From: <sip:alice@127.0.0.1>;tag=1928301774\r\n"
+    "Call-ID: a84b4c76e66710@127.0.0.1\r\n"
+    "CSeq: 63104 OPTIONS\r\n"
+    "Contact: <sip:alice@127.0.0.1:5070>\r\n"
+    "User-Agent: Linphone/5.2.5 (belle-sip/5.2.0)\r\n"
+    "Content-Length: 0\r\n\r\n"
+)
+
+
+def scenario_sip(tmp: pathlib.Path) -> None:
+    """A SIP OPTIONS request and its 200 OK over UDP, between two real sockets."""
+
+    server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    server.bind(("127.0.0.1", 5060))
+
+    def serve():
+        data, addr = server.recvfrom(65535)
+        lines = data.decode().split("\r\n")
+        keep = [ln for ln in lines if ln.split(":")[0] in ("Via", "To", "From", "Call-ID", "CSeq")]
+        resp = ("SIP/2.0 200 OK\r\n" + "\r\n".join(keep) + "\r\n"
+                "Server: Asterisk PBX 20.5.0\r\nAllow: INVITE, ACK, CANCEL, OPTIONS, BYE\r\n"
+                "Content-Length: 0\r\n\r\n")
+        server.sendto(resp.encode(), addr)
+
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
+    with Capture("sip", "udp port 5060"):
+        client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        client.bind(("127.0.0.1", 5070))
+        client.settimeout(5)
+        client.sendto(SIP_OPTIONS.encode(), ("127.0.0.1", 5060))
+        client.recvfrom(65535)
+        client.close()
+    thread.join(5)
+    server.close()
+
+
+def scenario_ftp_active(tmp: pathlib.Path) -> None:
+    """An FTP download (RETR) in active mode (PORT): the server connects back to the client."""
+
+    from pyftpdlib.authorizers import DummyAuthorizer
+    from pyftpdlib.handlers import FTPHandler
+    from pyftpdlib.servers import FTPServer
+
+    root = tmp / "ftproot"
+    root.mkdir()
+    (root / "sample.bin").write_bytes(DOWNLOAD)
+    auth = DummyAuthorizer()
+    auth.add_anonymous(str(root), perm="elr")
+    handler = FTPHandler
+    handler.authorizer = auth
+    handler.permit_foreign_addresses = True
+    srv = FTPServer(("127.0.0.1", 2121), handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    waitPort(2121)
+    # The data connection is from the server to a client port PORT picked, capture all TCP.
+    with Capture("ftp_active", "tcp and not port 22"):
+        client = ftplib.FTP()
+        client.connect("127.0.0.1", 2121)
+        client.login()
+        client.set_pasv(False)
+        client.retrbinary("RETR sample.bin", lambda _: None)
+        client.quit()
+    srv.close_all()
+
+
+def scenario_corner(tmp: pathlib.Path) -> None:
+    """Flow table corner cases: a TCP connection the capture joins midstream, a client port
+    reused for a second connection, and a UDP datagram to a closed port (ICMP unreachable)."""
+
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    listener.bind(("127.0.0.1", 8080))
+    listener.listen()
+
+    def serve():
+        for _ in range(3):
+            conn, _ = listener.accept()
+            with conn:
+                try:
+                    while data := conn.recv(65535):
+                        conn.sendall(b"echo: " + data)
+                except ConnectionResetError:
+                    pass
+
+    threading.Thread(target=serve, daemon=True).start()
+
+    def connect(port=0):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind(("127.0.0.1", port))
+        sock.connect(("127.0.0.1", 8080))
+        return sock
+
+    # Connected before the capture starts, so the capture joins it midstream.
+    midstream = connect(40100)
+    midstream.sendall(b"before the capture\n")
+    midstream.recv(65535)
+    with Capture("corner", "tcp port 8080 or udp port 9 or icmp"):
+        midstream.sendall(b"GET /midstream HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+        midstream.recv(65535)
+        midstream.close()
+        # The same client port twice (the client closes first and resets, no TIME_WAIT).
+        for path in (b"/first", b"/second"):
+            sock = connect(40200)
+            sock.sendall(b"GET " + path + b" HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+            sock.recv(65535)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+            sock.close()
+            time.sleep(0.2)
+        udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        udp.sendto(b"anyone there?", ("127.0.0.1", 9))
+        time.sleep(0.2)
+        udp.close()
+    listener.close()
+
+
+def scenario_multi(tmp: pathlib.Path) -> None:
+    """A gzipped pcapng with two interfaces of different link types: loopback (Ethernet) and
+    the "any" interface (Linux cooked capture), merged with mergecap."""
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 8081), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    waitPort(8081)
+    parts = []
+    for iface in ("lo", "any"):  # Ethernet, and Linux cooked capture
+        path = tmp / f"{iface}.pcapng"
+        proc = subprocess.Popen(
+            ["dumpcap", "-q", "-i", iface, "-f", "tcp port 8081", "-w", str(path)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        time.sleep(1.5)
+        subprocess.run(["curl", "-s", "--noproxy", "*", "-o", "/dev/null",
+                        f"http://127.0.0.1:8081/files/{iface}.bin"], check=True)
+        time.sleep(1.5)
+        proc.terminate()
+        proc.wait()
+        parts.append(str(path))
+    merged = tmp / "multi.pcapng"
+    subprocess.run(["mergecap", "-w", str(merged), *parts], check=True)
+    out = HERE / "multi.pcapng.gz"
+    with open(merged, "rb") as ifd, gzip.GzipFile(out, "wb", mtime=0) as ofd:
+        shutil.copyfileobj(ifd, ofd)
+    os.chmod(out, 0o644)
+    server.shutdown()
+    print(f"wrote {out.name}", file=sys.stderr)
+
+
+def scenario_vlan(tmp: pathlib.Path) -> None:
+    """The HTTP recording twice, tagged with VLAN 10 and then VLAN 20: the same 5-tuple on two
+    VLANs, which are two flows. Loopback has no VLANs, so the tags are added with scapy."""
+
+    from scapy.layers.l2 import Dot1Q, Ether
+    from scapy.utils import rdpcap, wrpcap
+
+    packets = []
+    for offset, vid in ((0, 10), (1, 20)):
+        for pkt in rdpcap(str(HERE / "http.pcapng")):
+            eth = pkt[Ether]
+            tagged = Ether(src=eth.src, dst=eth.dst) / Dot1Q(vlan=vid, type=eth.type) / eth.payload
+            tagged.time = pkt.time + offset
+            packets.append(tagged)
+    out = HERE / "vlan.pcap"
+    wrpcap(str(out), packets)
+    os.chmod(out, 0o644)
+    print(f"wrote {out.name}", file=sys.stderr)
 
 
 SCENARIOS = {

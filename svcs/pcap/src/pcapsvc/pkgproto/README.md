@@ -77,8 +77,9 @@ of one is sandboxed:
 
 - **An unprivileged user.** When the service runs as root (it does in the image) engines run as
   `sandbox:user` (`slib-pcap-engine`, uid 2000), which owns only the run's directory.
-- **Landlock.** Engines can only read the run's inputs and the system files they need, write the
-  run's directory, and run their own binary. TCP connects and binds are refused too on kernels
+- **Landlock.** Engines can only read the run's inputs and the system files they need (the
+  loader and libc config in `/etc`, not the rest of it), write the run's directory, and run
+  their own binary. TCP connects and binds are refused too on kernels
   with Landlock ABI 4 or later.
 - **seccomp.** IPv4, IPv6, and packet sockets are refused.
 - **no_new_privs, resource limits** (`sandbox:rlimits`: memory, CPU time, file size, open files,
@@ -482,6 +483,11 @@ updates the same nodes instead of creating duplicates.
   and Snort keep their own flow tables, so with unusual timeouts an engine's events can land on
   the flow that the packet they were logged on belongs to rather than the one the engine saw.
 - Packets on different VLANs are different flows, even with the same addresses and ports.
+  Community IDs don't include VLANs, so engine records without a frame number are matched by
+  their VLANs too.
+- libpcap (which Suricata and Snort read captures with) can't read a pcapng with interfaces of
+  different link types, so the service splits those into a pcap per link type for them and
+  maps their packet numbers back to the capture's frames.
 - Non-IP packets (ex. ARP), unsupported link types, malformed packets, packets cut off before the
   end of their transport header, and IP fragments after the first (they have no ports) are
   skipped and counted in the summary.
@@ -497,8 +503,14 @@ uv run pytest tests
 The flow tests build every capture they use (pcap, pcapng, gzip, each link type) in
 `tests/pcapgen.py`, and the rule tests in `tests/pcaps.py`. The engine tests use real traffic
 recorded on loopback in `tests/data/` (HTTP, TLS 1.2 with a client certificate, TLS 1.3 HTTP/1.1
-and HTTP/2 with its key log, SSH, FTP, SMTP with an attachment, RDP, DNS, QUIC, SMB, and
-Kerberos), see `tests/data/capture.py` to re-record them. No test calls out to external
+and HTTP/2 with its key log, SSH, SSH with the sntrup761 post-quantum key exchange, passive and
+active FTP, SMTP with an attachment, RDP, DNS, QUIC, SMB, Kerberos, and SIP over UDP), plus
+corner cases (a connection joined midstream, a reused 5-tuple, ICMP unreachable, the same
+5-tuple on two VLANs, and a gzipped pcapng with two link types), see `tests/data/capture.py` to
+re-record them. `tests/test_fixtures.py` checks that Suricata finds what tshark does (parity),
+and that the engines agree on frame numbers and Community IDs. The sandbox tests probe what a
+compromised engine would try (reading `/etc/shadow` or another run's capture, writing outside
+its directory, opening sockets, spinning, or flooding its output). No test calls out to external
 services, the feed tests use a local feed server (`tests/fakefeeds.py`).
 
 The tests that need an engine skip when it isn't installed (ex. on a dev machine or the CI host

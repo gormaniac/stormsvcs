@@ -49,9 +49,30 @@ DEFAULT_RLIMITS = {
 }
 """The default resource limits of an engine run, bytes or seconds (0 is unlimited)."""
 
-SYSTEM_READ = ("/etc", "/proc/self", "/sys/devices/system/cpu", "/dev/urandom", "/dev/null")
-"""Paths every engine may read: libc config (ld.so.cache, nsswitch, localtime), its own /proc
-entry, the CPU topology (thread counts), and /dev/urandom."""
+SYSTEM_READ = (
+    "/etc/ld.so.cache",
+    "/etc/ld.so.conf",
+    "/etc/ld.so.conf.d",
+    "/etc/nsswitch.conf",
+    "/etc/localtime",
+    "/etc/timezone",
+    "/etc/passwd",
+    "/etc/group",
+    "/etc/host.conf",
+    "/etc/hosts",
+    "/etc/gai.conf",
+    "/etc/services",
+    "/etc/protocols",
+    "/etc/magic",
+    "/etc/magic.mime",
+    "/proc/self",
+    "/sys/devices/system/cpu",
+    "/dev/urandom",
+    "/dev/null",
+)
+"""Paths every engine may read: libc and loader config (ld.so.cache, nsswitch, localtime, the
+user and service databases), libmagic's local config, its own /proc entry, the CPU topology
+(thread counts), and /dev/urandom. Not the rest of /etc (ex. /etc/shadow)."""
 
 SYSTEM_EXEC = ("/usr", "/lib", "/lib64", "/bin", "/sbin")
 """Paths every engine may read and execute from (libraries, the dynamic linker)."""
@@ -88,10 +109,14 @@ class Result:
 def _readLimited(maxsize: int):
     async def read(stream: asyncio.StreamReader, buf: bytearray, over: asyncio.Event) -> None:
         while chunk := await stream.read(65536):
+            if over.is_set():
+                # Keep draining (and dropping) the output until the engine is killed, so the
+                # pipe closes and waiting for the engine finishes.
+                continue
             if maxsize and len(buf) + len(chunk) > maxsize:
                 buf.extend(chunk[: maxsize - len(buf)])
                 over.set()
-                return
+                continue
             buf.extend(chunk)
 
     return read
