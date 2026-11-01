@@ -376,7 +376,9 @@ view. Change it with `slib.pcap.admin.schedule`. Each run:
      sid) and disable the original.
    - Rules that leave the feed are disabled and removed from its ruleset.
    - Only the feed's changes since its last sync into the view are synced, so a daily update
-     takes seconds. The first sync into a view, or one with `--force`, syncs every rule.
+     takes seconds. The first sync into a view, or one with `--force`, syncs every rule. Every
+     rule is modeled in Storm (no bulk ingest), so a first sync of a large feed takes a while,
+     roughly 10 minutes for a ~70k rule feed like ET Open (about 10ms a rule in testing).
 2. **Pushes every enabled rule** in the view to the service (unless `--no-push`), which replaces
    its rules with them and rebuilds each engine's rules if they changed.
 

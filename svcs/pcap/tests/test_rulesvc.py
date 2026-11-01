@@ -231,26 +231,41 @@ class TestFeedSync(s_tests.SynTest):
             msgs = await core.stormlist("slib.pcap.feed.list")
             self.stormIsInWarn(f"The last download of {ET} failed", msgs)
 
-    async def test_sync_ingest_batches(self):
-        # Synapse logs a line for every feed ingest, so new rules are ingested 10k at a time,
-        # not one ingest per (500 rule) feedChanges batch.
-        rules = "".join(
-            f'alert tcp any any -> any any ( msg:"BIG {i}"; content:"x{i}"; sid:{3000000 + i}; rev:1; )\n'
-            for i in range(10500)
+    async def test_sync_refs(self):
+        # Feed rules and custom rules are modeled by the same Storm, with the references the
+        # service cleaned, and without bulk ingest (Synapse logs a line per ingest).
+        text = (
+            'alert tcp any any -> any any ( msg:"REFS"; content:"x"; reference:cve,2021-44228; '
+            "reference:url,url,example.com/x; reference:url,www,example.com; "
+            "reference:md5,662002D61F1AEBD64FC204CE40FD65F2; reference:bugtraq,1; sid:{sid}; rev:1; )"
         )
         async with snortSvc(self) as (core, _, feeds):
-            feeds.files["/snort3.tar.gz"] = tarGz({"rules/big.rules": rules})
+            feeds.files["/snort3.tar.gz"] = tarGz({"rules/refs.rules": text.format(sid=7) + "\n"})
             with self.getLoggerStream("synapse.lib.snap", struct=False) as stream:
                 msgs = await core.stormlist(f"slib.pcap.sync --no-push --feed {S3}")
             self.stormHasNoWarnErr(msgs)
-            self.stormIsInPrint(
-                f"{S3}: synced 10500 rules (10500 added, 0 updated, 0 removed).", msgs
-            )
+            self.stormIsInPrint(f"{S3}: synced 1 rules (1 added, 0 updated, 0 removed).", msgs)
             stream.seek(0)
-            lines = [ln for ln in stream.read().splitlines() if "adding feed data" in ln]
-            assert len(lines) == 2, lines
-            rsguid = s_feeds.rulesetGuid(S3)
-            assert await count(core, f"meta:ruleset={rsguid} -(has)> it:app:snort:rule") == 10500
+            assert "adding feed data" not in stream.read()
+
+            msgs = await core.stormlist(
+                "slib.pcap.rule.add $text", opts={"vars": {"text": text.format(sid=8)}}
+            )
+            for guid in (rule(S3, 7), s_common.guid(("slib.pcap.custom", "snort", 1, 8))):
+                q = f"it:app:snort:rule={guid}"
+                assert await count(core, f"{q} -(detects)> it:sec:cve=cve-2021-44228") == 1
+                assert await count(core, f"{q} -(refs)> inet:url=http://example.com/x") == 1
+                assert (
+                    await count(core, f"{q} -(refs)> hash:md5=662002d61f1aebd64fc204ce40fd65f2")
+                    == 1
+                )
+                assert await count(core, f"{q} -(refs)> *") == 2
+
+            # A reference Synapse can't model is skipped with a warning.
+            q = f"""it:app:snort:rule={rule(S3, 7)}
+                $lib.import(slib.pcap.model).ruleRefs($node, ((cve, nope),))"""
+            msgs = await core.stormlist(q)
+            self.stormIsInWarn("it isn't a valid it:sec:cve: nope", msgs)
 
     async def test_sync_incremental(self):
         conf = {"pcap:feeds:interval": 0}
