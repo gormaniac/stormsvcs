@@ -22,6 +22,9 @@ function hasKey() {
     return($svc.hasApiKey().data)
 }
 
+// Whether the service-wide API key (slib.hatching.admin.apikey) is set.
+function hasSvcKey() { return($svc.hasApiKey().data) }
+
 function tagPrefix() {
     if $lib.globals.get("slib:hatching:tag:enabled") {
         return($lib.globals.get("slib:hatching:tag:prefix"))

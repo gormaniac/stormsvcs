@@ -595,7 +595,7 @@ class TestStormAdmin(s_tests.SynTest):
 
             # A user's own key takes precedence.
             msgs = await core.stormlist("slib.hatching.apikey")
-            self.stormIsInPrint("You don't have a Hatching Triage API key set.", msgs)
+            self.stormIsInPrint("You don't have your own Hatching Triage API key set, so the service-wide key is used.", msgs)
             msgs = await core.stormlist("slib.hatching.apikey badkey")
             self.stormIsInPrint("Saved your Hatching Triage API key in vault hatching:root.", msgs)
             msgs = await core.stormlist("slib.hatching.apikey")
@@ -608,11 +608,14 @@ class TestStormAdmin(s_tests.SynTest):
             self.stormIsInPrint("Updated your Hatching Triage API key.", msgs)
             msgs = await core.stormlist("slib.hatching.apikey --clear")
             self.stormIsInPrint("Deleted your Hatching Triage API key.", msgs)
+            self.stormIsInPrint("The service-wide key is used instead.", msgs)
             msgs = await core.stormlist("slib.hatching.apikey --clear")
-            self.stormIsInPrint("You don't have a Hatching Triage API key set.", msgs)
+            self.stormIsInPrint("You don't have your own Hatching Triage API key set, so the service-wide key", msgs)
 
             msgs = await core.stormlist("slib.hatching.admin.apikey --clear")
             self.stormIsInPrint("Cleared the slib.hatching API key.", msgs)
+            msgs = await core.stormlist("slib.hatching.apikey")
+            self.stormIsInPrint("and no service-wide key is set either.", msgs)
 
     async def test_request(self):
         async with hatchingSvc(self) as (core, svc, fake):

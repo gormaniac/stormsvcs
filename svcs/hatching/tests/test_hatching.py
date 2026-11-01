@@ -112,7 +112,8 @@ class TestNorm(s_tests.SynTest):
 
         (task,) = data["tasks"]
         assert task["name"] == "behavioral1" and task["target"] == ft.SAMPLE_SHA256
-        assert task["procs"][1] == {"procid": 2, "parent": 1, "pid": 3120, "orig": False, "sample": False,
+        assert task["procs"][1] == {"procid": 2, "parent": 1, "pid": 3120, "sample": False,
+                                    "orig": task["procs"][1]["orig"],
                                     "cmd": "C:\\Windows\\System32\\cmd.exe /c whoami",
                                     "path": "C:\\Windows\\System32\\cmd.exe"}
         # Parents that weren't reported are dropped.

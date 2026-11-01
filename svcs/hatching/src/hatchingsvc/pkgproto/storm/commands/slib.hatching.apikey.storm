@@ -1,19 +1,29 @@
+// What's used instead of a key of your own.
+function noUserKey(priv) {
+    if $priv.hasSvcKey() {
+        return("slib.hatching: You don't have your own Hatching Triage API key set, so the service-wide key is used.")
+    }
+    return("slib.hatching: You don't have your own Hatching Triage API key set, and no service-wide key is set either.")
+}
+
 init {
+    $priv = $lib.import(slib.hatching.priv.user)
     $vault = $lib.vault.bytype(hatching, scope=user)
 
     if $cmdopts.clear {
         if $vault {
             $vault.delete()
             $lib.print("slib.hatching: Deleted your Hatching Triage API key.")
+            if $priv.hasSvcKey() { $lib.print("slib.hatching: The service-wide key is used instead.") }
         } else {
-            $lib.print("slib.hatching: You don't have a Hatching Triage API key set.")
+            $lib.print($noUserKey($priv))
         }
     }
     elif (not $cmdopts.apikey) {
         if $vault {
             $lib.print("slib.hatching: Your Hatching Triage API key is set in vault {name}.", name=$vault.name)
         } else {
-            $lib.print("slib.hatching: You don't have a Hatching Triage API key set.")
+            $lib.print($noUserKey($priv))
         }
     }
     elif $vault {
