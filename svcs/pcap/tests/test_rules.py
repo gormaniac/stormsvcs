@@ -122,6 +122,19 @@ def test_check_net_vars():
         "HOME_NET": "[10.0.0.0/8, !10.1.0.0/16]",
         "EXTERNAL_NET": "!$HOME_NET",
     }
-    for bad in ({"HOME NET": "any"}, {"HOME_NET": "any'; os.exit()"}, {"HOME_NET": ""}, ["x"]):
+    assert s_rules.checkNetVars({"X_NET": "[10.0.0.0/8,[!$HOME_NET, 2001:db8::/32],!192.0.2.1]"})
+    for bad in (
+        {"HOME NET": "any"},
+        {"HOME_NET": "any'; os.exit()"},
+        {"HOME_NET": ""},
+        ["x"],
+        # Unbalanced, ports, not an address, an empty item.
+        {"HOME_NET": "[10.0.0.0/8"},
+        {"HOME_NET": "10.0.0.0/8]"},
+        {"HTTP_PORTS": "[80,8080]"},
+        {"HOME_NET": "[10.0.0.0/8,,]"},
+        {"HOME_NET": "nope"},
+        {"HOME_NET": "$"},
+    ):
         with pytest.raises(s_rules.RuleError):
             s_rules.checkNetVars(bad)

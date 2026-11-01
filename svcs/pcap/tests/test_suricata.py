@@ -123,6 +123,13 @@ def test_netvars_overrides(tmp_path):
         p_suricata.setPath({"a": 1}, "a.b", 2)
     with pytest.raises(p_suricata.SuricataError, match="Invalid suricata:set key"):
         p_suricata.setPath({}, "..", 2)
+    # Numbers index lists, like suricata --set outputs.0.eve-log.enabled=no.
+    conf = {"outputs": [{"eve-log": {"enabled": True}}, {"file-store": {}}]}
+    p_suricata.setPath(conf, "outputs.0.eve-log.enabled", False)
+    p_suricata.setPath(conf, "outputs.1", {"fast": {}})
+    assert conf["outputs"] == [{"eve-log": {"enabled": False}}, {"fast": {}}]
+    with pytest.raises(p_suricata.SuricataError, match="no list item 5"):
+        p_suricata.setPath(conf, "outputs.5.x", 1)
 
 
 def test_bad_base(tmp_path):

@@ -147,6 +147,14 @@ class RuleMixin:
         for path in (self.rulesdir, self.feeddir):
             os.makedirs(path, exist_ok=True)
 
+        # Default feeds that were retired since a service seeded them (unless an admin
+        # pointed them somewhere else).
+        for name, url in p_feeds.RETIRED_FEEDS.items():
+            fdef = self.feeddefs.get(name)
+            if fdef is not None and fdef.get("url") == url:
+                logger.warning("Removing the retired %s feed (%s).", name, url)
+                await self.feedDel(name)
+
         self.buildlock = asyncio.Lock()
         self.pushes: dict[str, dict[str, Any]] = {}
         self.inuse: dict[str, int] = {}

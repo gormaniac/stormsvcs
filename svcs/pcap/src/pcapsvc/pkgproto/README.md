@@ -218,9 +218,14 @@ readable by anyone with that permission.
 | Decode As rules for one run | Users with `slib.pcap.user` | `slib.pcap.flows ... --decode-as "tcp.port==8443,tls"`, used with the admin's rules. |
 | TLS key logs for one run | Users with `slib.pcap.user` | `slib.pcap.flows ... --keylog <sha256>`. |
 
-Network variables become Suricata `address-groups` and Snort `default_variables.nets` entries
-for the run. Snort only uses them through that table, which the stock `snort.lua` gives
-`ips.variables`, so a custom `snort:conf` has to use it too.
+Network variables become Suricata `address-groups` for the run. For Snort, the ones the base
+`snort.lua` assigns (ex. `HOME_NET`) are replaced in a per-run copy of it, so the variables the
+stock `snort_defaults.lua` derives from them (ex. `HTTP_SERVERS`) follow, and the rest (ex.
+`DNS_SERVERS`) are set in its `default_variables.nets` table. Values are validated as address
+groups (IPs, CIDRs, `any`, `$VARIABLES`, and `[...]` lists of them) before they're saved.
+
+`suricata:set` keys work like `suricata --set`, numbers index lists (ex.
+`outputs.0.eve-log.enabled`), and a key that can't apply stops the service at startup.
 
 Decode As rules go to tshark (`-d`) and, for the protocols Suricata parses, become extra
 Suricata detection ports (`tcp.port`/`udp.port` rules only). Engines only parse protocols on
@@ -278,7 +283,9 @@ changed any other way (ex. editing `:enabled` or `:text` directly) are picked up
 | `et-open` | `suricata` | yes | Proofpoint Emerging Threats Open, Suricata 8 syntax (MIT). |
 | `abusech-sslbl`, `abusech-feodo`, `abusech-urlhaus` | `suricata` | no | abuse.ch's SSL Blacklist (certificates), Feodo Tracker, and URLhaus rules (CC0). |
 
-Manage feeds with `slib.pcap.admin.feed`. A feed is a URL to a `.rules` file, or a `.tar.gz`,
+Manage feeds with `slib.pcap.admin.feed`. Default feeds that are retired (`abusech-sslbl-c2`,
+discontinued by abuse.ch) are removed from services that had them, unless an admin changed
+their URL. A feed is a URL to a `.rules` file, or a `.tar.gz`,
 `.tgz`, `.gz`, or `.zip` of them, and the engine its rules are for. Feeds that need a key (ex.
 Talos' registered and subscriber rules, an ET Pro code) use `${name}` placeholders, filled in
 from the service's `pcap:feeds:secrets` so the key isn't stored in the Cortex. Each secret lists

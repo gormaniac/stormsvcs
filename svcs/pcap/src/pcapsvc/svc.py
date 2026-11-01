@@ -480,6 +480,14 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
             sandbox=self.sandbox,
             overrides=self.conf.get("suricata:set"),
         )
+        if self.suricata.overrides:
+            # Bad suricata:set keys fail at startup, not on every run.
+            try:
+                self.suricata.config(self.tmpdir)
+            except p_suricata.SuricataError as err:
+                if "suricata:set" in err.mesg:
+                    raise s_exc.BadConfValu(mesg=err.mesg, name="suricata:set") from None
+                logger.warning("Unable to check suricata:set: %s", err.mesg)
         self.versions: dict[str, str | None] = {}
         self.uploads: dict[str, dict[str, Any]] = {}
         self.runsema = asyncio.Semaphore(self.conf.get("pcap:workers"))

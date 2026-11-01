@@ -169,26 +169,39 @@ def decodePorts(decode: Iterable[str]) -> dict[str, dict[str, list[str]]]:
 
 
 def setPath(conf: dict[str, Any], key: str, valu: Any) -> None:
-    """Set a dotted key (like ``suricata --set``) in a config, ex. ``stream.memcap``.
+    """Set a dotted key (like ``suricata --set``) in a config, ex. ``stream.memcap`` or
+    ``outputs.1.eve-log.enabled`` (a number indexes a list).
 
     Raises
     ------
     SuricataError
-        If the key is empty or a part of it is a value that isn't a mapping.
+        If the key is empty, or a part of it is a value that isn't a mapping (or a list it
+        indexes).
     """
 
     parts = [part for part in str(key).split(".") if part]
     if not parts:
         raise SuricataError(f"Invalid suricata:set key {key!r}.")
-    node = conf
-    for part in parts[:-1]:
-        nxt = node.get(part)
-        if nxt is None:
-            nxt = node[part] = {}
-        if not isinstance(nxt, dict):
+    node: Any = conf
+    for idx, part in enumerate(parts):
+        last = idx == len(parts) - 1
+        if isinstance(node, list):
+            if not part.isdigit() or int(part) >= len(node):
+                raise SuricataError(f"Invalid suricata:set key {key!r}: no list item {part}.")
+            if last:
+                node[int(part)] = valu
+                return
+            node = node[int(part)]
+            # Suricata's list items are one key mappings, ex. outputs: [{eve-log: {...}}].
+            continue
+        if not isinstance(node, dict):
             raise SuricataError(f"Invalid suricata:set key {key!r}: {part} isn't a mapping.")
-        node = nxt
-    node[parts[-1]] = valu
+        if last:
+            node[part] = valu
+            return
+        if node.get(part) is None:
+            node[part] = {}
+        node = node[part]
 
 
 def iterEve(path: str) -> Iterator[dict[str, Any]]:

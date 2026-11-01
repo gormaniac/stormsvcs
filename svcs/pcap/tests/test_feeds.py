@@ -6,6 +6,7 @@ import zipfile
 
 import aiohttp
 import pytest
+import synapse.tests.utils as s_tests
 from pcapsvc import feeds as s_feeds
 
 from .fakefeeds import SNORT2_RULES, SNORT3_RULES, FakeFeeds, tarGz
@@ -198,3 +199,24 @@ def test_feed_secrets():
     assert s_feeds.redact("GET https://www.snort.org/?oinkcode=abc123 failed", secrets) == (
         "GET https://www.snort.org/?oinkcode=${talos:oinkcode} failed"
     )
+
+
+class TestRetiredFeeds(s_tests.SynTest):
+    async def test_retired(self):
+        from pcapsvc import PcapSvc
+
+        url = s_feeds.RETIRED_FEEDS["abusech-sslbl-c2"]
+        with self.getTestDir() as dirn:
+            feeds = [
+                {"name": "abusech-sslbl-c2", "url": url, "engine": "suricata"},
+                {"name": "keep", "url": "https://example.com/x.rules", "engine": "suricata"},
+            ]
+            async with self.getTestCell(PcapSvc, dirn=dirn, conf={"pcap:feeds": feeds}) as svc:
+                # A service that seeded the retired feed (an older version) drops it.
+                assert sorted(f["name"] for f in await svc.feeds()) == ["keep"]
+            # One an admin pointed elsewhere stays.
+            async with self.getTestCell(PcapSvc, dirn=dirn) as svc:
+                await svc.feedAdd({"name": "abusech-sslbl-c2", "url": "https://mirror.example/x.rules",
+                                   "engine": "suricata"})
+            async with self.getTestCell(PcapSvc, dirn=dirn) as svc:
+                assert sorted(f["name"] for f in await svc.feeds()) == ["abusech-sslbl-c2", "keep"]

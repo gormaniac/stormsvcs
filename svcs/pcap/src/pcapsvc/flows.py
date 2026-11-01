@@ -301,6 +301,13 @@ def _readPcapng(fd: BinaryIO, header: bytes, state: dict) -> Iterator[Packet]:
         # Every other block type (stats, name resolution, custom, etc.) is ignored.
 
 
+SPLIT_SNAPLEN = 262144
+"""The snaplen of split captures, libpcap's max (MAXIMUM_SNAPLEN)."""
+
+MAX_PCAP_NS = (2**32 - 1) * 1_000_000_000 + 999_999_999
+"""The latest time a pcap record can hold, in nanoseconds since the epoch."""
+
+
 def splitLinktypes(path: str, dirn: str) -> list[tuple[str, list[int]]] | None:
     """Split a capture with more than one link type (ex. a pcapng of an Ethernet and a Linux
     cooked capture interface) into one pcap per link type, for engines that read captures
@@ -310,16 +317,17 @@ def splitLinktypes(path: str, dirn: str) -> list[tuple[str, list[int]]] | None:
     None if the capture has one link type.
     """
 
+    # Interfaces count even without packets (libpcap rejects the file on their IDB), so the
+    # reader's linktypes (every IDB's) decide. A classic pcap has one, stop at its header.
+    state: dict = {}
     with open(path, "rb") as fd:
-        linktypes = set()
         try:
-            for pkt in readPackets(fd):
-                linktypes.add(pkt.linktype)
-                if len(linktypes) > 1:
+            for _ in readPackets(fd, state):
+                if state.get("format") == "pcap" or len(state["linktypes"]) > 1:
                     break
         except PcapError:
             return None
-    if len(linktypes) < 2:
+    if len(state.get("linktypes", ())) < 2:
         return None
 
     outs: dict[int, tuple[BinaryIO, str, list[int]]] = {}
@@ -333,12 +341,17 @@ def splitLinktypes(path: str, dirn: str) -> list[tuple[str, list[int]]] | None:
                         ofd = open(opath, "wb")  # noqa: SIM115 - closed below
                         # A nanosecond pcap, so timestamps keep their precision.
                         ofd.write(
-                            struct.pack("<IHHiIII", 0xA1B23C4D, 2, 4, 0, 0, 262144, pkt.linktype)
+                            struct.pack(
+                                "<IHHiIII", 0xA1B23C4D, 2, 4, 0, 0, SPLIT_SNAPLEN, pkt.linktype
+                            )
                         )
                         out = outs[pkt.linktype] = (ofd, opath, [])
-                    sec, nsec = divmod(pkt.ts, 1_000_000_000)
-                    out[0].write(struct.pack("<IIII", sec, nsec, len(pkt.data), len(pkt.data)))
-                    out[0].write(pkt.data)
+                    # pcap timestamps are unsigned 32 bit seconds, and libpcap refuses packets
+                    # over its max snaplen, so both are clamped (the frame keeps its number).
+                    sec, nsec = divmod(min(max(pkt.ts, 0), MAX_PCAP_NS), 1_000_000_000)
+                    data = pkt.data[:SPLIT_SNAPLEN]
+                    out[0].write(struct.pack("<IIII", sec, nsec, len(data), len(pkt.data)))
+                    out[0].write(data)
                     out[2].append(pkt.num)
             except PcapError:
                 pass
@@ -946,8 +959,11 @@ def _ownEvents(rec: dict, cid: str, misplaced: list) -> dict:
 def _recVlans(rec: Any) -> list[int] | None:
     """The VLAN IDs of an engine record (EVE ``vlan``, a list; Snort ``vlan``, an int)."""
 
-    if not isinstance(rec, dict) or "vlan" not in rec:
+    if not isinstance(rec, dict):
         return None
+    if "vlan" not in rec:
+        # Suricata leaves vlan out of EVE records of untagged traffic.
+        return [] if "event_type" in rec else None
     valu = rec["vlan"]
     if valu in (None, 0, []):
         return []
@@ -995,13 +1011,16 @@ def matchLoose(
         best = cands[0]
         if tick is not None and len(cands) > 1:
 
-            def dist(flow: dict, tick: int = tick) -> tuple[int, int]:
-                # Active at the time (within a second) first, then the closest end, so a
-                # 5-tuple reused within a second goes to the connection that just ended.
+            def dist(flow: dict, tick: int = tick) -> tuple[int, int, int]:
+                # Active at the time first, then within a second of it (closest end first,
+                # so a 5-tuple reused within a second goes to the connection that just
+                # ended), then the closest.
                 near = abs(tick - flow["last"])
+                if flow["time"] <= tick <= flow["last"]:
+                    return 0, 0, near
                 if flow["time"] - 1000 <= tick <= flow["last"] + 1000:
-                    return 0, near
-                return min(abs(tick - flow["time"]), near), near
+                    return 1, 0, near
+                return 2, min(abs(tick - flow["time"]), near), near
 
             best = min(cands, key=dist)
         matched.setdefault(best["iden"], []).append((kind, rec))

@@ -95,6 +95,12 @@ DEFAULT_FEEDS: tuple[FeedDef, ...] = (
 Talos Registered and Subscriber rules need an oinkcode and have their own license terms, add
 them with a URL that references the oinkcode as a secret (see the README)."""
 
+RETIRED_FEEDS = {
+    "abusech-sslbl-c2": "https://sslbl.abuse.ch/blacklist/sslipblacklist.tar.gz",
+}
+"""Default feeds that were removed (abuse.ch retired the SSLBL botnet C2 IP list), by name and
+URL. Services that seeded them remove them at startup."""
+
 _SECRET = re.compile(r"\$\{([a-zA-Z0-9_.:-]+)\}")
 
 

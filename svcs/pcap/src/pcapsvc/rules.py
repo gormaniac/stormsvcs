@@ -7,6 +7,7 @@ is decided by the engine itself, see ``pcapsvc.snort`` and ``pcapsvc.suricata``.
 """
 
 import datetime
+import ipaddress
 import re
 from collections.abc import Iterator
 from typing import Any, TypedDict
@@ -388,12 +389,51 @@ def checkNetVars(valu: Any) -> dict[str, str]:
         if not NETVAR_NAME.fullmatch(name):
             raise RuleError(f"Invalid network variable name {name!r}, ex. HOME_NET.")
         addrs = str(addrs).strip()
-        if not NETVAR_VALU.fullmatch(addrs):
+        if not NETVAR_VALU.fullmatch(addrs) or not _addressGroup(addrs):
             raise RuleError(
-                f"Invalid {name} value {addrs!r}, use an address group like [10.0.0.0/8] or any."
+                f"Invalid {name} value {addrs!r}, use an address group like [10.0.0.0/8], "
+                "!$HOME_NET, or any."
             )
         out[name] = addrs
     return out
+
+
+def _addressGroup(valu: str, depth: int = 0) -> bool:
+    """Whether a value is an address group both engines read: ``any``, an IP or CIDR, a
+    ``$VARIABLE``, or a ``[...]`` list of those (negated with ``!``, nested)."""
+
+    valu = valu.strip()
+    if valu.startswith("!"):
+        valu = valu[1:].strip()
+    if not valu or depth > 8:
+        return False
+    if valu.startswith("["):
+        if not valu.endswith("]"):
+            return False
+        items, level, start = [], 0, 1
+        for idx, char in enumerate(valu[1:-1], start=1):
+            if char == "[":
+                level += 1
+            elif char == "]":
+                level -= 1
+                if level < 0:
+                    return False
+            elif char == "," and level == 0:
+                items.append(valu[start:idx])
+                start = idx + 1
+        if level:
+            return False
+        items.append(valu[start:-1])
+        return all(_addressGroup(item, depth + 1) for item in items)
+    if valu == "any":
+        return True
+    if valu.startswith("$"):
+        return NETVAR_NAME.fullmatch(valu[1:]) is not None
+    try:
+        ipaddress.ip_network(valu, strict=False)
+    except ValueError:
+        return False
+    return True
 
 
 _PAYLOAD_OPTS = {

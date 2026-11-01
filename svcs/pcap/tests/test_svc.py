@@ -378,6 +378,20 @@ class TestPcapSvcTshark(s_tests.SynTest):
 
 class TestPcapSvcOptions(s_tests.SynTest):
 
+    async def test_bad_suricata_set(self):
+        # A suricata:set key that can't apply fails at startup, not on every run.
+        with self.getTestDir() as dirn:
+            base = pathlib.Path(dirn) / "suricata.yaml"
+            base.write_text("stream: {memcap: 1gb}\noutputs: []\n")
+            conf = {"suricata:conf": str(base), "suricata:set": {"stream.memcap.x": 1}}
+            with self.raises(Exception) as cm:
+                async with self.getTestCell(PcapSvc, conf=conf):
+                    pass
+            assert "isn't a mapping" in str(cm.exception)
+            conf["suricata:set"] = {"stream.memcap": "2gb"}
+            async with self.getTestCell(PcapSvc, conf=conf) as svc:
+                assert svc.suricata.config(svc.tmpdir)["stream"]["memcap"] == "2gb"
+
     async def test_keylogs_decode(self):
         async with self.getTestAxon() as axon:
             _, sha = await axon.put(g.pcap(g.session()))

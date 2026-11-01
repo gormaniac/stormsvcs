@@ -133,6 +133,21 @@ class TestSnort(s_tests.SynTest):
                                         netvars={"HOME_NET": "[10.1.1.10]"})
             assert count == 1
 
+            # Variables derived from HOME_NET follow it (HTTP_SERVERS = HOME_NET in the stock
+            # snort_defaults.lua), and ones the base config doesn't assign are set too.
+            rules = {
+                "http": 'alert tcp any any -> $HTTP_SERVERS 80 ( msg:"x"; content:"evil"; sid:2; )',
+                "dns": 'alert udp any any -> $DNS_SERVERS 9999 ( msg:"y"; content:"SLIB"; sid:3; )',
+            }
+            path = os.path.join(dirn, "derived.rules")
+            assert sorted((await snort.validate(rules, path))[0]) == ["dns", "http"]
+            alerts.clear()
+            assert (await snort.scan(path, pcap, alerts.append))[0] == 0
+            count, _ = await snort.scan(path, pcap, alerts.append, netvars={
+                "HOME_NET": "[203.0.113.0/24]", "DNS_SERVERS": "[198.51.100.7]",
+            })
+            assert count == 3 and sorted({a["sid"] for a in alerts}) == [2, 3]
+
     async def test_validate_conf_error(self):
         with self.getTestDir() as dirn:
             base = os.path.join(dirn, "bad.lua")

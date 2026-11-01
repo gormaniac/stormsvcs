@@ -287,7 +287,9 @@ def _fileinfo(enr: Any, flow: dict, ev: dict, txs: dict[int, dict], filestore: s
     if info.get("state") == "TRUNCATED" and not info.get("stored"):
         # Cut off before Suricata could store it (ex. over its limits). Files cut off at
         # pcap:files:maxsize are stored, and skipped by their size (see FileStore.addPath).
-        if sha256 and enr.files is None:
+        if enr.files is not None:
+            enr.files.skipped += 1
+        elif sha256:
             enr.unsaved += 1
         return
     if not sha256 or not info.get("stored") or enr.files is None or filestore is None:
