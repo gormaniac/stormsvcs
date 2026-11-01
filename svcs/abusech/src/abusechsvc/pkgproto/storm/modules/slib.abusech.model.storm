@@ -382,7 +382,7 @@ function clamav(file, sig, plat) {
 
 function subfile(parent, child, plat, name=$lib.null) {
     if ($parent = $lib.null or $child = $lib.null) { return($lib.null) }
-    [ file:subfile=($parent, $child) :name ?= $name ]
+    [ file:subfile=($parent, $child) :path ?= $name ]
     return($seen($node, $plat))
 }
 

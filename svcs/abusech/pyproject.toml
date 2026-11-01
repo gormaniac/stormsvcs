@@ -1,6 +1,6 @@
 [project]
 name = "abusechsvc"
-version = "0.2.0"
+version = "0.2.1"
 description = "An abuse.ch Storm Service (MalwareBazaar, URLhaus, ThreatFox, YARAify, Feodo Tracker, and SSL Blacklist)"
 readme = "README.md"
 license-files = ["LICENSE"]
@@ -12,7 +12,7 @@ authors = [
 requires-python = ">=3.11,<3.12"
 dependencies = [
     "pyzipper>=0.3.6",
-    "stormlibpp>=0.10.1",
+    "stormlibpp>=0.12.1",
 ]
 
 [build-system]
@@ -30,6 +30,12 @@ testpaths = [
     "tests",
 ]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+# Python deprecations raised from the service's own code fail the tests. Synapse's
+# deprecations are logged instead, tests/conftest.py fails the tests for those.
+filterwarnings = [
+    "error::DeprecationWarning:abusechsvc",
+]
 
 [dependency-groups]
 dev = [
