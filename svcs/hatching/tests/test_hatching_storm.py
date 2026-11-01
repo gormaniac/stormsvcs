@@ -1,5 +1,6 @@
 """Pytests for the slib.hatching Storm package (commands, modules, modeling, and perms)."""
 
+import hashlib
 import json
 
 import synapse.tests.utils as s_tests
@@ -33,7 +34,7 @@ def yielded(msgs) -> list:
 class TestStormPkg(s_tests.SynTest):
 
     async def test_pkg(self):
-        assert len(CMDS) == 30
+        assert len(CMDS) == 35
 
         async with hatchingSvc(self) as (core, svc, fake):
             msgs = await core.stormlist("service.list")
@@ -73,9 +74,26 @@ class TestStormEnrich(s_tests.SynTest):
             assert f.tags["rep.hatching.cobaltstrike"] == (1793448000000, 1793448300000)
 
             # The verdict.
-            (scan,) = await core.nodes(f"{SAMPLE} -> it:av:scan:result:target:file")
+            (scan,) = await core.nodes(f"{SAMPLE} -> it:av:scan:result:target:file -:multi:scan")
             assert scan.get("scanner:name") == "hatching triage" and scan.get("verdict") == 40
             assert scan.get("signame") == "cobaltstrike"
+            assert f.get("ssdeeps") == (ft.SAMPLE_SSDEEP,)
+
+            # Each signature is a result under the verdict.
+            sigs = await core.nodes(f"it:av:scan:result={scan.ndef[1]} -> it:av:scan:result:multi:scan")
+            assert {(s.get("signame"), s.get("verdict")) for s in sigs} == {
+                ("cobaltstrike", 40), ("adds run key to start application", 30),
+                ("suspicious use of setwindowshookex", 10),
+            }
+            (sig,) = await core.nodes("it:av:scan:result:signame='adds run key to start application'")
+            assert sig.get("categories") == ("persistence",) and sig.get("target:file") == f"sha256:{ft.SAMPLE_SHA256}"
+            assert await core.count(f"it:av:scan:result={sig.ndef[1]} -(uses)> it:mitre:attack:technique=T1547.001") == 1
+
+            # Credentials from the config.
+            (cred,) = await core.nodes(f"{SAMPLE} -(refs)> auth:creds")
+            assert cred.get("user") == "bot@example.com" and cred.get("passwd") == "hunter2"
+            assert cred.get("email") == "bot@example.com" and cred.get("website") == "smtp://mail.example.com:587"
+            assert await core.count("it:sec:c2:config -(refs)> auth:creds") == 1
 
             # Families, techniques, and IOCs.
             nodes = await core.nodes("risk:tool:software:tag=rep.hatching.cobaltstrike")
@@ -104,6 +122,9 @@ class TestStormEnrich(s_tests.SynTest):
 
             # Everything is linked to the meta:source, without the task nodes.
             assert await core.count(f"meta:source={SOURCE_GUID} -(seen)> file:bytes") == 1
+            for form in ("it:av:scan:result", "risk:tool:software", "it:mitre:attack:technique",
+                         "auth:creds", "it:sec:c2:config"):
+                assert await core.count(f"{form} +{{ <(seen)- meta:source={SOURCE_GUID} }}") == await core.count(form), form
             assert await core.count("it:exec:proc") == 0
 
             # Modeling again updates the same nodes.
@@ -126,21 +147,68 @@ class TestStormEnrich(s_tests.SynTest):
 
             (flow,) = await core.nodes("inet:flow:dst=tcp://198.51.100.7:443")
             assert flow.get("dst:port") == 443 and flow.get("dst:txbytes") == 1024
+            assert flow.get("src") == "tcp://10.127.0.5:49712"
             assert await core.count("inet:flow:dst=tcp://198.51.100.7:443 :src:proc -> it:exec:proc") == 1
+            assert await core.count("inet:flow:dst=tcp://198.51.100.7:443 -(refs)> inet:fqdn=evil.example.com") == 1
+            assert await core.count("inet:tls:ja3:sample=(tcp://10.127.0.5:49712, a0e9f5d64349fb13191bc781f81f42e1)") == 1
+            assert await core.count("inet:tls:ja3s:sample=(tcp://198.51.100.7:443, 15af977ce25de452b96affa2addb1036)") == 1
+
+            # Triage's ASN and country of the IPs.
+            (ip,) = await core.nodes("inet:ipv4=198.51.100.7")
+            assert ip.get("asn") == 64500 and ip.get("loc") == "us"
 
             (dns,) = await core.nodes("inet:dns:request")
-            assert dns.get("query:name") == "evil.example.com"
+            assert dns.get("query:name") == "evil.example.com" and dns.get("query:type") == 1
+            assert dns.get("server") == "udp://8.8.8.8:53"
             assert await core.count("inet:dns:a=(evil.example.com, 198.51.100.7)") == 1
 
             (http,) = await core.nodes("inet:http:request")
             assert http.get("url") == "http://evil.example.com/jquery-3.3.1.min.js"
-            assert http.get("response:code") == 200
+            assert http.get("response:code") == 200 and http.get("response:reason") == "OK"
+            assert http.get("server") == "tcp://198.51.100.7:443"
+            assert http.get("headers") == (("host", "evil.example.com"), ("user-agent", "Mozilla/5.0 (fake)"))
+            assert http.get("response:headers") == (("server", "nginx"),)
             assert await core.count("inet:http:request :flow -> inet:flow") == 1
 
             (fadd,) = await core.nodes("it:exec:file:add")
             assert fadd.get("file") == f"sha256:{ft.DROPPED_SHA256}"
             assert fadd.get("path") == "c:/users/admin/appdata/roaming/upd.exe"
-            assert await core.count(f"{SAMPLE} -(refs)> file:bytes=sha256:{ft.DROPPED_SHA256}") == 1
+            assert await core.count(f"{SAMPLE} -(refs)> file:bytes=sha256:{ft.DROPPED_SHA256} +:name=upd.exe") == 1
+
+            # The task nodes are linked to the meta:source too.
+            for form in ("it:exec:proc", "inet:flow", "inet:dns:request", "inet:http:request",
+                         "it:exec:file:add", "inet:tls:ja3:sample"):
+                assert await core.count(f"{form} +{{ <(seen)- meta:source={SOURCE_GUID} }}") == await core.count(form), form
+
+            # An existing ASN isn't overwritten.
+            await core.nodes("inet:ipv4=198.51.100.7 [ :asn=1 ]")
+            await core.stormlist(f"slib.hatching.enrich --sample {SID} --tasks")
+            assert (await core.nodes("inet:ipv4=198.51.100.7"))[0].get("asn") == 1
+
+    async def test_enrich_archive(self):
+        async with hatchingSvc(self) as (core, svc, fake):
+            # An archive whose member was the analyzed file.
+            member = {"tasks": ["behavioral1"], "target": "invoice.exe", "sha256": ft.SAMPLE_SHA256,
+                      "md5": ft.SAMPLE_MD5, "size": len(ft.SAMPLE_BYTES),
+                      "tags": ["family:cobaltstrike"], "family": ["cobaltstrike"]}
+            zipsha = "ab" * 32
+            overview = json.loads(json.dumps(ft.OVERVIEW))
+            overview["sample"].update({"target": "invoice.zip", "sha256": zipsha, "md5": None,
+                                       "sha1": None, "sha512": None, "ssdeep": None})
+            overview["targets"] = [member]
+            fake.overviews[SID] = overview
+            del fake.statics[SID]
+            fake.samples[SID]["filename"] = "invoice.zip"
+
+            msgs = await core.stormlist(f"slib.hatching.enrich --sample {SID} --tasks")
+            self.stormHasNoWarnErr(msgs)
+            (sub,) = await core.nodes(f"file:subfile:parent=sha256:{zipsha}")
+            assert sub.get("child") == f"sha256:{ft.SAMPLE_SHA256}" and sub.get("path") == "invoice.exe"
+            (exe,) = await core.nodes(SAMPLE)
+            assert "rep.hatching.cobaltstrike" in exe.tags
+            # The analyzed process ran the member, in the archive's sandbox.
+            (proc,) = await core.nodes("it:exec:proc:pid=2044")
+            assert proc.get("exe") == f"sha256:{ft.SAMPLE_SHA256}" and proc.get("sandbox:file") == f"sha256:{zipsha}"
 
     async def test_enrich_nodes(self):
         async with hatchingSvc(self) as (core, svc, fake):
@@ -162,8 +230,15 @@ class TestStormEnrich(s_tests.SynTest):
             assert yielded(msgs) == [("inet:url", url)]
             assert fake.last("get", "/search")["query"]["query"] == f'url:"{url}"'
             (node,) = await core.nodes(f"inet:url={url}")
+            assert fake.last("get", "/search")["query"]["limit"] == "50"
             assert "rep.hatching.phishing" in node.tags
             assert await core.count(f"inet:url={url} -> it:av:scan:result:target:url +:verdict=30") == 1
+
+            # Triage's url: search also matches malware whose config has the URL, that's not a URL analysis.
+            c2url = "http://c2.example.com/gate.php"
+            fake.samples["261031-c2"] = dict(ft.SAMPLE, id="261031-c2", url=c2url)
+            msgs = await core.stormlist(f"[ inet:url={c2url} ] | slib.hatching.enrich")
+            self.stormIsInWarn("has no reported sample", msgs)
 
             # Not found, unsupported, no hash, and not reported.
             msgs = await core.stormlist(f"[ hash:sha256={'a' * 64} ] | slib.hatching.enrich")
@@ -394,7 +469,11 @@ class TestStormSubmit(s_tests.SynTest):
             msgs = await core.stormlist("slib.hatching.sample.profile 261031-new000002 --auto --pick a.exe")
             self.stormIsInWarn("PROFILE_NOT_SETTABLE", msgs)
             msgs = await core.stormlist("slib.hatching.sample.profile 261031-new000002")
-            self.stormIsInWarn("Use --profile at least once, or --auto.", msgs)
+            self.stormIsInWarn("Use --profile or --pick at least once, or --auto.", msgs)
+            # Picking files without profiles lets the sandbox pick their profiles.
+            fake.samples["261031-new000002"]["status"] = "static_analysis"
+            msgs = await core.stormlist("slib.hatching.sample.profile 261031-new000002 --pick a.exe")
+            assert fake.last("post", "/profile")["json"] == {"auto": True, "pick": ["a.exe"]}
 
             msgs = await core.stormlist("slib.hatching.sample.delete 261031-new000002 261031-new000001")
             self.stormIsInPrint("Deleted sample 261031-new000002.", msgs)
@@ -405,6 +484,26 @@ class TestStormSubmit(s_tests.SynTest):
 
             msgs = await core.stormlist("slib.hatching.submit --url ''")
             self.stormIsInWarn("Submitting", msgs)
+
+            # VPN analyses, and the timeout and profile limits.
+            msgs = await core.stormlist("slib.hatching.submit --url https://a.com/ --network vpn --geolocation us --timeout 300")
+            self.stormHasNoWarnErr(msgs)
+            assert fake.last("post", "/samples")["json"]["defaults"] == {
+                "timeout": 300, "network": "vpn", "geolocation": "us"}
+            msgs = await core.stormlist("slib.hatching.submit --url https://a.com/ --geolocation us")
+            self.stormIsInWarn("A geolocation requires the vpn network", msgs)
+            msgs = await core.stormlist("slib.hatching.submit --url https://a.com/ --timeout 4000")
+            self.stormIsInWarn("between 1 and 3600", msgs)
+            msgs = await core.stormlist("slib.hatching.submit --url https://a.com/ --network bad")
+            self.stormIsInErr("Invalid choice for argument --network", msgs)
+            msgs = await core.stormlist("slib.hatching.submit --url https://a.com/ --interactive --profile w10")
+            self.stormIsInWarn("Profiles can't be picked for an interactive submission", msgs)
+
+            # Importing public samples.
+            msgs = await core.stormlist("slib.hatching.sample.import https://tria.ge/261031-public1")
+            self.stormIsInPrint("Imported https://tria.ge/261031-public1 as", msgs)
+            assert fake.last("post", "/samples")["json"] == {"kind": "import",
+                                                             "url": "https://tria.ge/261031-public1"}
 
 
 class TestStormManage(s_tests.SynTest):
@@ -424,6 +523,16 @@ class TestStormManage(s_tests.SynTest):
             self.stormIsInPrint("Updated profile win7: network=drop timeout=600 tags=windows7", msgs)
             msgs = await core.stormlist("slib.hatching.profile.edit win7 --tag a --tag b")
             self.stormIsInPrint("tags=a,b", msgs)
+
+            msgs = await core.stormlist("slib.hatching.profile.add win7-vpn --tag windows7 --network vpn --geolocation de")
+            self.stormHasNoWarnErr(msgs)
+            msgs = await core.stormlist("slib.hatching.profile.list")
+            self.stormIsInPrint("win7-vpn", msgs)
+            self.stormIsInPrint(" de ", msgs)
+            msgs = await core.stormlist("slib.hatching.profile.edit win7-vpn --timeout 60")
+            self.stormIsInPrint("network=vpn (de) timeout=60", msgs)
+            msgs = await core.stormlist("slib.hatching.profile.edit win7-vpn --timeout 4000")
+            self.stormIsInWarn("between 1 and 3600", msgs)
 
             msgs = await core.stormlist("slib.hatching.profile.del win7 nope")
             self.stormIsInPrint("Deleted profile win7.", msgs)
@@ -450,6 +559,11 @@ class TestStormManage(s_tests.SynTest):
             msgs = await core.stormlist('slib.hatching.yara.add --name hunt.yara --text "rule hunt { condition: false }" --update')
             self.stormIsInPrint("Updated Yara rule hunt.yara.", msgs)
             assert fake.rules["hunt.yara"]["rule"] == "rule hunt { condition: false }"
+
+            msgs = await core.stormlist("slib.hatching.yara.add --name hunt2.yara --rename hunt.yara")
+            self.stormHasNoWarnErr(msgs)
+            self.stormIsInPrint("Renamed Yara rule hunt.yara to hunt2.yara.", msgs)
+            assert fake.last("put")["json"] == {"name": "hunt2.yara", "rule": "rule hunt { condition: false }"}
 
             msgs = await core.stormlist('slib.hatching.yara.add --name bad.yara --text "rule bad {"')
             self.stormIsInWarn("COMPILE_ERROR", msgs)
@@ -516,13 +630,19 @@ class TestStormAdmin(s_tests.SynTest):
     async def test_users(self):
         async with hatchingSvc(self) as (core, svc, fake):
             msgs = await core.stormlist("slib.hatching.admin.users --limit 10")
-            self.stormIsInPrint("analyst", msgs)
-            self.stormIsInPrint("view_samples,submit_samples", msgs)
+            self.stormIsInPrint("analyst@example.com", msgs)
+            assert fake.last()["query"]["limit"] == "10"
 
-            msgs = await core.stormlist("slib.hatching.admin.user.add bob bob@example.com --password pw --first Bob --last B --permission admin")
-            self.stormIsInPrint("Added user bob (user-1).", msgs)
-            assert fake.last()["json"] == {"username": "bob", "email": "bob@example.com", "password": "pw",
-                                           "first_name": "Bob", "last_name": "B", "permissions": ["admin"]}
+            msgs = await core.stormlist("slib.hatching.admin.user.add bob --password pw --name 'Bob B' --role org_basic")
+            self.stormHasNoWarnErr(msgs)
+            self.stormIsInPrint("Added user", msgs)
+            self.stormIsInPrint("(user-1) with the role org_basic.", msgs)
+            assert fake.last()["json"] == {"username": "bob", "password": "pw", "name": "Bob B",
+                                           "role": "org_basic"}
+            msgs = await core.stormlist("slib.hatching.admin.user.add eve@example.com --confirmed")
+            assert fake.last()["json"] == {"email": "eve@example.com", "email_confirmed": True}
+            msgs = await core.stormlist("slib.hatching.admin.user.add x --role root")
+            self.stormIsInErr("Invalid choice for argument --role", msgs)
 
             msgs = await core.stormlist("slib.hatching.admin.user.key.add user-1 ci")
             self.stormIsInPrint("Created API key ci for user-1: newkey", msgs)
@@ -537,8 +657,45 @@ class TestStormAdmin(s_tests.SynTest):
             self.stormIsInPrint("Deleted user user-1.", msgs)
             msgs = await core.stormlist("slib.hatching.admin.user.keys user-1")
             self.stormIsInWarn("NOT_FOUND", msgs)
-            msgs = await core.stormlist("slib.hatching.admin.user.add x")
-            self.stormIsInErr("email", msgs)
+
+    async def test_org(self):
+        async with hatchingSvc(self) as (core, svc, fake):
+            msgs = await core.stormlist("slib.hatching.admin.org")
+            assert json.loads(prints(msgs)) == {"magic_link": {"enabled": True}}
+            msgs = await core.stormlist("slib.hatching.admin.org --magic off")
+            self.stormIsInPrint("Turned magic links off.", msgs)
+            assert fake.org_settings == {"magic_link": {"enabled": False}}
+            msgs = await core.stormlist("slib.hatching.admin.org --stats")
+            assert json.loads(prints(msgs))["samples_submitted"] == len(fake.samples)
+
+            # Magic links are refused while they're off.
+            msgs = await core.stormlist(f"slib.hatching.sample.info {SID} --link")
+            self.stormIsInWarn("FORBIDDEN", msgs)
+            await core.stormlist("slib.hatching.admin.org --magic on")
+            msgs = await core.stormlist(f"slib.hatching.sample.info {SID} --link")
+            self.stormIsInPrint(f"{fake.url}/{SID}/magic/{ft.MAGIC_TOKEN}", msgs)
+
+
+class TestStormInfo(s_tests.SynTest):
+
+    async def test_resources_geolocations_stats(self):
+        async with hatchingSvc(self) as (core, svc, fake):
+            msgs = await core.stormlist("slib.hatching.resources")
+            self.stormHasNoWarnErr(msgs)
+            self.stormIsInPrint("win10v2004-20260901-en", msgs)
+            self.stormIsInPrint("os:windows10-2004-x64,locale:en-us", msgs)
+            msgs = await core.stormlist("slib.hatching.geolocations")
+            self.stormIsInPrint("geo:de", msgs)
+            msgs = await core.stormlist("slib.hatching.stats")
+            assert json.loads(prints(msgs)) == {"samples_submitted": 1}
+
+    async def test_urlscan(self):
+        async with hatchingSvc(self) as (core, svc, fake):
+            msgs = await core.stormlist(f"slib.hatching.report {SID} --urlscan")
+            assert json.loads(prints(msgs))["effective_url"] == "https://evil.example.com/login"
+            msgs = await core.stormlist(f"slib.hatching.download --sample {SID} --screenshot --yield")
+            self.stormHasNoWarnErr(msgs)
+            assert yielded(msgs) == [("file:bytes", f"sha256:{hashlib.sha256(ft.SCREENSHOT_BYTES).hexdigest()}")]
 
 
 class TestStormPerms(s_tests.SynTest):
@@ -565,7 +722,8 @@ class TestStormPerms(s_tests.SynTest):
 
             for cmd in ("slib.hatching.submit --url http://a.com", "slib.hatching.sample.delete x",
                         "slib.hatching.profile.add x", "slib.hatching.yara.del x",
-                        "slib.hatching.admin.apikey", "slib.hatching.admin.users"):
+                        "slib.hatching.admin.apikey", "slib.hatching.admin.users",
+                        "slib.hatching.sample.import x", "slib.hatching.admin.org"):
                 msgs = await core.stormlist(cmd, opts=opts)
                 self.stormIsInErr("requires permission: slib.hatching", msgs)
 

@@ -31,14 +31,20 @@ function setTagsEnabled(enabled) { $lib.globals.set("slib:hatching:tag:enabled",
 
 function users(limit=$lib.null) { return($svc.users(limit=$limit, apikey=$userKey())) }
 function user(user) { return($svc.user($user, apikey=$userKey())) }
-function addUser(username, email, password=$lib.null, first=$lib.null, last=$lib.null, permissions=$lib.null) {
-    return($svc.addUser($username, $email, password=$password, first=$first, last=$last,
-                        permissions=$permissions, apikey=$userKey()))
+function addUser(login, password=$lib.null, name=$lib.null, role=$lib.null, confirmed=(false)) {
+    return($svc.addUser($login, password=$password, name=$name, role=$role, confirmed=$confirmed,
+                        apikey=$userKey()))
 }
 function delUser(user) { return($svc.delUser($user, apikey=$userKey())) }
 function userKeys(user) { return($svc.userKeys($user, apikey=$userKey())) }
 function addUserKey(user, name) { return($svc.addUserKey($user, $name, apikey=$userKey())) }
 function delUserKey(user, name) { return($svc.delUserKey($user, $name, apikey=$userKey())) }
+
+// Organization settings and stats
+
+function orgSettings() { return($svc.orgSettings(apikey=$userKey())) }
+function setMagicLinks(enabled) { return($svc.setMagicLinks($enabled, apikey=$userKey())) }
+function orgStats() { return($svc.stats(org=(true), apikey=$userKey())) }
 
 // Raw requests
 

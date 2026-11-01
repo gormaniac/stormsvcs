@@ -1,0 +1,12 @@
+init {
+    $psub = $lib.import(slib.hatching.priv.submit)
+    $util = $lib.import(slib.hatching.util)
+
+    for $sample in $cmdopts.sample {
+        $retn = $psub.importSample($sample)
+        if (not $util.failed($retn, `Importing {$sample}`)) {
+            $lib.print("slib.hatching.sample.import: Imported {sample} as {id} ({status}).", sample=$sample,
+                       id=$retn.data.id, status=$retn.data.status)
+        }
+    }
+}

@@ -2,7 +2,13 @@ init {
     $priv = $lib.import(slib.hatching.priv.user)
     $util = $lib.import(slib.hatching.util)
 
-    if $cmdopts.task {
+    if $cmdopts.urlscan {
+        $task = $cmdopts.task
+        if (not $task) { $task = urlscan1 }
+        $retn = $priv.urlscanReport($cmdopts.sample, $task)
+        $what = `The UrlScan report of {$cmdopts.sample}`
+    }
+    elif $cmdopts.task {
         $retn = $priv.taskReport($cmdopts.sample, $cmdopts.task)
         $what = `The {$cmdopts.task} report of {$cmdopts.sample}`
     }

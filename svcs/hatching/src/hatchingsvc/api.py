@@ -1,37 +1,76 @@
 """The CellApi implementation for slib.hatching."""
 
-
 from collections.abc import AsyncIterator, Awaitable
 
-from stormlibpp.telepath import BoolRetn, TelepathRetn
-from stormlibpp.utils import normver
 import synapse.lib.cell as s_cell
 import synapse.lib.stormsvc as s_stormsvc
+from stormlibpp.telepath import BoolRetn, TelepathRetn
+from stormlibpp.utils import normver
 
-from .defs import SVC_EVTS, PKGDEFS, SVC_NAME, SVC_VER
+from .defs import PKGDEFS, SVC_EVTS, SVC_NAME, SVC_VER
 from .errors import HatchingApiError
-
 
 # HatchingSvc methods that are exposed over Telepath as-is, wrapped in a TelepathRetn.
 # See HatchingSvc for each method's arguments and the Hatching Triage endpoint it calls.
 RETN_METHS = (
-    "rawRequest", "maxSize", "resolve",
+    "rawRequest",
+    "maxSize",
+    "resolve",
     # Samples
-    "search", "samples", "sample", "summary", "deleteSample", "setProfile",
-    "submitUrl", "submitFile", "wait",
+    "search",
+    "samples",
+    "sample",
+    "summary",
+    "deleteSample",
+    "setProfile",
+    "magicLink",
+    "submitUrl",
+    "submitFile",
+    "importSample",
+    "wait",
     # Reports and modeling
-    "overview", "staticReport", "taskReport", "normSample", "dumpedFiles",
+    "overview",
+    "staticReport",
+    "taskReport",
+    "urlscanReport",
+    "normSample",
+    "dumpedFiles",
     # Profiles
-    "profiles", "profile", "addProfile", "editProfile", "delProfile",
+    "profiles",
+    "profile",
+    "addProfile",
+    "editProfile",
+    "delProfile",
     # Yara
-    "rules", "rule", "addRule", "editRule", "delRule",
+    "rules",
+    "rule",
+    "addRule",
+    "editRule",
+    "renameRule",
+    "delRule",
     # Users and API keys
-    "users", "user", "addUser", "delUser", "userKeys", "addUserKey", "delUserKey",
+    "users",
+    "user",
+    "addUser",
+    "delUser",
+    "userKeys",
+    "addUserKey",
+    "delUserKey",
+    # Resources, geolocations, stats, and organization settings
+    "resources",
+    "geolocations",
+    "stats",
+    "orgSettings",
+    "setMagicLinks",
 )
 
 # HatchingSvc async generators that are exposed over Telepath, each item wrapped in a TelepathRetn.
 GENR_METHS = (
-    "sampleEvents", "kernelReport", "downloadSample", "downloadTaskFile", "downloadArchive",
+    "sampleEvents",
+    "kernelReport",
+    "downloadSample",
+    "downloadTaskFile",
+    "downloadArchive",
 )
 
 

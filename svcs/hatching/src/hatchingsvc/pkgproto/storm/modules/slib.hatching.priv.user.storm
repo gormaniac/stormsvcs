@@ -36,6 +36,7 @@ function search(query, limit=(20)) { return($svc.search($query, limit=$limit, ap
 function samples(subset=owned, limit=(20)) { return($svc.samples(subset=$subset, limit=$limit, apikey=$userKey())) }
 function sample(sample) { return($svc.sample($sample, apikey=$userKey())) }
 function summary(sample) { return($svc.summary($sample, apikey=$userKey())) }
+function magicLink(sample) { return($svc.magicLink($sample, apikey=$userKey())) }
 function wait(sample, timeout=(600)) { return($svc.wait($sample, timeout=$timeout, apikey=$userKey())) }
 
 function events(sample=$lib.null, limit=(100), timeout=(600)) {
@@ -49,6 +50,7 @@ function events(sample=$lib.null, limit=(100), timeout=(600)) {
 function overview(sample) { return($svc.overview($sample, apikey=$userKey())) }
 function staticReport(sample) { return($svc.staticReport($sample, apikey=$userKey())) }
 function taskReport(sample, task) { return($svc.taskReport($sample, $task, apikey=$userKey())) }
+function urlscanReport(sample, task=urlscan1) { return($svc.urlscanReport($sample, task=$task, apikey=$userKey())) }
 function dumpedFiles(sample) { return($svc.dumpedFiles($sample, apikey=$userKey())) }
 
 function normSample(sample, tasks=(false)) {
@@ -67,6 +69,12 @@ function profiles() { return($svc.profiles(apikey=$userKey())) }
 function profile(profile) { return($svc.profile($profile, apikey=$userKey())) }
 function rules() { return($svc.rules(apikey=$userKey())) }
 function rule(name) { return($svc.rule($name, apikey=$userKey())) }
+
+// Analysis environments, VPN regions, and usage stats
+
+function resources() { return($svc.resources(apikey=$userKey())) }
+function geolocations() { return($svc.geolocations(apikey=$userKey())) }
+function stats() { return($svc.stats(apikey=$userKey())) }
 
 // Downloads into the Axon. Each returns {"status", "mesg", "data": {"sha256", "size"}}.
 

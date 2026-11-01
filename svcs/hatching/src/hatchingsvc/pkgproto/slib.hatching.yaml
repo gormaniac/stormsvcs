@@ -68,13 +68,14 @@ commands:
       Model the newest reported Hatching Triage analysis of files, hashes, and URLs.
 
       Models the sample (file:bytes or inet:url) with Triage's tags and families as tags,
-      Triage's verdict (it:av:scan:result), the malware families (risk:tool:software),
-      ATT&CK techniques (-(uses)> it:mitre:attack:technique), IOCs (-(refs)>), and extracted
+      Triage's verdict (it:av:scan:result) with a result per matched signature, the malware
+      families (risk:tool:software), ATT&CK techniques (-(uses)> it:mitre:attack:technique),
+      IOCs and credentials (-(refs)>), the files in archives (file:subfile), and extracted
       malware configs (it:sec:c2:config) with their C2 servers tagged.
 
       With --tasks, also models each behavioral task's processes (it:exec:proc), network
-      flows (inet:flow), DNS and HTTP requests, and dropped files (it:exec:file:add), all
-      linked to the sample with :sandbox:file.
+      flows (inet:flow) with their TLS fingerprints, DNS and HTTP requests, and dropped files
+      (it:exec:file:add), all linked to the sample with :sandbox:file.
 
       Examples:
 
@@ -105,7 +106,7 @@ commands:
       - form: hash:sha256
       - form: hash:sha512
       - form: inet:url
-        help: Looked up as a URL analysis.
+        help: Looked up as a URL analysis of that exact URL.
 
   - name: slib.hatching.search
     perms:
@@ -182,6 +183,10 @@ commands:
         - default: false
           action: store_true
           help: Print the sample's summary (scores, tags, and tasks) instead.
+      - - --link
+        - default: false
+          action: store_true
+          help: Print a shareable magic link to the sample's analysis instead (magic links must be enabled for your organization).
 
   - name: slib.hatching.sample.wait
     perms:
@@ -243,7 +248,8 @@ commands:
     perms:
       - [ slib, hatching, user ]
     descr: |
-      Print a sample's overview report, static report (--static), or a task's report (--task).
+      Print a sample's overview report, static report (--static), a task's report (--task), or a
+      URL sample's UrlScan report (--urlscan).
 
       Examples:
 
@@ -262,6 +268,10 @@ commands:
         - type: str
           default: null
           help: Print the report of this task (ex. behavioral1).
+      - - --urlscan
+        - default: false
+          action: store_true
+          help: Print the UrlScan report of a URL sample (of --task, urlscan1 by default).
 
   - name: slib.hatching.kernel
     perms:
@@ -335,6 +345,10 @@ commands:
         - default: false
           action: store_true
           help: Download the files dropped during each behavioral task.
+      - - --screenshot
+        - default: false
+          action: store_true
+          help: Download the screenshot of a URL sample (of --task, urlscan1 by default).
       - - --archive
         - type: str
           default: null
@@ -356,6 +370,27 @@ commands:
       - [ slib, hatching, user ]
     descr: |
       List the account's analysis profiles.
+    cmdargs: []
+
+  - name: slib.hatching.resources
+    perms:
+      - [ slib, hatching, user ]
+    descr: |
+      List the analysis environments (VMs), and the tags profiles use to pick them.
+    cmdargs: []
+
+  - name: slib.hatching.geolocations
+    perms:
+      - [ slib, hatching, user ]
+    descr: |
+      List the regions analyses on the vpn network can exit from (--geolocation).
+    cmdargs: []
+
+  - name: slib.hatching.stats
+    perms:
+      - [ slib, hatching, user ]
+    descr: |
+      Print your Hatching Triage usage stats.
     cmdargs: []
 
   - name: slib.hatching.yara.list
@@ -462,15 +497,20 @@ commands:
       - - --timeout
         - type: int
           default: null
-          help: The analysis timeout in seconds, when the sandbox picks the profiles.
+          help: The analysis timeout in seconds (at most 3600), when the sandbox picks the profiles.
       - - --network
         - type: str
           default: null
-          help: The analysis network (internet, drop, tor, sim200, sim404, or simnx), when the sandbox picks the profiles.
+          choices: [ internet, drop, tor, sim200, sim404, simnx, vpn ]
+          help: The analysis network, when the sandbox picks the profiles (vpn routes it through a VPN, see --geolocation).
+      - - --geolocation
+        - type: str
+          default: null
+          help: With --network vpn, the region to exit from (see slib.hatching.geolocations).
       - - --interactive
         - default: false
           action: store_true
-          help: Stop after static analysis so profiles can be picked with slib.hatching.sample.profile.
+          help: Stop after static analysis so profiles can be picked with slib.hatching.sample.profile (not with --profile).
       - - --wait
         - type: int
           default: 0
@@ -519,7 +559,24 @@ commands:
         - type: str
           action: append
           default: []
-          help: With --auto, a file in an archive to analyze. May be used multiple times.
+          help: A file in an archive to analyze, with profiles the sandbox picks. May be used multiple times.
+
+  - name: slib.hatching.sample.import
+    perms:
+      - [ slib, hatching, submit ]
+    descr: |
+      Import public tria.ge samples into your private cloud instance (cloud instances only).
+
+      Examples:
+
+        slib.hatching.sample.import 261031-a1b2c3d4e5
+
+        slib.hatching.sample.import https://tria.ge/261031-a1b2c3d4e5
+    cmdargs:
+      - - sample
+        - type: str
+          nargs: "+"
+          help: The public sample IDs or tria.ge URLs.
 
   - name: slib.hatching.sample.delete
     perms:
@@ -546,7 +603,12 @@ commands:
 
       Examples:
 
-        slib.hatching.profile.add win10-drop --tag windows10 --network drop --timeout 300
+        slib.hatching.profile.add win10-drop --tag os:windows10-2004-x64 --network drop --timeout 300
+
+        slib.hatching.profile.add win10-us --tag os:windows10-2004-x64 --network vpn --geolocation us
+
+      Use slib.hatching.resources for the tags that pick an analysis environment, and
+      slib.hatching.geolocations for the VPN regions.
     cmdargs:
       - - name
         - type: str
@@ -555,15 +617,20 @@ commands:
         - type: str
           action: append
           default: []
-          help: A tag that matches the profile to samples (ex. windows10). May be used multiple times.
+          help: A resource tag that picks the analysis environment (ex. os:windows10-2004-x64). May be used multiple times.
       - - --timeout
         - type: int
           default: null
-          help: The analysis timeout in seconds.
+          help: The analysis timeout in seconds (at most 3600).
       - - --network
         - type: str
           default: null
-          help: The analysis network (internet, drop, tor, sim200, sim404, or simnx).
+          choices: [ internet, drop, tor, sim200, sim404, simnx, vpn ]
+          help: The analysis network.
+      - - --geolocation
+        - type: str
+          default: null
+          help: With --network vpn, the region to exit from.
 
   - name: slib.hatching.profile.edit
     perms:
@@ -590,11 +657,16 @@ commands:
       - - --timeout
         - type: int
           default: null
-          help: The analysis timeout in seconds.
+          help: The analysis timeout in seconds (at most 3600).
       - - --network
         - type: str
           default: null
+          choices: [ internet, drop, tor, sim200, sim404, simnx, vpn ]
           help: The analysis network.
+      - - --geolocation
+        - type: str
+          default: null
+          help: With the vpn network, the region to exit from.
 
   - name: slib.hatching.profile.del
     perms:
@@ -633,6 +705,10 @@ commands:
         - default: false
           action: store_true
           help: Replace existing rules instead of adding new ones.
+      - - --rename
+        - type: str
+          default: null
+          help: With --name, rename this existing rule to --name (and replace its text, with --text).
     cmdinputs:
       - form: it:app:yara:rule
 
@@ -722,11 +798,32 @@ commands:
         - default: null
           help: The JSON body.
 
+  - name: slib.hatching.admin.org
+    perms:
+      - [ slib, hatching, admin ]
+    descr: |
+      Print your Triage organization's settings, or its usage stats (--stats), or turn magic
+      links on or off (requires a key with the manage_company permission).
+
+      Examples:
+
+        slib.hatching.admin.org --magic on
+    cmdargs:
+      - - --stats
+        - default: false
+          action: store_true
+          help: Print the organization's usage stats.
+      - - --magic
+        - type: str
+          default: null
+          choices: [ "on", "off" ]
+          help: Allow, or stop, creating magic links (see slib.hatching.sample.info --link).
+
   - name: slib.hatching.admin.users
     perms:
       - [ slib, hatching, admin ]
     descr: |
-      List the users of a private or self-hosted Triage instance (requires a Triage admin API key).
+      List the users of your Triage organization (requires a key with the manage_company permission).
     cmdargs:
       - - --limit
         - type: int
@@ -737,41 +834,44 @@ commands:
     perms:
       - [ slib, hatching, admin ]
     descr: |
-      Add a user to a private or self-hosted Triage instance.
+      Add a user to your Triage organization (requires a key with the manage_company permission).
+
+      The login is an email address, or a username (no "@"), which signs in as "<username>@triage.local".
+      The role picks the user's permissions, see https://tria.ge/docs/cloud-api/users/ (only API
+      roles, not org_readonly or org_read_own_samples, can use API keys).
 
       Examples:
 
-        slib.hatching.admin.user.add analyst analyst@example.com --permission view_samples --permission submit_samples
+        slib.hatching.admin.user.add analyst --password correcthorsebatterystaple --role org_basic
+
+        slib.hatching.admin.user.add analyst@example.com --name "An Analyst" --role org_submit --confirmed
     cmdargs:
-      - - username
+      - - login
         - type: str
-          help: The new user's username.
-      - - email
-        - type: str
-          help: The new user's email address.
+          help: The new user's email address, or a username.
       - - --password
         - type: str
           default: null
           help: The new user's password.
-      - - --first
+      - - --name
         - type: str
           default: null
-          help: The new user's first name.
-      - - --last
+          help: The new user's display name.
+      - - --role
         - type: str
           default: null
-          help: The new user's last name.
-      - - --permission
-        - type: str
-          action: append
-          default: []
-          help: A permission to give the user. May be used multiple times.
+          choices: [ org_readonly, org_submit, org_read_own_samples, org_manage_own_samples, org_basic, org_advanced, org_admin ]
+          help: The new user's role.
+      - - --confirmed
+        - default: false
+          action: store_true
+          help: Confirm the new user's email address so they can sign in right away.
 
   - name: slib.hatching.admin.user.del
     perms:
       - [ slib, hatching, admin ]
     descr: |
-      Delete users from a private or self-hosted Triage instance.
+      Delete users from your Triage organization.
     cmdargs:
       - - user
         - type: str

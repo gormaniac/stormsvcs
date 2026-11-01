@@ -1,10 +1,8 @@
 """The Python definition of the slib.hatching Storm package."""
 
-
 from stormlibpp import StormPkg
 
 from . import __version__
-
 
 SVC_NAME = "slib.hatching"
 SVC_VER = __version__
@@ -18,13 +16,13 @@ SVC_EVTS = {
     "add": {
         "storm": (
             f'[(meta:source={SOURCE_GUID} :name="hatching triage" :type=slib.hatching '
-            ':url=https://tria.ge)] | spin | '
+            ":url=https://tria.ge)] | spin | "
             'if ($lib.globals.get("slib:hatching:tag:enabled") = $lib.null) { '
             '    $lib.globals.set("slib:hatching:tag:enabled", (true)) '
-            '} '
+            "} "
             'if ($lib.globals.get("slib:hatching:tag:prefix") = $lib.null) { '
             '    $lib.globals.set("slib:hatching:tag:prefix", "rep.hatching") '
-            '}'
+            "}"
         )
     }
 }

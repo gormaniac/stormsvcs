@@ -1,0 +1,11 @@
+init {
+    $priv = $lib.import(slib.hatching.priv.user)
+    $util = $lib.import(slib.hatching.util)
+
+    $retn = $priv.resources()
+    if (not $util.failed($retn, "Listing the analysis environments")) {
+        $rows = ([])
+        for $r in $retn.data { $rows.append(($r.name, (",").join($r.tags))) }
+        $util.table((("name", 32), ("tags", 64)), $rows)
+    }
+}

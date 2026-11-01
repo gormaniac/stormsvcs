@@ -6,26 +6,34 @@ for downloads) and raise ``HatchingApiError`` on failure. ``HatchingCellApi`` wr
 them in the standard ``TelepathRetn`` convention for Storm.
 """
 
-
 import asyncio
 import collections
 import contextlib
+import urllib.parse
 from collections.abc import AsyncIterator
 from typing import Any
 
 import pyhatching
 import pyhatching.errors as p_errors
 import pyhatching.utils as p_utils
-from pyhatching import base as p_base
 import synapse.lib.cell as s_cell
+from pyhatching import base as p_base
 
 from . import norm
 from .api import HatchingCellApi
 from .errors import HatchingApiError
 
-
 TERMINAL = ("reported", "failed")
 """The sample statuses that end an analysis."""
+
+UNAVAILABLE = ("NOT_FOUND", "REPORT_NOT_AVAILABLE", "NOT_AVAILABLE")
+"""API error names meaning a report doesn't exist (yet), rather than that the request failed."""
+
+MAX_PAGE = 200
+"""The largest page the Triage API returns (``limit`` on paginated endpoints)."""
+
+MAX_TIMEOUT = 3600
+"""The longest analysis timeout, in seconds, the Triage API accepts."""
 
 MAX_CLIENTS = 32
 """The most per-API-key pyhatching clients kept open at once."""
@@ -184,6 +192,11 @@ class HatchingSvc(s_cell.Cell):
         self.inuse[client] += 1
         try:
             yield client
+        except p_errors.PyHatchingApiError as err:
+            mesg = f"Hatching Triage: {err.error or 'error'} - {err.message or err}"
+            if err.status:
+                mesg += f" (HTTP {err.status})"
+            raise HatchingApiError(mesg, error=err.error, status=err.status) from err
         except p_errors.PyHatchingError as err:
             raise HatchingApiError(f"Hatching Triage: {err}") from err
         finally:
@@ -214,7 +227,9 @@ class HatchingSvc(s_cell.Cell):
         async for chunk in self._genr(apikey, meth, *args):
             size += len(chunk)
             if size > self.maxsize:
-                raise HatchingApiError(f"The download is larger than the max of {self.maxsize} bytes.")
+                raise HatchingApiError(
+                    f"The download is larger than the max of {self.maxsize} bytes."
+                )
             yield chunk
 
     async def resolve(self, sample: str, apikey: str | None = None) -> str:
@@ -238,8 +253,14 @@ class HatchingSvc(s_cell.Cell):
                 return item.id
         return page.data[0].id
 
-    async def rawRequest(self, method: str, path: str, params: dict | None = None,
-                         json_data: Any = None, apikey: str | None = None) -> Any:
+    async def rawRequest(
+        self,
+        method: str,
+        path: str,
+        params: dict | None = None,
+        json_data: Any = None,
+        apikey: str | None = None,
+    ) -> Any:
         """Send an arbitrary request (ex. ``get /v0/samples``) and return its JSON. An escape hatch."""
 
         if not path.startswith("/"):
@@ -251,10 +272,40 @@ class HatchingSvc(s_cell.Cell):
         if resp.status >= 400:
             if isinstance(data, dict):
                 raise HatchingApiError(
-                    f"Hatching Triage: {resp.status} {data.get('error')} - {data.get('message')}"
+                    f"Hatching Triage: {data.get('error')} - {data.get('message')} "
+                    f"(HTTP {resp.status})",
+                    error=data.get("error"),
+                    status=resp.status,
                 )
-            raise HatchingApiError(f"Hatching Triage: HTTP {resp.status}")
+            raise HatchingApiError(f"Hatching Triage: HTTP {resp.status}", status=resp.status)
         return data
+
+    async def _pagedList(
+        self, apikey: str | None, uri: str, model: type, limit: int | None = None
+    ) -> list[dict]:
+        """Every item of a paginated list endpoint (``{"data": [...], "next": ...}``).
+
+        Follows ``next`` until ``limit`` items (None or 0 for all of them), in pages of
+        at most ``MAX_PAGE``. Each item is validated with the pyhatching ``model``.
+        """
+
+        ret: list[dict] = []
+        offset = None
+        async with self.useClient(apikey) as client:
+            while True:
+                size = MAX_PAGE if not limit else min(MAX_PAGE, limit - len(ret))
+                resp, data = await client._request(  # pylint: disable=W0212
+                    "get", uri, params={"limit": size, "offset": offset}
+                )
+                if resp.status >= 400 or not isinstance(data, dict) or "data" not in data:
+                    # Raises the API's error (raise_on_api_err is set).
+                    client.convert_resp(model, resp, data)
+                    raise HatchingApiError(f"Hatching Triage: unexpected response from {uri}.")
+                items = data.get("data") or []
+                ret.extend(dump(model(**item)) for item in items)
+                offset = data.get("next")
+                if not items or not offset or (limit and len(ret) >= limit):
+                    return ret[:limit] if limit else ret
 
     # ---- Samples ----
 
@@ -262,8 +313,9 @@ class HatchingSvc(s_cell.Cell):
         """GET /v0/search - up to ``limit`` samples (0 for every result)."""
         return await self._call(apikey, "search", query, limit=limit)
 
-    async def samples(self, subset: str = "owned", limit: int = 20,
-                      apikey: str | None = None) -> list[dict]:
+    async def samples(
+        self, subset: str = "owned", limit: int = 20, apikey: str | None = None
+    ) -> list[dict]:
         """GET /v0/samples - up to ``limit`` samples of a subset (owned, org, or public)."""
         return await self._call(apikey, "get_samples", subset, limit=limit)
 
@@ -280,22 +332,75 @@ class HatchingSvc(s_cell.Cell):
         await self._call(apikey, "delete_sample", await self.resolve(sample, apikey))
         return True
 
-    async def setProfile(self, sample: str, profiles: list | None = None, auto: bool = False,
-                         pick: list | None = None, apikey: str | None = None) -> bool:
+    async def setProfile(
+        self,
+        sample: str,
+        profiles: list | None = None,
+        auto: bool = False,
+        pick: list | None = None,
+        apikey: str | None = None,
+    ) -> bool:
         """POST /v0/samples/{id}/profile - pick profiles for an interactive submission.
 
         ``profiles`` items are a profile name, ``"profile:pick"``, or a ``{profile, pick}`` dict.
         """
         sid = await self.resolve(sample, apikey)
-        await self._call(apikey, "set_sample_profile", sid, profiles=profileList(profiles),
-                         auto=auto, pick=list(pick or []))
+        profiles = profileList(profiles)
+        if not profiles and not auto and not pick:
+            raise HatchingApiError("Pick at least one profile, a file to analyze, or auto.")
+        if pick and not profiles:
+            # Picking files without profiles lets the sandbox pick the profiles for them.
+            auto = True
+        await self._call(
+            apikey, "set_sample_profile", sid, profiles=profiles, auto=auto, pick=list(pick or [])
+        )
         return True
 
-    def _submitReq(self, kind: str, url: str | None = None, name: str | None = None,
-                   interactive: bool = False, password: str | None = None,
-                   profiles: list | None = None, tags: list | None = None,
-                   timeout: int | None = None, network: str | None = None) -> p_base.SubmissionRequest:
-        defaults = {k: v for k, v in (("timeout", timeout), ("network", network)) if v}
+    async def magicLink(self, sample: str, apikey: str | None = None) -> str:
+        """GET /v0/samples/{id}/magic - a shareable link to a sample's analysis.
+
+        Magic links must be enabled for the organization (see ``setMagicLinks``).
+        """
+
+        sid = await self.resolve(sample, apikey)
+        token = await self._call(apikey, "magic_token", sid)
+        if not token:
+            raise HatchingApiError(f"Hatching Triage returned no magic link token for {sid}.")
+        return f"{self.conf.get('hatching:url').rstrip('/')}/{sid}/magic/{token}"
+
+    @staticmethod
+    def _checkNetwork(timeout: int | None, network: str | None, geolocation: str | None) -> None:
+        """Validate the timeout, network, and geolocation of a submission or profile."""
+
+        if timeout is not None and not 0 < int(timeout) <= MAX_TIMEOUT:
+            raise HatchingApiError(f"The timeout must be between 1 and {MAX_TIMEOUT} seconds.")
+        if geolocation and network != "vpn":
+            raise HatchingApiError("A geolocation requires the vpn network.")
+
+    def _submitReq(
+        self,
+        kind: str,
+        url: str | None = None,
+        name: str | None = None,
+        interactive: bool = False,
+        password: str | None = None,
+        profiles: list | None = None,
+        tags: list | None = None,
+        timeout: int | None = None,
+        network: str | None = None,
+        geolocation: str | None = None,
+    ) -> p_base.SubmissionRequest:
+        self._checkNetwork(timeout, network, geolocation)
+        if profiles and interactive:
+            raise HatchingApiError(
+                "Profiles can't be picked for an interactive submission, pick them with "
+                "slib.hatching.sample.profile once its static analysis is done."
+            )
+        defaults = {
+            k: v
+            for k, v in (("timeout", timeout), ("network", network), ("geolocation", geolocation))
+            if v
+        }
         try:
             return p_base.SubmissionRequest(
                 kind=kind,
@@ -310,30 +415,74 @@ class HatchingSvc(s_cell.Cell):
         except ValueError as err:
             raise HatchingApiError(f"Invalid submission: {err}") from err
 
-    async def submitUrl(self, url: str, fetch: bool = False, interactive: bool = False,
-                        profiles: list | None = None, tags: list | None = None,
-                        timeout: int | None = None, network: str | None = None,
-                        apikey: str | None = None) -> dict:
+    async def submitUrl(
+        self,
+        url: str,
+        fetch: bool = False,
+        interactive: bool = False,
+        profiles: list | None = None,
+        tags: list | None = None,
+        timeout: int | None = None,
+        network: str | None = None,
+        geolocation: str | None = None,
+        apikey: str | None = None,
+    ) -> dict:
         """POST /v0/samples - analyze a URL, or with ``fetch``, the file the sandbox downloads from it."""
 
-        req = self._submitReq("fetch" if fetch else "url", url=url, interactive=interactive,
-                              profiles=profiles, tags=tags, timeout=timeout, network=network)
+        req = self._submitReq(
+            "fetch" if fetch else "url",
+            url=url,
+            interactive=interactive,
+            profiles=profiles,
+            tags=tags,
+            timeout=timeout,
+            network=network,
+            geolocation=geolocation,
+        )
         return await self._call(apikey, "submit_sample", req)
 
-    async def submitFile(self, chunks: list[bytes], name: str, interactive: bool = False,
-                         password: str | None = None, profiles: list | None = None,
-                         tags: list | None = None, timeout: int | None = None,
-                         network: str | None = None, apikey: str | None = None) -> dict:
+    async def importSample(self, sample: str, apikey: str | None = None) -> dict:
+        """POST /v0/samples (kind ``import``) - copy a public tria.ge sample into a private cloud.
+
+        ``sample`` is the public sample's ID or tria.ge URL.
+        """
+
+        req = self._submitReq("import", url=str(sample).strip())
+        return await self._call(apikey, "submit_sample", req)
+
+    async def submitFile(
+        self,
+        chunks: list[bytes],
+        name: str,
+        interactive: bool = False,
+        password: str | None = None,
+        profiles: list | None = None,
+        tags: list | None = None,
+        timeout: int | None = None,
+        network: str | None = None,
+        geolocation: str | None = None,
+        apikey: str | None = None,
+    ) -> dict:
         """POST /v0/samples - submit a file, given as a list of chunks (as read from an Axon)."""
 
         byts = b"".join(chunks)
         if len(byts) > self.maxsize:
-            raise HatchingApiError(f"The file is {len(byts)} bytes, larger than the max of {self.maxsize}.")
+            raise HatchingApiError(
+                f"The file is {len(byts)} bytes, larger than the max of {self.maxsize}."
+            )
         if not byts:
             raise HatchingApiError("The file is empty.")
-        req = self._submitReq("file", name=name or "sample", interactive=interactive,
-                              password=password, profiles=profiles, tags=tags, timeout=timeout,
-                              network=network)
+        req = self._submitReq(
+            "file",
+            name=name or "sample",
+            interactive=interactive,
+            password=password,
+            profiles=profiles,
+            tags=tags,
+            timeout=timeout,
+            network=network,
+            geolocation=geolocation,
+        )
         return await self._call(apikey, "submit_sample", req, byts)
 
     async def wait(self, sample: str, timeout: float = 600, apikey: str | None = None) -> dict:
@@ -354,12 +503,17 @@ class HatchingSvc(s_cell.Cell):
 
         try:
             await asyncio.wait_for(follow(), timeout=timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass
         return await self._call(apikey, "get_sample", sid)
 
-    async def sampleEvents(self, sample: str | None = None, limit: int = 100,
-                           timeout: float = 600, apikey: str | None = None) -> AsyncIterator[dict]:
+    async def sampleEvents(
+        self,
+        sample: str | None = None,
+        limit: int = 100,
+        timeout: float = 600,
+        apikey: str | None = None,
+    ) -> AsyncIterator[dict]:
         """Yield sample status changes (GET /samples/{id}/events, or every sample's with no sample).
 
         Stops after ``limit`` events (0 for no limit) or ``timeout`` seconds.
@@ -391,7 +545,7 @@ class HatchingSvc(s_cell.Cell):
                     return
                 try:
                     item = await asyncio.wait_for(queue.get(), timeout=left)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     return
                 if item is None:
                     return
@@ -419,8 +573,20 @@ class HatchingSvc(s_cell.Cell):
         """GET /v0/samples/{id}/{task}/report_triage.json"""
         return await self._call(apikey, "task_report", await self.resolve(sample, apikey), task)
 
-    async def kernelReport(self, sample: str, task: str, log: str | None = None, limit: int = 1000,
-                           apikey: str | None = None) -> AsyncIterator[dict]:
+    async def urlscanReport(
+        self, sample: str, task: str = "urlscan1", apikey: str | None = None
+    ) -> dict:
+        """GET /v0/samples/{id}/{task}/report_urlscan.json - a URL sample's UrlScan report."""
+        return await self._call(apikey, "urlscan_report", await self.resolve(sample, apikey), task)
+
+    async def kernelReport(
+        self,
+        sample: str,
+        task: str,
+        log: str | None = None,
+        limit: int = 1000,
+        apikey: str | None = None,
+    ) -> AsyncIterator[dict]:
         """Yield up to ``limit`` (0 for all) kernel monitor events of a task."""
 
         sid = await self.resolve(sample, apikey)
@@ -439,10 +605,10 @@ class HatchingSvc(s_cell.Cell):
         for task in overview.get("tasks") or []:
             name = task.get("name") or ""
             if name.startswith(f"{sid}-"):
-                name = name[len(sid) + 1:]
-            if task.get("kind") == "behavioral" or name.startswith("behavioral"):
-                if task.get("status") in (None, "reported"):
-                    ret.append(name)
+                name = name[len(sid) + 1 :]
+            behavioral = task.get("kind") == "behavioral" or name.startswith("behavioral")
+            if behavioral and task.get("status") in (None, "reported"):
+                ret.append(name)
         return ret
 
     async def normSample(self, sample: str, tasks: bool = False, apikey: str | None = None) -> dict:
@@ -460,12 +626,15 @@ class HatchingSvc(s_cell.Cell):
             )
 
         overview = await self._call(apikey, "overview", sid)
+        reports, errors = {}, []
         try:
             static = await self._call(apikey, "static_report", sid)
-        except HatchingApiError:
+        except HatchingApiError as err:
+            # Samples without a static task (ex. URLs) have no static report.
+            if err.error not in UNAVAILABLE:
+                raise
             static = None
 
-        reports, errors = {}, []
         names = self.behavioralTasks(sid, overview) if tasks else []
         for name, report in zip(names, await self._taskReports(sid, names, apikey)):
             if isinstance(report, HatchingApiError):
@@ -474,7 +643,7 @@ class HatchingSvc(s_cell.Cell):
                 reports[name] = report
 
         ret = norm.normSample(info, overview, static, reports)
-        ret["errors"] = errors
+        ret["errors"] = errors + ret.pop("reported")
         return ret
 
     async def _taskReports(self, sid: str, names: list[str], apikey: str | None = None) -> list:
@@ -504,13 +673,15 @@ class HatchingSvc(s_cell.Cell):
                 raise report
             for item in report.get("dumped") or []:
                 if item.get("sha256") and item.get("name") and item.get("kind") != "region":
-                    ret.append({
-                        "task": task,
-                        "name": item["name"],
-                        "path": item.get("path"),
-                        "sha256": item["sha256"].lower(),
-                        "size": item.get("size"),
-                    })
+                    ret.append(
+                        {
+                            "task": task,
+                            "name": item["name"],
+                            "path": item.get("path"),
+                            "sha256": item["sha256"].lower(),
+                            "size": item.get("size"),
+                        }
+                    )
         return ret
 
     # ---- Downloads (async generators of byte chunks) ----
@@ -521,15 +692,17 @@ class HatchingSvc(s_cell.Cell):
         async for chunk in self._bytes(apikey, "iter_sample", sid):
             yield chunk
 
-    async def downloadTaskFile(self, sample: str, task: str, name: str,
-                               apikey: str | None = None) -> AsyncIterator[bytes]:
+    async def downloadTaskFile(
+        self, sample: str, task: str, name: str, apikey: str | None = None
+    ) -> AsyncIterator[bytes]:
         """GET /v0/samples/{id}/{task}/{name} - ex. dump.pcap, dump.pcapng, or a dumped file."""
         sid = await self.resolve(sample, apikey)
         async for chunk in self._bytes(apikey, "iter_task_file", sid, task, name):
             yield chunk
 
-    async def downloadArchive(self, sample: str, fmt: str = "tar",
-                              apikey: str | None = None) -> AsyncIterator[bytes]:
+    async def downloadArchive(
+        self, sample: str, fmt: str = "tar", apikey: str | None = None
+    ) -> AsyncIterator[bytes]:
         """GET /v0/samples/{id}/archive (tar) or /archive.zip"""
         sid = await self.resolve(sample, apikey)
         async for chunk in self._bytes(apikey, "iter_sample_archive", sid, fmt):
@@ -538,22 +711,49 @@ class HatchingSvc(s_cell.Cell):
     # ---- Profiles ----
 
     async def profiles(self, apikey: str | None = None) -> list[dict]:
-        """GET /v0/profiles"""
-        return await self._call(apikey, "get_profiles")
+        """GET /v0/profiles - every page."""
+        return await self._pagedList(apikey, "/v0/profiles", p_base.HatchingProfileResponse)
 
     async def profile(self, profile: str, apikey: str | None = None) -> dict:
         """GET /v0/profiles/{id or name}"""
         return await self._call(apikey, "get_profile", profile)
 
-    async def addProfile(self, name: str, tags: list | None = None, timeout: int | None = None,
-                         network: str | None = None, apikey: str | None = None) -> dict:
+    async def addProfile(
+        self,
+        name: str,
+        tags: list | None = None,
+        timeout: int | None = None,
+        network: str | None = None,
+        geolocation: str | None = None,
+        apikey: str | None = None,
+    ) -> dict:
         """POST /v0/profiles"""
-        return await self._call(apikey, "submit_profile", name, list(tags or []), timeout, network)
+        self._checkNetwork(timeout, network, geolocation)
+        return await self._call(
+            apikey,
+            "submit_profile",
+            name,
+            list(tags or []),
+            timeout,
+            network,
+            geolocation=geolocation,
+        )
 
-    async def editProfile(self, profile: str, name: str | None = None, tags: list | None = None,
-                          timeout: int | None = None, network: str | None = None,
-                          apikey: str | None = None) -> dict:
-        """PUT /v0/profiles/{id or name} - unset values keep their current value."""
+    async def editProfile(
+        self,
+        profile: str,
+        name: str | None = None,
+        tags: list | None = None,
+        timeout: int | None = None,
+        network: str | None = None,
+        geolocation: str | None = None,
+        apikey: str | None = None,
+    ) -> dict:
+        """PUT /v0/profiles/{id or name} - unset values keep their current value.
+
+        The API overwrites the whole profile, so the current values are sent for the unset
+        ones. The geolocation is dropped when the network changes from ``vpn``.
+        """
 
         cur = await self.profile(profile, apikey=apikey)
         new = {
@@ -562,9 +762,23 @@ class HatchingSvc(s_cell.Cell):
             "timeout": timeout or cur.get("timeout"),
             "network": network if network is not None else cur.get("network", ""),
         }
-        await self._call(apikey, "update_profile", new["tags"], new["timeout"], new["network"],
-                         new["name"], cur.get("id") or profile)
-        return dict(cur, **new)
+        geo = geolocation or (cur.get("geolocation") if new["network"] == "vpn" else None)
+        self._checkNetwork(new["timeout"], new["network"], geo)
+        await self._call(
+            apikey,
+            "update_profile",
+            new["tags"],
+            new["timeout"],
+            new["network"],
+            new["name"],
+            cur.get("id") or profile,
+            geolocation=geo,
+        )
+        ret = dict(cur, **new)
+        ret.pop("geolocation", None)
+        if geo:
+            ret["geolocation"] = geo
+        return ret
 
     async def delProfile(self, profile: str, apikey: str | None = None) -> bool:
         """DELETE /v0/profiles/{id or name}"""
@@ -591,6 +805,23 @@ class HatchingSvc(s_cell.Cell):
         await self._call(apikey, "update_rule", name, text)
         return True
 
+    async def renameRule(
+        self, name: str, newname: str, text: str | None = None, apikey: str | None = None
+    ) -> bool:
+        """PUT /v0/yara/{name} with a new name (and optionally new rule text)."""
+
+        if text is None:
+            text = (await self.rule(name, apikey=apikey)).get("rule")
+        async with self.useClient(apikey) as client:
+            resp, data = await client._request(  # pylint: disable=W0212
+                "put",
+                f"/v0/yara/{urllib.parse.quote(str(name), safe='')}",
+                json={"name": newname, "rule": text},
+            )
+            if resp.status >= 400 or (isinstance(data, dict) and "error" in data):
+                client.convert_resp(p_base.ErrorResponse, resp, data)
+        return True
+
     async def delRule(self, name: str, apikey: str | None = None) -> bool:
         """DELETE /v0/yara/{name}"""
         await self._call(apikey, "delete_rule", name)
@@ -599,20 +830,39 @@ class HatchingSvc(s_cell.Cell):
     # ---- Users and API keys (private and self-hosted instances) ----
 
     async def users(self, limit: int | None = None, apikey: str | None = None) -> list[dict]:
-        """GET /v0/users"""
-        return await self._call(apikey, "get_users", limit=limit)
+        """GET /v0/users - up to ``limit`` users (None or 0 for all of them)."""
+        return await self._pagedList(apikey, "/v0/users", p_base.User, limit=limit)
 
     async def user(self, user: str, apikey: str | None = None) -> dict:
         """GET /v0/users/{id}"""
         return await self._call(apikey, "get_user", user)
 
-    async def addUser(self, username: str, email: str, password: str | None = None,
-                      first: str | None = None, last: str | None = None,
-                      permissions: list | None = None, apikey: str | None = None) -> dict:
-        """POST /v0/users"""
-        return await self._call(apikey, "create_user", username, email, password=password,
-                                first_name=first, last_name=last,
-                                permissions=list(permissions) if permissions else None)
+    async def addUser(
+        self,
+        login: str,
+        password: str | None = None,
+        name: str | None = None,
+        role: str | None = None,
+        confirmed: bool = False,
+        apikey: str | None = None,
+    ) -> dict:
+        """POST /v0/users - create a user in your organization.
+
+        ``login`` is an email address, or a username (no ``@``), which Triage turns into a
+        ``<username>@triage.local`` login. ``confirmed`` confirms the email address so the
+        user can sign in right away. ``role`` is ex. ``org_basic``, see the users docs.
+        """
+
+        login = str(login).strip()
+        if not login:
+            raise HatchingApiError("A username or email address is required.")
+        if "@" in login:
+            kwargs = {"email": login, "email_confirmed": True if confirmed else None}
+        else:
+            kwargs = {"username": login}
+        return await self._call(
+            apikey, "create_user", password=password, name=name, role=role, **kwargs
+        )
 
     async def delUser(self, user: str, apikey: str | None = None) -> bool:
         """DELETE /v0/users/{id}"""
@@ -632,3 +882,33 @@ class HatchingSvc(s_cell.Cell):
         await self._call(apikey, "delete_user_apikey", user, name)
         return True
 
+    # ---- Resources, geolocations, stats, and organization settings ----
+
+    async def resources(self, apikey: str | None = None) -> list[dict]:
+        """GET /v0/resources - the analysis environments, and the tags that pick them."""
+        return [
+            res
+            for group in await self._call(apikey, "get_resources")
+            for res in group.get("resources") or []
+        ]
+
+    async def geolocations(self, apikey: str | None = None) -> list[dict]:
+        """GET /v0/geolocations - the regions VPN analyses can exit from."""
+        return [
+            geo
+            for group in await self._call(apikey, "get_geolocations")
+            for geo in group.get("geolocations") or []
+        ]
+
+    async def stats(self, org: bool = False, apikey: str | None = None) -> dict:
+        """GET /v0/stats/user, or /v0/stats/org with ``org``."""
+        return await self._call(apikey, "org_stats" if org else "user_stats")
+
+    async def orgSettings(self, apikey: str | None = None) -> dict:
+        """GET /v0/org/settings (requires the manage_company permission)."""
+        return await self._call(apikey, "get_org_settings")
+
+    async def setMagicLinks(self, enabled: bool, apikey: str | None = None) -> bool:
+        """PUT /v0/org/settings/magic - allow (or stop) creating magic links."""
+        await self._call(apikey, "set_magic_link", bool(enabled))
+        return True

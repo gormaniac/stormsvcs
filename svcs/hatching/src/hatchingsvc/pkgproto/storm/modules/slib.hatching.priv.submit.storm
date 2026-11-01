@@ -38,14 +38,17 @@ function submitFile(sha256, size, name, opts) {
 
     return($svc.submitFile($_chunks($sha256, $size), $name, interactive=$opts.interactive,
                            password=$opts.password, profiles=$opts.profiles, tags=$opts.tags,
-                           timeout=$opts.timeout, network=$opts.network, apikey=$userKey()))
+                           timeout=$opts.timeout, network=$opts.network, geolocation=$opts.geolocation,
+                           apikey=$userKey()))
 }
 
 function submitUrl(url, opts) {
     return($svc.submitUrl($url, fetch=$opts.fetch, interactive=$opts.interactive, profiles=$opts.profiles,
                           tags=$opts.tags, timeout=$opts.timeout, network=$opts.network,
-                          apikey=$userKey()))
+                          geolocation=$opts.geolocation, apikey=$userKey()))
 }
+
+function importSample(sample) { return($svc.importSample($sample, apikey=$userKey())) }
 
 function setProfile(sample, profiles=$lib.null, auto=(false), pick=$lib.null) {
     return($svc.setProfile($sample, profiles=$profiles, auto=$auto, pick=$pick, apikey=$userKey()))

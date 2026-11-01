@@ -2,8 +2,8 @@ init {
     $psub = $lib.import(slib.hatching.priv.submit)
     $util = $lib.import(slib.hatching.util)
 
-    if ((not $cmdopts.auto) and (not $cmdopts.profile)) {
-        $lib.warn("slib.hatching.sample.profile: Use --profile at least once, or --auto.")
+    if ((not $cmdopts.auto) and (not $cmdopts.profile) and (not $cmdopts.pick)) {
+        $lib.warn("slib.hatching.sample.profile: Use --profile or --pick at least once, or --auto.")
     }
     else {
         $retn = $psub.setProfile($cmdopts.sample, profiles=$cmdopts.profile, auto=$cmdopts.auto, pick=$cmdopts.pick)

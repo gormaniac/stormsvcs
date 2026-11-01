@@ -33,11 +33,15 @@ function model(sample, tasks=(false)) {
 }
 
 // The newest reported sample matching a search query, or null.
-function findSample(query) {
-    $retn = $priv.search($query, limit=(20))
+// With url, only URL analyses of that URL count: Triage's url: search also matches samples whose
+// malware configs contain the URL.
+function findSample(query, url=$lib.null) {
+    $retn = $priv.search($query, limit=(50))
     if $util.failed($retn, `Searching for {$query}`) { return($lib.null) }
     for $sample in $retn.data {
-        if ($sample.status = "reported") { return($sample.id) }
+        if ($sample.status != "reported") { continue }
+        if ($url = $lib.null) { return($sample.id) }
+        if ($sample.kind = "url" and $sample.url = $url) { return($sample.id) }
     }
     return($lib.null)
 }
@@ -58,7 +62,9 @@ function enrich(node, tasks=(false)) {
         $lib.warn("slib.hatching: {form} {repr} has no hash or URL to look up.", form=$node.form(), repr=$node.repr())
         return($lib.null)
     }
-    $sid = $findSample($query)
+    $url = $lib.null
+    if ($node.form() = "inet:url") { $url = $node.repr() }
+    $sid = $findSample($query, url=$url)
     if ($sid = $lib.null) {
         $lib.warn("slib.hatching: Hatching Triage has no reported sample for {repr}.", repr=$node.repr())
         return($lib.null)

@@ -6,10 +6,10 @@ init {
     if (not $util.failed($retn, "Listing users")) {
         $rows = ([])
         for $u in $retn.data {
-            $perms = ""
-            if $u.permissions { $perms = (",").join($u.permissions) }
-            $rows.append(($u.username, $u.email, $perms, $u.id))
+            $confirmed = (false)
+            if $u.email_confirmed_at { $confirmed = (true) }
+            $rows.append(($u.email, $u.name, $u.role, $confirmed, $u.created_at, $u.id))
         }
-        $util.table((("username", 20), ("email", 32), ("permissions", 32), ("id", 36)), $rows)
+        $util.table((("email", 32), ("name", 20), ("role", 22), ("confirmed", 9), ("created", 20), ("id", 36)), $rows)
     }
 }

@@ -3,6 +3,13 @@ init {
     $util = $lib.import(slib.hatching.util)
 
     for $sample in $cmdopts.sample {
+        if $cmdopts.link {
+            $retn = $priv.magicLink($sample)
+            if (not $util.failed($retn, `Getting the magic link of {$sample}`)) {
+                $lib.print("slib.hatching.sample.info: {sample}: {link}", sample=$sample, link=$retn.data)
+            }
+            continue
+        }
         if $cmdopts.summary { $retn = $priv.summary($sample) }
         else { $retn = $priv.sample($sample) }
         if (not $util.failed($retn, `Getting sample {$sample}`)) { $util.printJson($retn.data) }

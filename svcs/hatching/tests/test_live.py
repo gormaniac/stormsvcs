@@ -45,8 +45,9 @@ class TestLive(s_tests.SynTest):
             overview = await svc.overview(sid)
             assert "analysis" in overview and "sample" in overview
 
-            result = await svc.normSample(sid, tasks=True, prefix="rep.hatching")
-            assert result["sample"] and result["nodes"]
+            result = await svc.normSample(sid, tasks=True)
+            assert result["id"] == sid and result["score"] and result["tasks"]
+            assert result["file"]["sha256"] and result["signatures"]
 
             msgs = await core.stormlist(f"slib.hatching.enrich --sample {sid} --tasks --yield")
             self.stormHasNoErr(msgs)
@@ -56,3 +57,10 @@ class TestLive(s_tests.SynTest):
         async with liveSvc(self) as (core, svc):
             assert isinstance(await svc.profiles(), list)
             assert isinstance(await svc.rules(), list)
+
+    async def test_resources_geolocations_stats(self):
+        async with liveSvc(self) as (core, svc):
+            resources = await svc.resources()
+            assert resources and all("tags" in r for r in resources)
+            assert isinstance(await svc.geolocations(), list)
+            assert "samples_submitted" in await svc.stats()

@@ -24,6 +24,12 @@ init {
             $any = (true)
             $nodes.extend($hatching.downloadPcaps($sample, task=$cmdopts.task, pcapng=(true)))
         }
+        if $cmdopts.screenshot {
+            $any = (true)
+            $task = $cmdopts.task
+            if (not $task) { $task = urlscan1 }
+            $nodes.append($hatching.downloadTaskFile($sample, $task, "screenshot.png"))
+        }
         if $cmdopts.archive {
             $any = (true)
             $nodes.append($hatching.downloadArchive($sample, fmt=$cmdopts.archive))

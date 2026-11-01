@@ -87,16 +87,24 @@ function mutexNode(mutex) {
 
 function techniqueNode(ttp) {
     [ it:mitre:attack:technique?=$ttp ]
-    return($node)
+    return($seen($node))
 }
 
-// A file:bytes node from normalized hashes ({sha256, md5, sha1, sha512, size, name, mime}).
+// A file:bytes node from normalized hashes ({sha256, md5, sha1, sha512, ssdeep, size, name, mime}).
 function fileNode(file) {
     if ($file = $lib.null or $file.sha256 = $lib.null) { return($lib.null) }
     [ file:bytes?=`sha256:{$file.sha256}`
         :sha256?=$file.sha256 :md5?=$file.md5 :sha1?=$file.sha1 :sha512?=$file.sha512
         :size?=$file.size :name?=$file.name :mime?=$file.mime ]
+    if $file.ssdeep { [ :ssdeeps?+=$file.ssdeep ] }
     return($seen($node))
+}
+
+// A file:bytes node for a SHA256 the graph (or this analysis) already has, or null.
+function fileBySha256(sha256) {
+    if ($sha256 = $lib.null) { return($lib.null) }
+    [ file:bytes?=`sha256:{$sha256}` :sha256?=$sha256 ]
+    return($node)
 }
 
 // A file:bytes node for a file saved in the Axon.
@@ -116,7 +124,8 @@ function sample(data, prefix=$lib.null) {
     $ival = $data.ival
     for $name in $data.tags { $tag($snode, $prefix, $name, $ival) }
 
-    $scan($snode, $data)
+    $result = $scan($snode, $data)
+    for $sig in $data.signatures { $sigResult($snode, $data, $result, $sig) }
     for $item in $data.families { $family($item, $prefix) }
     for $ttp in $data.ttps { $edge($snode, uses, $techniqueNode($ttp)) }
 
@@ -126,6 +135,8 @@ function sample(data, prefix=$lib.null) {
     for $item in $data.configs { $c2config($snode, $data, $item, $prefix) }
     for $item in $data.droppers { $dropperUrls($snode, $data, $item, $prefix) }
     for $item in $data.ransom { $ransomNote($snode, $data, $item, $prefix) }
+    for $cred in $data.creds { $edge($snode, refs, $credsNode($cred)) }
+    for $item in $data.members { $member($snode, $data, $item, $prefix) }
 
     for $item in $data.tasks { $taskNodes($snode, $data, $item) }
     return($snode)
@@ -143,6 +154,46 @@ function scan(snode, data) {
     return($seen($node))
 }
 
+// A Triage signature that matched, as an it:av:scan:result under the sample's verdict (:multi:scan).
+function sigResult(snode, data, result, sig) {
+    if ($result = $lib.null) { return($lib.null) }
+    if ($snode.form() = "inet:url") { $target = "target:url" } else { $target = "target:file" }
+    $n = $sigNode($snode, $data, $result, $sig, $target)
+    for $ttp in $sig.ttps { $edge($n, uses, $techniqueNode($ttp)) }
+    return($n)
+}
+
+function sigNode(snode, data, result, sig, target) {
+    $cats = $lib.null
+    if $sig.categories { $cats = $sig.categories }
+    [ it:av:scan:result=$lib.guid(slib.hatching, $data.id, signature, $sig.key)
+        :scanner:name=$scanner :$target=$snode.repr() :time?=$data.time :verdict?=$sig.verdict
+        :signame?=$sig.name :categories?=$cats :multi:scan=$result.repr() ]
+    return($seen($node))
+}
+
+// A file in an archive (or other container sample) that Triage analyzed.
+function member(snode, data, item, prefix) {
+    if ($snode.form() != "file:bytes") { return($lib.null) }
+    $mnode = $fileNode($item)
+    if ($mnode = $lib.null) { return($lib.null) }
+    for $name in $item.tags { $tag($mnode, $prefix, $name, $data.ival) }
+    [ file:subfile?=($snode.repr(), $mnode.repr()) :path?=$item.path ]
+    return($seen($node))
+}
+
+// Credentials found in a sample or its malware config (ex. an SMTP account it exfiltrates with).
+function credsNode(cred) {
+    if $cred.email { $emailNode($cred.email) }
+    if $cred.url { $urlNode($cred.url) }
+    if $cred.emailto { $emailNode($cred.emailto) }
+    [ auth:creds=$lib.guid(slib.hatching, creds, $cred.url, $cred.username, $cred.password)
+        :user?=$cred.username :passwd?=$cred.password :email?=$cred.email :website?=$cred.url ]
+    $n = $seen($node)
+    if $cred.emailto { $edge($n, refs, $emailNode($cred.emailto)) }
+    return($n)
+}
+
 // A malware family as a risk:tool:software, with :tag set to its tag.
 function family(fam, prefix) {
     $famtag = $lib.null
@@ -150,7 +201,7 @@ function family(fam, prefix) {
     if ($prefix and $part) { $famtag = `{$prefix}.{$part}` }
     [ risk:tool:software=$lib.guid(slib.hatching, family, $fam)
         :soft:name?=$fam :reporter:name=$scanner :tag?=$famtag ]
-    return($node)
+    return($seen($node))
 }
 
 // Tag the C2 servers of a malware config and model the config.
@@ -166,9 +217,17 @@ function c2config(snode, data, config, prefix) {
     // The config holds a single mutex, the rest are linked to the sample above.
     $mutex = $lib.null
     if $config.mutexes { $mutex = $config.mutexes.index(0) }
+    for $url in $config.listens { $urlNode($url) }
+    $c2node = $c2configNode($data, $config, $file, $mutex)
+    for $cred in $config.creds { $edge($c2node, refs, $credsNode($cred)) }
+    return($c2node)
+}
+
+function c2configNode(data, config, file, mutex) {
     [ it:sec:c2:config=$lib.guid(slib.hatching, $data.id, config, $config.family, $config.servers)
         :family?=$config.family :file?=$file :servers?=$config.servers :mutex?=$mutex
-        :decoys?=$config.decoys :campaigncode?=$config.campaign :raw?=$config.raw ]
+        :decoys?=$config.decoys :listens?=$config.listens :dns:resolvers?=$config.resolvers
+        :campaigncode?=$config.campaign :raw?=$config.raw ]
     return($seen($node))
 }
 
@@ -196,6 +255,7 @@ function ransomNote(snode, data, note, prefix) {
     if $note.family { $famtag = $lib.regex.replace("[^a-z0-9_]+", "_", $note.family).strip("_") }
     $nodes = ([])
     for $email in $note.emails { $nodes.append($emailNode($email)) }
+    // Wallets aren't modeled, their currency isn't reported.
     for $url in $note.urls { $nodes.append($urlNode($url)) }
     for $n in $nodes {
         $tag($n, $prefix, ransom, $data.ival)
@@ -217,10 +277,20 @@ function taskGuid(data, task, kind, id) {
 // sample with :sandbox:file (when the sample is a file).
 function taskNodes(snode, data, task) {
     $sandbox = $lib.null
-    if ($snode.form() = "file:bytes") { $sandbox = $snode.repr() }
+    $exe = $lib.null
+    if ($snode.form() = "file:bytes") {
+        $sandbox = $snode.repr()
+        // The file the task ran: the sample, or for archives, the member that was picked.
+        $exe = $sandbox
+        if ($task.target and $task.target != $snode.props.sha256) {
+            $tnode = $fileBySha256($task.target)
+            if $tnode { $exe = $tnode.repr() }
+        }
+    }
 
-    for $proc in $task.procs { $procNode($data, $task, $proc, $sandbox) }
+    for $proc in $task.procs { $procNode($data, $task, $proc, $sandbox, $exe) }
     for $flow in $task.flows { $flowNode($data, $task, $flow, $sandbox) }
+    for $ip in $task.ips { $ipGeo($ip) }
     for $req in $task.dns { $dnsNode($data, $task, $req, $sandbox) }
     for $ans in $task.answers { $answerNode($ans) }
     for $req in $task.http { $httpNode($data, $task, $req, $sandbox) }
@@ -228,31 +298,66 @@ function taskNodes(snode, data, task) {
     return($snode)
 }
 
-function procNode(data, task, proc, sandbox) {
-    $exe = $lib.null
-    if $proc.orig { $exe = $sandbox }
+function procNode(data, task, proc, sandbox, exe) {
+    $pexe = $lib.null
+    if $proc.orig { $pexe = $exe }
     [ it:exec:proc=$taskGuid($data, $task, proc, $proc.procid)
-        :sandbox:file?=$sandbox :exe?=$exe :pid?=$proc.pid :cmd?=$proc.cmd :path?=$proc.path
+        :sandbox:file?=$sandbox :exe?=$pexe :pid?=$proc.pid :cmd?=$proc.cmd :path?=$proc.path
         :src:proc?=$taskGuid($data, $task, proc, $proc.parent) ]
-    return($node)
+    return($seen($node))
 }
 
 function flowNode(data, task, flow, sandbox) {
     $ipprop = $lib.null
     if $flow.ipver { $ipprop = `dst:{$flow.ipver}` $ipNode($flow.ip, ver=$flow.ipver) }
-    if $flow.domain { $hostNode($flow.domain) }
+    $fnode = $flowProps($data, $task, $flow, $sandbox, $ipprop)
+    // The domain the flow connected to, and the TLS server name it asked for.
+    for $host in ($flow.domain, $flow.sni) {
+        if $host { $edge($fnode, refs, $hostNode($host)) }
+    }
+    $ja3Sample($flow.client, $flow.ja3)
+    $ja3sSample($flow.server, $flow.ja3s)
+    return($fnode)
+}
+
+// The JA3 fingerprint of a flow's TLS client hello.
+function ja3Sample(client, ja3) {
+    if ((not $client) or (not $ja3)) { return($lib.null) }
+    [ inet:tls:ja3:sample?=($client, $ja3) ]
+    return($seen($node))
+}
+
+// The JA3S fingerprint of a flow's TLS server hello.
+function ja3sSample(server, ja3s) {
+    if ((not $server) or (not $ja3s)) { return($lib.null) }
+    [ inet:tls:ja3s:sample?=($server, $ja3s) ]
+    return($seen($node))
+}
+
+function flowProps(data, task, flow, sandbox, ipprop) {
     [ inet:flow=$taskGuid($data, $task, flow, $flow.id)
         :sandbox:file?=$sandbox :dst?=$flow.server :dst:port?=$flow.port :dst:proto?=$flow.proto
-        :src:proc?=$taskGuid($data, $task, proc, $flow.procid)
-        :src:txbytes?=$flow.txbytes :dst:txbytes?=$flow.rxbytes ]
+        :src?=$flow.client :src:proc?=$taskGuid($data, $task, proc, $flow.procid)
+        :src:txbytes?=$flow.txbytes :dst:txbytes?=$flow.rxbytes
+        :src:txcount?=$flow.txcount :dst:txcount?=$flow.rxcount ]
     if $ipprop { [ :$ipprop?=$flow.ip ] }
+    return($seen($node))
+}
+
+// Triage's ASN and country of an IP, only set when the graph doesn't already have them.
+function ipGeo(ip) {
+    $n = $ipNode($ip.ip, ver=$ip.ipver)
+    if ($n = $lib.null) { return($lib.null) }
+    yield $n
+    if ($ip.asn and (not :asn)) { [ :asn?=$ip.asn ] }
+    if ($ip.cc and (not :loc)) { [ :loc?=$ip.cc ] }
     return($node)
 }
 
 function dnsNode(data, task, req, sandbox) {
     [ inet:dns:request=$lib.guid(slib.hatching, $data.id, $task.name, dns, $req.flow, $req.index, $req.name)
-        :sandbox:file?=$sandbox :query:name?=$req.name ]
-    return($node)
+        :sandbox:file?=$sandbox :query:name?=$req.name :query:type?=$req.type :server?=$req.server ]
+    return($seen($node))
 }
 
 function answerNode(ans) {
@@ -267,20 +372,27 @@ function answerNode(ans) {
 
 function httpNode(data, task, req, sandbox) {
     $urlNode($req.url)
+    $hdrs = $lib.null
+    if $req.headers { $hdrs = $req.headers }
+    $rhdrs = $lib.null
+    if $req.rheaders { $rhdrs = $req.rheaders }
     [ inet:http:request=$lib.guid(slib.hatching, $data.id, $task.name, http, $req.flow, $req.index, $req.url)
-        :sandbox:file?=$sandbox :flow?=$taskGuid($data, $task, flow, $req.flow)
-        :method?=$req.method :url?=$req.url :response:code?=$req.code ]
-    return($node)
+        :sandbox:file?=$sandbox :flow?=$taskGuid($data, $task, flow, $req.flow) :server?=$req.server
+        :method?=$req.method :url?=$req.url :headers?=$hdrs
+        :response:code?=$req.code :response:reason?=$req.reason :response:headers?=$rhdrs ]
+    return($seen($node))
 }
 
 // A file dropped during the task. Returns the dropped file's file:bytes node.
 function fileAdd(data, task, file, sandbox) {
     $fnode = $fileNode(({"sha256": $file.sha256, "md5": $file.md5, "sha1": $file.sha1,
-                         "sha512": $file.sha512, "size": $file.size}))
+                         "sha512": $file.sha512, "ssdeep": $file.ssdeep, "size": $file.size,
+                         "name": $file.basename}))
     if ($fnode = $lib.null) { return($lib.null) }
     [ it:exec:file:add=$lib.guid(slib.hatching, $data.id, $task.name, file, $file.name, $file.sha256)
         :sandbox:file?=$sandbox :file=$fnode.repr() :path?=$file.path
         :proc?=$taskGuid($data, $task, proc, $file.procid) ]
+    $seen($node)
     return($fnode)
 }
 

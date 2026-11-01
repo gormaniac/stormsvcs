@@ -3,9 +3,15 @@ init {
     $util = $lib.import(slib.hatching.util)
 
     function add(name, text) {
-        if ((not $name) or (not $text)) {
+        if ((not $name) or ((not $text) and (not $cmdopts.rename))) {
             $lib.warn("slib.hatching.yara.add: A rule needs a name and text.")
             return((false))
+        }
+        if $cmdopts.rename {
+            $retn = $pman.renameRule($cmdopts.rename, $name, text=$text)
+            if $util.failed($retn, `Renaming Yara rule {$cmdopts.rename}`) { return((false)) }
+            $lib.print("slib.hatching.yara.add: Renamed Yara rule {old} to {name}.", old=$cmdopts.rename, name=$name)
+            return((true))
         }
         if $cmdopts.update { $retn = $pman.editRule($name, $text) $verb = Updated }
         else { $retn = $pman.addRule($name, $text) $verb = Added }

@@ -12,6 +12,7 @@ init {
         "tags": $cmdopts.tag,
         "timeout": $cmdopts.timeout,
         "network": $cmdopts.network,
+        "geolocation": $cmdopts.geolocation,
         "name": $cmdopts.name,
         "wait": $cmdopts.wait,
         "tasks": $cmdopts.tasks,
