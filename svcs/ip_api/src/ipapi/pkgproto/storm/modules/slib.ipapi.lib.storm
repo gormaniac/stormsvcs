@@ -60,9 +60,17 @@ function modelResult(data, tagPrefix) {
     $locNode = $buildPlaceNode($data)
     $asnNode = $buildASNNode($data)
 
+    // Synapse also parses IPv4 strings as valid inet:ipv6 values (::ffff:x.x.x.x),
+    // so only fall back to inet:ipv6 when the query is not a valid IPv4.
+    ($isIpv4, $ipv4) = $lib.trycast(inet:ipv4, $data.query)
+    if $isIpv4 {
+        $ipForm = inet:ipv4
+    } else {
+        $ipForm = inet:ipv6
+    }
+
     [
-        inet:ipv4?=$data.query
-        inet:ipv6?=$data.query
+        *$ipForm?=$data.query
         :asn?=$asnNode
     ]
 
