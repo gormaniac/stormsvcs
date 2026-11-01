@@ -1,8 +1,8 @@
 name: slib.pcap
-version: 0.8.0
+version: 0.8.1
 guid: e02a89d21d5b4eb588a03a7156b3b467
 
-synapse_minversion: [2, 234, 0]
+synapse_version: ">=2.234.0,<3.0.0"
 
 genopts:
     dotstorm: true
