@@ -22,12 +22,16 @@ function buildGeoTelemNode (ipNode, placeNode, data) {
 }
 
 function buildPlaceNode(data) {
-    $placeName = (', ').join(([$data.city, $data.regionName, $data.country]))
+    $nameParts = ([])
+    for $part in ($data.city, $data.regionName, $data.country) {
+        if $part { $nameParts.append($part) }
+    }
+    $placeName = (', ').join($nameParts)
 
     [
         geo:place=($data.lat, $data.lon, $data.city)
         :latlong=($data.lat, $data.lon)
-        :name=`$placeName ({$data.lat}, {$data.lon})`
+        :name?=$placeName
         :type=ip.geoloc.city
         :desc=(`{$placeName} at the coordinates {$data.lat}, {$data.lon} per ip geolocation data.`)
     ]
