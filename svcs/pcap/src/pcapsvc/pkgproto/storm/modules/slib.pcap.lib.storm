@@ -115,6 +115,12 @@ function _report(sha256, summary, count, nhits, file, hits=(false)) {
         $lib.warn("slib.pcap: {sha256} has more than {count} flows, {dropped} packets for the rest were dropped.",
                   sha256=$sha256, count=$count, dropped=$summary.dropped)
     }
+    // What the sandbox caught an engine doing while it read this capture: the capture may be
+    // an exploit attempt against the engine.
+    for $alert in $summary.sandbox.alerts {
+        $lib.warn("slib.pcap: The sandbox caught {engine} on {sha256} ({kind}): {detail}. The capture may be trying to exploit it, see slib.pcap.status.",
+                  engine=$alert.engine, sha256=$sha256, kind=$alert.kind, detail=$alert.detail)
+    }
     for ($name, $info) in $summary.engines {
         if ($info.enabled and $info.error) {
             $lib.warn("slib.pcap: {engine} had a problem with {sha256}: {err}", engine=$name,

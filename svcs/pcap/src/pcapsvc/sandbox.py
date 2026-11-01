@@ -17,7 +17,10 @@ changes), Landlock needs a host kernel with it enabled (5.13+, 6.7+ to block TCP
 """
 
 import asyncio
+import collections
 import contextlib
+import contextvars
+import ctypes
 import json
 import logging
 import os
@@ -26,6 +29,7 @@ import shutil
 import signal
 import stat
 import sys
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -98,6 +102,13 @@ class Result:
     stderr: bytes
     warnings: list[str] = field(default_factory=list)
     """Sandbox layers that were skipped (best-effort mode)."""
+    alerts: list[dict] = field(default_factory=list)
+    """What the run did that it shouldn't have (see ``Sandbox.alert``)."""
+    applied: list[str] | None = None
+    """The sandbox layers the wrapper applied, None if it didn't report (ex. mode off)."""
+    verified: bool | None = None
+    """Whether the engine's /proc status matched the layers applied, None if the engine
+    exited before it could be checked."""
 
     @property
     def text(self) -> str:
@@ -106,9 +117,23 @@ class Result:
         return (self.stdout + b"\n" + self.stderr).decode(errors="replace")
 
 
+_APPLIED = (_sbxexec.PREFIX + " applied ").encode()
+
+
 def _readLimited(maxsize: int):
-    async def read(stream: asyncio.StreamReader, buf: bytearray, over: asyncio.Event) -> None:
+    async def read(
+        stream: asyncio.StreamReader,
+        buf: bytearray,
+        over: asyncio.Event,
+        result: Result | None = None,
+    ) -> None:
         while chunk := await stream.read(65536):
+            if result is not None and result.applied is None:
+                # The wrapper's report of the layers it applied, before it execs the engine.
+                head = bytes(buf[:65536]) + chunk
+                if (idx := head.find(_APPLIED)) != -1 and (end := head.find(b"\n", idx)) != -1:
+                    with contextlib.suppress(ValueError):
+                        result.applied = json.loads(head[idx + len(_APPLIED) : end])
             if over.is_set():
                 # Keep draining (and dropping) the output until the engine is killed, so the
                 # pipe closes and waiting for the engine finishes.
@@ -120,6 +145,102 @@ def _readLimited(maxsize: int):
             buf.extend(chunk)
 
     return read
+
+
+RUN_ALERTS: contextvars.ContextVar[list | None] = contextvars.ContextVar(
+    "slib_pcap_run_alerts", default=None
+)
+"""The alerts of the current analysis: ``PcapSvc.analyze`` sets a list, every engine run in
+its context (including concurrent ones) adds its alerts to it."""
+
+CRASH_SIGNALS = {
+    signal.SIGSEGV: "a segmentation fault",
+    signal.SIGBUS: "a bus error",
+    signal.SIGILL: "an illegal instruction",
+    signal.SIGFPE: "a floating point exception",
+    signal.SIGABRT: "an abort (ex. a failed assertion or heap corruption check)",
+    signal.SIGTRAP: "a trap",
+}
+"""Signals an engine dies of when it crashes, often what an exploit attempt looks like."""
+
+ALERT_KINDS = ("seccomp", "crash", "unconfined", "leftover", "escaped", "file")
+"""The kinds of sandbox alerts:
+
+- ``seccomp``: the engine tried to open a network socket and was killed (SIGSYS).
+- ``crash``: the engine crashed on its input (see ``CRASH_SIGNALS``).
+- ``unconfined``: the engine's /proc status didn't match the sandbox layers applied.
+- ``leftover``: processes of the run's group were still running after it ended.
+- ``escaped``: an engine process left the run's process group (or was orphaned to the
+  service), it was killed.
+- ``file``: a file the engine's user owns outside the engines' directories.
+"""
+
+PR_SET_CHILD_SUBREAPER = 36
+
+
+def _procStatus(pid: int) -> dict[str, str] | None:
+    try:
+        with open(f"/proc/{pid}/status", encoding="utf-8", errors="replace") as fd:
+            lines = fd.read().splitlines()
+    except OSError:
+        return None
+    out = {}
+    for line in lines:
+        key, _, valu = line.partition(":")
+        out[key] = valu.strip()
+    return out
+
+
+def _procPgrp(pid: int) -> int | None:
+    try:
+        with open(f"/proc/{pid}/stat", encoding="utf-8", errors="replace") as fd:
+            stat = fd.read()
+    except OSError:
+        return None
+    # The command is in parentheses and may contain spaces, the fields after it are fixed.
+    rest = stat.rsplit(")", 1)[-1].split()
+    try:
+        return int(rest[2])
+    except (IndexError, ValueError):
+        return None
+
+
+def sandboxed(status: dict[str, str], own: dict[str, str] | None) -> bool:
+    """Whether a process was started in the sandbox (or by something that was): it has more
+    seccomp filters than the service, or no_new_privs when the service doesn't. Both are
+    inherited and can't be undone, so they mark every process an engine starts."""
+
+    own = own or {}
+    try:
+        if int(status.get("Seccomp_filters", 0)) > int(own.get("Seccomp_filters", 0)):
+            return True
+    except ValueError:
+        pass
+    return status.get("NoNewPrivs") == "1" and own.get("NoNewPrivs") != "1"
+
+
+def checkStatus(
+    status: dict[str, str], applied: list[str], ids: tuple[int, int] | None, seccomp: bool
+) -> list[str]:
+    """What's wrong with an engine's /proc status, given the layers its wrapper applied."""
+
+    problems = []
+    if ids is not None and "user" in applied:
+        uids = status.get("Uid", "").split()
+        gids = status.get("Gid", "").split()
+        if not uids or any(int(u) != ids[0] for u in uids):
+            problems.append(f"it runs with uids {' '.join(uids) or '?'}, not {ids[0]}")
+        if not gids or any(int(g) != ids[1] for g in gids):
+            problems.append(f"it runs with gids {' '.join(gids) or '?'}, not {ids[1]}")
+        if status.get("Groups", "").strip():
+            problems.append(f"it has supplementary groups {status['Groups']}")
+    if "no_new_privs" in applied and status.get("NoNewPrivs") != "1":
+        problems.append("no_new_privs isn't set")
+    if seccomp and "seccomp" in applied and status.get("Seccomp") != "2":
+        problems.append(f"its seccomp mode is {status.get('Seccomp', '?')}, not 2 (filter)")
+    if status.get("CapEff", "0").strip("0") and ids is not None and "user" in applied:
+        problems.append(f"it has capabilities {status['CapEff']}")
+    return problems
 
 
 class Sandbox:
@@ -153,6 +274,136 @@ class Sandbox:
         self.script = os.path.abspath(_sbxexec.__file__)
         self._probe: dict[str, Any] | None = None
         self._reached: set[str] = set()
+        self._live: set[int] = set()
+        self.alerts: collections.deque[dict] = collections.deque(maxlen=100)
+        self.alertcount = 0
+        self.subreaper = False
+        if self.mode != "off":
+            # Engine processes that are orphaned (ex. a daemonized child) become the service's
+            # children instead of init's, so the sweep finds them.
+            with contextlib.suppress(OSError, AttributeError):
+                libc = ctypes.CDLL(None, use_errno=True)
+                self.subreaper = libc.prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) == 0
+
+    def alert(self, kind: str, engine: str, detail: str, result: Result | None = None) -> dict:
+        """Record that an engine did something it shouldn't have. Alerts are logged, kept for
+        the service's status, added to the current analysis (``RUN_ALERTS``), and to
+        ``result``."""
+
+        rec = {"kind": kind, "engine": engine, "detail": detail, "time": int(time.time() * 1000)}
+        logger.warning("Sandbox alert (%s) for %s: %s", kind, engine, detail)
+        self.alerts.append(rec)
+        self.alertcount += 1
+        if (run := RUN_ALERTS.get()) is not None:
+            run.append(rec)
+        if result is not None:
+            result.alerts.append(rec)
+        return rec
+
+    def sweep(self, engine: str = "engine", result: Result | None = None) -> list[int]:
+        """Kill engine processes that got out of their run: orphans the service inherited
+        (as a subreaper) and, with a sandbox user, the user's processes outside every running
+        engine's process group. Returns the killed pids."""
+
+        ids = self.ids()
+        me = os.getpid()
+        own = _procStatus(me)
+        killed = []
+        try:
+            pids = [int(name) for name in os.listdir("/proc") if name.isdigit()]
+        except OSError:
+            return killed
+        for pid in pids:
+            if pid == me or pid in self._live:
+                continue
+            status = _procStatus(pid)
+            if status is None:
+                continue
+            uids = status.get("Uid", "").split()
+            # The service has children of its own (ex. Synapse's IO workers), only the ones
+            # marked as started in the sandbox are engine orphans.
+            orphan = self.subreaper and status.get("PPid") == str(me) and sandboxed(status, own)
+            if status.get("State", "").startswith("Z"):
+                # Already dead (ex. a run's leftover that was killed), only reap it.
+                if orphan:
+                    with contextlib.suppress(ChildProcessError, OSError):
+                        os.waitpid(pid, os.WNOHANG)
+                continue
+            ours = ids is not None and bool(uids) and int(uids[0]) == ids[0]
+            if ours and _procPgrp(pid) in self._live:
+                continue
+            if not (orphan or ours):
+                continue
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                os.kill(pid, signal.SIGKILL)
+            if orphan:
+                with contextlib.suppress(ChildProcessError, OSError):
+                    os.waitpid(pid, 0)
+            killed.append(pid)
+            name = status.get("Name", "?")
+            how = "was orphaned to the service" if orphan else "left its run's process group"
+            self.alert("escaped", engine, f"process {pid} ({name}) {how}, it was killed", result)
+        return killed
+
+    def sweepFiles(
+        self,
+        roots: list[str],
+        exclude: list[str] = (),
+        maxfiles: int = 100000,
+        engine: str = "engine",
+    ) -> list[str]:
+        """Find files the engine's user owns under ``roots`` (outside ``exclude``, the
+        directories engines are given), which it shouldn't have been able to write. Returns
+        their paths (each is an alert)."""
+
+        ids = self.ids()
+        if ids is None:
+            return []
+        skip = [os.path.abspath(path) for path in exclude]
+        found, seen = [], 0
+        for root in roots:
+            for dirpath, dirnames, filenames in os.walk(root, onerror=lambda _err: None):
+                if any(dirpath == d or dirpath.startswith(d + os.sep) for d in skip):
+                    dirnames[:] = []
+                    continue
+                for name in [*filenames, *dirnames]:
+                    seen += 1
+                    if seen > maxfiles:
+                        return found
+                    path = os.path.join(dirpath, name)
+                    try:
+                        info = os.lstat(path)
+                    except OSError:
+                        continue
+                    if info.st_uid == ids[0]:
+                        found.append(path)
+                        self.alert(
+                            "file", engine, f"{path} is owned by the sandbox user {self.user}"
+                        )
+        return found
+
+    async def _verify(self, proc: asyncio.subprocess.Process, result: Result, engine: str) -> None:
+        """Check the engine's /proc status against the layers its wrapper reports applying.
+
+        The wrapper reports them after applying them all, and they're kept across its exec of
+        the engine, so the kernel's view of the process is checked as soon as the report is
+        in (the status is readable whoever the engine runs as, its exe isn't).
+        """
+
+        ids = self.ids()
+        for _ in range(2000):
+            if proc.returncode is not None:
+                return
+            if result.applied is not None:
+                status = _procStatus(proc.pid)
+                if status is None:
+                    return
+                problems = checkStatus(status, result.applied, ids, self.seccomp)
+                result.verified = not problems
+                for problem in problems:
+                    self.alert("unconfined", engine, problem, result)
+                return
+            await asyncio.sleep(0.005)
 
     def ids(self) -> tuple[int, int] | None:
         """The (uid, gid) engines run as, or None if they run as the service's user."""
@@ -300,8 +551,13 @@ class Sandbox:
         timeout: float | None = None,
         maxoutput: int = 0,
         stdout: str | None = None,
+        engine: str | None = None,
     ) -> Result:
         """Run an engine in the sandbox and wait for it.
+
+        While it runs, its /proc status is checked against the layers applied, and after it
+        exits its process group and the service's orphans are swept. What it shouldn't have
+        done is reported as alerts (see ``ALERT_KINDS``), in the result and ``RUN_ALERTS``.
 
         Parameters
         ----------
@@ -335,6 +591,7 @@ class Sandbox:
         if binpath is None:
             raise SandboxError(f"Unable to find {argv[0]}.")
         binpath = os.path.realpath(binpath)
+        engine = engine or os.path.basename(binpath)
         if env is None:
             env = {"PATH": os.path.dirname(binpath) + ":/usr/bin:/bin", "LANG": "C.UTF-8"}
         execs = [os.path.dirname(binpath), *execs]
@@ -374,26 +631,55 @@ class Sandbox:
                 )
             except OSError as err:
                 raise SandboxError(f"Unable to run {argv[0]}: {err}") from err
+            self._live.add(proc.pid)
 
             out, errb = bytearray(), bytearray()
+            leftovers: list[bool] = []
             over = asyncio.Event()
             read_ = _readLimited(maxoutput)
-            tasks = [asyncio.create_task(read_(proc.stderr, errb, over))]
+            result = Result(0, b"", b"")
+            tasks = [asyncio.create_task(read_(proc.stderr, errb, over, result))]
             if proc.stdout is not None:
                 tasks.append(asyncio.create_task(read_(proc.stdout, out, over)))
+            verify = None
+            if self.mode != "off":
+                verify = asyncio.create_task(self._verify(proc, result, engine))
+
+            async def exited() -> None:
+                # The return code is set when the engine exits, proc.wait() also waits for
+                # its output pipes to close, which something it left running keeps open.
+                while proc.returncode is None:
+                    await asyncio.sleep(0.02)
 
             async def waitAll() -> None:
                 done = asyncio.gather(*tasks)
                 overt = asyncio.create_task(over.wait())
+                exit_ = asyncio.create_task(exited())
                 try:
                     finished, _ = await asyncio.wait(
-                        {done, overt}, return_when=asyncio.FIRST_COMPLETED
+                        {done, overt, exit_}, return_when=asyncio.FIRST_COMPLETED
                     )
                     if overt in finished:
                         raise SandboxError(f"{argv[0]} wrote more than {maxoutput} bytes.")
+                    if done not in finished:
+                        try:
+                            await asyncio.wait_for(asyncio.shield(done), 1)
+                        except TimeoutError:
+                            # Its pipes are held open by processes it left behind: kill its
+                            # group (reported below), and any that left it (the sweep).
+                            with contextlib.suppress(ProcessLookupError, PermissionError):
+                                os.killpg(proc.pid, 0)
+                                leftovers.append(True)
+                                os.killpg(proc.pid, signal.SIGKILL)
+                            self.sweep(engine, result)
+                            try:
+                                await asyncio.wait_for(asyncio.shield(done), 5)
+                            except TimeoutError:
+                                pass
                     await proc.wait()
                 finally:
                     overt.cancel()
+                    exit_.cancel()
 
             try:
                 await asyncio.wait_for(waitAll(), timeout=timeout or None)
@@ -408,9 +694,29 @@ class Sandbox:
             finally:
                 for task in tasks:
                     task.cancel()
+                if verify is not None:
+                    verify.cancel()
+                # Anything still in the run's process group outlived the engine.
+                leftover = bool(leftovers)
+                with contextlib.suppress(ProcessLookupError, PermissionError):
+                    os.killpg(proc.pid, 0)
+                    leftover = True
+                if leftover:
+                    with contextlib.suppress(ProcessLookupError, PermissionError):
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    if proc.returncode == 0:
+                        self.alert(
+                            "leftover",
+                            engine,
+                            "processes of its run were still "
+                            "running after it exited, they were killed",
+                            result,
+                        )
+                self._live.discard(proc.pid)
         finally:
             if outfd is not None:
                 outfd.close()
+        self.sweep(engine, result)
 
         warnings = []
         stderr = bytes(errb)
@@ -424,7 +730,23 @@ class Sandbox:
         stderr = b"".join(lines)
         if proc.returncode == _sbxexec.EXIT_SANDBOX and warnings:
             raise SandboxError(f"The sandbox couldn't run {argv[0]}: {'; '.join(warnings)}")
-        return Result(proc.returncode, bytes(out), stderr, warnings)
+        result.code, result.stdout, result.stderr = proc.returncode, bytes(out), stderr
+        result.warnings = [w for w in warnings if not w.startswith("applied ")]
+        code = proc.returncode
+        if code is not None and code < 0 and self.mode != "off":
+            sig = -code
+            if sig == signal.SIGSYS and self.seccomp and "seccomp" in (result.applied or ()):
+                self.alert(
+                    "seccomp", engine, "it tried to open a network socket, and was killed", result
+                )
+            elif sig in CRASH_SIGNALS:
+                self.alert(
+                    "crash",
+                    engine,
+                    f"it crashed with {CRASH_SIGNALS[sig]} ({signal.Signals(sig).name})",
+                    result,
+                )
+        return result
 
     @staticmethod
     def _kill(proc: asyncio.subprocess.Process) -> None:

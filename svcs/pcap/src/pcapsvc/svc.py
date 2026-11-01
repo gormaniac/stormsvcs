@@ -536,7 +536,11 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
             }
         return {
             "engines": engines,
-            "sandbox": self.sandbox.probe(),
+            "sandbox": {
+                **self.sandbox.probe(),
+                "alerts": self.sandbox.alertcount,
+                "recent": list(self.sandbox.alerts)[-10:],
+            },
             "axon": bool(self.axonurl),
             "rules": await self.ruleStatus(),
         }
@@ -560,6 +564,20 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
         while not await self.waitfini(timeout=600):
             self._pruneUploads()
             self._prunePushes()
+            await self.sweepSandbox()
+
+    async def sweepSandbox(self) -> dict[str, Any]:
+        """Look for what an engine that got out of its sandbox would leave behind: processes
+        of the sandbox user outside a run, and files it owns outside the engines'
+        directories (each is a sandbox alert). Runs every 10 minutes."""
+
+        killed = self.sandbox.sweep("sweep")
+        roots = [
+            path for path in ("/tmp", "/var/tmp", "/dev/shm", self.dirn) if os.path.isdir(path)
+        ]
+        exclude = [self.tmpdir, self.snort.workdir, self.suricata.workdir]
+        files = await s_coro.executor(self.sandbox.sweepFiles, roots, exclude)
+        return {"killed": killed, "files": files}
 
     async def uploadStart(self, kind: str = "capture") -> str:
         """Start streaming a file (a ``capture`` or a ``keylog``) to the service. Returns its ID.
@@ -912,19 +930,27 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
             raise PcapSvcError("The service has no axon:url, key logs must be uploaded.")
 
         async with self.runsema:
-            with tempfile.TemporaryDirectory(dir=self.tmpdir) as tmp:
-                return await self._analyze(
-                    tmp,
-                    sha256,
-                    upload,
-                    keylogs,
-                    keyloguploads,
-                    decode,
-                    timeout,
-                    limit,
-                    handshake,
-                    opts,
-                )
+            # Every engine run of this analysis adds what the sandbox caught it doing.
+            alerts: list[dict] = []
+            token = p_sandbox.RUN_ALERTS.set(alerts)
+            try:
+                with tempfile.TemporaryDirectory(dir=self.tmpdir) as tmp:
+                    flows, summary = await self._analyze(
+                        tmp,
+                        sha256,
+                        upload,
+                        keylogs,
+                        keyloguploads,
+                        decode,
+                        timeout,
+                        limit,
+                        handshake,
+                        opts,
+                    )
+            finally:
+                p_sandbox.RUN_ALERTS.reset(token)
+            summary["sandbox"] = {"alerts": alerts}
+            return flows, summary
 
     async def _fetch(
         self,

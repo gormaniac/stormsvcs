@@ -17,6 +17,16 @@ init {
         $sbx = $status.sandbox
         $lib.print("Sandbox: {mode}, engines run as {user}, Landlock ABI {abi}, seccomp {sec}",
             mode=$sbx.mode, user=$sbx.uid, abi=$sbx.landlock, sec=$sbx.seccomp)
+        if $sbx.alerts {
+            $lib.warn("slib.pcap: The sandbox has {count} alerts since the service started (an engine crashed, tried to open a socket, or got out of its sandbox). The latest:",
+                count=$sbx.alerts)
+            for $alert in $sbx.recent {
+                $lib.warn("    {time} {engine} ({kind}): {detail}", time=$lib.time.format($alert.time, "%Y-%m-%d %H:%M:%S"),
+                    engine=$alert.engine, kind=$alert.kind, detail=$alert.detail)
+            }
+        } else {
+            $lib.print("Sandbox alerts: none")
+        }
         if $sbx.missing {
             $lib.warn("slib.pcap: The host doesn't support these sandbox layers: {missing}",
                 missing=$lib.str.join(", ", $sbx.missing))

@@ -71,6 +71,9 @@ PR_SET_SECCOMP = 22
 SECCOMP_MODE_FILTER = 2
 SECCOMP_RET_ALLOW = 0x7FFF0000
 SECCOMP_RET_ERRNO = 0x00050000
+SECCOMP_RET_KILL_PROCESS = 0x80000000
+
+LANDLOCK_RESTRICT_SELF_LOG_NEW_EXEC_ON = 1 << 1  # ABI 7, log denials after an exec too
 
 AUDIT_ARCHES = {"x86_64": (0xC000003E, 41), "aarch64": (0xC00000B7, 198)}
 """(AUDIT_ARCH value, the socket syscall number) of the arches the seccomp filter supports."""
@@ -197,7 +200,9 @@ def applyLandlock(
             allow(path, READ_EXEC)
         for path in write:
             allow(path, fsall)
-        if libc.syscall(SYS_LANDLOCK_RESTRICT_SELF, fd, ctypes.c_uint32(0)) != 0:
+        # Log denials (to the kernel's audit log) of what this execs too, the engine.
+        flags = LANDLOCK_RESTRICT_SELF_LOG_NEW_EXEC_ON if abi >= 7 else 0
+        if libc.syscall(SYS_LANDLOCK_RESTRICT_SELF, fd, ctypes.c_uint32(flags)) != 0:
             raise SandboxError(f"Unable to apply Landlock: {os.strerror(ctypes.get_errno())}")
     finally:
         os.close(fd)
@@ -208,8 +213,11 @@ def _bpf(code: int, k: int, jt: int = 0, jf: int = 0) -> _SockFilter:
     return _SockFilter(code, jt, jf, k)
 
 
-def applySeccomp(libc: ctypes.CDLL | None = None) -> None:
-    """Refuse (EPERM) socket() for IPv4, IPv6, and packet sockets, allow everything else.
+def applySeccomp(libc: ctypes.CDLL | None = None, kill: bool = True) -> None:
+    """Refuse socket() for IPv4, IPv6, and packet sockets, allow everything else.
+
+    With ``kill`` the process is killed (SIGSYS), so a try is an alarm instead of a quiet
+    failure (the engines never open those sockets offline), otherwise it fails with EPERM.
 
     Raises
     ------
@@ -224,7 +232,7 @@ def applySeccomp(libc: ctypes.CDLL | None = None) -> None:
     audit, nrsocket = arch
 
     ld, jeq, ret = 0x20, 0x15, 0x06  # BPF_LD|BPF_W|BPF_ABS, BPF_JMP|BPF_JEQ|BPF_K, BPF_RET|BPF_K
-    deny = SECCOMP_RET_ERRNO | errno.EPERM
+    deny = SECCOMP_RET_KILL_PROCESS if kill else SECCOMP_RET_ERRNO | errno.EPERM
     prog = [
         _bpf(ld, 4),  # 0: arch
         _bpf(jeq, audit, 1, 0),  # 1: our arch? -> 3, else -> 2
@@ -295,6 +303,8 @@ def main(argv: list[str]) -> None:
     cmd = argv[2:]
     strict = bool(spec.get("strict"))
 
+    applied = []
+
     def layer(name: str, func, *args, required: bool = False) -> None:
         try:
             func(*args)
@@ -302,6 +312,8 @@ def main(argv: list[str]) -> None:
             if strict or required:
                 _fail(f"{name}: {err}")
             _warn(f"{name} skipped: {err}")
+            return
+        applied.append(name)
 
     layer("rlimits", setRlimits, spec.get("rlimits") or {})
     if spec.get("uid") is not None:
@@ -326,7 +338,11 @@ def main(argv: list[str]) -> None:
             libc,
         )
     if spec.get("seccomp"):
-        layer("seccomp", applySeccomp, libc)
+        layer("seccomp", applySeccomp, libc, spec.get("seccomp:kill", True))
+
+    # What was applied, the service checks the engine's /proc status against it.
+    sys.stderr.write(f"{PREFIX} applied {json.dumps(applied)}\n")
+    sys.stderr.flush()
 
     os.umask(0o077)
     env = {str(k): str(v) for k, v in (spec.get("env") or {}).items()}

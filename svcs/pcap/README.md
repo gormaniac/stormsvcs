@@ -81,7 +81,8 @@ of one is sandboxed:
   loader and libc config in `/etc`, not the rest of it), write the run's directory, and run
   their own binary. TCP connects and binds are refused too on kernels
   with Landlock ABI 4 or later.
-- **seccomp.** IPv4, IPv6, and packet sockets are refused.
+- **seccomp.** IPv4, IPv6, and packet sockets are refused (the engine is killed and the try
+  reported, see below).
 - **no_new_privs, resource limits** (`sandbox:rlimits`: memory, CPU time, file size, open files,
   no core dumps), **a clean environment, a new process group** that is killed on timeout, and
   **capped output**.
@@ -94,6 +95,55 @@ them, like `cell.yaml`: keep the storage directory's files that hold secrets `06
 the directories searchable yourself if the engines can't get to their files. `sandbox:mode` `best-effort` (the default) applies every layer the host supports,
 `strict` refuses to run engines without all of them, and `off` runs them directly.
 `slib.pcap.status` shows what the host supports.
+
+### Detecting sandbox escapes
+
+The sandbox also watches what engines try, so a capture that exploits one is noticed, not just
+contained. Every alert is logged, shown as a warning on the `slib.pcap.flows` run that caused
+it (the capture may be malicious), and counted (with the latest ones) in `slib.pcap.status`:
+
+| Alert | When |
+|---|---|
+| `seccomp` | An engine tried to open an IPv4, IPv6, or packet socket. The filter kills it (SIGSYS) instead of failing the call, the engines never open those offline. |
+| `crash` | An engine died of a crash signal (SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGABRT, SIGTRAP), often what an exploit attempt looks like. |
+| `unconfined` | The kernel's view of the running engine (`/proc/<pid>/status`: its uids and gids, supplementary groups, capabilities, `NoNewPrivs`, `Seccomp`) doesn't match the layers its wrapper reported applying. |
+| `leftover` | Processes of the run's process group were still running after the engine exited. They're killed. |
+| `escaped` | A process that left its run's process group (ex. `setsid`), or that was orphaned to the service, is still running. The service is a child subreaper, so orphans become its children, and engine descendants are told apart from its other children by the seccomp filter and `no_new_privs` they inherit (and can't drop). They're killed. |
+| `file` | A file the sandbox user owns outside the engines' directories (`/tmp`, `/var/tmp`, `/dev/shm`, and the storage directory are swept every 10 minutes). |
+
+On kernels with Landlock ABI 7 (Linux 6.15+) the service also asks the kernel to log every
+Landlock denial of the engines (`LANDLOCK_RESTRICT_SELF_LOG_NEW_EXEC_ON`) to the audit log,
+where host tooling can collect them (reading the audit log needs `CAP_AUDIT_READ`, which
+containers don't have).
+
+These checks run in the service's container, so an exploit that gets root there (ex. through a
+kernel bug) can hide from them. Monitor the engine user (uid 2000) from the host too, ex. with
+[Falco](https://falco.org/):
+
+```yaml
+- rule: slib.pcap engine outside its sandbox
+  desc: An slib.pcap engine (uid 2000) ran something other than an engine, or used the network.
+  condition: >
+    user.uid = 2000 and
+    ((spawned_process and not proc.exepath in (/opt/wireshark/bin/tshark,
+                                               /opt/suricata/bin/suricata,
+                                               /opt/snort/bin/snort, /opt/snort/bin/snort2lua))
+     or (evt.type in (connect, bind, sendto) and fd.l4proto in (tcp, udp))
+     or (evt.type in (setuid, setresuid, setgid, setresgid) and evt.dir = <))
+  output: "slib.pcap engine %proc.cmdline did %evt.type (container=%container.name)"
+  priority: CRITICAL
+```
+
+or `auditd` (`/etc/audit/rules.d/slib-pcap.rules`):
+
+```
+-a always,exit -F arch=b64 -S execve -F uid=2000 -F exe!=/opt/wireshark/bin/tshark -F exe!=/opt/suricata/bin/suricata -F exe!=/opt/snort/bin/snort -F exe!=/opt/snort/bin/snort2lua -k slib-pcap-exec
+-a always,exit -F arch=b64 -S connect,bind -F uid=2000 -k slib-pcap-net
+-a always,exit -F arch=b64 -S setuid,setreuid,setresuid,setgid,setresgid -F uid=2000 -k slib-pcap-priv
+```
+
+Landlock denials are audit records of type `LANDLOCK_ACCESS` (with `LANDLOCK_DOMAIN`) for the
+engine user's processes.
 
 ### Configuration
 

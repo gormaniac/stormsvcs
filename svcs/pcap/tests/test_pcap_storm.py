@@ -3,6 +3,7 @@
 
 import contextlib
 import hashlib
+import os
 import pathlib
 
 import synapse.tests.utils as s_tests
@@ -417,6 +418,33 @@ class TestPcapStormSettings(s_tests.SynTest):
             await user.allow(("slib", "pcap", "user"))
             msgs = await core.stormlist("slib.pcap.admin.vars", opts={"user": user.iden})
             self.stormIsInErr("slib.pcap.admin", msgs)
+
+    async def test_sandbox_alerts(self):
+        # An engine that crashes on a capture is reported to the user and in the status.
+        with self.getTestDir() as dirn:
+            fake = pathlib.Path(dirn) / "tshark"
+            fake.write_text("#!/bin/sh\nkill -SEGV $$\n")
+            fake.chmod(0o755)
+            os.chmod(dirn, 0o755)
+            async with pcapCore(self, g.pcap(g.session())) as (core, svc, (sha,)):
+                svc.tshark.path = str(fake)
+                svc.tshark.version = None
+                svc.suricata.binpath = "/nonexistent/suricata"
+                msgs = await core.stormlist(f"slib.pcap.flows {sha}")
+                self.stormIsInWarn("The sandbox caught tshark on", msgs)
+                self.stormIsInWarn("(crash): it crashed with a segmentation fault (SIGSEGV)", msgs)
+                # The flows are still modeled.
+                self.len(4, await core.nodes("inet:flow"))
+
+                # (The status runs tshark -v too, which crashes again.)
+                msgs = await core.stormlist("slib.pcap.status")
+                self.stormIsInWarn("alerts since the service started", msgs)
+                self.stormIsInWarn("tshark (crash): it crashed with a segmentation fault", msgs)
+
+                status = (await svc.status())["sandbox"]
+                assert status["alerts"] >= 1 and status["recent"][0]["kind"] == "crash"
+                flows, summary = await svc.analyze(sha)
+                assert [a["kind"] for a in summary["sandbox"]["alerts"]] == ["crash"]
 
     async def test_keylog_no_tshark(self):
         async with pcapCore(self, g.pcap(g.session()), b"CLIENT_RANDOM 00 00\n") as \

@@ -2,6 +2,7 @@
 
 
 import os
+import signal
 import sys
 
 import pytest
@@ -63,7 +64,9 @@ class TestSandbox:
         for family in ("AF_INET", "AF_INET6"):
             res = await runPy(sbx, f"import socket; socket.socket(socket.{family}, "
                                    "socket.SOCK_DGRAM)", dirs)
-            assert res.code != 0 and b"PermissionError" in res.stderr, family
+            # Killed (SIGSYS), and reported: the engines never open network sockets.
+            assert res.code == -signal.SIGSYS, family
+            assert [a["kind"] for a in res.alerts] == ["seccomp"], family
         res = await runPy(sbx, "import socket; socket.socket(socket.AF_UNIX); print('ok')", dirs)
         assert res.stdout.strip() == b"ok"
 
@@ -220,7 +223,8 @@ class TestProbes:
             "import socket; socket.socket(socket.AF_PACKET, socket.SOCK_RAW)",
         ):
             res = await probe(code)
-            assert res.code != 0 and b"PermissionError" in res.stderr, code
+            assert res.code == -signal.SIGSYS, code
+            assert res.alerts and res.alerts[0]["kind"] == "seccomp", code
 
     async def test_limits(self, run):
         probe, _ = run
@@ -230,3 +234,143 @@ class TestProbes:
         # Endless output is killed by the output cap.
         with pytest.raises(p_sandbox.SandboxError, match="wrote more than"):
             await probe("import sys\nwhile True: sys.stdout.write('x' * 65536)", maxoutput=1 << 20)
+
+
+class TestDetection:
+    """What the sandbox reports when an engine does what it shouldn't (see ALERT_KINDS)."""
+
+    async def test_verified(self, dirs):
+        # The engine's /proc status is checked against the layers its wrapper applied.
+        sbx = p_sandbox.Sandbox()
+        res = await runPy(sbx, "import time; time.sleep(0.3); print('ok')", dirs)
+        assert res.stdout.strip() == b"ok" and res.alerts == []
+        assert "no_new_privs" in res.applied and res.verified is True
+
+    def test_check_status(self):
+        status = {"Uid": "2000\t2000\t2000\t2000", "Gid": "2000\t2000\t2000\t2000",
+                  "Groups": "", "NoNewPrivs": "1", "Seccomp": "2", "CapEff": "0000000000000000"}
+        layers = ["rlimits", "user", "no_new_privs", "landlock", "seccomp"]
+        check = p_sandbox.checkStatus
+        assert check(status, layers, (2000, 2000), True) == []
+        bad = {**status, "Uid": "2000\t0\t2000\t2000", "NoNewPrivs": "0", "Seccomp": "0",
+               "Groups": "0", "CapEff": "000001ffffffffff"}
+        problems = check(bad, layers, (2000, 2000), True)
+        assert len(problems) == 5
+        assert any("uids 2000 0" in p for p in problems)
+        # Layers the wrapper reported skipped (best-effort) aren't expected.
+        assert check({**status, "Seccomp": "0"}, ["user", "no_new_privs"], (2000, 2000), True) == []
+
+    async def test_crash(self, dirs):
+        sbx = p_sandbox.Sandbox()
+        res = await runPy(sbx, "import os; os.abort()", dirs)
+        assert res.code == -signal.SIGABRT
+        assert [a["kind"] for a in res.alerts] == ["crash"]
+        assert "SIGABRT" in res.alerts[0]["detail"]
+        res = await runPy(sbx, "import ctypes; ctypes.string_at(0)", dirs)
+        assert [a["kind"] for a in res.alerts] == ["crash"] and "SIGSEGV" in res.alerts[0]["detail"]
+        # Exiting with an error isn't a crash.
+        res = await runPy(sbx, "raise SystemExit(3)", dirs)
+        assert res.code == 3 and res.alerts == []
+
+    async def test_leftover(self, dirs):
+        # A child the engine leaves running in its process group is killed and reported.
+        sbx2 = p_sandbox.Sandbox()
+        code = ("import subprocess, sys; subprocess.Popen([sys.executable, '-c', "
+                "'import time; time.sleep(60)']); print('left one')")
+        res = await runPy(sbx2, code, dirs)
+        assert res.stdout.strip() == b"left one"
+        assert [a["kind"] for a in res.alerts] == ["leftover"]
+
+    async def test_escaped(self, dirs):
+        # A child that leaves the run's process group (setsid) and is orphaned to the service
+        # (the sandbox makes it a child subreaper) is found by the sweep, killed, and reported.
+        sbx = p_sandbox.Sandbox()
+        if not sbx.subreaper:
+            pytest.skip("can't be a child subreaper here")
+        code = ("import os, time\n"
+                "if os.fork() == 0:\n"
+                "    os.setsid()\n"
+                "    time.sleep(60)\n"
+                "    os._exit(0)\n"
+                "print('escaped')")
+        res = await runPy(sbx, code, dirs)
+        assert res.stdout.strip() == b"escaped"
+        assert [a["kind"] for a in res.alerts] == ["escaped"]
+        assert "orphaned to the service" in res.alerts[0]["detail"] or \
+            "left its run's process group" in res.alerts[0]["detail"]
+        pid = int(res.alerts[0]["detail"].split()[1])
+        assert not os.path.exists(f"/proc/{pid}") or \
+            "Z" in open(f"/proc/{pid}/stat").read().rsplit(")", 1)[1].split()[0]
+
+    def test_sandboxed_marker(self):
+        own = {"Seccomp_filters": "1", "NoNewPrivs": "0"}
+        assert p_sandbox.sandboxed({"Seccomp_filters": "2", "NoNewPrivs": "0"}, own)
+        assert p_sandbox.sandboxed({"Seccomp_filters": "1", "NoNewPrivs": "1"}, own)
+        # The service's other children (ex. Synapse's IO workers) aren't.
+        assert not p_sandbox.sandboxed({"Seccomp_filters": "1", "NoNewPrivs": "0"}, own)
+        assert not p_sandbox.sandboxed({"Seccomp_filters": "1", "NoNewPrivs": "1"},
+                                       {"Seccomp_filters": "1", "NoNewPrivs": "1"})
+
+    async def test_sweep_spares_others(self, dirs):
+        # A child of the service that wasn't started in the sandbox isn't touched.
+        import subprocess
+
+        sbx = p_sandbox.Sandbox()
+        other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        try:
+            res = await runPy(sbx, "print('ok')", dirs)
+            assert res.alerts == [] and other.poll() is None
+            assert sbx.sweep() == []
+        finally:
+            other.kill()
+            other.wait()
+
+    async def test_run_alerts(self, dirs):
+        # An analysis collects the alerts of every engine run in its context.
+        sbx = p_sandbox.Sandbox()
+        token = p_sandbox.RUN_ALERTS.set([])
+        try:
+            await runPy(sbx, "import os; os.abort()", dirs)
+            alerts = p_sandbox.RUN_ALERTS.get()
+        finally:
+            p_sandbox.RUN_ALERTS.reset(token)
+        assert [a["kind"] for a in alerts] == ["crash"]
+        assert sbx.alertcount == 1 and list(sbx.alerts) == alerts
+
+    def test_sweep_files(self, tmp_path):
+        sbx = p_sandbox.Sandbox()
+        if sbx.ids() is None:
+            pytest.skip("needs the sandbox user (the tests running as root, in the test image)")
+        uid, gid = sbx.ids()
+        work = tmp_path / "work"
+        work.mkdir()
+        (work / "fine").write_text("x")
+        os.chown(work / "fine", uid, gid)
+        planted = tmp_path / "planted"
+        planted.write_text("x")
+        os.chown(planted, uid, gid)
+        (tmp_path / "root-owned").write_text("x")
+        assert sbx.sweepFiles([str(tmp_path)], exclude=[str(work)]) == [str(planted)]
+        assert sbx.alerts[-1]["kind"] == "file"
+
+
+
+def test_landlock_log_flag(monkeypatch):
+    # On Landlock ABI 7, the engine's denials are logged to the audit log (they're after an
+    # exec, which isn't logged by default).
+    calls = []
+
+    class FakeLibc:
+        class syscall:  # noqa: N801 - mimics ctypes' function object
+            restype = None
+
+            def __new__(cls, nr, *args):
+                calls.append((nr, args))
+                if nr == _sbxexec.SYS_LANDLOCK_CREATE_RULESET:
+                    return 7 if args[0] is None else 99
+                return 0
+
+    monkeypatch.setattr(os, "close", lambda fd: None)
+    _sbxexec.applyLandlock([], [], [], FakeLibc)
+    restrict = [args for nr, args in calls if nr == _sbxexec.SYS_LANDLOCK_RESTRICT_SELF]
+    assert restrict[0][1].value == _sbxexec.LANDLOCK_RESTRICT_SELF_LOG_NEW_EXEC_ON
