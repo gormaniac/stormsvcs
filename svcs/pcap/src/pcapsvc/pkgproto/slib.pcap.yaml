@@ -1,0 +1,455 @@
+name: slib.pcap
+version: 0.7.1
+guid: e02a89d21d5b4eb588a03a7156b3b467
+
+synapse_minversion: [2, 234, 0]
+
+genopts:
+    dotstorm: true
+
+author:
+  url: https://github.com/gormaniac
+  name: John Gorman
+
+desc: A Storm Service that analyzes PCAPs - their network flows (inet:flow), what Suricata, Snort 3, and tshark find in them (certificates, SSH keys, software, DNS, files), and Snort and Suricata rule matches - with every engine sandboxed.
+
+docs:
+  - title: README
+    path: README.md
+
+perms:
+  - perm: [ slib, pcap, user ]
+    gate: cortex
+    desc: Analyze PCAPs (and model their flows and rule matches), check rules, and view the service's status, rule errors, and feeds.
+  - perm: [ slib, pcap, rules ]
+    gate: cortex
+    desc: Add, enable, and disable rules, which pushes them to the service.
+  - perm: [ slib, pcap, sync ]
+    gate: cortex
+    desc: Sync the rule feeds into the Cortex (creating and editing rule and meta:ruleset nodes) and push every enabled rule to the service.
+  - perm: [ slib, pcap, admin ]
+    gate: cortex
+    desc: Manage the rule feeds, the scheduled sync, and the Decode As rules used for every run.
+
+modules:
+  # Privileged modules - the only modules that talk to the service (and the Axon).
+  # They run asroot so users don't need the service.get or Axon permissions.
+  - name: slib.pcap.priv.user
+    asroot:perms:
+      - [ slib, pcap, user ]
+  - name: slib.pcap.priv.rules
+    asroot:perms:
+      - [ slib, pcap, rules ]
+  - name: slib.pcap.priv.sync
+    asroot:perms:
+      - [ slib, pcap, sync ]
+  - name: slib.pcap.priv.admin
+    asroot:perms:
+      - [ slib, pcap, admin ]
+
+  # Unprivileged modules - node edits here run as the calling user.
+  - name: slib.pcap.lib
+    perms:
+      - [ slib, pcap, user ]
+  - name: slib.pcap.model
+  - name: slib.pcap.util
+
+commands:
+
+  - name: slib.pcap.flows
+    perms:
+      - [ slib, pcap, user ]
+    descr: |
+      Analyze PCAPs (pcap, pcapng, or either gzip compressed, as file:bytes in the Axon) and
+      model every network flow in them as an inet:flow, with everything the service's engines
+      find in them, and the Snort and Suricata rules that matched them.
+
+      Packets are grouped into bidirectional flows by IP protocol, VLAN, and endpoints (plus
+      ports for TCP and UDP). The client (:src) is the side that sent the TCP SYN, the ICMP
+      request, or the first packet. A flow ends when it's idle for --timeout seconds, or a
+      new TCP connection reuses its ports. Each flow is linked to its PCAP's file:bytes with
+      a -(refs)> edge and shares an inet:flow:from with every other flow from that PCAP.
+
+      Suricata (protocols, files, and Suricata rules), Snort 3 (Snort rules), and tshark
+      (SSH host keys, SIP, emails, and TLS decryption with --keylog) add the flows' TLS
+      certificates, SSH keys, RDP client details, software names and CPEs, DNS requests, and
+      the files each side sent. Rule matches are it:app:snort:hit and it:app:suricata:matched
+      nodes on the flows. Every engine runs sandboxed.
+
+      Examples:
+
+        file:bytes:mime=application/vnd.tcpdump.pcap | slib.pcap.flows
+
+        file:bytes=sha256:<sha256> | slib.pcap.flows --yield --timeout 60 --tag cno.case.x
+
+        // The rules that matched.
+        file:bytes=sha256:<sha256> | slib.pcap.flows --hits | -> *
+
+        // Decrypt TLS (1.2 and 1.3) with a key log in the Axon, and decode TLS on port 8443.
+        file:bytes=sha256:<sha256> | slib.pcap.flows --keylog <sha256> --decode-as "tcp.port==8443,tls"
+
+        slib.pcap.flows <sha256> --yield | +inet:flow:dst:port=443
+    cmdargs:
+      - - sha256s
+        - type: str
+          nargs: "*"
+          help: SHA-256s of PCAPs in the Axon to analyze instead of the inbound nodes.
+      - - --timeout
+        - type: int
+          default: null
+          help: Seconds a flow can be idle before a new flow starts, 0 to never time out (service default 300).
+      - - --limit
+        - type: int
+          default: 0
+          help: The max number of flows to model per PCAP (0 for the service's max).
+      - - --handshake
+        - type: int
+          default: null
+          help: The max characters kept from each side's first text payload, 0 for none (service default 1024).
+      - - --tag
+        - type: str
+          default: null
+          help: A tag to add to every flow.
+      - - --host
+        - type: str
+          default: null
+          help: The it:host that captured the traffic, set as each flow's :capture:host.
+      - - --sandbox-file
+        - type: str
+          default: null
+          help: The file:bytes a sandbox ran to make the PCAP, set as each flow's :sandbox:file.
+      - - --keylog
+        - type: str
+          action: append
+          default: []
+          help: The SHA-256 of a TLS key log (SSLKEYLOGFILE) in the Axon to decrypt TLS with (needs tshark). May be used multiple times.
+      - - --decode-as
+        - type: str
+          action: append
+          default: []
+          help: A Decode As rule, <selector>==<value>[-<value>],<protocol> (ex. "tcp.port==8443,tls", quoted), for tshark and Suricata. May be used multiple times.
+      - - --no-suricata
+        - default: false
+          action: store_true
+          help: Don't run Suricata (protocols, files, and Suricata rules).
+      - - --no-snort
+        - default: false
+          action: store_true
+          help: Don't run Snort (Snort rules).
+      - - --no-tshark
+        - default: false
+          action: store_true
+          help: Don't run tshark.
+      - - --no-rules
+        - default: false
+          action: store_true
+          help: Don't match the PCAP against the Snort and Suricata rules.
+      - - --no-files
+        - default: false
+          action: store_true
+          help: Don't extract the files sent in flows into the Axon.
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the inet:flow nodes instead of the inbound nodes.
+      - - --hits
+        - default: false
+          action: store_true
+          help: With --yield, yield the rule matches (it:app:snort:hit and it:app:suricata:matched) instead of the flows.
+    cmdinputs:
+      - form: file:bytes
+        help: PCAP files to analyze, by :sha256.
+
+  - name: slib.pcap.status
+    perms:
+      - [ slib, pcap, user ]
+    descr: |
+      The service's engines (Suricata, Snort, tshark) and their versions, its sandbox, whether
+      it has an Axon, the rules it loaded, and the sync schedule.
+
+  - name: slib.pcap.sync
+    perms:
+      - [ slib, pcap, sync ]
+    descr: |
+      Sync the rule feeds into the Cortex and push every enabled rule to the service.
+
+      Each feed's rules are modeled as it:app:snort:rule (Snort feeds) or it:app:suricata:rule
+      (Suricata feeds) nodes in the feed's meta:ruleset. Then every enabled rule with :text in
+      the view is pushed to the service, which builds a rules file for each engine. This runs
+      as a cron job (see slib.pcap.admin.schedule).
+
+      Examples:
+
+        slib.pcap.sync
+
+        // Download and sync every feed again, and rebuild the service's rules.
+        slib.pcap.sync --force
+
+        slib.pcap.sync --feed et-open --no-push
+    cmdargs:
+      - - --feed
+        - type: str
+          action: append
+          default: []
+          help: Only sync this feed (even if it's disabled). May be used multiple times.
+      - - --force
+        - default: false
+          action: store_true
+          help: Download every feed now, sync all of their rules, and rebuild the service's rules.
+      - - --no-feeds
+        - default: false
+          action: store_true
+          help: Don't sync the feeds, only push the rules.
+      - - --no-push
+        - default: false
+          action: store_true
+          help: Don't push the rules to the service.
+
+  - name: slib.pcap.rule.add
+    perms:
+      - [ slib, pcap, rules ]
+    descr: |
+      Add (or update) custom rules, and push them to the service.
+
+      Snort 3 rules are it:app:snort:rule nodes (:engine 3), Snort 2.x rules (--engine snort2)
+      are it:app:snort:rule nodes (:engine 2, converted with snort2lua by the service), and
+      Suricata rules (--engine suricata) are it:app:suricata:rule nodes. A rule's guid is
+      unique to its engine and gid:sid, adding it again updates it.
+
+      Examples:
+
+        slib.pcap.rule.add 'alert http any any -> any any ( msg:"My rule"; http_uri; content:"/evil"; sid:1000001; rev:1; )'
+
+        slib.pcap.rule.add --engine suricata 'alert dns any any -> any any (msg:"Evil DNS"; dns.query; content:"evil.example"; sid:1000002; rev:1;)'
+    cmdargs:
+      - - text
+        - type: str
+          nargs: "+"
+          help: The rules.
+      - - --engine
+        - type: str
+          default: snort3
+          choices: [ snort3, snort2, suricata ]
+          help: The rules' syntax.
+      - - --disabled
+        - default: false
+          action: store_true
+          help: Add the rules disabled (they aren't pushed to the service).
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the rule nodes.
+
+  - name: slib.pcap.rule.enable
+    perms:
+      - [ slib, pcap, rules ]
+    descr: |
+      Enable rules (it:app:snort:rule and it:app:suricata:rule nodes) and push them to the
+      service.
+
+      Examples:
+
+        meta:ruleset:name=et-open -(has)> it:app:suricata:rule +:name~=cobalt | slib.pcap.rule.enable
+    cmdinputs:
+      - form: it:app:snort:rule
+      - form: it:app:suricata:rule
+
+  - name: slib.pcap.rule.disable
+    perms:
+      - [ slib, pcap, rules ]
+    descr: |
+      Disable rules (it:app:snort:rule and it:app:suricata:rule nodes) and remove them from the
+      service.
+
+      Examples:
+
+        it:app:suricata:rule:id=2013502 | slib.pcap.rule.disable
+    cmdinputs:
+      - form: it:app:snort:rule
+      - form: it:app:suricata:rule
+
+  - name: slib.pcap.rule.check
+    perms:
+      - [ slib, pcap, user ]
+    descr: |
+      Check if the engines can load rules (nodes or --text), without changing the service.
+
+      Examples:
+
+        it:app:snort:rule:id=1000001 | slib.pcap.rule.check
+
+        slib.pcap.rule.check --engine suricata --text 'alert tls any any -> any any (msg:"x"; tls.sni; content:"x"; sid:1; rev:1;)'
+    cmdargs:
+      - - --text
+        - type: str
+          default: null
+          help: Check this rule text instead of the inbound nodes.
+      - - --engine
+        - type: str
+          default: snort3
+          choices: [ snort3, snort2, suricata ]
+          help: The syntax of --text.
+    cmdinputs:
+      - form: it:app:snort:rule
+      - form: it:app:suricata:rule
+
+  - name: slib.pcap.rule.errors
+    perms:
+      - [ slib, pcap, user ]
+    descr: |
+      The rules the engines couldn't load, and why, then warnings about rules that loaded but
+      might not do what they look like they do (ex. no content match, pass or noalert rules).
+    cmdargs:
+      - - --no-warnings
+        - default: false
+          action: store_true
+          help: Don't list the warnings of rules that loaded (ex. rules with no content match).
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the rule nodes.
+
+  - name: slib.pcap.feed.list
+    perms:
+      - [ slib, pcap, user ]
+    descr: |
+      The rule feeds, and the state of their last download and sync into this view.
+    cmdargs:
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the feeds' meta:ruleset nodes.
+
+  - name: slib.pcap.admin.feed
+    perms:
+      - [ slib, pcap, admin ]
+    descr: |
+      Add, remove, enable, or disable a rule feed.
+
+      A feed's URL can reference secrets from the service's pcap:feeds:secrets config as
+      ${name}, ex. a Talos oinkcode. A secret is only sent to the hosts the service's operator
+      allowed for it. Talos Registered and Subscriber rules have their own
+      license terms, it's up to you to follow them.
+
+      Examples:
+
+        slib.pcap.admin.feed enable abusech-sslbl
+
+        slib.pcap.admin.feed add talos 'https://www.snort.org/rules/snortrules-snapshot-31200.tar.gz?oinkcode=${talos:oinkcode}' --engine snort3
+
+        slib.pcap.admin.feed add my-feed https://example.com/my.rules --engine suricata
+    cmdargs:
+      - - action
+        - type: str
+          choices: [ add, del, enable, disable ]
+          help: What to do.
+      - - name
+        - type: str
+          help: The feed's name.
+      - - url
+        - type: str
+          nargs: "?"
+          default: null
+          help: The feed's URL (add).
+      - - --engine
+        - type: str
+          default: snort3
+          choices: [ snort3, snort2, suricata ]
+          help: The syntax of the feed's rules (add).
+      - - --exclude
+        - type: str
+          action: append
+          default: []
+          help: A rules file name pattern to skip (add). May be used multiple times.
+      - - --desc
+        - type: str
+          default: ""
+          help: The feed's description (add).
+      - - --disabled
+        - default: false
+          action: store_true
+          help: Add the feed disabled (add).
+
+  - name: slib.pcap.admin.schedule
+    perms:
+      - [ slib, pcap, admin ]
+    descr: |
+      Show or change the cron job that runs slib.pcap.sync. --period takes a cron.add period,
+      ex. "hourly@:17" or "daily@03:00". The job runs as you, in the current view.
+    cmdargs:
+      - - --period
+        - type: str
+          default: null
+          help: The new schedule.
+      - - --enable
+        - default: false
+          action: store_true
+          help: Enable the cron job.
+      - - --disable
+        - default: false
+          action: store_true
+          help: Disable the cron job.
+
+  - name: slib.pcap.admin.vars
+    perms:
+      - [ slib, pcap, admin ]
+    descr: |
+      Manage the network variables (ex. HOME_NET, EXTERNAL_NET, HTTP_SERVERS) Suricata and
+      Snort use for every run, over the service's suricata:vars and snort:vars config. Prints
+      the variables without options.
+
+      Values are address groups, ex. [10.0.0.0/8,192.168.0.0/16], !$HOME_NET, or any. Snort
+      applies them through the default_variables table of the stock snort.lua, a custom
+      snort:conf has to use it too.
+
+      Examples:
+
+        slib.pcap.admin.vars --set "HOME_NET=[10.0.0.0/8,172.16.0.0/12]"
+
+        slib.pcap.admin.vars --set "DNS_SERVERS=[10.0.0.53]" --del HTTP_SERVERS
+    cmdargs:
+      - - --set
+        - type: str
+          action: append
+          default: []
+          help: A NAME=VALUE variable to set (quoted). May be used multiple times.
+      - - --del
+        - type: str
+          action: append
+          default: []
+          help: A variable to remove. May be used multiple times.
+      - - --clear
+        - default: false
+          action: store_true
+          help: Remove every variable (before any --set).
+  - name: slib.pcap.admin.decode
+    perms:
+      - [ slib, pcap, admin ]
+    descr: |
+      Manage the Decode As rules slib.pcap uses for every run (for tshark, and Suricata's
+      detection ports), on top of the --decode-as rules of each run. Prints the rules without
+      options.
+
+      Rules are <selector>==<value>[-<value>],<protocol>, ex. "tcp.port==8443,tls". Quote
+      them, Storm can't parse them unquoted.
+
+      Examples:
+
+        slib.pcap.admin.decode --add "tcp.port==8443,tls" --add "tcp.port==2222,ssh"
+
+        slib.pcap.admin.decode --del "tcp.port==2222,ssh"
+    cmdargs:
+      - - --add
+        - type: str
+          action: append
+          default: []
+          help: A rule to add. May be used multiple times.
+      - - --del
+        - type: str
+          action: append
+          default: []
+          help: A rule to remove. May be used multiple times.
+      - - --clear
+        - default: false
+          action: store_true
+          help: Remove every rule (before any --add).

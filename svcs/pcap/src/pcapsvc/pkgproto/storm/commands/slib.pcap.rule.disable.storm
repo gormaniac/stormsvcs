@@ -1,0 +1,18 @@
+init {
+    $rules = $lib.import(slib.pcap.priv.rules)
+    $util = $lib.import(slib.pcap.util)
+    $dels = ([])
+}
+
+$form = $node.form()
+if ($form = "it:app:snort:rule" or $form = "it:app:suricata:rule") {
+    [ :enabled=(false) ]
+    $dels.append($node.repr())
+}
+
+fini {
+    if $dels {
+        $summary = $util.data($rules.update(dels=$dels), "Removing the rules from the service")
+        if $summary { $util.printBuild("slib.pcap.rule.disable", $summary) }
+    }
+}

@@ -1,0 +1,36 @@
+init {
+    $privadmin = $lib.import(slib.pcap.priv.admin)
+    $util = $lib.import(slib.pcap.util)
+    $util.warnNoAxon("slib.pcap.admin.decode", $privadmin.hasAxon())
+
+    $rules = ([])
+    if (not $cmdopts.clear) {
+        for $rule in $privadmin.decodeDefaults() { $rules.append($rule) }
+    }
+    for $rule in $cmdopts.add {
+        $rule = $lib.cast(str, $rule).strip().lower()
+        if (not $rules.has($rule)) { $rules.append($rule) }
+    }
+    if $cmdopts.del {
+        $kept = ([])
+        $dels = ([])
+        for $rule in $cmdopts.del { $dels.append($lib.cast(str, $rule).strip().lower()) }
+        for $rule in $rules { if (not $dels.has($rule)) { $kept.append($rule) } }
+        $rules = $kept
+    }
+
+    if ($cmdopts.add or $cmdopts.del or $cmdopts.clear) {
+        $retn = $privadmin.setDecodeDefaults($rules)
+        if (not $retn.status) {
+            $lib.warn("slib.pcap.admin.decode: {err}", err=$retn.mesg)
+        }
+    }
+
+    $rules = $privadmin.decodeDefaults()
+    if $rules {
+        $lib.print("slib.pcap Decode As rules for every run:")
+        for $rule in $rules { $lib.print("    {rule}", rule=$rule) }
+    } else {
+        $lib.print("slib.pcap has no Decode As rules for every run.")
+    }
+}

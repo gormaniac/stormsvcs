@@ -1,0 +1,225 @@
+// Privileged (asroot) rule syncing for slib.pcap.sync.
+//
+// Feeds: the service downloads each feed and parses its rules, this models them as
+// it:app:snort:rule (Snort feeds) or it:app:suricata:rule (Suricata feeds) nodes in the
+// feed's meta:ruleset (as root, so slib.pcap.sync holders don't need node permissions).
+//
+// Push: every enabled rule with :text in the current view is sent to the service, which
+// replaces its rules with them and rebuilds its rules files.
+//
+// NOTE: A for loop that runs while a node is in a function's pipeline sends the node
+// downstream after its first iteration. So functions here only yield a node when they
+// don't loop, and loops call helpers that edit the node in their own runtime instead.
+
+init {
+    $svc = $lib.service.get("slib.pcap")
+    $model = $lib.import(slib.pcap.model)
+    $batchsize = (1000)
+}
+
+
+// ---- Feeds ----
+
+function feeds() { return($svc.feeds(view=$lib.view.get().iden)) }
+
+// The feed's meta:ruleset node.
+function ruleset(feed, info) {
+    [ meta:ruleset=$feed.ruleset
+        :name=$feed.name
+        :type=slib.pcap.feed
+    ]
+    if $feed.desc { [ :desc=$feed.desc ] }
+    if $info.pulled { [ :updated=$info.pulled ] }
+    return($node)
+}
+
+function _get(form, guid) {
+    *$form=$guid
+    return($node)
+}
+
+// The ruleset node if the rule is in it, otherwise null.
+// (A runtsafe return, ex. return((true)), would run even when no node reaches it.)
+function _inset(rule, rsguid) {
+    yield $rule
+    <(has)- meta:ruleset +meta:ruleset=$rsguid
+    return($node)
+}
+
+// Update an existing rule from one of a feed's rule records. Returns "updated" or "same".
+function _update(rule, rec, rsguid) {
+    $inset = $_inset($rule, $rsguid)
+    // Nothing changed, skip the edits.
+    if ($inset and $rule.props.text = $rec.text and $rule.props.engine = $rec.engineid) { return(same) }
+
+    $rule = $model.rule($rec)
+    if (not $inset) { $_join($rule, $rec, $rsguid) }
+    if $rec.refs { $model.ruleRefs($rule, $rec.refs) }
+    return(updated)
+}
+
+// Add new rules (that aren't in the Cortex) in bulk, with their feed's enabled state and
+// references (see pcapsvc.feeds.ruleNodeDef), and add them to the feed's ruleset.
+function _bulk(recs, rsguid) {
+    $defs = ([])
+    $edges = ([])
+    for $rec in $recs {
+        $defs.append($rec.nodedef)
+        $edges.append(("has", ($rec.form, $rec.guid)))
+    }
+    $defs.append((("meta:ruleset", $rsguid), ({"edges": $edges})))
+    $lib.feed.ingest("syn.nodes", $defs)
+
+    // A rule the bulk ingest skipped (ex. a bad value) is added one prop at a time instead.
+    for $rec in $recs {
+        if (not $_get($rec.form, $rec.guid)) {
+            $rule = $model.rule($rec)
+            $_join($rule, $rec, $rsguid)
+            if $rec.refs { $model.ruleRefs($rule, $rec.refs) }
+        }
+    }
+    return()
+}
+
+// A rule joining a feed's ruleset gets the feed's enabled state, after that it's up to the Cortex.
+function _join(rule, rec, rsguid) {
+    yield $rule
+    [ :enabled=$rec.enabled <(has)+ { meta:ruleset=$rsguid } ]
+    return($node)
+}
+
+// The rules in a feed's ruleset.
+function _members(rsguid) {
+    meta:ruleset=$rsguid -(has)> * +(it:app:snort:rule or it:app:suricata:rule)
+    emit $node
+}
+
+// Disable a rule that left its feed, and remove it from the feed's ruleset.
+function _retire(rule, rsguid) {
+    yield $rule
+    [ :enabled=(false) <(has)- { meta:ruleset=$rsguid } ]
+    return($node)
+}
+
+// Sync a feed into the view. Returns a summary, with an "error" if it failed.
+//
+// Only the feed's changes since its last sync into the view are synced, unless force is set
+// or the feed was never synced into the view, then every rule is (a "full" sync).
+function syncFeed(feed, force=(false)) {
+    $name = $feed.name
+    $view = $lib.view.get().iden
+    $summary = ({"name": $name, "error": $lib.null, "pulled": (false), "synced": (false),
+                 "full": (false), "added": (0), "updated": (0), "removed": (0), "count": (0)})
+
+    $retn = $svc.feedPull($name, force=$force, view=$view)
+    if (not $retn.status) {
+        $summary.error = $retn.mesg
+        return($summary)
+    }
+    $info = $retn.data
+    $summary.pulled = (not $info.skipped)
+    $summary.count = $info.count
+
+    if (not $force and $info.synced = $info.sha256) { return($summary) }
+
+    $ruleset($feed, $info)
+    $rsguid = $feed.ruleset
+    $seen = $lib.set()
+    for $retn in $svc.feedChanges($name, $view, full=$force) {
+        if (not $retn.status) {
+            $summary.error = $retn.mesg
+            return($summary)
+        }
+        $batch = $retn.data
+        $summary.full = $batch.full
+
+        $new = ([])
+        for $rec in $batch.upsert {
+            $seen.add($rec.guid)
+            $rule = $_get($rec.form, $rec.guid)
+            if $rule {
+                if ($_update($rule, $rec, $rsguid) = "updated") { $summary.updated = ($summary.updated + 1) }
+            } else {
+                $new.append($rec)
+            }
+        }
+        if $new {
+            $_bulk($new, $rsguid)
+            $summary.added = ($summary.added + $lib.len($new))
+        }
+
+        for $guid in $batch.removed {
+            $rule = $_get($feed.form, $guid)
+            if ($rule and $_inset($rule, $rsguid)) {
+                $_retire($rule, $rsguid)
+                $summary.removed = ($summary.removed + 1)
+            }
+        }
+    }
+
+    // A full sync finds the rules that left the feed itself.
+    if $summary.full {
+        $gone = ([])
+        for $rule in $_members($rsguid) {
+            if (not $seen.has($rule.repr())) { $gone.append($rule) }
+        }
+        for $rule in $gone {
+            $_retire($rule, $rsguid)
+            $summary.removed = ($summary.removed + 1)
+        }
+    }
+
+    $retn = $svc.feedSynced($name, $info.sha256, $view)
+    if (not $retn.status) {
+        $summary.error = $retn.mesg
+        return($summary)
+    }
+    $summary.synced = (true)
+    return($summary)
+}
+
+// ---- Push ----
+
+// Every rule the service can run: enabled, with :text, and for Snort rules a Snort 2 or 3
+// (or no) :engine.
+function _enabled() {
+    it:app:snort:rule:enabled=(true) +:text +(:engine=2 or :engine=3 or not :engine)
+    emit $node
+}
+
+function _enabledSuricata() {
+    it:app:suricata:rule:enabled=(true) +:text
+    emit $node
+}
+
+// Push a batch of rules, cancelling the push if it fails. Returns the service's retn.
+function _send(iden, batch) {
+    $retn = $svc.pushRules($iden, $batch)
+    if (not $retn.status) { $svc.pushCancel($iden) }
+    return($retn)
+}
+
+// Push every enabled rule in the current view to the service. Returns the service's
+// {status, mesg, data} with the build summary.
+function push(force=(false)) {
+    $retn = $svc.pushStart()
+    if (not $retn.status) { return($retn) }
+    $iden = $retn.data
+
+    $batch = ([])
+    for $gen in ($_enabled(), $_enabledSuricata()) {
+        for $rule in $gen {
+            $batch.append(($rule.repr(), $rule.form(), $rule.props.text, $rule.props.engine))
+            if ($lib.len($batch) >= $batchsize) {
+                $retn = $_send($iden, $batch)
+                if (not $retn.status) { return($retn) }
+                $batch = ([])
+            }
+        }
+    }
+    if $batch {
+        $retn = $_send($iden, $batch)
+        if (not $retn.status) { return($retn) }
+    }
+    return($svc.pushDone($iden, force=$force))
+}

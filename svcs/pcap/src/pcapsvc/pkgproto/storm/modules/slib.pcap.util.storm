@@ -1,0 +1,71 @@
+// Unprivileged helpers shared by the slib.pcap commands.
+
+// Warn about a failed service call. Returns true if the call failed.
+function failed(retn, what) {
+    if $retn.status { return((false)) }
+    $lib.warn("slib.pcap: {what} failed: {err}", what=$what, err=$retn.mesg)
+    return((true))
+}
+
+// A service call's data, or null (with a warning) if it failed.
+function data(retn, what) {
+    if $failed($retn, $what) { return($lib.null) }
+    return($retn.data)
+}
+
+// Warn about each item of a list, ex. "<prefix>: <item>".
+// NOTE: Functions here end with a return(), a function without one only runs when its result is iterated.
+function warnAll(prefix, items) {
+    for $item in $items {
+        $lib.warn("{prefix}: {item}", prefix=$prefix, item=$item)
+    }
+    return()
+}
+
+// Print a table. columns is a list of (name, width) and rows is a list of lists.
+function table(columns, rows) {
+    $cols = ([])
+    for ($name, $width) in $columns {
+        $cols.append(({"name": $name, "width": $width}))
+    }
+    $printer = $lib.tabular.printer(({"columns": $cols}))
+    $lib.print($printer.header())
+    for $row in $rows {
+        $lib.print($printer.row($row))
+    }
+    return()
+}
+
+// A time (epoch millis) as a string, or "never". Strings (ex. a cron job's "Never") are returned as-is.
+function when(tick) {
+    if ($tick = $lib.null) { return(never) }
+    if ($lib.vars.type($tick) = "str") { return($tick) }
+    return($lib.time.format($tick, "%Y-%m-%d %H:%M:%S"))
+}
+
+// Print a rule build summary from the service.
+function printBuild(what, summary) {
+    $engines = ([])
+    for ($engine, $count) in $summary.engines { $engines.append(`{$engine} {$count}`) }
+    $loaded = $lib.str.join(", ", $engines)
+    if (not $loaded) { $loaded = "no engines" }
+    if (not $summary.changed) {
+        $lib.print("slib.pcap: {what}: the service's {count} rules are unchanged ({loaded} loaded: {engines}, {invalid} invalid).",
+            what=$what, count=$summary.rules, loaded=$summary.loaded, engines=$loaded, invalid=$summary.invalid)
+        return()
+    }
+    $lib.print("slib.pcap: {what}: the service loaded {loaded} of {count} rules ({engines}) in {secs}s ({invalid} invalid, see slib.pcap.rule.errors).",
+        what=$what, loaded=$summary.loaded, count=$summary.rules, engines=$loaded, invalid=$summary.invalid,
+        secs=$lib.math.number($summary.took).scaleb(-3))
+    return()
+}
+
+// Warn an admin that the service has no Axon (so captures are streamed, and extracted files
+// aren't saved). hasAxon is the service's hasAxon() retn.
+function warnNoAxon(what, hasAxon) {
+    if ($hasAxon.status and not $hasAxon.data) {
+        $lib.warn("{what}: The service has no Axon (axon:url), so files extracted from flows can't be saved. Set axon:url to the Cortex's Axon.",
+            what=$what)
+    }
+    return()
+}

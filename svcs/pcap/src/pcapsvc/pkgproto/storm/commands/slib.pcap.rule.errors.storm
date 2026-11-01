@@ -1,0 +1,50 @@
+init {
+    $pcap = $lib.import(slib.pcap.lib)
+    $model = $lib.import(slib.pcap.model)
+
+    $nodes = ([])
+    $errs = $pcap.ruleErrors()
+    if ($errs != $lib.null) {
+        if (not $errs) {
+            $lib.print("slib.pcap.rule.errors: The engines loaded every rule.")
+        } else {
+            $guids = ([])
+            for ($guid, $mesg) in $errs { $guids.append($guid) }
+            $ids = ({})
+            $forms = ({})
+            for $rule in $model.rules($guids) {
+                $ids.($rule.repr()) = $rule.props.id
+                $forms.($rule.repr()) = $rule.form()
+                $nodes.append($rule)
+            }
+            for ($guid, $mesg) in $errs {
+                $lib.print("{form}={guid} (sid {id}): {err}", form=$forms.$guid, guid=$guid,
+                           id=$ids.$guid, err=$mesg)
+            }
+            $lib.print("slib.pcap.rule.errors: {count} rules couldn't be loaded.", count=$lib.len($guids))
+        }
+    }
+
+    if (not $cmdopts.no_warnings) {
+        $warns = $pcap.ruleWarnings()
+        if $warns {
+            $wguids = ([])
+            for ($guid, $mesgs) in $warns { $wguids.append($guid) }
+            $wforms = ({})
+            $wids = ({})
+            for $rule in $model.rules($wguids) {
+                $wforms.($rule.repr()) = $rule.form()
+                $wids.($rule.repr()) = $rule.props.id
+            }
+            for ($guid, $mesgs) in $warns {
+                for $mesg in $mesgs {
+                    $lib.print("{form}={guid} (sid {id}) warning: {warning}", form=$wforms.$guid,
+                               guid=$guid, id=$wids.$guid, warning=$mesg)
+                }
+            }
+            $lib.print("slib.pcap.rule.errors: {count} loaded rules have warnings.", count=$lib.len($wguids))
+        }
+    }
+}
+
+divert $cmdopts.yield $model.nodes($nodes)

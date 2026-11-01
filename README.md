@@ -57,6 +57,8 @@ Each service must have the following:
   - Every abuse.ch platform: MalwareBazaar, URLhaus, ThreatFox, YARAify, Feodo Tracker, SSL Blacklist, and the false positive list.
 - `capa`
   - Run Mandiant's capa against files in the Axon, model the matched rules, and tag files with the rule namespaces.
+- `pcap`
+  - Analyze PCAPs (pcap, pcapng, gzip): model their network flows as `inet:flow` nodes with DNS, certificates, SSH keys, software, and transferred files (Suricata, tshark), and match them against Snort and Suricata rules from feeds or the graph, with every engine sandboxed.
 
 
 ## Services Wish List/Plan

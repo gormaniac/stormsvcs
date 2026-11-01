@@ -1,0 +1,63 @@
+init {
+    $pcap = $lib.import(slib.pcap.lib)
+    $util = $lib.import(slib.pcap.util)
+
+    $status = $pcap.status()
+    if $status {
+        for ($name, $eng) in $status.engines {
+            if (not $eng.available) {
+                $lib.print("{name}: not installed", name=$name)
+            } elif (not $eng.enabled) {
+                $lib.print("{name}: {vers} (disabled by default)", name=$name, vers=$eng.version)
+            } else {
+                $lib.print("{name}: {vers}", name=$name, vers=$eng.version)
+            }
+        }
+
+        $sbx = $status.sandbox
+        $lib.print("Sandbox: {mode}, engines run as {user}, Landlock ABI {abi}, seccomp {sec}",
+            mode=$sbx.mode, user=$sbx.uid, abi=$sbx.landlock, sec=$sbx.seccomp)
+        if $sbx.alerts {
+            $lib.warn("slib.pcap: The sandbox has {count} alerts since the service started (an engine crashed, tried to open a socket, or got out of its sandbox). The latest:",
+                count=$sbx.alerts)
+            for $alert in $sbx.recent {
+                $lib.warn("    {time} {engine} ({kind}): {detail}", time=$lib.time.format($alert.time, "%Y-%m-%d %H:%M:%S"),
+                    engine=$alert.engine, kind=$alert.kind, detail=$alert.detail)
+            }
+        } else {
+            $lib.print("Sandbox alerts: none")
+        }
+        if $sbx.missing {
+            $lib.warn("slib.pcap: The host doesn't support these sandbox layers: {missing}",
+                missing=$lib.str.join(", ", $sbx.missing))
+        }
+
+        if $status.axon {
+            $lib.print("Axon: PCAPs are read from the Axon by the service, extracted files are saved to it.")
+        } else {
+            $lib.warn("slib.pcap: The service has no Axon (axon:url). PCAPs are streamed to it, and files extracted from flows can't be saved. Set axon:url to the Cortex's Axon.")
+        }
+
+        $rules = $status.rules
+        $engines = ([])
+        for ($engine, $count) in $rules.engines { $engines.append(`{$engine} {$count}`) }
+        if (not $engines) { $engines.append("no engines") }
+        $lib.print("Rules: {loaded} loaded of {count} pushed ({engines}), {invalid} invalid",
+            loaded=$rules.loaded, count=$rules.rules, engines=$lib.str.join(", ", $engines),
+            invalid=$rules.invalid)
+        $lib.print("Last pushed: {pushed}, last built: {built}", pushed=$util.when($rules.pushed),
+            built=$util.when($rules.built))
+        if $rules.building { $lib.print("The service is building its rules now.") }
+        if $rules.error { $lib.warn("slib.pcap: The last rule build failed: {err}", err=$rules.error) }
+    }
+
+    $job = $pcap.schedule()
+    if $job {
+        $state = disabled
+        if $job.enabled { $state = enabled }
+        $lib.print("Sync schedule: cron {iden} ({state}), last run: {last}", iden=$job.iden, state=$state,
+            last=$util.when($job.laststart))
+    } else {
+        $lib.print("Sync schedule: none, see slib.pcap.admin.schedule.")
+    }
+}

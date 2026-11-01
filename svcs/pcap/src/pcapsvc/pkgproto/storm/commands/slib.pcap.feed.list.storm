@@ -1,0 +1,33 @@
+init {
+    $pcap = $lib.import(slib.pcap.lib)
+    $model = $lib.import(slib.pcap.model)
+    $util = $lib.import(slib.pcap.util)
+
+    $guids = ([])
+    $feeds = $pcap.feeds()
+    if ($feeds != $lib.null) {
+        $rows = ([])
+        for $feed in $feeds {
+            $guids.append($feed.ruleset)
+            $info = $feed.info
+            $synced = no
+            // Synced into this view.
+            if ($info.sha256 and $info.synced = $info.sha256) { $synced = yes }
+            $count = ""
+            if ($info.count != $lib.null) { $count = $lib.cast(str, $info.count) }
+            $rows.append(($feed.name, $lib.cast(str, $feed.enabled), $lib.cast(str, $feed.engine), $count,
+                          $util.when($info.pulled), $synced))
+        }
+        $util.table((("name", (20)), ("enabled", (8)), ("engine", (7)), ("rules", (7)), ("downloaded", (20)), ("synced", (7))), $rows)
+        for $feed in $feeds {
+            $lib.print("{name}: {url}", name=$feed.name, url=$feed.url)
+            if $feed.info.error {
+                $lib.warn("slib.pcap.feed.list: The last download of {name} failed: {err}", name=$feed.name, err=$feed.info.error)
+            }
+        }
+    }
+    $nodes = ([])
+    for $rs in $model.rulesets($guids) { $nodes.append($rs) }
+}
+
+divert $cmdopts.yield $model.nodes($nodes)
