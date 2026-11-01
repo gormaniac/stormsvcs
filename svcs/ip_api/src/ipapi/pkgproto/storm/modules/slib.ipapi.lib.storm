@@ -39,6 +39,20 @@ function buildPlaceNode(data) {
     return($node)
 }
 
+// Build a loc value (ex. "us.va.ashburn") from the country code, region, and city.
+// Each part must be under the one before it, so stop at the first missing part.
+function buildLoc(data) {
+    $locParts = ([])
+    for $part in ($data.countryCode, $data.region, $data.city) {
+        // A "." would split the part into extra levels of the loc hierarchy.
+        if $part { $part = $part.replace(".", "").strip() }
+        if (not $part) { break }
+        $locParts.append($part)
+    }
+    if (not $locParts) { return((null)) }
+    return(('.').join($locParts))
+}
+
 function buildOrgNode(data) {
     gen.ou.org $data.isp |
     [
@@ -76,6 +90,9 @@ function modelResult(data, tagPrefix) {
     [
         *$ipForm?=$data.query
         :asn?=$asnNode
+        :latlong?=($data.lat, $data.lon)
+        :place?=$locNode
+        :loc?=$buildLoc($data)
     ]
 
     // TODO - add tag timestamps here

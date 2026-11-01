@@ -192,6 +192,37 @@ class TestShodanStormHost(s_tests.SynTest):
             assert "my.shodan.cloud" in (await core.nodes("inet:ipv4=8.8.8.8"))[0].tags
 
 
+    async def test_host_ipv4_creates_no_ipv6(self):
+        async with shodanSvc(self) as (core, svc, fake):
+            msgs = await core.stormlist("slib.shodan.host --ip 8.8.8.8")
+            self.stormHasNoErr(msgs)
+
+            # Synapse also parses "8.8.8.8" as inet:ipv6=::ffff:8.8.8.8, which must not be made.
+            assert len(await core.nodes("inet:ipv4=8.8.8.8")) == 1
+            assert len(await core.nodes("inet:ipv6")) == 0
+
+    async def test_isipv6(self):
+        async with shodanSvc(self) as (core, svc, fake):
+            q = "$util = $lib.import(slib.shodan.util) return($util.isIpv6($ip))"
+            for ip, expected in (
+                ("8.8.8.8", False),
+                (134744072, False),
+                ("2001:4860:4860::8888", True),
+                ("::ffff:8.8.8.8", True),
+            ):
+                assert await core.callStorm(q, opts={"vars": {"ip": ip}}) is expected, ip
+
+            model = "$model = $lib.import(slib.shodan.model)"
+            await core.nodes(f"{model} $model.ipNode(8.8.8.8)")
+            await core.nodes(f"{model} $model.dnsNode(vertex.link, 8.8.8.8)")
+            await core.nodes(f"{model} $model.serverNode(8.8.8.8, (80))")
+            assert len(await core.nodes("inet:ipv4=8.8.8.8")) == 1
+            assert len(await core.nodes("inet:dns:a=(vertex.link, 8.8.8.8)")) == 1
+            assert len(await core.nodes("inet:server=tcp://8.8.8.8:80")) == 1
+            assert len(await core.nodes("inet:ipv6")) == 0
+            assert len(await core.nodes("inet:dns:aaaa")) == 0
+
+
 class TestShodanStormSearch(s_tests.SynTest):
     async def test_search(self):
         async with shodanSvc(self) as (core, svc, fake):

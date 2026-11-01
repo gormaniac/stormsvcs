@@ -230,6 +230,85 @@ class TestIpApiStorm(s_tests.SynTest):
             assert len(telems) == 1
             assert telems[0].get("node") == ("inet:ipv4", 134744072)
 
+    async def test_cmd_query_sets_ip_geo_props(self):
+        async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
+
+            async def fake_query(ipaddr):
+                return dict(SUCCESS_DATA), {}
+
+            with mock.patch.object(svc, "_query", fake_query):
+                msgs = await core.stormlist(f"{SVC_NAME}.query --query 8.8.8.8")
+                self.stormHasNoErr(msgs)
+
+            places = await core.nodes("geo:place")
+            assert len(places) == 1
+
+            nodes = await core.nodes("inet:ipv4=8.8.8.8")
+            assert len(nodes) == 1
+            assert nodes[0].get("latlong") == (39.03, -77.5)
+            assert nodes[0].get("place") == places[0].ndef[1]
+            assert nodes[0].get("loc") == "us.va.ashburn"
+
+    async def test_cmd_query_sets_ipv6_geo_props(self):
+        async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
+            data = dict(SUCCESS_DATA)
+            data["query"] = "2001:4860:4860::8888"
+
+            async def fake_query(ipaddr):
+                return data, {}
+
+            with mock.patch.object(svc, "_query", fake_query):
+                msgs = await core.stormlist(f'{SVC_NAME}.query --query "2001:4860:4860::8888"')
+                self.stormHasNoErr(msgs)
+
+            places = await core.nodes("geo:place")
+            nodes = await core.nodes("inet:ipv6=2001:4860:4860::8888")
+            assert len(nodes) == 1
+            assert nodes[0].get("latlong") == (39.03, -77.5)
+            assert nodes[0].get("place") == places[0].ndef[1]
+            assert nodes[0].get("loc") == "us.va.ashburn"
+
+    async def test_cmd_query_loc_partial(self):
+        async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
+            data = dict(SUCCESS_DATA)
+            # Each loc part must be under the one before it, so a missing region drops the city.
+            data["region"] = ""
+            data["city"] = "St. Louis"
+
+            async def fake_query(ipaddr):
+                return data, {}
+
+            with mock.patch.object(svc, "_query", fake_query):
+                msgs = await core.stormlist(f"{SVC_NAME}.query --query 8.8.8.8")
+                self.stormHasNoErr(msgs)
+
+            nodes = await core.nodes("inet:ipv4=8.8.8.8")
+            assert nodes[0].get("loc") == "us"
+
+            data["region"] = "MO"
+            with mock.patch.object(svc, "_query", fake_query):
+                msgs = await core.stormlist(f"{SVC_NAME}.query --query 8.8.8.8")
+                self.stormHasNoErr(msgs)
+
+            nodes = await core.nodes("inet:ipv4=8.8.8.8")
+            assert nodes[0].get("loc") == "us.mo.st louis"
+
+    async def test_cmd_query_loc_missing(self):
+        async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
+            data = dict(SUCCESS_DATA)
+            data["countryCode"] = ""
+
+            async def fake_query(ipaddr):
+                return data, {}
+
+            with mock.patch.object(svc, "_query", fake_query):
+                msgs = await core.stormlist(f"{SVC_NAME}.query --query 8.8.8.8")
+                self.stormHasNoErr(msgs)
+
+            nodes = await core.nodes("inet:ipv4=8.8.8.8")
+            assert nodes[0].get("loc") is None
+            assert nodes[0].get("latlong") == (39.03, -77.5)
+
     async def test_cmd_query_ipv6_node_input(self):
         async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
             await core.nodes("[ inet:ipv6=2001:4860:4860::8888 ]")

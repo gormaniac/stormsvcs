@@ -1,6 +1,6 @@
 """The slib.ipapi Synapse Service."""
 
-__version__ = "0.2.1"
+__version__ = "0.2.3"
 
 
 from .svc import IpApiSvc

@@ -1,5 +1,5 @@
 name: slib.shodan
-version: 0.3.0
+version: 0.3.2
 guid: 0f6c1d0f1d8a4c3bb7a1e3d5c9b2a864
 
 synapse_minversion: [2, 137, 0]
