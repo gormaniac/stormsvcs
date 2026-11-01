@@ -231,6 +231,71 @@ class TestFeedSync(s_tests.SynTest):
             msgs = await core.stormlist("slib.pcap.feed.list")
             self.stormIsInWarn(f"The last download of {ET} failed", msgs)
 
+    async def test_sync_refs(self):
+        # Feed rules and custom rules are modeled by the same Storm, with the references the
+        # service cleaned, and without bulk ingest (Synapse logs a line per ingest).
+        text = (
+            'alert tcp any any -> any any ( msg:"REFS"; content:"x"; reference:cve,2021-44228; '
+            "reference:url,url,example.com/x; reference:url,www,example.com; "
+            "reference:md5,662002D61F1AEBD64FC204CE40FD65F2; reference:bugtraq,1; sid:{sid}; rev:1; )"
+        )
+        async with snortSvc(self) as (core, _, feeds):
+            feeds.files["/snort3.tar.gz"] = tarGz({"rules/refs.rules": text.format(sid=7) + "\n"})
+            with self.getLoggerStream("synapse.lib.snap", struct=False) as stream:
+                msgs = await core.stormlist(f"slib.pcap.sync --no-push --feed {S3}")
+            self.stormHasNoWarnErr(msgs)
+            self.stormIsInPrint(f"{S3}: synced 1 rules (1 added, 0 updated, 0 removed).", msgs)
+            stream.seek(0)
+            assert "adding feed data" not in stream.read()
+
+            msgs = await core.stormlist(
+                "slib.pcap.rule.add $text", opts={"vars": {"text": text.format(sid=8)}}
+            )
+            for guid in (rule(S3, 7), s_common.guid(("slib.pcap.custom", "snort", 1, 8))):
+                q = f"it:app:snort:rule={guid}"
+                assert await count(core, f"{q} -(detects)> it:sec:cve=cve-2021-44228") == 1
+                assert await count(core, f"{q} -(refs)> inet:url=http://example.com/x") == 1
+                assert (
+                    await count(core, f"{q} -(refs)> hash:md5=662002d61f1aebd64fc204ce40fd65f2")
+                    == 1
+                )
+                assert await count(core, f"{q} -(refs)> *") == 2
+
+            # A reference Synapse can't model is skipped with a warning.
+            q = f"""it:app:snort:rule={rule(S3, 7)}
+                $lib.import(slib.pcap.model).ruleRefs($node, ((cve, nope),))"""
+            msgs = await core.stormlist(q)
+            self.stormIsInWarn("it isn't a valid it:sec:cve: nope", msgs)
+
+    async def test_sync_suricata_no_engine(self):
+        # Suricata rules are modeled without the Suricata engine (they have no :engine or
+        # :family), from a feed and from slib.pcap.rule.add.
+        async with snortSvc(self) as (core, _, feeds):
+            fdef = {"name": "test-suri", "url": f"{feeds.url}/suricata.tar.gz", "engine": "suricata"}
+            await core.callStorm("return($lib.service.get(slib.pcap).feedAdd($fdef))",
+                                 opts={"vars": {"fdef": fdef}})
+            msgs = await core.stormlist("slib.pcap.sync --no-push --feed test-suri")
+            self.stormHasNoWarnErr(msgs)
+            self.stormIsInPrint("test-suri: synced 5 rules (5 added, 0 updated, 0 removed).", msgs)
+            node = (await core.nodes(f"it:app:suricata:rule={rule('test-suri', 4000001)}"))[0]
+            assert node.get("id") == "4000001" and node.get("enabled") == 1
+            assert await count(core, f"it:app:suricata:rule={rule('test-suri', 4000005)} +:enabled=0") == 1
+            assert (
+                await count(
+                    core,
+                    f"it:app:suricata:rule={rule('test-suri', 4000001)} -(detects)> it:sec:cve=cve-2021-44228",
+                )
+                == 1
+            )
+
+            text = 'alert udp any any -> any 9999 (msg:"x"; content:"y"; sid:7; rev:5;)'
+            msgs = await core.stormlist(
+                "slib.pcap.rule.add --engine suricata $text", opts={"vars": {"text": text}}
+            )
+            assert not [m for m in msgs if m[0] == "err"], msgs
+            guid = s_common.guid(("slib.pcap.custom", "suricata", 1, 7))
+            assert await count(core, f"it:app:suricata:rule={guid} +:version=5.0.0") == 1
+
     async def test_sync_incremental(self):
         conf = {"pcap:feeds:interval": 0}
         async with snortSvc(self, conf=conf) as (core, svc, feeds):

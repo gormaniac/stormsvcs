@@ -516,6 +516,7 @@ class RuleMixin:
         rule["form"] = p_rules.FORMS[engine]
         space = "suricata" if engine == p_rules.ENGINE_SURICATA else "snort"
         rule["guid"] = s_common.guid(("slib.pcap.custom", space, rule["gid"], rule["sid"]))
+        rule["refs"] = p_rules.cleanRefs(rule["refs"])
         return rule
 
     async def ruleCheck(self, text: str, engine: str | None = None) -> str | None:
@@ -715,8 +716,9 @@ class RuleMixin:
         Yields
         ------
         dict
-            ``full``, ``upsert`` (rule records to add or update, each with a ``nodedef`` for
-            bulk ingest), and ``removed`` (the guids of rules that left the feed).
+            ``full``, ``upsert`` (rule records to add or update, their ``refs`` cleaned with
+            ``pcapsvc.rules.cleanRefs``), and ``removed`` (the guids of rules that left the
+            feed).
         """
 
         fdef = self._reqFeed(name)
@@ -736,7 +738,7 @@ class RuleMixin:
             full = True
 
         for rec in recs:
-            rec["nodedef"] = p_feeds.ruleNodeDef(rec)
+            rec["refs"] = p_rules.cleanRefs(rec["refs"])
 
         yield {"full": full, "upsert": recs[:size], "removed": removed}
         for idx in range(size, len(recs), size):

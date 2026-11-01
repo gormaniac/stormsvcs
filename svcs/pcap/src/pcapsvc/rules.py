@@ -373,6 +373,58 @@ NETVAR_VALU = re.compile(r"[0-9A-Za-z\[\]\.:/,!$_ -]{1,4096}")
 """A network variable's value: an address group, ex. ``[10.0.0.0/8,!$DNS_SERVERS]`` or ``any``."""
 
 
+_CVE = re.compile(r"^(?:cve-)?(\d{4}-\d{4,})$", re.IGNORECASE)
+_HEX = re.compile(r"^[0-9a-fA-F]+$")
+_SCHEME = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*://")
+_URLHOST = re.compile(
+    r"^[a-z][a-z0-9+.-]*://"
+    r"(?:\[[0-9a-f:.]+\]|\d{1,3}(?:\.\d{1,3}){3}|[a-z0-9_-]+(?:\.[a-z0-9_-]+)*\.[a-z][a-z0-9-]*)"
+    # Synapse reads the host up to the first "/".
+    r"(?::\d{1,5})?(?:/\S*)?$",
+    re.IGNORECASE,
+)
+
+
+def refUrl(valu: str) -> str | None:
+    """A rule's URL reference as a URL (http:// if it has no scheme), or None if it's malformed.
+
+    Feeds have typos Synapse can't model as an inet:url (ex. "url,example.com/x" or
+    "www,example.com"), those are skipped.
+    """
+
+    valu = valu.strip()
+    while valu.lower().startswith("url,"):
+        valu = valu[4:].strip()
+    if not _SCHEME.match(valu):
+        valu = f"http://{valu}"
+    if not _URLHOST.match(valu):
+        return None
+    return valu
+
+
+def cleanRefs(refs: list[list[str]]) -> list[list[str]]:
+    """The references Storm models for a rule (see slib.pcap.model.ruleRefs), as (scheme, value).
+
+    The CVEs the rule detects (``cve``, as ``cve-YYYY-NNNN``), and the URLs (``url``) and hashes
+    (``md5``, ``sha256``) it refers to. Other schemes and malformed values are skipped.
+    """
+
+    cleaned = []
+    for scheme, valu in refs:
+        valu = str(valu).strip()
+        if scheme == "cve" and (match := _CVE.match(valu)):
+            cleaned.append(["cve", f"cve-{match.group(1)}".lower()])
+        elif scheme == "url" and (url := refUrl(valu)):
+            cleaned.append(["url", url])
+        elif (
+            scheme in ("md5", "sha256")
+            and _HEX.match(valu)
+            and len(valu) == (32 if scheme == "md5" else 64)
+        ):
+            cleaned.append([scheme, valu.lower()])
+    return cleaned
+
+
 def checkNetVars(valu: Any) -> dict[str, str]:
     """Validate network variables (name -> address group) both engines use, ex. ``HOME_NET``.
 
