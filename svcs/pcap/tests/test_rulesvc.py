@@ -231,6 +231,27 @@ class TestFeedSync(s_tests.SynTest):
             msgs = await core.stormlist("slib.pcap.feed.list")
             self.stormIsInWarn(f"The last download of {ET} failed", msgs)
 
+    async def test_sync_ingest_batches(self):
+        # Synapse logs a line for every feed ingest, so new rules are ingested 10k at a time,
+        # not one ingest per (500 rule) feedChanges batch.
+        rules = "".join(
+            f'alert tcp any any -> any any ( msg:"BIG {i}"; content:"x{i}"; sid:{3000000 + i}; rev:1; )\n'
+            for i in range(10500)
+        )
+        async with snortSvc(self) as (core, _, feeds):
+            feeds.files["/snort3.tar.gz"] = tarGz({"rules/big.rules": rules})
+            with self.getLoggerStream("synapse.lib.snap", struct=False) as stream:
+                msgs = await core.stormlist(f"slib.pcap.sync --no-push --feed {S3}")
+            self.stormHasNoWarnErr(msgs)
+            self.stormIsInPrint(
+                f"{S3}: synced 10500 rules (10500 added, 0 updated, 0 removed).", msgs
+            )
+            stream.seek(0)
+            lines = [ln for ln in stream.read().splitlines() if "adding feed data" in ln]
+            assert len(lines) == 2, lines
+            rsguid = s_feeds.rulesetGuid(S3)
+            assert await count(core, f"meta:ruleset={rsguid} -(has)> it:app:snort:rule") == 10500
+
     async def test_sync_incremental(self):
         conf = {"pcap:feeds:interval": 0}
         async with snortSvc(self, conf=conf) as (core, svc, feeds):

@@ -15,6 +15,9 @@ init {
     $svc = $lib.service.get("slib.pcap")
     $model = $lib.import(slib.pcap.model)
     $batchsize = (1000)
+    // New rules are ingested this many at a time. Synapse logs a line for every ingest, so
+    // these are collected across the service's (smaller) feedChanges batches.
+    $ingestsize = (10000)
 }
 
 
@@ -125,6 +128,7 @@ function syncFeed(feed, force=(false)) {
     $ruleset($feed, $info)
     $rsguid = $feed.ruleset
     $seen = $lib.set()
+    $new = ([])
     for $retn in $svc.feedChanges($name, $view, full=$force) {
         if (not $retn.status) {
             $summary.error = $retn.mesg
@@ -133,7 +137,6 @@ function syncFeed(feed, force=(false)) {
         $batch = $retn.data
         $summary.full = $batch.full
 
-        $new = ([])
         for $rec in $batch.upsert {
             $seen.add($rec.guid)
             $rule = $_get($rec.form, $rec.guid)
@@ -143,9 +146,10 @@ function syncFeed(feed, force=(false)) {
                 $new.append($rec)
             }
         }
-        if $new {
+        if ($lib.len($new) >= $ingestsize) {
             $_bulk($new, $rsguid)
             $summary.added = ($summary.added + $lib.len($new))
+            $new = ([])
         }
 
         for $guid in $batch.removed {
@@ -155,6 +159,11 @@ function syncFeed(feed, force=(false)) {
                 $summary.removed = ($summary.removed + 1)
             }
         }
+    }
+
+    if $new {
+        $_bulk($new, $rsguid)
+        $summary.added = ($summary.added + $lib.len($new))
     }
 
     // A full sync finds the rules that left the feed itself.
