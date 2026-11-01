@@ -258,6 +258,33 @@ class TestEnrich:
         assert src[0]["mime"] == "application/x-msdownload"
         assert src[0]["sha256"] == hashlib.sha256(b"MZ\x90\x00").hexdigest()
 
+        # A frame can hold several reassembled responses: every body is kept, and each pairs
+        # up with its own request.
+        flow = apply([
+            (True, {"http.request.method": ["GET", "POST", "GET"],
+                    "http.request.uri": ["/one.bin", "/upload", "/two.bin"]}),
+            (False, {"http.response_for.uri": ["http://vertex.link/one.bin",
+                                               "http://vertex.link/upload",
+                                               "http://vertex.link/two.bin"],
+                     "http.file_data": [b"one".hex(), b"posted".hex(), b"two".hex()],
+                     "http.content_type": ["text/plain", "text/plain", "text/plain"]}),
+        ], files=p_enrich.FileStore(str(tmp_path)))
+        dst = {f["name"]: f for f in flow["dst"]["txfiles"]}
+        assert dst["one.bin"]["sha256"] == hashlib.sha256(b"one").hexdigest()
+        assert dst["two.bin"]["sha256"] == hashlib.sha256(b"two").hexdigest()
+        # The POST's response isn't the file at its URI, so it has no name.
+        assert dst[None]["sha256"] == hashlib.sha256(b"posted").hexdigest()
+
+        # Responses without a body in the frame still advance the pairing.
+        flow = apply([
+            (True, {"http.request.method": ["POST", "GET"],
+                    "http.request.uri": ["/post", "/get.bin"]}),
+            (False, {"http.response_for.uri": ["http://vertex.link/post"]}),  # No body.
+            (False, {"http.response_for.uri": ["http://vertex.link/get.bin"],
+                     "http.file_data": [b"got".hex()]}),
+        ], files=p_enrich.FileStore(str(tmp_path)))
+        assert [f["name"] for f in flow["dst"]["txfiles"]] == ["get.bin"]
+
         # A multipart body with no files is kept whole.
         flow = apply([(True, {"http.request.method": ["POST"], "http.request.uri": ["/f"],
                               "http.file_data": [b"--B\r\n\r\nx\r\n--B--".hex()],

@@ -168,6 +168,15 @@ def alertCommunityId(proto: str, src: str, sport: Any, dst: str, dport: Any) -> 
             return p_communityid.communityId(ipproto, srcb, dstb, int(sport), int(dport))
         except (TypeError, ValueError):
             return None
+    if ipproto in (1, 58):
+        # Snort reports the ICMP type and code in the port fields. The flows' ICMP Community
+        # IDs hash them (see pcapsvc.communityid), so a portless hash could never match one.
+        try:
+            itype = int(sport)
+            icode = int(dport) if dport is not None else 0
+        except (TypeError, ValueError):
+            return None
+        return p_communityid.communityId(ipproto, srcb, dstb, itype, icode)
     return p_communityid.communityId(ipproto, srcb, dstb)
 
 
@@ -555,7 +564,11 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
 
     def _pruneUploads(self, idle: int = UPLOAD_IDLE) -> list[str]:
         cutoff = s_common.now() - idle
-        stale = [iden for iden, up in self.uploads.items() if up["touched"] < cutoff]
+        stale = [
+            iden
+            for iden, up in self.uploads.items()
+            if up["touched"] < cutoff and not up.get("busy")
+        ]
         for iden in stale:
             self._dropUpload(iden)
         return stale
@@ -606,6 +619,7 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
             "maxsize": maxsize,
             "sha256": hashlib.sha256(),
             "touched": s_common.now(),
+            "busy": False,
         }
         return iden
 
@@ -929,28 +943,46 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
         if keylogs and not self.axonurl:
             raise PcapSvcError("The service has no axon:url, key logs must be uploaded.")
 
-        async with self.runsema:
-            # Every engine run of this analysis adds what the sandbox caught it doing.
-            alerts: list[dict] = []
-            token = p_sandbox.RUN_ALERTS.set(alerts)
-            try:
-                with tempfile.TemporaryDirectory(dir=self.tmpdir) as tmp:
-                    flows, summary = await self._analyze(
-                        tmp,
-                        sha256,
-                        upload,
-                        keylogs,
-                        keyloguploads,
-                        decode,
-                        timeout,
-                        limit,
-                        handshake,
-                        opts,
-                    )
-            finally:
-                p_sandbox.RUN_ALERTS.reset(token)
-            summary["sandbox"] = {"alerts": alerts}
-            return flows, summary
+        # Waiting for a worker can outlast the idle prune, so this run's uploads are marked
+        # busy (and checked) first, so they're still there once a worker is free.
+        claims = []
+        if upload is not None:
+            claims.append((upload, "capture"))
+        claims.extend((kiden, "keylog") for kiden in keyloguploads)
+        for iden, kind in claims:
+            self._reqUpload(iden, kind)
+        for iden, _ in claims:
+            self.uploads[iden]["busy"] = True
+        try:
+            async with self.runsema:
+                # Every engine run of this analysis adds what the sandbox caught it doing.
+                alerts: list[dict] = []
+                token = p_sandbox.RUN_ALERTS.set(alerts)
+                try:
+                    with tempfile.TemporaryDirectory(dir=self.tmpdir) as tmp:
+                        flows, summary = await self._analyze(
+                            tmp,
+                            sha256,
+                            upload,
+                            keylogs,
+                            keyloguploads,
+                            decode,
+                            timeout,
+                            limit,
+                            handshake,
+                            opts,
+                        )
+                finally:
+                    p_sandbox.RUN_ALERTS.reset(token)
+                summary["sandbox"] = {"alerts": alerts}
+                return flows, summary
+        finally:
+            # The run normally consumes its uploads (_takeUpload), this keeps a failed run's.
+            for iden, _ in claims:
+                left = self.uploads.get(iden)
+                if left is not None:
+                    left["busy"] = False
+                    left["touched"] = s_common.now()
 
     async def _fetch(
         self,
@@ -1026,6 +1058,8 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
             info["suricata"]["error"] = "Suricata is not installed"
         if opts["snort"] and opts["rules"] and self.snort.available():
             tasks["snort"] = self._runSnort(parts, opts["netvars"])
+        elif opts["snort"] and opts["rules"]:
+            info["snort"]["error"] = "Snort is not installed"
         if opts["tshark"] and self.tshark.available:
             tasks["tshark"] = self._runTshark(path, keylog, decode, gaps="suricata" in tasks)
         elif opts["tshark"]:

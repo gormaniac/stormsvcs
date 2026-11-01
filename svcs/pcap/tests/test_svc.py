@@ -24,6 +24,30 @@ async def collect(genr) -> list:
     return [item async for item in genr]
 
 
+def test_alertCommunityId():
+    import ipaddress
+
+    from pcapsvc import communityid as p_cid
+    from pcapsvc.svc import alertCommunityId
+
+    def ip(valu):
+        return ipaddress.ip_address(valu).packed
+
+    assert alertCommunityId("TCP", "1.2.3.4", "80", "5.6.7.8", 1024) == \
+        p_cid.communityId(6, ip("1.2.3.4"), ip("5.6.7.8"), 80, 1024)
+    # Snort reports the ICMP type and code in the port fields, and the flows' ICMP Community
+    # IDs hash them, so an echo alert (either direction) matches its flow.
+    assert alertCommunityId("icmp", "10.0.0.1", 8, "1.1.1.1", 0) == \
+        p_cid.communityId(1, ip("10.0.0.1"), ip("1.1.1.1"), 8, 0)
+    assert alertCommunityId("icmp", "1.1.1.1", 0, "10.0.0.1", None) == \
+        p_cid.communityId(1, ip("10.0.0.1"), ip("1.1.1.1"), 8, 0)
+    assert alertCommunityId("icmp", "10.0.0.1", None, "1.1.1.1", None) is None
+    assert alertCommunityId("gre", "10.0.0.1", None, "10.0.0.2", None) == \
+        p_cid.communityId(47, ip("10.0.0.1"), ip("10.0.0.2"))
+    assert alertCommunityId("nope", "10.0.0.1", 1, "10.0.0.2", 2) is None
+    assert alertCommunityId("tcp", "not-an-ip", 1, "10.0.0.2", 2) is None
+
+
 class SvcProx:
     """Calls the service's Telepath API (the test helpers only give a Cortex proxy)."""
 
@@ -249,6 +273,10 @@ class TestPcapSvcUploads(s_tests.SynTest):
             assert (await prox.call("uploadCancel", iden))["data"] is False
             assert not pathlib.Path(path).exists()
             iden = await prox.upload(b"abc")
+            # An upload a queued analysis claimed isn't pruned, however long it waits.
+            svc.uploads[iden]["busy"] = True
+            assert svc._pruneUploads(idle=-1) == []
+            svc.uploads[iden]["busy"] = False
             assert svc._pruneUploads(idle=-1) == [iden]
             assert svc.uploads == {}
 
@@ -294,8 +322,8 @@ class TestPcapSvcTshark(s_tests.SynTest):
                                                         "error": "tshark is not installed"}
                 assert summary["engines"]["suricata"] == {"enabled": False,
                                                           "error": "Suricata is not installed"}
-                # Snort only runs with rules.
-                assert summary["engines"]["snort"] == {"enabled": False, "error": None}
+                assert summary["engines"]["snort"] == {"enabled": False,
+                                                       "error": "Snort is not installed"}
                 assert summary["files"] == {"count": 0, "skipped": 0, "uploaded": 0}
                 assert summary["hits"] == 0
                 # Flows still have every key, just empty.

@@ -78,6 +78,9 @@ LANDLOCK_RESTRICT_SELF_LOG_NEW_EXEC_ON = 1 << 1  # ABI 7, log denials after an e
 AUDIT_ARCHES = {"x86_64": (0xC000003E, 41), "aarch64": (0xC00000B7, 198)}
 """(AUDIT_ARCH value, the socket syscall number) of the arches the seccomp filter supports."""
 
+X32_SYSCALL_BIT = 0x40000000
+"""Set in the syscall number of x32 syscalls (which report the x86_64 audit arch)."""
+
 AF_INET, AF_INET6, AF_PACKET = 2, 10, 17
 
 RLIMITS = {
@@ -231,21 +234,26 @@ def applySeccomp(libc: ctypes.CDLL | None = None, kill: bool = True) -> None:
         raise SandboxError(f"The seccomp filter doesn't support {platform.machine()}.")
     audit, nrsocket = arch
 
-    ld, jeq, ret = 0x20, 0x15, 0x06  # BPF_LD|BPF_W|BPF_ABS, BPF_JMP|BPF_JEQ|BPF_K, BPF_RET|BPF_K
+    # BPF_LD|BPF_W|BPF_ABS, BPF_JMP|BPF_JEQ|BPF_K, BPF_JMP|BPF_JGE|BPF_K, BPF_RET|BPF_K
+    ld, jeq, jge, ret = 0x20, 0x15, 0x35, 0x06
     deny = SECCOMP_RET_KILL_PROCESS if kill else SECCOMP_RET_ERRNO | errno.EPERM
     prog = [
         _bpf(ld, 4),  # 0: arch
         _bpf(jeq, audit, 1, 0),  # 1: our arch? -> 3, else -> 2
-        _bpf(ret, SECCOMP_RET_ALLOW),  # 2
+        # A foreign arch's syscall numbers don't line up with nrsocket (ex. 32-bit socketcall
+        # on x86_64 could open a socket), so any such syscall kills the process.
+        _bpf(ret, SECCOMP_RET_KILL_PROCESS),  # 2
         _bpf(ld, 0),  # 3: syscall nr
-        _bpf(jeq, nrsocket, 1, 0),  # 4: socket? -> 6, else -> 5
-        _bpf(ret, SECCOMP_RET_ALLOW),  # 5
-        _bpf(ld, 16),  # 6: args[0], the address family (low 32 bits)
-        _bpf(jeq, AF_INET, 3, 0),  # 7 -> 11
-        _bpf(jeq, AF_INET6, 2, 0),  # 8 -> 11
-        _bpf(jeq, AF_PACKET, 1, 0),  # 9 -> 11
-        _bpf(ret, SECCOMP_RET_ALLOW),  # 10
-        _bpf(ret, deny),  # 11
+        _bpf(jge, X32_SYSCALL_BIT, 0, 1),  # 4: x32 nr (same audit arch)? -> 5, else -> 6
+        _bpf(ret, SECCOMP_RET_KILL_PROCESS),  # 5
+        _bpf(jeq, nrsocket, 1, 0),  # 6: socket? -> 8, else -> 7
+        _bpf(ret, SECCOMP_RET_ALLOW),  # 7
+        _bpf(ld, 16),  # 8: args[0], the address family (low 32 bits)
+        _bpf(jeq, AF_INET, 3, 0),  # 9 -> 13
+        _bpf(jeq, AF_INET6, 2, 0),  # 10 -> 13
+        _bpf(jeq, AF_PACKET, 1, 0),  # 11 -> 13
+        _bpf(ret, SECCOMP_RET_ALLOW),  # 12
+        _bpf(ret, deny),  # 13
     ]
     arr = (_SockFilter * len(prog))(*prog)
     fprog = _SockFprog(len(prog), arr)

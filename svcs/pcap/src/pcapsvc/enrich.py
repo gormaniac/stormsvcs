@@ -470,25 +470,32 @@ class Enricher:
         for method, uri in zip(methods, uris):
             self.http["requests"].append({"method": method, "uri": uri})
 
-        body = rec.get("http.file_data")
-        if not body:
-            if "http.response_for.uri" in rec:
-                self.responses += 1
+        # A frame can carry several reassembled HTTP messages, each field has one value per
+        # message that has it.
+        bodies = rec.get("http.file_data") or ()
+        resuris = rec.get("http.response_for.uri") or ()
+        ctypes = rec.get("http.content_type") or ()
+        if not bodies:
+            self.responses += len(resuris)
             return
-        data = bytes.fromhex(body[0].replace(":", ""))
-        if methods:
-            name = uriName(uris[0] if uris else None)
-        else:
-            # Responses come in the order of their requests. Only a GET's response body is
-            # the file the URI names, ex. a POST's response isn't the file that was posted.
-            reqs = self.http["requests"]
-            method = reqs[self.responses]["method"] if self.responses < len(reqs) else None
-            self.responses += 1
-            name = None
-            if method in (None, "GET"):
-                name = uriName((rec.get("http.response_for.uri") or [None])[0])
-
-        self._httpBody(side, data, (rec.get("http.content_type") or [None])[0], name, "http")
+        for idx, body in enumerate(bodies):
+            data = bytes.fromhex(body.replace(":", ""))
+            ctype = ctypes[idx] if idx < len(ctypes) else None
+            if methods:
+                name = uriName(uris[idx] if idx < len(uris) else (uris[0] if uris else None))
+            else:
+                # Responses come in the order of their requests. Only a GET's response body is
+                # the file the URI names, ex. a POST's response isn't the file that was posted.
+                reqs = self.http["requests"]
+                method = reqs[self.responses]["method"] if self.responses < len(reqs) else None
+                self.responses += 1
+                name = None
+                if method in (None, "GET"):
+                    name = uriName(resuris[idx] if idx < len(resuris) else None)
+            self._httpBody(side, data, ctype, name, "http")
+        # Responses in the frame without a body (ex. a 204 or 304) still pair up a request.
+        if not methods and len(resuris) > len(bodies):
+            self.responses += len(resuris) - len(bodies)
 
     def _httpBody(
         self, side: dict, data: bytes, ctype: str | None, name: str | None, proto: str

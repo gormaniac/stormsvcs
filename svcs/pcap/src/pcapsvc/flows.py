@@ -810,6 +810,13 @@ class FlowTable:
             payload = bytes(l4.data)
             if ipproto == 6:
                 flags = l4.flags
+        elif ipproto == 132:
+            # SCTP flows need their ports too: the Community ID hashes them (like the engines
+            # do), and without them every SCTP event and alert would go unmatched.
+            if not isinstance(l4, dpkt.sctp.SCTP):
+                self._skip("truncated")
+                return None
+            sport, dport = l4.sport, l4.dport
         icmpcode = 0
         if ipproto in (1, 58):
             if isinstance(l4, dpkt.Packet):

@@ -177,9 +177,9 @@ def _unquote(valu: str | None) -> str | None:
     return re.sub(r"\\(.)", r"\1", valu)
 
 
-def _int(valu: str | None, name: str) -> int | None:
+def _int(valu: str | None, name: str) -> int:
     if valu is None:
-        return None
+        raise RuleError(f"The {name} option must have a value.")
     try:
         return int(valu.strip())
     except ValueError as err:
@@ -328,7 +328,10 @@ def iterRuleText(text: str) -> Iterator[tuple[int, str]]:
 
         buf.append(line)
         stripped = line.rstrip()
-        if stripped.endswith(")") or (not stripped and not buf[-1].endswith("\\")):
+        # A blank line ends a rule, unless the line before it continued it with a backslash.
+        if stripped.endswith(")") or (
+            not stripped and (len(buf) < 2 or not buf[-2].rstrip().endswith("\\"))
+        ):
             yield first, "\n".join(buf)
             buf = []
 
@@ -464,12 +467,9 @@ def ruleWarnings(text: str) -> list[str]:
     except RuleError:
         return []
     start, end = rule["text"].find("("), rule["text"].rfind(")")
-    names = {name for name, _ in splitOptions(rule["text"][start + 1 : end])}
-    flowbits = [
-        valu or ""
-        for name, valu in splitOptions(rule["text"][start + 1 : end])
-        if name in ("flowbits", "xbits")
-    ]
+    opts = splitOptions(rule["text"][start + 1 : end])
+    names = {name for name, _ in opts}
+    flowbits = [valu or "" for name, valu in opts if name in ("flowbits", "xbits")]
     proto = (rule["header"].split()[1:2] or [""])[0].lower()
 
     warnings = []

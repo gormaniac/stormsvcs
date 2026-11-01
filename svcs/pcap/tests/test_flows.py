@@ -502,6 +502,25 @@ class TestIdentity:
         assert ping["community_id"] == p_cid.communityId(1, ip("10.0.0.1"), ip("1.1.1.1"), 8, 0)
         assert all(f["community_id"].startswith("1:") for f in flows)
 
+    def test_sctp_ports(self):
+        from pcapsvc import communityid as p_cid
+
+        def ip(valu):
+            import ipaddress
+            return ipaddress.ip_address(valu).packed
+
+        # SCTP flows keep their ports, and their Community ID hashes them (like the engines).
+        flows, _ = analyze(g.pcap([
+            (0, g.eth(g.sctp("10.0.0.1", 5000, "10.0.0.2", 3868))),
+            (0.1, g.eth(g.sctp("10.0.0.2", 3868, "10.0.0.1", 5000))),
+        ]))
+        assert len(flows) == 1
+        flow = flows[0]
+        assert flow["proto"] == "sctp"
+        assert (flow["src"]["port"], flow["dst"]["port"]) == (5000, 3868)
+        assert flow["community_id"] == p_cid.communityId(
+            132, ip("10.0.0.1"), ip("10.0.0.2"), 5000, 3868)
+
     def test_vlans(self):
         udp = g.udp("10.0.0.1", 5000, "10.0.0.2", 53)
 

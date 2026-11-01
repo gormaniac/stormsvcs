@@ -45,6 +45,12 @@ def udp(src: str, sport: int, dst: str, dport: int, data: bytes = b"") -> dpkt.P
     return ipPkt(src, dst, dgram, 17)
 
 
+def sctp(src: str, sport: int, dst: str, dport: int) -> dpkt.Packet:
+    """An IP packet with an SCTP header (no chunks)."""
+
+    return ipPkt(src, dst, dpkt.sctp.SCTP(sport=sport, dport=dport, chunks=[]), 132)
+
+
 def icmp(src: str, dst: str, type_: int) -> dpkt.Packet:
     """An IP packet with an ICMP (or ICMPv6, for IPv6 addresses) message."""
 

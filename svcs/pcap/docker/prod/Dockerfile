@@ -20,7 +20,9 @@ ARG WIRESHARK_SHA256=d062d416a1ab3a49975aafe3a671c882dde0562ccd71b078808ceb59d46
 ARG SURICATA_VERSION=8.0.8
 ARG SURICATA_SHA256=bb56bbaeb4da81b4c90e61148f93b789ea924412207388bc9cba0a7ac6a24a8f
 ARG LIBDAQ_VERSION=3.0.28
+ARG LIBDAQ_SHA256=a72bc8882abdcfaf475b18d547b5a08785d574005584ce258e533d247bc62771
 ARG SNORT_VERSION=3.12.4.0
+ARG SNORT_SHA256=5bab33f703ca09b74bc2de72d16d8be59c67ebb98dbd45e50c30989b5cdd510f
 
 
 # ---- Sources ----
@@ -41,11 +43,15 @@ ADD --checksum=sha256:${SURICATA_SHA256} \
 
 FROM scratch AS libdaq-src
 ARG LIBDAQ_VERSION
-ADD https://github.com/snort3/libdaq/archive/refs/tags/v${LIBDAQ_VERSION}.tar.gz /libdaq.tar.gz
+ARG LIBDAQ_SHA256
+ADD --checksum=sha256:${LIBDAQ_SHA256} \
+    https://github.com/snort3/libdaq/archive/refs/tags/v${LIBDAQ_VERSION}.tar.gz /libdaq.tar.gz
 
 FROM scratch AS snort3-src
 ARG SNORT_VERSION
-ADD https://github.com/snort3/snort3/archive/refs/tags/${SNORT_VERSION}.tar.gz /snort3.tar.gz
+ARG SNORT_SHA256
+ADD --checksum=sha256:${SNORT_SHA256} \
+    https://github.com/snort3/snort3/archive/refs/tags/${SNORT_VERSION}.tar.gz /snort3.tar.gz
 
 
 # ---- tshark ----

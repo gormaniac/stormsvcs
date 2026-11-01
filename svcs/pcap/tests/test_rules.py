@@ -54,6 +54,11 @@ def test_parse_errors():
         s_rules.parseRule('alert tcp any any -> any any (msg:"no sid";)')
     with pytest.raises(s_rules.RuleError, match="Invalid sid"):
         s_rules.parseRule("alert tcp any any -> any any (sid:abc;)")
+    # Valueless numeric options are errors, not None (gid:sid keys and rev compares need ints).
+    with pytest.raises(s_rules.RuleError, match="gid option"):
+        s_rules.parseRule("alert tcp any any -> any any (gid; sid:5;)")
+    with pytest.raises(s_rules.RuleError, match="rev option"):
+        s_rules.parseRule("alert tcp any any -> any any (sid:5; rev;)")
 
 
 def test_parse_rules_file():
@@ -89,6 +94,25 @@ def test_parse_rules_file():
         (12, "A Snort rule must have a sid.")
     ]
     assert [line for r, line, _ in parsed if r] == [3, 4, 6, 10, 13]
+
+
+def test_parse_rules_blank_line_continuation():
+    # A blank line inside a backslash-continued rule doesn't end it, a blank line after a
+    # line without one still does.
+    text = "\n".join(
+        (
+            'alert tcp any any -> any any (msg:"one"; \\',
+            "",
+            "    sid:1;)",
+            "",
+            "alert udp any any -> any any sid-less-and-unterminated",
+            "",
+            'alert udp any any -> any any (msg:"two"; sid:2;)',
+        )
+    )
+    parsed = list(s_rules.parseRules(text))
+    assert [r["sid"] for r, _, _ in parsed if r] == [1, 2]
+    assert [err for _, _, err in parsed if err] == ["A Snort rule's options must be in parentheses."]
 
 
 def test_split_options():
