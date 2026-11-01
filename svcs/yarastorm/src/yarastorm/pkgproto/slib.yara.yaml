@@ -1,8 +1,8 @@
 name: slib.yara
-version: 0.5.0
+version: 0.5.1
 guid: f418c8589b13201801b9a4bf2b4f7842
 
-synapse_minversion: [2, 137, 0]
+synapse_version: ">=2.145.0,<3.0.0"
 
 genopts:
     dotstorm: true

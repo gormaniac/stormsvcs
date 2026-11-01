@@ -1,6 +1,6 @@
 [project]
 name = "capasvc"
-version = "0.3.0"
+version = "0.3.1"
 description = "A Storm Service that runs Mandiant capa against files in an Axon"
 readme = "README.md"
 license-files = ["LICENSE"]
@@ -12,7 +12,7 @@ authors = [
 requires-python = ">=3.11,<3.12"
 dependencies = [
     "flare-capa==10.0.0",
-    "stormlibpp>=0.10.1",
+    "stormlibpp>=0.12.1",
 ]
 
 [build-system]
@@ -31,6 +31,11 @@ testpaths = [
 ]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+# Python deprecations raised from the service's own code fail the tests. Synapse's
+# deprecations are logged instead, tests/conftest.py fails the tests for those.
+filterwarnings = [
+    "error::DeprecationWarning:capasvc",
+]
 
 [dependency-groups]
 dev = [

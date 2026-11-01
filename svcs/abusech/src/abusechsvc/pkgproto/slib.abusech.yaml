@@ -1,8 +1,8 @@
 name: slib.abusech
-version: 0.2.0
+version: 0.2.1
 guid: e95841a657444e3691de476861eb2a94
 
-synapse_minversion: [2, 137, 0]
+synapse_version: ">=2.145.0,<3.0.0"
 
 genopts:
     dotstorm: true
@@ -96,24 +96,16 @@ commands:
         - default: false
           action: store_true
           help: Yield the enriched/created nodes instead of the inbound nodes.
-    forms:
-      input:
-        - file:bytes
-        - hash:md5
-        - hash:sha1
-        - hash:sha256
-        - inet:url
-        - inet:fqdn
-        - inet:ipv4
-        - inet:ipv6
-        - inet:server
-      output:
-        - file:bytes
-        - inet:url
-        - inet:fqdn
-        - inet:ipv4
-        - inet:ipv6
-        - inet:server
+    cmdinputs:
+      - form: file:bytes
+      - form: hash:md5
+      - form: hash:sha1
+      - form: hash:sha256
+      - form: inet:url
+      - form: inet:fqdn
+      - form: inet:ipv4
+      - form: inet:ipv6
+      - form: inet:server
 
   # ---- MalwareBazaar ----
 
@@ -143,14 +135,11 @@ commands:
         - default: false
           action: store_true
           help: Yield the file:bytes nodes instead of the inbound nodes.
-    forms:
-      input:
-        - file:bytes
-        - hash:md5
-        - hash:sha1
-        - hash:sha256
-      output:
-        - file:bytes
+    cmdinputs:
+      - form: file:bytes
+      - form: hash:md5
+      - form: hash:sha1
+      - form: hash:sha256
 
   - name: slib.abusech.bazaar.search
     perms:
@@ -193,9 +182,6 @@ commands:
         - type: int
           default: 100
           help: The max number of samples to return (max 1000).
-    forms:
-      output:
-        - file:bytes
 
   - name: slib.abusech.bazaar.cscb
     perms:
@@ -212,9 +198,6 @@ commands:
         - default: false
           action: store_true
           help: Yield the crypto:x509:cert nodes.
-    forms:
-      output:
-        - crypto:x509:cert
 
   - name: slib.abusech.bazaar.download
     perms:
@@ -237,12 +220,9 @@ commands:
         - default: false
           action: store_true
           help: Yield the downloaded file:bytes nodes instead of the inbound nodes.
-    forms:
-      input:
-        - file:bytes
-        - hash:sha256
-      output:
-        - file:bytes
+    cmdinputs:
+      - form: file:bytes
+      - form: hash:sha256
 
   - name: slib.abusech.bazaar.submit
     perms:
@@ -288,9 +268,8 @@ commands:
         - default: false
           action: store_true
           help: Submit anonymously.
-    forms:
-      input:
-        - file:bytes
+    cmdinputs:
+      - form: file:bytes
 
   - name: slib.abusech.bazaar.update
     perms:
@@ -318,10 +297,9 @@ commands:
           action: append
           default: []
           help: A <key>=<value> update. Keys are add_tag, remove_tag, urlhaus, any_run, joe_sandbox, malpedia, twitter, links, dropped_by_md5, dropped_by_sha256, dropped_by_malware, dropping_md5, dropping_sha256, dropping_malware, and comment. May be used multiple times.
-    forms:
-      input:
-        - file:bytes
-        - hash:sha256
+    cmdinputs:
+      - form: file:bytes
+      - form: hash:sha256
 
   - name: slib.abusech.bazaar.export
     perms:
@@ -390,10 +368,6 @@ commands:
         - default: false
           action: store_true
           help: Yield the file:bytes (or it:app:yara:rule) nodes.
-    forms:
-      output:
-        - file:bytes
-        - it:app:yara:rule
 
   # ---- URLhaus ----
 
@@ -440,19 +414,13 @@ commands:
         - default: false
           action: store_true
           help: Yield the URL/host/file nodes instead of the inbound nodes.
-    forms:
-      input:
-        - inet:url
-        - inet:fqdn
-        - inet:ipv4
-        - file:bytes
-        - hash:md5
-        - hash:sha256
-      output:
-        - inet:url
-        - inet:fqdn
-        - inet:ipv4
-        - file:bytes
+    cmdinputs:
+      - form: inet:url
+      - form: inet:fqdn
+      - form: inet:ipv4
+      - form: file:bytes
+      - form: hash:md5
+      - form: hash:sha256
 
   - name: slib.abusech.urlhaus.search
     perms:
@@ -484,10 +452,6 @@ commands:
         - type: int
           default: 0
           help: The max number of results (0 for URLhaus' default, max 1000).
-    forms:
-      output:
-        - inet:url
-        - file:bytes
 
   - name: slib.abusech.urlhaus.download
     perms:
@@ -508,12 +472,9 @@ commands:
         - default: false
           action: store_true
           help: Yield the downloaded file:bytes nodes instead of the inbound nodes.
-    forms:
-      input:
-        - file:bytes
-        - hash:sha256
-      output:
-        - file:bytes
+    cmdinputs:
+      - form: file:bytes
+      - form: hash:sha256
 
   - name: slib.abusech.urlhaus.submit
     perms:
@@ -545,9 +506,8 @@ commands:
         - default: false
           action: store_true
           help: Report anonymously.
-    forms:
-      input:
-        - inet:url
+    cmdinputs:
+      - form: inet:url
 
   - name: slib.abusech.urlhaus.export
     perms:
@@ -616,9 +576,6 @@ commands:
         - default: false
           action: store_true
           help: Yield the inet:url nodes.
-    forms:
-      output:
-        - inet:url
 
   # ---- ThreatFox ----
 
@@ -669,24 +626,16 @@ commands:
         - default: false
           action: store_true
           help: Yield the IOC nodes instead of the inbound nodes.
-    forms:
-      input:
-        - file:bytes
-        - hash:md5
-        - hash:sha1
-        - hash:sha256
-        - inet:url
-        - inet:fqdn
-        - inet:ipv4
-        - inet:ipv6
-        - inet:server
-      output:
-        - file:bytes
-        - inet:url
-        - inet:fqdn
-        - inet:ipv4
-        - inet:ipv6
-        - inet:server
+    cmdinputs:
+      - form: file:bytes
+      - form: hash:md5
+      - form: hash:sha1
+      - form: hash:sha256
+      - form: inet:url
+      - form: inet:fqdn
+      - form: inet:ipv4
+      - form: inet:ipv6
+      - form: inet:server
 
   - name: slib.abusech.threatfox.search
     perms:
@@ -717,14 +666,6 @@ commands:
         - type: int
           default: 0
           help: The max number of IOCs (0 for every match; tag and malware searches return at most 1000).
-    forms:
-      output:
-        - file:bytes
-        - inet:url
-        - inet:fqdn
-        - inet:ipv4
-        - inet:ipv6
-        - inet:server
 
   - name: slib.abusech.threatfox.ref
     perms:
@@ -816,12 +757,11 @@ commands:
         - default: false
           action: store_true
           help: Submit anonymously.
-    forms:
-      input:
-        - inet:url
-        - inet:fqdn
-        - inet:server
-        - file:bytes
+    cmdinputs:
+      - form: inet:url
+      - form: inet:fqdn
+      - form: inet:server
+      - form: file:bytes
 
   - name: slib.abusech.threatfox.export
     perms:
@@ -885,14 +825,6 @@ commands:
         - default: false
           action: store_true
           help: Yield the IOC nodes.
-    forms:
-      output:
-        - file:bytes
-        - inet:url
-        - inet:fqdn
-        - inet:ipv4
-        - inet:ipv6
-        - inet:server
 
   # ---- YARAify ----
 
@@ -929,14 +861,11 @@ commands:
         - default: false
           action: store_true
           help: Yield the file:bytes nodes instead of the inbound nodes.
-    forms:
-      input:
-        - file:bytes
-        - hash:md5
-        - hash:sha1
-        - hash:sha256
-      output:
-        - file:bytes
+    cmdinputs:
+      - form: file:bytes
+      - form: hash:md5
+      - form: hash:sha1
+      - form: hash:sha256
 
   - name: slib.abusech.yaraify.search
     perms:
@@ -967,9 +896,6 @@ commands:
         - type: int
           default: 25
           help: The max number of files (max 1000).
-    forms:
-      output:
-        - file:bytes
 
   - name: slib.abusech.yaraify.scan
     perms:
@@ -1025,14 +951,11 @@ commands:
         - default: false
           action: store_true
           help: Yield the scanned file:bytes nodes (with --wait) instead of the inbound nodes.
-    forms:
-      input:
-        - file:bytes
-        - hash:md5
-        - hash:sha1
-        - hash:sha256
-      output:
-        - file:bytes
+    cmdinputs:
+      - form: file:bytes
+      - form: hash:md5
+      - form: hash:sha1
+      - form: hash:sha256
 
   - name: slib.abusech.yaraify.tasks
     perms:
@@ -1107,9 +1030,6 @@ commands:
         - default: false
           action: store_true
           help: Yield the it:app:yara:rule nodes.
-    forms:
-      output:
-        - it:app:yara:rule
 
   - name: slib.abusech.yaraify.deploy
     perms:
@@ -1138,9 +1058,8 @@ commands:
           action: append
           default: []
           help: The YARAhub UUID of one of your deployed rules to delete (delete_yara_rule). May be used multiple times.
-    forms:
-      input:
-        - it:app:yara:rule
+    cmdinputs:
+      - form: it:app:yara:rule
 
   - name: slib.abusech.yaraify.download
     perms:
@@ -1170,12 +1089,9 @@ commands:
         - default: false
           action: store_true
           help: Download a file YARAify unpacked from a sample, instead of a submitted file.
-    forms:
-      input:
-        - file:bytes
-        - hash:sha256
-      output:
-        - file:bytes
+    cmdinputs:
+      - form: file:bytes
+      - form: hash:sha256
 
   # ---- Feodo Tracker and SSL Blacklist ----
 
@@ -1210,10 +1126,6 @@ commands:
         - default: false
           action: store_true
           help: Yield the inet:server (or IP) nodes.
-    forms:
-      output:
-        - inet:server
-        - inet:ipv4
 
   - name: slib.abusech.sslbl
     perms:
@@ -1247,10 +1159,6 @@ commands:
         - default: false
           action: store_true
           help: Yield the modeled nodes.
-    forms:
-      output:
-        - crypto:x509:cert
-        - hash:md5
 
   # ---- Hunting ----
 
@@ -1273,12 +1181,6 @@ commands:
         - default: false
           action: store_true
           help: Yield the false positive nodes.
-    forms:
-      output:
-        - file:bytes
-        - inet:url
-        - inet:fqdn
-        - inet:ipv4
 
   # ---- Auth-Keys ----
 

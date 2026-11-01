@@ -837,7 +837,7 @@ class TestStormYaraify(s_tests.SynTest):
             )
 
             nodes = await core.nodes(f"file:subfile:parent=sha256:{SHA256}")
-            assert len(nodes) == 1 and nodes[0].get("name") == "unpacked.bin"
+            assert len(nodes) == 1 and nodes[0].get("path") == "unpacked.bin"
             assert (
                 await count(
                     core,
