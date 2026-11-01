@@ -8,7 +8,7 @@ SVC_NAME = "slib.capa"
 SVC_VER = __version__
 SVC_GUID = "ee5999b4059645168272e22d7cd087e3"
 """The guid of the slib.capa ``meta:source`` node."""
-SVC_SYN_MIN_VER = (2, 137, 0)
+SVC_SYN_MIN_VER = (2, 145, 0)
 
 RULES_VERSION = "v10.0.0"
 """The capa-rules release bundled with this version of the service (it matches flare-capa)."""

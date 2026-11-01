@@ -1,6 +1,6 @@
 [project]
 name = "yarastorm"
-version = "0.5.0"
+version = "0.5.1"
 description = "The yarastorm Python package"
 readme = "README.md"
 license-files = ["LICENSE"]
@@ -31,6 +31,12 @@ testpaths = [
     "tests",
 ]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+# Python deprecations raised from the service's own code fail the tests. Synapse's
+# deprecations are logged instead, tests/conftest.py fails the tests for those.
+filterwarnings = [
+    "error::DeprecationWarning:yarastorm",
+]
 
 [dependency-groups]
 dev = [

@@ -1,6 +1,6 @@
 [project]
 name = "pcapsvc"
-version = "0.7.1"
+version = "0.7.2"
 description = "A Storm Service that models the flows in PCAP files from an Axon as inet:flow nodes"
 readme = "README.md"
 license-files = ["LICENSE"]
@@ -33,6 +33,11 @@ testpaths = [
 ]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+# Python deprecations raised from the service's own code fail the tests. Synapse's
+# deprecations are logged instead, tests/conftest.py fails the tests for those.
+filterwarnings = [
+    "error::DeprecationWarning:pcapsvc",
+]
 
 [dependency-groups]
 dev = [

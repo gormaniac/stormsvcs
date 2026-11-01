@@ -7,7 +7,7 @@ from . import __version__
 SVC_NAME = "slib.abusech"
 SVC_VER = __version__
 SVC_GUID = "07574885b1dd44518f554cc7356d056a"
-SVC_SYN_MIN_VER = (2, 137, 0)
+SVC_SYN_MIN_VER = (2, 145, 0)
 
 SOURCES = {
     "bazaar": ("0880c1df548847f591cc4d25071e8ec7", "MalwareBazaar", "https://bazaar.abuse.ch"),

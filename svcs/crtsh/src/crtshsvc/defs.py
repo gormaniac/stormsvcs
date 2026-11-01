@@ -7,7 +7,7 @@ from . import __version__
 SVC_NAME = "slib.crtsh"
 SVC_VER = __version__
 SVC_GUID = "c7357722661f45a4b81c91ccfbbb37c0"
-SVC_SYN_MIN_VER = (2, 137, 0)
+SVC_SYN_MIN_VER = (2, 145, 0)
 
 SVC_EVTS = {
     "add": {
