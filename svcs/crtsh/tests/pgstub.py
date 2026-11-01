@@ -13,7 +13,6 @@ so like libx509pq the stubs return null for them.
 The database's public schema is dropped and rebuilt.
 """
 
-
 import asyncio
 import datetime
 import hashlib
@@ -138,13 +137,25 @@ async def load(dsn: str, pki: Pki = PKI) -> None:
             if cert is not None:
                 await conn.execute(
                     "INSERT INTO x509_info VALUES ($1, $2, $3, $4, $5, $6, $7, to_tsvector('certwatch', $8))",
-                    sha256, _naive(cert.not_valid_before_utc), _naive(cert.not_valid_after_utc),
-                    _derSerial(cert), _ski(cert), _spki(cert), cert.subject.public_bytes(),
-                    identityText(cert))
+                    sha256,
+                    _naive(cert.not_valid_before_utc),
+                    _naive(cert.not_valid_after_utc),
+                    _derSerial(cert),
+                    _ski(cert),
+                    _spki(cert),
+                    cert.subject.public_bytes(),
+                    identityText(cert),
+                )
                 for nametype, valu in _identities(cert):
-                    await conn.execute("INSERT INTO x509_ident VALUES ($1, $2, $3)", sha256, nametype, valu)
-            await conn.execute("INSERT INTO certificate (ID, ISSUER_CA_ID, CERTIFICATE) VALUES ($1, $2, $3)",
-                               row["id"], row["issuer_ca_id"], row["der"])
+                    await conn.execute(
+                        "INSERT INTO x509_ident VALUES ($1, $2, $3)", sha256, nametype, valu
+                    )
+            await conn.execute(
+                "INSERT INTO certificate (ID, ISSUER_CA_ID, CERTIFICATE) VALUES ($1, $2, $3)",
+                row["id"],
+                row["issuer_ca_id"],
+                row["der"],
+            )
 
         for certid, caid in pki.cacerts.items():
             await conn.execute("INSERT INTO ca_certificate VALUES ($1, $2)", certid, caid)
@@ -154,14 +165,29 @@ async def load(dsn: str, pki: Pki = PKI) -> None:
             for entry in entries:
                 if entry["log"] not in logs:
                     logs[entry["log"]] = len(logs) + 1
-                    await conn.execute("INSERT INTO ct_log VALUES ($1, $2, $3, $4)", logs[entry["log"]],
-                                       entry["operator"], entry["url"], entry["log"])
-                await conn.execute("INSERT INTO ct_log_entry VALUES ($1, $2, $3, $4)", certid,
-                                   entry["index"], _fromMillis(entry["time"]), logs[entry["log"]])
+                    await conn.execute(
+                        "INSERT INTO ct_log VALUES ($1, $2, $3, $4)",
+                        logs[entry["log"]],
+                        entry["operator"],
+                        entry["url"],
+                        entry["log"],
+                    )
+                await conn.execute(
+                    "INSERT INTO ct_log_entry VALUES ($1, $2, $3, $4)",
+                    certid,
+                    entry["index"],
+                    _fromMillis(entry["time"]),
+                    logs[entry["log"]],
+                )
 
         for (caid, serial), info in pki.revoked.items():
-            await conn.execute("INSERT INTO crl_revoked VALUES ($1, $2, $3, $4)", caid, serial,
-                               info["code"], _fromMillis(info["time"]))
+            await conn.execute(
+                "INSERT INTO crl_revoked VALUES ($1, $2, $3, $4)",
+                caid,
+                serial,
+                info["code"],
+                _fromMillis(info["time"]),
+            )
         await conn.execute("ANALYZE")
     finally:
         await conn.close()

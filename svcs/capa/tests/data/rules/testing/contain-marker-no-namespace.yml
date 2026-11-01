@@ -1,0 +1,10 @@
+rule:
+  meta:
+    name: contain marker without a namespace
+    authors:
+      - test@example.com
+    scopes:
+      static: file
+      dynamic: file
+  features:
+    - string: "slib-capa-test-marker"

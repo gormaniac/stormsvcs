@@ -8,6 +8,7 @@ on:
       - "svcs/shodan/**"
       - ".github/workflows/shodan.yml"
       - ".github/workflows/_service.yml"
+      - "pyproject.toml" # The root ruff config, used by the ruff steps in _service.yml
 
 permissions:
   contents: read

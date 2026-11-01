@@ -1,0 +1,119 @@
+// The slib.capa user API. Errors are reported as warnings.
+//
+// Usable directly from Storm, ex:
+//     $capa = $lib.import(slib.capa.lib)
+//     file:bytes=<sha256> for $rule in $capa.scan($node) { $lib.print($rule.props.name) }
+
+init {
+    $priv = $lib.import(slib.capa.priv.user)
+    $model = $lib.import(slib.capa.model)
+    $util = $lib.import(slib.capa.util)
+    // The custom rules key scan() looked up, once per import of this module (see scan).
+    $cache = ({})
+}
+
+// The service's rules info (see CapaSvc.rulesInfo), or null if they aren't loaded.
+function info() {
+    $retn = $priv.rulesInfo()
+    if $util.failed($retn, "Getting the capa rules info") { return($lib.null) }
+    return($retn.data)
+}
+
+// ---- Custom rules ----
+//
+// A custom capa rule is a meta:rule with a :type of capa.custom (or a type below it) and the
+// rule's YAML in its :text. The custom rules in the view are sent to the service before a scan,
+// so edits to them are used by the next scan. A custom rule with the same name as an official
+// capa rule is skipped (the official rule wins), the node is left as it is.
+
+function customNodes() {
+    meta:rule:type^=capa.custom +:text
+    emit $node
+}
+
+// Send the custom rules in the view to the service. Returns its summary (see CapaSvc.custom),
+// or null if there are none or they couldn't be sent. Skipped rules are warned about.
+function customInfo() {
+    $rules = ([])
+    for $n in $customNodes() {
+        $rules.append(({"guid": $n.value(), "text": $n.props.text}))
+    }
+    if (not $rules) { return($lib.null) }
+
+    $retn = $priv.custom($rules)
+    if $util.failed($retn, "Loading the custom capa rules") { return($lib.null) }
+
+    for $err in $retn.data.errors {
+        $lib.warn("slib.capa: Skipping the custom capa rule meta:rule={guid}: {err}",
+                  guid=$err.guid, err=$err.mesg)
+    }
+    for $rule in $retn.data.shadowed {
+        $lib.warn("slib.capa: Skipping the custom capa rule meta:rule={guid}, an official capa rule has the same name: {name}",
+                  guid=$rule.guid, name=$rule.name)
+    }
+    return($retn.data)
+}
+
+// The key of the view's custom rules for scan(), or false if there are none to use.
+function customKey() {
+    $info = $customInfo()
+    if ($info = $lib.null or $info.key = $lib.null) { return((false)) }
+    return($info.key)
+}
+
+// ---- Scanning ----
+
+// Whether a file:bytes was already scanned with the service's rules, these custom rules
+// (a key from customKey(), or false for none), and the same format and OS options. rinfo is
+// the service's rules info, it's looked up if not given.
+function scanned(file, rinfo=$lib.null, custom=(false), fmt=auto, osname=auto) {
+    $data = $file.data.get("slib:capa")
+    if ($data = $lib.null) { return((false)) }
+    if ($rinfo = $lib.null) { $rinfo = $info() }
+    if ($rinfo = $lib.null) { return((false)) }
+    if ($data.rules.sha256 != $rinfo.sha256) { return((false)) }
+
+    // Scans from before the options were saved used the defaults.
+    $options = $data.options
+    if ($options = $lib.null) { $options = ({"format": "auto", "os": "auto"}) }
+    if ($options.format != $fmt or $options.os != $osname) { return((false)) }
+
+    if $custom { return(($data.rules.custom = $custom)) }
+    return(($data.rules.custom = $lib.null))
+}
+
+// Run capa against a file:bytes node (pulled from the Axon by :sha256) and model the results.
+// Emits the matched meta:rule nodes.
+//
+// Files already scanned with the same rules are skipped unless force is true. rinfo is the
+// service's rules info, it's looked up if not given. custom is the key of the custom rules to
+// use (see customKey), null to send the view's custom rules first (once per import of this
+// module, so import it before lifting the files, and edits to them during a query aren't used
+// until the next one), or false for none.
+//
+// NOTE: return() in a function that emits raises an error, so this uses elif/else instead.
+function scan(file, fmt=auto, osname=auto, force=(false), rinfo=$lib.null, custom=$lib.null) {
+    if ($custom = $lib.null) {
+        // customKey() never returns null, so null means it wasn't looked up yet.
+        if ($cache.custom = $lib.null) { $cache.custom = $customKey() }
+        $custom = $cache.custom
+    }
+    $ckey = $lib.null
+    if $custom { $ckey = $custom }
+
+    $sha256 = $file.props.sha256
+    if (not $sha256) {
+        $lib.warn("slib.capa: Unable to scan file:bytes={valu}, it has no :sha256.",
+                  valu=$file.repr())
+    }
+    elif ((not $force) and $scanned($file, $rinfo, $custom, $fmt, $osname)) {
+        $lib.print("slib.capa: Skipping {sha256}, it was already scanned with these rules (see --force).",
+                   sha256=$sha256)
+    }
+    else {
+        $retn = $priv.scan($sha256, fmt=$fmt, osname=$osname, custom=$ckey)
+        if (not $util.failed($retn, `Scanning {$sha256}`)) {
+            for $r in $model.results($file, $retn.data, $priv.tagPrefix()) { emit $r }
+        }
+    }
+}

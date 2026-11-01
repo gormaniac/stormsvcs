@@ -1,0 +1,9 @@
+// Privileged (asroot) wrappers around the slib.pcap service for slib.pcap.rules.
+
+init {
+    $svc = $lib.service.get("slib.pcap")
+}
+
+
+// Add/update (guid, form, text, engine) rules in the service and remove rules (by guid), then rebuild its rules.
+function update(rules=$lib.null, dels=$lib.null) { return($svc.ruleUpdate(rules=$rules, dels=$dels)) }

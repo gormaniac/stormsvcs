@@ -24,10 +24,27 @@ on:
         required: false
         type: string
         default: docker/prod/Dockerfile
+      apt-packages:
+        description: Space separated apt packages the service's tests need.
+        required: false
+        type: string
+        default: ""
+      docker_tests:
+        description: >-
+          Also run the service's tests in its test image (docker/test/Dockerfile, built on the
+          new production image) before it's published. For services with system dependencies
+          the host test job doesn't have. The test Dockerfile must take a BASE_IMAGE build arg.
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
   packages: write
+
+env:
+  # The ruff locked in the root uv.lock. Bump it with that lock so local and CI runs agree.
+  RUFF_VERSION: "0.16.0"
 
 jobs:
 
@@ -45,6 +62,25 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: svcs/${{ inputs.service }}/uv.lock
+
+      # Ruff reads the [tool.ruff] config in the root pyproject.toml, which targets Python 3.11.
+      # Lint and format failures block, and both gates run before the install so syntax, style,
+      # and format issues fail early. Run `uvx ruff check --fix .` and `uvx ruff format .`
+      # locally to fix.
+      - name: Ruff lint gate
+        run: uvx ruff@${{ env.RUFF_VERSION }} check --output-format=github .
+
+      - name: Ruff format gate
+        run: uvx ruff@${{ env.RUFF_VERSION }} format --check .
+
+      - name: Install apt packages
+        if: inputs.apt-packages != ''
+        env:
+          DEBIAN_FRONTEND: noninteractive
+          PACKAGES: ${{ inputs.apt-packages }}
+        run: |
+          sudo apt-get update
+          sudo -E apt-get install -y --no-install-recommends $PACKAGES
 
       - name: Setup Python
         run: uv python install
@@ -91,6 +127,21 @@ jobs:
           # Save the built image (with all tags) so later steps can either
           # attach it to the run or push it, without rebuilding.
           outputs: type=docker,dest=/tmp/stormsvcs-${{ inputs.service }}.tar
+          # Cache every stage (mode=max), ex. the engines the pcap service builds from source,
+          # per service so they don't evict each other.
+          cache-from: type=gha,scope=${{ inputs.service }}
+          cache-to: type=gha,mode=max,scope=${{ inputs.service }}
+
+      - name: Run tests in the test image
+        if: inputs.docker_tests
+        # Built with the default (docker driver) builder, which can see the loaded image.
+        run: |
+          docker load -i /tmp/stormsvcs-${{ inputs.service }}.tar
+          docker buildx build --builder default --load \
+            --build-arg BASE_IMAGE=ghcr.io/gormaniac/stormsvcs/${{ inputs.service }}:${{ github.sha }} \
+            -t stormsvcs-${{ inputs.service }}-test \
+            -f svcs/${{ inputs.service }}/docker/test/Dockerfile svcs/${{ inputs.service }}
+          docker run --rm stormsvcs-${{ inputs.service }}-test
 
       - name: Upload image artifact (pull requests)
         # When not publishing (PRs, manual runs off main), don't touch the registry —

@@ -1,0 +1,70 @@
+// Privileged (asroot) wrappers around the slib.pcap service, the sync cron job, and the
+// Decode As rules for every run, for slib.pcap.admin.
+
+init {
+    $svc = $lib.service.get("slib.pcap")
+    $cronglobal = "slib:pcap:cron"
+}
+
+
+function hasAxon() { return($svc.hasAxon()) }
+function feedAdd(fdef) { return($svc.feedAdd($fdef)) }
+function feedDel(name) { return($svc.feedDel($name)) }
+function feedEnable(name, enabled=(true)) { return($svc.feedEnable($name, enabled=$enabled)) }
+
+// The sync cron job, or null if there isn't one.
+function cron() {
+    $iden = $lib.globals.get($cronglobal)
+    if (not $iden) { return($lib.null) }
+    try {
+        return($lib.cron.get($iden))
+    } catch (NoSuchIden, StormRuntimeError) as err {
+        return($lib.null)
+    }
+}
+
+// Replace the sync cron job with one on a new schedule (a cron.add --period), in the current view.
+function schedule(period) {
+    $old = $cron()
+    $new = $lib.cron.add(query="slib.pcap.sync", period=$period)
+    $new.set(name, "slib.pcap.sync")
+    $new.set(doc, "Sync the slib.pcap rule feeds into the Cortex and push the enabled it:app:snort:rule and it:app:suricata:rule nodes to the slib.pcap service.")
+    $lib.globals.set($cronglobal, $new.iden)
+    if $old { $lib.cron.del($old.iden) }
+    return($new)
+}
+
+function enable(enabled=(true)) {
+    $job = $cron()
+    if (not $job) { return($lib.null) }
+    if $enabled { $lib.cron.enable($job.iden) }
+    else { $lib.cron.disable($job.iden) }
+    return($lib.cron.get($job.iden))
+}
+
+function decodeDefaults() {
+    $rules = $lib.globals.get("slib:pcap:decode")
+    if ($rules = $lib.null) { return(([])) }
+    return($rules)
+}
+
+// The network variables (ex. HOME_NET) both engines use for every run, {name: address group}.
+function netVars() {
+    $vars = $lib.globals.get("slib:pcap:vars")
+    if ($vars = $lib.null) { return(({})) }
+    return($vars)
+}
+
+// Validate and save the network variables. Returns the service's retn.
+function setNetVars(vars) {
+    $retn = $svc.checkNetVars($vars)
+    if $retn.status { $lib.globals.set("slib:pcap:vars", $retn.data) }
+    return($retn)
+}
+
+// Validate and save the Decode As rules used for every run. Returns the service's retn.
+function setDecodeDefaults(rules) {
+    $retn = $svc.checkDecodeAs($rules)
+    if $retn.status { $lib.globals.set("slib:pcap:decode", $retn.data) }
+    return($retn)
+}

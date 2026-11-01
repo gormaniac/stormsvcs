@@ -1,0 +1,33 @@
+init {
+    $pcap = $lib.import(slib.pcap.lib)
+    // null leaves it to the service's config.
+    $optional = ({"tshark": $cmdopts.no_tshark, "suricata": $cmdopts.no_suricata,
+                  "snort": $cmdopts.no_snort, "files": $cmdopts.no_files})
+    $opts = ({"timeout": $cmdopts.timeout, "limit": $cmdopts.limit, "handshake": $cmdopts.handshake,
+              "keylogs": $cmdopts.keylog, "decode": $cmdopts.decode_as, "rules": (not $cmdopts.no_rules),
+              "tag": $cmdopts.tag, "host": $cmdopts.host, "sandbox": $cmdopts.sandbox_file})
+    for ($name, $off) in $optional {
+        $opts.$name = $lib.null
+        if $off { $opts.$name = (false) }
+    }
+    $yieldit = $cmdopts.yield
+}
+
+if $cmdopts.sha256s {
+    // SHA-256s ignore inbound nodes.
+    spin |
+    for $sha256 in $cmdopts.sha256s {
+        for $n in $pcap.ingest($sha256, opts=$opts, hits=$cmdopts.hits) {
+            yield $n
+        }
+    }
+}
+else {
+    if ($node.form() = "file:bytes" and :sha256) {
+        divert $yieldit $pcap.nodes($pcap.ingest(:sha256, opts=$opts, file=$node, hits=$cmdopts.hits))
+    } else {
+        $lib.warn("slib.pcap.flows: Unable to analyze {form} {repr}, it needs to be a file:bytes with a :sha256.",
+                  form=$node.form(), repr=$node.repr())
+        spin
+    }
+}

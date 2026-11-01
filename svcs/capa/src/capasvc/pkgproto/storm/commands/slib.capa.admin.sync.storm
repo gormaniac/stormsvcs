@@ -1,0 +1,7 @@
+init {
+    $sync = $lib.import(slib.capa.sync)
+    $set = $sync.sync(force=$cmdopts.force, reload=$cmdopts.reload)
+}
+
+spin |
+if ($set != $lib.null) { yield $set }

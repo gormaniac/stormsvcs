@@ -1,0 +1,39 @@
+init {
+    $admin = $lib.import(slib.pcap.priv.admin)
+    $util = $lib.import(slib.pcap.util)
+    $util.warnNoAxon("slib.pcap.admin.feed", $admin.hasAxon())
+
+    $name = $lib.cast(str, $cmdopts.name).lower()
+    switch $cmdopts.action {
+        "add": {
+            if (not $cmdopts.url) {
+                $lib.warn("slib.pcap.admin.feed: A URL is required to add a feed.")
+            } else {
+                $fdef = ({"name": $name, "url": $cmdopts.url, "engine": $cmdopts.engine,
+                          "exclude": $cmdopts.exclude, "desc": $cmdopts.desc, "enabled": (not $cmdopts.disabled)})
+                $feed = $util.data($admin.feedAdd($fdef), `Adding the {$name} feed`)
+                if $feed {
+                    $lib.print("slib.pcap.admin.feed: Added the {name} feed ({url}), it syncs on the next slib.pcap.sync.",
+                        name=$feed.name, url=$feed.url)
+                }
+            }
+        }
+        "del": {
+            $feed = $util.data($admin.feedDel($name), `Removing the {$name} feed`)
+            if $feed {
+                $lib.print("slib.pcap.admin.feed: Removed the {name} feed, its meta:ruleset={guid} and rules are still in the Cortex.",
+                    name=$feed.name, guid=$feed.ruleset)
+            }
+        }
+        "enable": {
+            if $util.data($admin.feedEnable($name, enabled=(true)), `Enabling the {$name} feed`) {
+                $lib.print("slib.pcap.admin.feed: Enabled the {name} feed.", name=$name)
+            }
+        }
+        "disable": {
+            if $util.data($admin.feedEnable($name, enabled=(false)), `Disabling the {$name} feed`) {
+                $lib.print("slib.pcap.admin.feed: Disabled the {name} feed, its rules are left as they are.", name=$name)
+            }
+        }
+    }
+}

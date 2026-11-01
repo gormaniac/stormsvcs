@@ -29,22 +29,32 @@ async def ids(genr) -> list[int]:
 
 
 class TestPostgres(s_tests.SynTest):
-
     async def test_queries(self):
         await pgstub.load(DSN)
         async with self.getTestCell(CrtshSvc, conf={"crtsh:dsn": DSN}) as svc:
-
             # Lookups, with every kind of identifier, and the metadata.
             leaf = (await svc.lookup(None, [10]))[0]
-            assert leaf["crtsh"]["issuer"] == {"id": 2, "name": "C=US, O=Test Trust, CN=Test Issuing CA 1"}
+            assert leaf["crtsh"]["issuer"] == {
+                "id": 2,
+                "name": "C=US, O=Test Trust, CN=Test Issuing CA 1",
+            }
             assert [e["log"] for e in leaf["crtsh"]["ctlog"]] == ["Test Log A", "Test Log B"]
             assert leaf["crtsh"]["logged"] == [e["time"] for e in leaf["crtsh"]["ctlog"]]
             assert leaf["crtsh"]["caids"] == [] and leaf["crtsh"]["revoked"] is None
-            for kind, valu in (("sha256", leaf["sha256"]), ("sha1", leaf["sha1"]), ("serial", leaf["serial"]),
-                               ("ski", leaf["ski"]), ("spki", leaf["pubkey"]["sha256"]),
-                               ("spkisha1", leaf["pubkey"]["sha1"]), ("subjectsha1", leaf["subject"]["sha1"])):
+            for kind, valu in (
+                ("sha256", leaf["sha256"]),
+                ("sha1", leaf["sha1"]),
+                ("serial", leaf["serial"]),
+                ("ski", leaf["ski"]),
+                ("spki", leaf["pubkey"]["sha256"]),
+                ("spkisha1", leaf["pubkey"]["sha1"]),
+                ("subjectsha1", leaf["subject"]["sha1"]),
+            ):
                 assert 10 in [c["crtsh"]["id"] for c in await svc.lookup(kind, valu)], kind
-            assert [c["crtsh"]["id"] for c in await svc.lookup(None, [10, PKI.sha256(2), PKI.sha256(13)])] == [10, 2, 13]
+            assert [
+                c["crtsh"]["id"]
+                for c in await svc.lookup(None, [10, PKI.sha256(2), PKI.sha256(13)])
+            ] == [10, 2, 13]
             assert (await svc.lookup("id", 2))[0]["crtsh"]["caids"] == [2]
             revoked = (await svc.lookup("id", 11))[0]["crtsh"]["revoked"]
             assert revoked["reason"] == "keyCompromise"
@@ -53,7 +63,10 @@ class TestPostgres(s_tests.SynTest):
             # Searches.
             assert await ids(svc.searchGenr(dns="vertex.link")) == [10, 9, 15, 11, 12]
             assert await ids(svc.searchGenr(dns="www.vertex.link", exact=True)) == [10, 9, 15]
-            assert await ids(svc.searchGenr(dns="vertex.link", valid=True, precerts=False)) == [10, 11]
+            assert await ids(svc.searchGenr(dns="vertex.link", valid=True, precerts=False)) == [
+                10,
+                11,
+            ]
             assert await ids(svc.searchGenr(dns="vertex.link", org="vertex", cn="old")) == [11]
             assert await ids(svc.searchGenr(ip="1.2.3.4")) == [10, 9]
             assert await ids(svc.searchGenr(ip="2001:db8::1")) == [10, 9]
@@ -62,17 +75,38 @@ class TestPostgres(s_tests.SynTest):
             assert await ids(svc.searchGenr(ou="Engineering")) == [10, 9, 15]
             assert await ids(svc.searchGenr(subject="O=Example Inc")) == [14]
             assert await ids(svc.searchGenr(identity="shop.example.com")) == [14]
-            assert await ids(svc.searchGenr(dns="vertex.link", issuer="Issuing CA")) == [10, 9, 15, 11, 12]
+            assert await ids(svc.searchGenr(dns="vertex.link", issuer="Issuing CA")) == [
+                10,
+                9,
+                15,
+                11,
+                12,
+            ]
             assert await ids(svc.searchGenr(dns="vertex.link", caids=[1])) == []
-            assert await ids(svc.searchGenr(dns="vertex.link", since=0, until=2 ** 42)) == [10, 9, 15, 11, 12]
+            assert await ids(svc.searchGenr(dns="vertex.link", since=0, until=2**42)) == [
+                10,
+                9,
+                15,
+                11,
+                12,
+            ]
             assert await ids(svc.searchGenr(issuer="Root R1")) == [2, 1]
             assert await ids(svc.searchGenr(issuer="nope")) == []
 
             # Issued, with every kind of CA source in one query.
             assert await ids(svc.issuedGenr(caids=[2])) == [14, 10, 9, 15, 11, 12, 13]
             assert await ids(svc.issuedGenr(caids=[1, 3])) == [4, 2, 3, 1]
-            assert await ids(svc.issuedGenr(valu=PKI.sha256(4), precerts=False, limit=3)) == [14, 10, 15]
-            assert await ids(svc.issuedGenr(valu=2, kind="id", valid=True, since=0)) == [14, 10, 9, 11]
+            assert await ids(svc.issuedGenr(valu=PKI.sha256(4), precerts=False, limit=3)) == [
+                14,
+                10,
+                15,
+            ]
+            assert await ids(svc.issuedGenr(valu=2, kind="id", valid=True, since=0)) == [
+                14,
+                10,
+                9,
+                11,
+            ]
             with pytest.raises(Exception, match="may not be a CA"):
                 await ids(svc.issuedGenr(valu=10))
 
@@ -91,7 +125,11 @@ class TestPostgres(s_tests.SynTest):
             sha = {cid: PKI.sha256(cid) for cid in (10, 2, 4, 1, 3)}
             assert [c["crtsh"]["id"] for c in chain["certs"]] == [10, 2, 4, 1, 3]
             assert chain["paths"] == [[sha[10], sha[2], sha[1]], [sha[10], sha[4], sha[3]]]
-            assert [c["crtsh"]["id"] for c in (await svc.chain(10, maxdepth=1))["certs"]] == [10, 2, 4]
+            assert [c["crtsh"]["id"] for c in (await svc.chain(10, maxdepth=1))["certs"]] == [
+                10,
+                2,
+                4,
+            ]
             assert (await svc.chain(1))["links"] == []
 
             # CAs.

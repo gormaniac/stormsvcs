@@ -1,6 +1,8 @@
 [project]
 name = "stormsvcs"
-authors = "John Gorman"
+authors = [
+    {"name" = "John Gorman"}
+]
 version = "0.0.1"
 description = "A monorepo of independent custom Synapse Advanced Power-Ups"
 readme = "README.md"
@@ -17,4 +19,20 @@ dev = [
     "pytest-asyncio>=1.4.0",
     "ruff>=0.16.0",
     "vcrpy>=8.3.0",
+]
+
+[tool.ruff]
+# The services run on Python 3.11 (the Synapse base image, see svcs/*/pyproject.toml), not the
+# Python above. Without this, ruff infers 3.14 from requires-python, and its fixes and formatting
+# use syntax that fails on 3.11 (ex. `except A, B:`). The services don't have their own ruff
+# config, so this applies to them too.
+target-version = "py311"
+# The line limit from .github/copilot-instructions.md.
+line-length = 100
+# exclude some common directories and file types from Ruff checks
+exclude = [".ruff_cache/", ".git/", ".claude/", "**/*.md", "**/*.yml", "**/*.yaml", "**/tests/*"]
+# Ignore some specific rules
+lint.ignore = [
+    "RUF012",
+    "BLE001",
 ]

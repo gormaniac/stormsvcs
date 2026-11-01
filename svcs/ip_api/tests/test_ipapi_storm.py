@@ -103,11 +103,48 @@ class TestIpApiStorm(s_tests.SynTest):
             assert len(nodes) == 1
             assert nodes[0].get("asn") is not None
 
+    async def test_cmd_query_place_names(self):
+        async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
+
+            async def fake_query(ipaddr):
+                return dict(SUCCESS_DATA), {}
+
+            with mock.patch.object(svc, "_query", fake_query):
+                msgs = await core.stormlist(f"{SVC_NAME}.query --query 8.8.8.8")
+                self.stormHasNoErr(msgs)
+
+            places = await core.nodes("geo:place")
+            assert len(places) == 1
+            assert places[0].get("name") == "ashburn, virginia, united states"
+
+            telems = await core.nodes("inet:ipv4=8.8.8.8 -> geo:telem:node")
+            assert len(telems) == 1
+            assert telems[0].get("place:name") == "ashburn, virginia, united states"
+
+    async def test_cmd_query_place_name_skips_empty_parts(self):
+        async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
+            data = dict(SUCCESS_DATA)
+            data["city"] = ""
+
+            async def fake_query(ipaddr):
+                return data, {}
+
+            with mock.patch.object(svc, "_query", fake_query):
+                msgs = await core.stormlist(f"{SVC_NAME}.query --query 8.8.8.8")
+                self.stormHasNoErr(msgs)
+
+            places = await core.nodes("geo:place")
+            assert len(places) == 1
+            assert places[0].get("name") == "virginia, united states"
+
     async def test_cmd_query_node_input(self):
         async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
             await core.nodes("[ inet:ipv4=8.8.8.8 ]")
 
             async def fake_query(ipaddr):
+                # The command must send the printable address, not the
+                # normalized integer value (134744072) of the inet:ipv4 node.
+                assert ipaddr == "8.8.8.8"
                 return dict(SUCCESS_DATA), {}
 
             with mock.patch.object(svc, "_query", fake_query):
@@ -133,9 +170,15 @@ class TestIpApiStorm(s_tests.SynTest):
         async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
             await core.nodes("[ inet:fqdn=example.com ]")
 
-            msgs = await core.stormlist(f"inet:fqdn=example.com | {SVC_NAME}.query")
-            self.stormHasNoErr(msgs)
-            self.stormIsInWarn("is not supported", msgs)
+            async def fake_query(ipaddr):
+                # Unsupported forms must never reach the API - an empty query
+                # would return data about the service host's own IP.
+                raise AssertionError(f"_query was called with {ipaddr!r}")
+
+            with mock.patch.object(svc, "_query", fake_query):
+                msgs = await core.stormlist(f"inet:fqdn=example.com | {SVC_NAME}.query")
+                self.stormHasNoErr(msgs)
+                self.stormIsInWarn("is not supported", msgs)
 
     async def test_cmd_query_mixed_supported_unsupported_forms(self):
         async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
@@ -169,6 +212,24 @@ class TestIpApiStorm(s_tests.SynTest):
                 assert len(nodeMsgs) == 1
                 assert nodeMsgs[0][1][0] == ("inet:ipv4", 134744072)
 
+    async def test_cmd_query_ipv4_creates_no_ipv6(self):
+        async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
+
+            async def fake_query(ipaddr):
+                return dict(SUCCESS_DATA), {}
+
+            with mock.patch.object(svc, "_query", fake_query):
+                msgs = await core.stormlist(f"{SVC_NAME}.query --query 8.8.8.8 --yield")
+                self.stormHasNoErr(msgs)
+
+            # Synapse also parses "8.8.8.8" as inet:ipv6=::ffff:8.8.8.8, which must not be made.
+            assert len(await core.nodes("inet:ipv4=8.8.8.8")) == 1
+            assert len(await core.nodes("inet:ipv6")) == 0
+
+            telems = await core.nodes("geo:telem")
+            assert len(telems) == 1
+            assert telems[0].get("node") == ("inet:ipv4", 134744072)
+
     async def test_cmd_query_ipv6_node_input(self):
         async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
             await core.nodes("[ inet:ipv6=2001:4860:4860::8888 ]")
@@ -177,6 +238,7 @@ class TestIpApiStorm(s_tests.SynTest):
             data["query"] = "2001:4860:4860::8888"
 
             async def fake_query(ipaddr):
+                assert ipaddr == "2001:4860:4860::8888"
                 return data, {}
 
             with mock.patch.object(svc, "_query", fake_query):
@@ -252,6 +314,14 @@ class TestIpApiStorm(s_tests.SynTest):
             nodes = await core.nodes("inet:ipv4=8.8.8.8")
             assert "myorg.hosting" in nodes[0].tags
 
+    async def test_cmd_admin_settag_empty_prefix_raises(self):
+        async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
+            msgs = await core.stormlist(f"{SVC_NAME}.admin.settag ''")
+            self.stormIsInErr("non-empty tag prefix", msgs)
+
+            msgs = await core.stormlist('$lib.print($lib.globals.get("slib:ipapi:tag:prefix"))')
+            self.stormIsInPrint("rep.ipapi.infra", msgs)
+
     async def test_cmd_query_no_tags_when_disabled(self):
         async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
             msgs = await core.stormlist(f"{SVC_NAME}.admin.disabletag")
@@ -311,9 +381,7 @@ class TestIpApiStormPerms(s_tests.SynTest):
         async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
             adminIden, _userIden = await self._addPermUsers(core)
 
-            msgs = await core.stormlist(
-                f"{SVC_NAME}.admin.disabletag", opts={"user": adminIden}
-            )
+            msgs = await core.stormlist(f"{SVC_NAME}.admin.disabletag", opts={"user": adminIden})
             self.stormHasNoErr(msgs)
 
             msgs = await core.stormlist('$lib.print($lib.globals.get("slib:ipapi:tag:enabled"))')
@@ -325,9 +393,7 @@ class TestIpApiStormPerms(s_tests.SynTest):
 
             await core.stormlist(f"{SVC_NAME}.admin.disabletag", opts={"user": adminIden})
 
-            msgs = await core.stormlist(
-                f"{SVC_NAME}.admin.enabletag", opts={"user": adminIden}
-            )
+            msgs = await core.stormlist(f"{SVC_NAME}.admin.enabletag", opts={"user": adminIden})
             self.stormHasNoErr(msgs)
 
             msgs = await core.stormlist('$lib.print($lib.globals.get("slib:ipapi:tag:enabled"))')
