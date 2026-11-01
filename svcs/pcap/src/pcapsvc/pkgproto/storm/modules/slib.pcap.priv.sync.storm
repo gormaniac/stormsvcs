@@ -1,8 +1,9 @@
 // Privileged (asroot) rule syncing for slib.pcap.sync.
 //
-// Feeds: the service downloads each feed and parses its rules, this models them as
-// it:app:snort:rule (Snort feeds) or it:app:suricata:rule (Suricata feeds) nodes in the
-// feed's meta:ruleset (as root, so slib.pcap.sync holders don't need node permissions).
+// Feeds: the service downloads each feed and parses its rules, this models them (with
+// slib.pcap.model) as it:app:snort:rule (Snort feeds) or it:app:suricata:rule (Suricata feeds)
+// nodes in the feed's meta:ruleset (as root, so slib.pcap.sync holders don't need node
+// permissions).
 //
 // Push: every enabled rule with :text in the current view is sent to the service, which
 // replaces its rules with them and rebuilds its rules files.
@@ -58,26 +59,19 @@ function _update(rule, rec, rsguid) {
     return(updated)
 }
 
-// Add new rules (that aren't in the Cortex) in bulk, with their feed's enabled state and
-// references (see pcapsvc.feeds.ruleNodeDef), and add them to the feed's ruleset.
-function _bulk(recs, rsguid) {
-    $defs = ([])
-    $edges = ([])
-    for $rec in $recs {
-        $defs.append($rec.nodedef)
-        $edges.append(("has", ($rec.form, $rec.guid)))
-    }
-    $defs.append((("meta:ruleset", $rsguid), ({"edges": $edges})))
-    $lib.feed.ingest("syn.nodes", $defs)
+// Add a new rule (that isn't in the Cortex) with its feed's enabled state and references.
+// It joins the feed's ruleset in _adopt.
+function _add(rec) {
+    $rule = $model.rule($rec, enabled=$rec.enabled)
+    if $rec.refs { $model.ruleRefs($rule, $rec.refs) }
+    return()
+}
 
-    // A rule the bulk ingest skipped (ex. a bad value) is added one prop at a time instead.
-    for $rec in $recs {
-        if (not $_get($rec.form, $rec.guid)) {
-            $rule = $model.rule($rec)
-            $_join($rule, $rec, $rsguid)
-            if $rec.refs { $model.ruleRefs($rule, $rec.refs) }
-        }
-    }
+// Add new rules (by guid) to a feed's ruleset, in one edit. A rule that was added but not
+// adopted (ex. the sync failed in between) joins the ruleset in _update on the next sync.
+function _adopt(form, guids, rsguid) {
+    meta:ruleset=$rsguid
+    [ +(has)> { for $guid in $guids { *$form=$guid } } ]
     return()
 }
 
@@ -133,19 +127,20 @@ function syncFeed(feed, force=(false)) {
         $batch = $retn.data
         $summary.full = $batch.full
 
-        $new = ([])
+        $added = ([])
         for $rec in $batch.upsert {
             $seen.add($rec.guid)
             $rule = $_get($rec.form, $rec.guid)
             if $rule {
                 if ($_update($rule, $rec, $rsguid) = "updated") { $summary.updated = ($summary.updated + 1) }
             } else {
-                $new.append($rec)
+                $_add($rec)
+                $added.append($rec.guid)
             }
         }
-        if $new {
-            $_bulk($new, $rsguid)
-            $summary.added = ($summary.added + $lib.len($new))
+        if $added {
+            $_adopt($feed.form, $added, $rsguid)
+            $summary.added = ($summary.added + $lib.len($added))
         }
 
         for $guid in $batch.removed {

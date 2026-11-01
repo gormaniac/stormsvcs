@@ -119,58 +119,6 @@ async def test_download():
             await s_feeds.download(sess, "http://127.0.0.1:1/x", maxsize=10, timeout=10)
 
 
-def test_ref_edges():
-    refs = [
-        ["cve", "2021-44228"],
-        ["cve", "CVE-2020-0001"],
-        ["cve", "nope"],
-        ["url", "www.example.com/a?b=c"],
-        ["url", "https://1.2.3.4:8080/x"],
-        ["url", "url,example.org/x"],
-        ["url", "url,url,attack.mitre.org/techniques/T1219/"],
-        ["url", "www,example.com/x"],
-        ["url", "http://www.corelan.be#=#=8800/x"],
-        ["url", "e9bc44cf548a70e7285499209973faf44b7374de"],
-        ["url", '"example.com/x"'],
-        ["url", "bad url"],
-        ["url", "[::1]/x"],
-        ["md5", "662002D61F1AEBD64FC204CE40FD65F2"],
-        ["md5", "abc"],
-        ["sha256", "aa" * 32],
-        ["bugtraq", "123"],
-    ]
-    assert s_feeds.refEdges(refs) == [
-        ("detects", ("it:sec:cve", "cve-2021-44228")),
-        ("detects", ("it:sec:cve", "cve-2020-0001")),
-        ("refs", ("inet:url", "http://www.example.com/a?b=c")),
-        ("refs", ("inet:url", "https://1.2.3.4:8080/x")),
-        ("refs", ("inet:url", "http://example.org/x")),
-        ("refs", ("inet:url", "http://attack.mitre.org/techniques/T1219/")),
-        ("refs", ("inet:url", "http://[::1]/x")),
-        ("refs", ("hash:md5", "662002d61f1aebd64fc204ce40fd65f2")),
-        ("refs", ("hash:sha256", "aa" * 32)),
-    ]
-
-
-def test_rule_nodedef():
-    fdef = s_feeds.normFeed({"name": "t", "url": "https://e.com", "engine": 2})
-    rec = s_feeds.parseFeed(fdef, tarGz({"a.rules": SNORT2_RULES}), maxsize=1024 * 1024)["rules"][0]
-    (form, guid), info = s_feeds.ruleNodeDef(rec)
-    assert form == "it:app:snort:rule" and guid == rec["guid"]
-    assert info["props"] == {
-        "id": "2000001",
-        "text": rec["text"],
-        "engine": 2,
-        "version": "4",
-        "enabled": True,
-        "name": "ET SLIB TEST Response Body",
-        "family": "SlibTest",
-        "created": "2021-11-01",
-        "updated": "2024-03-05",
-    }
-    assert info["edges"] == [("refs", ("hash:md5", "662002d61f1aebd64fc204ce40fd65f2"))]
-
-
 def test_feed_secrets():
     secrets = {
         "talos:oinkcode": {"value": "abc123", "hosts": ["www.snort.org", "*.example.com"]},

@@ -162,3 +162,36 @@ def test_check_net_vars():
     ):
         with pytest.raises(s_rules.RuleError):
             s_rules.checkNetVars(bad)
+
+
+def test_clean_refs():
+    refs = [
+        ["cve", "2021-44228"],
+        ["cve", "CVE-2020-0001"],
+        ["cve", "nope"],
+        ["url", "www.example.com/a?b=c"],
+        ["url", "https://1.2.3.4:8080/x"],
+        ["url", "url,example.org/x"],
+        ["url", "url,url,attack.mitre.org/techniques/T1219/"],
+        ["url", "www,example.com/x"],
+        ["url", "http://www.corelan.be#=#=8800/x"],
+        ["url", "e9bc44cf548a70e7285499209973faf44b7374de"],
+        ["url", '"example.com/x"'],
+        ["url", "bad url"],
+        ["url", "[::1]/x"],
+        ["md5", "662002D61F1AEBD64FC204CE40FD65F2"],
+        ["md5", "abc"],
+        ["sha256", "aa" * 32],
+        ["bugtraq", "123"],
+    ]
+    assert s_rules.cleanRefs(refs) == [
+        ["cve", "cve-2021-44228"],
+        ["cve", "cve-2020-0001"],
+        ["url", "http://www.example.com/a?b=c"],
+        ["url", "https://1.2.3.4:8080/x"],
+        ["url", "http://example.org/x"],
+        ["url", "http://attack.mitre.org/techniques/T1219/"],
+        ["url", "http://[::1]/x"],
+        ["md5", "662002d61f1aebd64fc204ce40fd65f2"],
+        ["sha256", "aa" * 32],
+    ]

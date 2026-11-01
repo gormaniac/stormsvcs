@@ -301,6 +301,7 @@ function dns(flownode, f, opts) {
 // record): an it:app:snort:rule (Snort 2.x and 3 rules) or it:app:suricata:rule.
 // enabled is only set when it isn't null.
 function rule(r, enabled=$lib.null) {
+    // Only Snort rules have an engine and a family.
     if ($r.form = "it:app:suricata:rule") {
         [ it:app:suricata:rule=$r.guid ]
     } else {
@@ -314,37 +315,41 @@ function rule(r, enabled=$lib.null) {
         :name?=$r.msg
         :created?=$r.created
         :updated?=$r.updated
+        :enabled?=$enabled
     ]
-    if ($enabled != $lib.null) { [ :enabled=$enabled ] }
     return($node)
 }
 
-// Link a rule to one of its references: the CVE it detects, or the URL or hash it refers to.
-function _ref(rule, scheme, valu) {
-    yield $rule
-    switch $scheme {
-        "cve": {
-            $cve = $lib.cast(str, $valu).lower()
-            if (not $cve.startswith("cve-")) { $cve = `cve-{$cve}` }
-            [ +(detects)> { [ it:sec:cve?=$cve ] } ]
-        }
-        "url": {
-            $url = $lib.cast(str, $valu)
-            if (not $lib.regex.matches("^[a-zA-Z][a-zA-Z0-9+.-]*://", $url)) { $url = `http://{$url}` }
-            [ +(refs)> { [ inet:url?=$url ] } ]
-        }
-        "md5": { [ +(refs)> { [ hash:md5?=$valu ] } ] }
-        "sha256": { [ +(refs)> { [ hash:sha256?=$valu ] } ] }
-    }
-    return($rule)
-}
-
-// Link a rule to its references, a list of (scheme, value).
+// Link a rule to its references, a list of (scheme, value) cleaned by the service (see
+// pcapsvc.rules.cleanRefs): the CVEs it detects, and the URLs and hashes it refers to. A value
+// Synapse can't model is skipped with a warning.
 function ruleRefs(rule, refs) {
+    $forms = ({"cve": "it:sec:cve", "url": "inet:url", "md5": "hash:md5", "sha256": "hash:sha256"})
+    $cves = ([])
+    $others = ([])
     for ($scheme, $valu) in $refs {
-        $_ref($rule, $scheme, $valu)
+        $form = $forms.$scheme
+        if (not $form) { continue }
+        ($ok, $norm) = $lib.trycast($form, $valu)
+        if (not $ok) {
+            $lib.warn("slib.pcap: Skipped the {scheme} reference of {form}={guid}, it isn't a valid {type}: {valu}",
+                scheme=$scheme, form=$rule.form(), guid=$rule.repr(), type=$form, valu=$valu)
+        } elif ($scheme = "cve") {
+            $cves.append($norm)
+        } else {
+            $others.append(($form, $norm))
+        }
     }
-    return($rule)
+    if (not ($cves or $others)) { return($rule) }
+
+    // No loops run while the rule is in the pipeline (see slib.pcap.priv.sync), the
+    // subqueries add every edge in one edit.
+    yield $rule
+    [
+        +(detects)> { for $cve in $cves { [ it:sec:cve=$cve ] } }
+        +(refs)> { for ($form, $valu) in $others { [ *$form=$valu ] } }
+    ]
+    return($node)
 }
 
 // ---- Generators ----

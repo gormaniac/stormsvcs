@@ -22,12 +22,16 @@ function buildGeoTelemNode (ipNode, placeNode, data) {
 }
 
 function buildPlaceNode(data) {
-    $placeName = (', ').join(([$data.city, $data.regionName, $data.country]))
+    $nameParts = ([])
+    for $part in ($data.city, $data.regionName, $data.country) {
+        if $part { $nameParts.append($part) }
+    }
+    $placeName = (', ').join($nameParts)
 
     [
         geo:place=($data.lat, $data.lon, $data.city)
         :latlong=($data.lat, $data.lon)
-        :name=`$placeName ({$data.lat}, {$data.lon})`
+        :name?=$placeName
         :type=ip.geoloc.city
         :desc=(`{$placeName} at the coordinates {$data.lat}, {$data.lon} per ip geolocation data.`)
     ]
@@ -60,9 +64,17 @@ function modelResult(data, tagPrefix) {
     $locNode = $buildPlaceNode($data)
     $asnNode = $buildASNNode($data)
 
+    // Synapse also parses IPv4 strings as valid inet:ipv6 values (::ffff:x.x.x.x),
+    // so only fall back to inet:ipv6 when the query is not a valid IPv4.
+    ($isIpv4, $ipv4) = $lib.trycast(inet:ipv4, $data.query)
+    if $isIpv4 {
+        $ipForm = inet:ipv4
+    } else {
+        $ipForm = inet:ipv6
+    }
+
     [
-        inet:ipv4?=$data.query
-        inet:ipv6?=$data.query
+        *$ipForm?=$data.query
         :asn?=$asnNode
     ]
 
