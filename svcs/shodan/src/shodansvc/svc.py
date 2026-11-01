@@ -495,6 +495,12 @@ class ShodanSvc(s_cell.Cell):
         """GET trends.shodan.io/api/v1/search/filters"""
         return await self._api("get", "/api/v1/search/filters", apikey, base="trends")
 
+    # ---- Local helpers (no API calls) ----
+
+    async def bannerHash(self, text: str) -> int:
+        """Calculate Shodan's banner ``hash`` for banner text, for use in ``hash:<n>`` searches."""
+        return norm.bannerHash(text)
+
     # ---- InternetDB (free, no API key) ----
 
     async def internetdb(self, ip: str) -> dict:

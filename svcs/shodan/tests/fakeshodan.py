@@ -89,6 +89,34 @@ HOST_8888 = {
     ],
 }
 
+# Trimmed from a real Shodan host lookup of scanme.nmap.org. The banner "hash" is Shodan's own.
+SSH_KEY_B64 = 'AAAAB3NzaC1yc2EAAAADAQABAAABAQC6afooTZ9mVUGFNEhkMoRR1Btzu64XXwElhCsHw/zVlIx/\nHXylNbb9+11dm2VgJQ21pxkWDs+L6+EbYyDnvRURTrMTgHL0xseB0EkNqexs9hYZSiqtMx4jtGNt\nHvsMxZnbxvVUk2dasWvtBkn8J5JagSbzWTQo4hjKMOI1SUlXtiKxAs2F8wiq2EdSuKw/KNk8GfIp\n1TA+8ccGeAtnsVptTJ4D/8MhAWsROkQzOowQvnBBz2/8ecEvoMScaf+kDfNQowK3gENtSSOqYw9J\nLOza6YJBPL/aYuQQ0nJ74Rr5vL44aNIlrGI9jJc2x0bV7BeNA5kVuXsmhyfWbbkB8yGd\n'
+HOST_SSH = {
+    "ip_str": "45.33.32.156",
+    "last_update": "2026-11-01T14:21:51.848593",
+    "hostnames": ["scanme.nmap.org"],
+    "ports": [22],
+    "data": [
+        {
+            "ip_str": "45.33.32.156",
+            "port": 22,
+            "transport": "tcp",
+            "timestamp": "2026-10-30T03:23:08.176003",
+            "product": "OpenSSH",
+            "version": "6.6.1p1 Ubuntu 2ubuntu2.13",
+            "data": 'SSH-2.0-OpenSSH_6.6.1p1 Ubuntu-2ubuntu2.13\nKey type: ssh-rsa\nKey: AAAAB3NzaC1yc2EAAAADAQABAAABAQC6afooTZ9mVUGFNEhkMoRR1Btzu64XXwElhCsHw/zVlIx/\nHXylNbb9+11dm2VgJQ21pxkWDs+L6+EbYyDnvRURTrMTgHL0xseB0EkNqexs9hYZSiqtMx4jtGNt\nHvsMxZnbxvVUk2dasWvtBkn8J5JagSbzWTQo4hjKMOI1SUlXtiKxAs2F8wiq2EdSuKw/KNk8GfIp\n1TA+8ccGeAtnsVptTJ4D/8MhAWsROkQzOowQvnBBz2/8ecEvoMScaf+kDfNQowK3gENtSSOqYw9J\nLOza6YJBPL/aYuQQ0nJ74Rr5vL44aNIlrGI9jJc2x0bV7BeNA5kVuXsmhyfWbbkB8yGd\nFingerprint: 20:3d:2d:44:62:2a:b0:5a:9d:b5:b3:05:14:c2:a6:b2\n\nKex Algorithms:\n\tcurve25519-sha256@libssh.org\n\tecdh-sha2-nistp256\n\tecdh-sha2-nistp384\n\tecdh-sha2-nistp521\n\tdiffie-hellman-group-exchange-sha256\n\tdiffie-hellman-group-exchange-sha1\n\tdiffie-hellman-group14-sha1\n\tdiffie-hellman-group1-sha1\n\nServer Host Key Algorithms:\n\tssh-rsa\n\tssh-dss\n\tecdsa-sha2-nistp256\n\tssh-ed25519\n\nEncryption Algorithms:\n\taes128-ctr\n\taes192-ctr\n\taes256-ctr\n\tarcfour256\n\tarcfour128\n\taes128-gcm@openssh.com\n\taes256-gcm@openssh.com\n\tchacha20-poly1305@openssh.com\n\taes128-cbc\n\t3des-cbc\n\tblowfish-cbc\n\tcast128-cbc\n\taes192-cbc\n\taes256-cbc\n\tarcfour\n\trijndael-cbc@lysator.liu.se\n\nMAC Algorithms:\n\thmac-md5-etm@openssh.com\n\thmac-sha1-etm@openssh.com\n\tumac-64-etm@openssh.com\n\tumac-128-etm@openssh.com\n\thmac-sha2-256-etm@openssh.com\n\thmac-sha2-512-etm@openssh.com\n\thmac-ripemd160-etm@openssh.com\n\thmac-sha1-96-etm@openssh.com\n\thmac-md5-96-etm@openssh.com\n\thmac-md5\n\thmac-sha1\n\tumac-64@openssh.com\n\tumac-128@openssh.com\n\thmac-sha2-256\n\thmac-sha2-512\n\thmac-ripemd160\n\thmac-ripemd160@openssh.com\n\thmac-sha1-96\n\thmac-md5-96\n\nCompression Algorithms:\n\tnone\n\tzlib@openssh.com\n',
+            "hash": -145740310,
+            "ssh": {
+                "type": "ssh-rsa",
+                "fingerprint": "20:3d:2d:44:62:2a:b0:5a:9d:b5:b3:05:14:c2:a6:b2",
+                "key": SSH_KEY_B64,
+                "hassh": "ba6d3d2aecbd0d91b01dfa7828110d70",
+            },
+            "_shodan": {"module": "ssh"},
+        }
+    ],
+}
+
 INTERNETDB_1111 = {
     "ip": "1.1.1.1",
     "ports": [53, 80],
@@ -255,6 +283,7 @@ ALERT = {
 # Canned responses keyed by (method, path). Values are (status, body) or a callable(request) -> (status, body).
 ROUTES: dict[tuple[str, str], Any] = {
     ("GET", "/api/shodan/host/8.8.8.8"): (200, HOST_8888),
+    ("GET", "/api/shodan/host/45.33.32.156"): (200, HOST_SSH),
     ("GET", "/api/shodan/host/10.0.0.1"): (404, {"error": "No information available for that IP."}),
     ("GET", "/api/shodan/host/count"): (
         200,

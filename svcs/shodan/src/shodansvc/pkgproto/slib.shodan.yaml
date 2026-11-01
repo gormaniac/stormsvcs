@@ -1,5 +1,5 @@
 name: slib.shodan
-version: 0.3.2
+version: 0.4.0
 guid: 0f6c1d0f1d8a4c3bb7a1e3d5c9b2a864
 
 synapse_minversion: [2, 137, 0]
@@ -158,6 +158,11 @@ commands:
     descr: |
       Search Shodan and model every matching banner. Yields the matching inet:ipv4/inet:ipv6 nodes.
 
+      Inbound inet:banner nodes are searched for by their Shodan banner hash ("hash:<n>"),
+      finding every service presenting the exact same banner. Any query is AND'd with the
+      hash, ex. "country:US". The hash is a 32-bit MurmurHash3 of the banner text, so it
+      works for inet:banner nodes from any source, not just Shodan.
+
       Each page of 100 results consumes one Shodan query credit. Use --count to get
       the total (and any --facets) for free without ingesting anything.
 
@@ -174,12 +179,15 @@ commands:
 
         // List the available search filters and facets.
         slib.shodan.search --filters
+
+        // Free: count the US services presenting the same SSH banner.
+        inet:server=tcp://1.2.3.4:22 -> inet:banner | slib.shodan.search "country:US" --count
     cmdargs:
       - - query
         - type: str
           nargs: "?"
           default: ""
-          help: The Shodan search query.
+          help: The Shodan search query. AND'd with the banner hash of any inbound inet:banner nodes.
       - - --limit
         - type: int
           default: 100
@@ -208,6 +216,9 @@ commands:
         - default: false
           action: store_true
           help: Print the available search filters and facets and stop.
+    cmdinputs:
+      - form: inet:banner
+        help: Banners to search for by their Shodan banner hash.
 
   - name: slib.shodan.dns.domain
     perms:

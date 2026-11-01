@@ -49,6 +49,8 @@ function searchGenr(query, limit=(100), minify=(false), page=(1)) {
     }
 }
 
+// Calculate Shodan's banner hash for banner text. Local to the service, no API call.
+function bannerHash(text) { return($svc.bannerHash($text)) }
 function searchFacets() { return($svc.searchFacets(apikey=$userKey())) }
 function searchFilters() { return($svc.searchFilters(apikey=$userKey())) }
 function searchTokens(query) { return($svc.searchTokens($query, apikey=$userKey())) }

@@ -1,5 +1,6 @@
 """Pytests for the slib.shodan Storm package (commands, modules, modeling, and perms)."""
 
+import hashlib
 import pathlib
 import tomllib
 
@@ -8,7 +9,7 @@ import synapse.tests.utils as s_tests
 from shodansvc import __version__
 from shodansvc.defs import PKGDEFS, SVC_GUID, SVC_NAME
 
-from .fakeshodan import shodanSvc
+from .fakeshodan import HOST_SSH, SSH_KEY_B64, shodanSvc
 
 
 CMDS = tuple(cmd["name"] for cmd in PKGDEFS[0]["commands"])
@@ -221,6 +222,108 @@ class TestShodanStormHost(s_tests.SynTest):
             assert len(await core.nodes("inet:server=tcp://8.8.8.8:80")) == 1
             assert len(await core.nodes("inet:ipv6")) == 0
             assert len(await core.nodes("inet:dns:aaaa")) == 0
+
+
+class TestShodanStormSsh(s_tests.SynTest):
+    SSH_TEXT = f"ssh-rsa {''.join(SSH_KEY_B64.split())}\n"
+    SSH_SHA256 = hashlib.sha256(SSH_TEXT.encode()).hexdigest()
+    SERVER = "tcp://45.33.32.156:22"
+
+    async def test_ssh_key_servfile(self):
+        async with shodanSvc(self) as (core, svc, fake):
+            msgs = await core.stormlist("slib.shodan.host --ip 45.33.32.156")
+            self.stormHasNoErr(msgs)
+
+            nodes = await core.nodes(f"inet:server={self.SERVER} -> inet:servfile -> file:bytes")
+            assert len(nodes) == 1
+            file = nodes[0]
+            byts = self.SSH_TEXT.encode()
+            assert file.ndef[1] == f"sha256:{self.SSH_SHA256}"
+            assert file.get("size") == len(byts)
+            assert file.get("md5") == hashlib.md5(byts).hexdigest()
+            assert file.get("sha1") == hashlib.sha1(byts).hexdigest()
+            assert file.get("sha512") == hashlib.sha512(byts).hexdigest()
+            assert file.get("mime") == "text/plain"
+
+            # The key file is saved in the Axon, exactly as it would be on disk.
+            assert await core.axon.get(bytes.fromhex(self.SSH_SHA256)).__anext__() == byts
+
+            servfile = (await core.nodes("inet:servfile"))[0]
+            assert servfile.get(".seen") is not None
+            for node in (file, servfile):
+                assert len(await core.nodes(f"iden {node.iden()} <(seen)- meta:source +:name=shodan")) == 1
+
+            # The banner keeps Shodan's hash, and an identical key on another server is the same file.
+            banner = (await core.nodes(f"inet:server={self.SERVER} -> inet:banner"))[0]
+            assert await banner.getData("shodan:hash") == HOST_SSH["data"][0]["hash"]
+
+    async def test_ssh_key_no_axon_perm(self):
+        async with shodanSvc(self) as (core, svc, fake):
+            user = await core.auth.addUser("user")
+            await user.addRule((True, ("node",)))
+            await user.addRule((True, ("slib", "shodan", "user")))
+
+            msgs = await core.stormlist("slib.shodan.host --ip 45.33.32.156", opts={"user": user.iden})
+            self.stormHasNoErr(msgs)
+
+            # Without axon.upload the bytes aren't saved, but the file:bytes is still modeled.
+            assert len(await core.nodes(f"file:bytes=sha256:{self.SSH_SHA256} -> inet:servfile")) == 1
+            assert not await core.axon.has(bytes.fromhex(self.SSH_SHA256))
+
+    async def test_banner_hash(self):
+        async with shodanSvc(self) as (core, svc, fake):
+            await core.nodes("slib.shodan.host --ip 45.33.32.156")
+            shodanhash = HOST_SSH["data"][0]["hash"]
+
+            q = "$shodan = $lib.import(slib.shodan.lib) return($shodan.bannerHash($valu))"
+            assert await core.callStorm(q, opts={"vars": {"valu": "foo"}}) == -156908512
+
+            q = "$shodan = $lib.import(slib.shodan.lib) inet:banner return($shodan.bannerHash($node))"
+            assert await core.callStorm(q) == shodanhash
+
+            # Banners from other sources get the hash calculated from their text.
+            q = """
+                $shodan = $lib.import(slib.shodan.lib)
+                [ inet:banner=(tcp://1.2.3.4:22, $text) ]
+                return($shodan.bannerHash($node))
+            """
+            text = HOST_SSH["data"][0]["data"]
+            assert await core.callStorm(q, opts={"vars": {"text": text}}) == shodanhash
+
+            q = "$shodan = $lib.import(slib.shodan.lib) [ inet:fqdn=vertex.link ] return($shodan.bannerHash($node))"
+            msgs = await core.stormlist(q)
+            self.stormIsInWarn("Only inet:banner nodes have a banner hash", msgs)
+
+    async def test_search_banner(self):
+        async with shodanSvc(self) as (core, svc, fake):
+            await core.nodes("slib.shodan.host --ip 45.33.32.156")
+            shodanhash = HOST_SSH["data"][0]["hash"]
+
+            msgs = await core.stormlist(f"inet:server={self.SERVER} -> inet:banner | slib.shodan.search")
+            self.stormHasNoErr(msgs)
+            searches = [r for r in fake.requests if r["path"] == "/api/shodan/host/search"]
+            assert [r["query"]["query"] for r in searches] == [f"hash:{shodanhash}"]
+            nodes = [m[1][0] for m in msgs if m[0] == "node"]
+            assert nodes == [("inet:ipv4", 134744072), ("inet:ipv6", "2001:4860:4860::8888")]
+
+            msgs = await core.stormlist(f'inet:server={self.SERVER} -> inet:banner | slib.shodan.search "country:US"')
+            self.stormHasNoErr(msgs)
+            assert fake.last("/api/shodan/host/search")["query"]["query"] == f"hash:{shodanhash} country:US"
+            searches = [r for r in fake.requests if r["path"] == "/api/shodan/host/search"]
+            assert len(searches) == 2
+
+            msgs = await core.stormlist(f"inet:server={self.SERVER} -> inet:banner | slib.shodan.search --count")
+            self.stormHasNoErr(msgs)
+            self.stormIsInPrint(f"Total results: 1234 (hash:{shodanhash})", msgs)
+            assert fake.last("/api/shodan/host/count")["query"]["query"] == f"hash:{shodanhash}"
+            assert not [m for m in msgs if m[0] == "node"]
+            assert len([r for r in fake.requests if r["path"] == "/api/shodan/host/search"]) == 2
+
+            # Unsupported forms are skipped, and without banners the query runs on its own.
+            msgs = await core.stormlist('[ inet:fqdn=vertex.link ] | slib.shodan.search "nginx"')
+            self.stormIsInWarn("The node form inet:fqdn is not supported", msgs)
+            assert fake.last("/api/shodan/host/search")["query"]["query"] == "nginx"
+            assert len([r for r in fake.requests if r["path"] == "/api/shodan/host/search"]) == 3
 
 
 class TestShodanStormSearch(s_tests.SynTest):

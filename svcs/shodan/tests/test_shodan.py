@@ -16,6 +16,9 @@ from shodansvc.client import (
     normParams,
 )
 
+import base64
+import hashlib
+
 from .fakeshodan import (
     FORM_ROUTES,
     CVE_LOG4SHELL,
@@ -23,7 +26,9 @@ from .fakeshodan import (
     EUVD_NO_CVE,
     GHSA_LOG4SHELL,
     HOST_8888,
+    HOST_SSH,
     INTERNETDB_1111,
+    SSH_KEY_B64,
     FakeShodan,
     shodanSvc,
 )
@@ -360,6 +365,63 @@ class TestNorm(s_tests.SynTest):
         )
         assert len(banner["data"]) == norm.MAX_BANNER_LEN
         assert banner["transport"] == "tcp"
+        # The hash is of the full text, the way Shodan calculates it, not the truncated text.
+        full = "x" * (norm.MAX_BANNER_LEN + 10)
+        assert banner["hash"] == norm.bannerHash(full)
+        assert banner["hash"] != norm.bannerHash(banner["data"])
+
+    def test_banner_hash(self):
+        # Expected values are from mmh3.hash(), which Shodan's banner hash matches.
+        for text, expected in (
+            ("", 0),
+            ("a", 1009084850),
+            ("foo", -156908512),
+            ("Hello, world!", -1070186941),
+            ("SSH-2.0-OpenSSH_8.9\r\n", -947078635),
+        ):
+            assert norm.bannerHash(text) == expected, text
+
+        # A real banner and the hash Shodan returned for it.
+        banner = HOST_SSH["data"][0]
+        assert norm.bannerHash(banner["data"]) == banner["hash"]
+
+        # Shodan's own hash is kept, otherwise it is calculated.
+        assert norm.normBanner({"data": "foo", "hash": 123})["hash"] == 123
+        assert norm.normBanner({"data": "foo"})["hash"] == -156908512
+        assert norm.normBanner({})["hash"] is None
+
+    def test_norm_ssh_key(self):
+        banner = norm.normBanner(HOST_SSH["data"][0])
+        key = banner["ssh"]["pubkey"]
+
+        b64 = "".join(SSH_KEY_B64.split())
+        text = f"ssh-rsa {b64}\n"
+        byts = text.encode()
+        assert key == {
+            "text": text,
+            "algo": "ssh-rsa",
+            "size": len(byts),
+            "md5": hashlib.md5(byts).hexdigest(),
+            "sha1": hashlib.sha1(byts).hexdigest(),
+            "sha256": hashlib.sha256(byts).hexdigest(),
+            "sha512": hashlib.sha512(byts).hexdigest(),
+        }
+
+        # Shodan's fingerprint is the MD5 of the key blob, so the base64 round trips.
+        fprint = hashlib.md5(base64.b64decode(b64)).hexdigest()
+        assert ":".join(fprint[i : i + 2] for i in range(0, 32, 2)) == HOST_SSH["data"][0]["ssh"]["fingerprint"]
+
+        # The algorithm comes from the key blob itself, over Shodan's "type".
+        assert norm.normSshKey({"type": "ssh-dss", "key": SSH_KEY_B64})["algo"] == "ssh-rsa"
+
+        # Falls back to Shodan's "type" when the blob doesn't start with an algorithm.
+        junk = base64.b64encode(b"\xff\xff\xff\xffjunk").decode()
+        assert norm.normSshKey({"type": "ssh-ed25519", "key": junk})["algo"] == "ssh-ed25519"
+
+        assert norm.normSshKey({"key": junk}) is None
+        assert norm.normSshKey({"type": "ssh-rsa", "key": "not base64!"}) is None
+        assert norm.normSshKey({"type": "ssh-rsa"}) is None
+        assert norm.normSshKey({"type": "ssh-rsa", "key": "  \n "}) is None
 
     def test_norm_internetdb(self):
         host = norm.normInternetDb(INTERNETDB_1111)
@@ -658,6 +720,9 @@ class TestShodanSvc(s_tests.SynTest):
                 retn = await prox.host("10.0.0.1")
                 assert retn["status"] is False
                 assert "No information" in retn["mesg"]
+
+                retn = await prox.bannerHash("foo")
+                assert retn == {"status": True, "mesg": "", "data": -156908512}
 
                 retn = await prox.setApiKey("newkey")
                 assert retn["status"] is True

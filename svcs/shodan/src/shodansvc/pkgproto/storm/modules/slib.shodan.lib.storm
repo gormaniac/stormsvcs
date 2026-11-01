@@ -127,6 +127,29 @@ function countCves(cpe23=$lib.null, product=$lib.null, kev=(false), start=$lib.n
     return($retn.data.total)
 }
 
+// Get Shodan's banner hash for an inet:banner node or banner text. Search for banners
+// with the same text using the "hash:<n>" search filter. Returns the hash, or null.
+//
+// Shodan's hash of the full banner is saved on inet:banner nodes made by slib.shodan, since
+// very long banners are truncated in the node. Otherwise the hash is calculated from the text.
+function bannerHash(banner) {
+    $text = $banner
+    if ($lib.vars.type($banner) = "node") {
+        if ($banner.form() != "inet:banner") {
+            $lib.warn("slib.shodan: Only inet:banner nodes have a banner hash, not {form}.", form=$banner.form())
+            return($lib.null)
+        }
+        $texthash = $banner.data.get("shodan:hash")
+        if ($texthash != $lib.null) { return($texthash) }
+        $text = $banner.props.text
+    }
+    if ($text = $lib.null) { return($lib.null) }
+
+    $retn = $priv.bannerHash($lib.cast(str, $text))
+    if $util.failed($retn, "Calculating the banner hash") { return($lib.null) }
+    return($retn.data)
+}
+
 // Enrich any supported node with the best matching Shodan API. Returns a list of the resulting nodes.
 function enrich(node) {
     switch $node.form() {
