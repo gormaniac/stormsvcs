@@ -158,6 +158,13 @@ def basename(path: str | None) -> str | None:
     return path.replace("\\", "/").rsplit("/", 1)[-1] or None
 
 
+def rrType(rtype: str | None) -> str | None:
+    """A DNS record type without its class (Triage reports ex. "IN A" for an A record)."""
+
+    parts = (rtype or "").split()
+    return parts[-1].upper() if parts else None
+
+
 def uniq(items) -> list:
     """The unique, truthy, items of an iterable, in order."""
 
@@ -375,19 +382,30 @@ def normTask(name: str, report: dict) -> dict:
         p.get("procid") for p in report.get("processes") or [] if p.get("procid") is not None
     }
 
+    # The file this task ran (for archives, the member that was picked).
+    task = report.get("task") or {}
+    target = (
+        task.get("sha256") or (report.get("sample") or {}).get("sha256") or ""
+    ).lower() or None
+    tname = (basename(task.get("target")) or "").lower()
+
     procs = []
     for proc in report.get("processes") or []:
         if proc.get("procid") is None:
             continue
         parent = proc.get("procid_parent")
+        image = proc.get("image")
         procs.append(
             {
                 "procid": proc["procid"],
                 "parent": parent if parent in procids else None,
                 "pid": proc.get("pid"),
                 "cmd": cmdLine(proc.get("cmd")),
-                "path": proc.get("image"),
+                "path": image,
+                # Triage sets orig on every process in the sample's tree (or none of them),
+                # so the processes that ran the task's file are found by their image's name.
                 "orig": bool(proc.get("orig")),
+                "sample": bool(tname) and (basename(image) or "").lower() == tname,
             }
         )
 
@@ -456,13 +474,13 @@ def normTask(name: str, report: dict) -> dict:
                         "flow": flow,
                         "index": req.get("index"),
                         "name": (lower(quest["name"]) or "").rstrip(".") or None,
-                        "type": (quest.get("type") or "").upper() or None,
+                        "type": rrType(quest.get("type")),
                         "server": servers.get(flow),
                     }
                 )
         if req.get("dns_response"):
             for ans in req["dns_response"].get("answers") or []:
-                rtype = (ans.get("type") or "").lower()
+                rtype = (rrType(ans.get("type")) or "").lower()
                 if rtype in ("a", "aaaa", "cname") and ans.get("name") and ans.get("value"):
                     answers.append({"type": rtype, "name": ans["name"], "value": ans["value"]})
         if req.get("http_request"):
@@ -517,12 +535,6 @@ def normTask(name: str, report: dict) -> dict:
                 "procid": dump.get("procid") if dump.get("procid") in procids else None,
             }
         )
-
-    # The file this task ran (for archives, the member that was picked).
-    task = report.get("task") or {}
-    target = (
-        task.get("sha256") or (report.get("sample") or {}).get("sha256") or ""
-    ).lower() or None
 
     return {
         "name": name,

@@ -1,5 +1,6 @@
 """Pytests for the slib.hatching service's Python code (HatchingSvc, its Telepath API, and norm)."""
 
+import copy
 import pathlib
 import tomllib
 
@@ -61,6 +62,7 @@ class TestNorm(s_tests.SynTest):
         assert norm.ipVersion("::1") == "ipv6" and norm.ipVersion("a.com") is None
         assert norm.basename("C:\\a\\b.exe") == "b.exe" and norm.basename(None) is None
         assert norm.cmdLine(["a", "b"]) == "a b" and norm.cmdLine("") is None
+        assert norm.rrType("IN A") == "A" and norm.rrType("cname") == "CNAME" and norm.rrType("") is None
 
     def test_norm_sample(self):
         tasks = {"behavioral1": ft.TASK_REPORT}
@@ -110,11 +112,11 @@ class TestNorm(s_tests.SynTest):
 
         (task,) = data["tasks"]
         assert task["name"] == "behavioral1" and task["target"] == ft.SAMPLE_SHA256
-        assert task["procs"][1] == {"procid": 2, "parent": 1, "pid": 3120, "orig": False,
+        assert task["procs"][1] == {"procid": 2, "parent": 1, "pid": 3120, "orig": False, "sample": False,
                                     "cmd": "C:\\Windows\\System32\\cmd.exe /c whoami",
                                     "path": "C:\\Windows\\System32\\cmd.exe"}
         # Parents that weren't reported are dropped.
-        assert task["procs"][0]["parent"] is None and task["procs"][0]["orig"]
+        assert task["procs"][0]["parent"] is None and task["procs"][0]["sample"]
         assert task["flows"][0] == {
             "id": 1, "server": "tcp://198.51.100.7:443", "client": "tcp://10.127.0.5:49712",
             "proto": "tcp", "ip": "198.51.100.7", "ipver": "ipv4", "port": 443, "procid": 1,
@@ -139,6 +141,25 @@ class TestNorm(s_tests.SynTest):
 
         # Without task reports there are no tasks.
         assert norm.normSample(ft.SAMPLE, ft.OVERVIEW)["tasks"] == []
+
+    def test_norm_live_task_shape(self):
+        # The live API reports DNS types with their class ("IN A"), and sets orig on every
+        # process in the sample's tree, or on none of them.
+        report = copy.deepcopy(ft.TASK_REPORT)
+        for proc in report["processes"]:
+            proc["orig"] = True
+        for req in report["network"]["requests"]:
+            for key in ("dns_request", "dns_response"):
+                for rec in (req.get(key) or {}).get("questions", []) + (req.get(key) or {}).get("answers", []):
+                    rec["type"] = f"IN {rec['type']}"
+        task = norm.normTask("behavioral1", report)
+        assert [p["sample"] for p in task["procs"]] == [True, False]
+        assert [d["type"] for d in task["dns"]] == ["A"]
+        assert task["answers"] == [{"type": "a", "name": "evil.example.com", "value": "198.51.100.7"}]
+
+        for proc in report["processes"]:
+            proc["orig"] = False
+        assert [p["sample"] for p in norm.normTask("behavioral1", report)["procs"]] == [True, False]
 
     def test_norm_archive_and_configs(self):
         # An archive sample with two members, one of them a known family.

@@ -300,7 +300,7 @@ function taskNodes(snode, data, task) {
 
 function procNode(data, task, proc, sandbox, exe) {
     $pexe = $lib.null
-    if $proc.orig { $pexe = $exe }
+    if $proc.sample { $pexe = $exe }
     [ it:exec:proc=$taskGuid($data, $task, proc, $proc.procid)
         :sandbox:file?=$sandbox :exe?=$pexe :pid?=$proc.pid :cmd?=$proc.cmd :path?=$proc.path
         :src:proc?=$taskGuid($data, $task, proc, $proc.parent) ]
