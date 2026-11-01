@@ -76,6 +76,7 @@ need the normal node permissions for the nodes the commands create.
 | `slib.shodan.enrich` | Enrich any supported node with the best API: IPs → host, `inet:fqdn` → DNS, `risk:vuln`/`it:sec:cve` → CVEDB, `it:sec:cpe` → CVEs. |
 | `slib.shodan.search` | Search Shodan, model each banner, and yield the IPs. `--count` and `--facets` are free, `--tokens` explains a query, `--filters` lists filters/facets. Inbound `inet:banner` nodes are searched for by their banner hash (`hash:<n>`), AND'd with any query. |
 | `slib.shodan.stream` | Read banners from the Streaming API (`banners`, `asn`, `countries`, `ports`, `tags`, `vulns`, `custom`, `alert`) for `--limit` banners or `--timeout` seconds. |
+| `slib.shodan.hash` | Print Shodan's banner hash (`hash:<n>`) for `inet:banner` nodes or `--text`. Local only, no API calls. |
 | `slib.shodan.dns.domain` | Model every DNS record and subdomain Shodan knows for a domain. |
 | `slib.shodan.dns.lookup` | Resolve `inet:fqdn`s and reverse-resolve IPs. |
 | `slib.shodan.cve` | Model CVEDB details (CVSS, KEV, references, linked GHSA/EUVD IDs) on `risk:vuln`s. Accepts CVE, GHSA, and EUVD IDs. Search by `--cpe`/`--product` with `--kev`, `--epss`, `--start`, `--end`, `--count`. |
@@ -131,8 +132,8 @@ $vulns = $shodan.cves(product=log4j, kev=(true))
 |---|---|
 | IP, ASN, org, location | `inet:ipv4`/`inet:ipv6` (`:asn`, `:latlong`, `:loc`), `inet:asn:owner` → `ou:org` |
 | Hostnames | `inet:dns:a`/`inet:dns:aaaa` |
-| Services and banners | `inet:server`, `inet:banner` (Shodan's banner hash in the `shodan:hash` node data) |
-| SSH host keys | `file:bytes` of the key as OpenSSH saves it (`<algo> <base64 key>\n`), served by the server via `inet:servfile`. The bytes are saved in the Axon for users with `axon.upload`. |
+| Services and banners | `inet:server`, `inet:banner` (the full banner text, never truncated) |
+| SSH host keys | `file:bytes` of the key as OpenSSH saves it (`<algo> <base64 key>\n`), served by the server via `inet:servfile`, both tagged `#rep.shodan.banner`. The bytes are saved in the Axon for users with `axon.upload`. |
 | Products and CPEs | `it:prod:softver` (`:cpe`, `:name`, `:vers`), with `inet:server -(uses)> it:prod:softver` |
 | Vulnerabilities | `risk:vuln` (via `$lib.gen.vulnByCve`), `risk:vulnerable` for the IP and the server |
 | TLS certificates | `crypto:x509:cert` (deconflicted by `:sha256`), `inet:tls:servercert` |
@@ -231,9 +232,10 @@ Notes from verifying the service against the live APIs (2026-10):
 - **Banner hash.** Every banner has a `hash`, a signed 32-bit MurmurHash3 (x86_32, seed 0, the
   same as `mmh3.hash()`) of the banner's full `data`. This was checked against real banners from
   several modules (ssh, http, https, ntp), and `hash:<n>` searches work. `norm.bannerHash()`
-  calculates it, so any `inet:banner` can be searched for, and `$shodan.bannerHash()` returns it
-  in Storm. Banners longer than 16 KB are truncated in `inet:banner:text`, which is why
-  Shodan's own hash is also kept in node data.
+  calculates it, so any `inet:banner` can be searched for (`slib.shodan.hash`,
+  `$shodan.bannerHash()`, or pipe it to `slib.shodan.search`). Banners are stored whole, even
+  very long ones (Synapse handles multi-MB `inet:banner:text` fine), so the hash of the node's
+  text always matches Shodan's.
 - **SSH keys.** `ssh.key` is the base64 key blob with newlines every 76 characters. Its MD5 is
   Shodan's `ssh.fingerprint`. The algorithm is read from the blob, falling back to `ssh.type`.
 - **Host history.** `GET /shodan/host/{ip}?history=true` returned a 404 ("No information

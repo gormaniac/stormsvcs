@@ -220,6 +220,32 @@ commands:
       - form: inet:banner
         help: Banners to search for by their Shodan banner hash.
 
+  - name: slib.shodan.hash
+    perms:
+      - [ slib, shodan, user ]
+    descr: |
+      Calculate Shodan's banner hash for inet:banner nodes (or banner text), and print the
+      "hash:<n>" search filter that finds every service presenting the exact same banner.
+
+      Runs locally, no Shodan API calls or query credits. The hash is a signed 32-bit MurmurHash3
+      of the banner text (the same as Python's mmh3.hash()), so it works for banners from any
+      source. Pipe inet:banner nodes to slib.shodan.search to run the hash search directly.
+
+      Examples:
+
+        inet:server=tcp://1.2.3.4:22 -> inet:banner | slib.shodan.hash
+
+        slib.shodan.hash --text "SSH-2.0-OpenSSH_8.9\r\n"
+    cmdargs:
+      - - --text
+        - type: str
+          action: append
+          default: []
+          help: Banner text to hash instead of using the inbound nodes. May be used multiple times.
+    cmdinputs:
+      - form: inet:banner
+        help: Banners to hash.
+
   - name: slib.shodan.dns.domain
     perms:
       - [ slib, shodan, user ]

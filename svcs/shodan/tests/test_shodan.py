@@ -359,16 +359,12 @@ class TestNorm(s_tests.SynTest):
         assert dns["cert"] is None
         assert dns["http"] is None
 
-    def test_norm_banner_truncates(self):
-        banner = norm.normBanner(
-            {"ip_str": "1.2.3.4", "port": 1, "data": "x" * (norm.MAX_BANNER_LEN + 10)}
-        )
-        assert len(banner["data"]) == norm.MAX_BANNER_LEN
+    def test_norm_banner_not_truncated(self):
+        # Long banners are kept whole, so a hash of the inet:banner:text matches Shodan's hash.
+        text = "x" * 100_000 + "\r\n"
+        banner = norm.normBanner({"ip_str": "1.2.3.4", "port": 1, "data": text})
+        assert banner["data"] == text
         assert banner["transport"] == "tcp"
-        # The hash is of the full text, the way Shodan calculates it, not the truncated text.
-        full = "x" * (norm.MAX_BANNER_LEN + 10)
-        assert banner["hash"] == norm.bannerHash(full)
-        assert banner["hash"] != norm.bannerHash(banner["data"])
 
     def test_banner_hash(self):
         # Expected values are from mmh3.hash(), which Shodan's banner hash matches.
@@ -384,11 +380,6 @@ class TestNorm(s_tests.SynTest):
         # A real banner and the hash Shodan returned for it.
         banner = HOST_SSH["data"][0]
         assert norm.bannerHash(banner["data"]) == banner["hash"]
-
-        # Shodan's own hash is kept, otherwise it is calculated.
-        assert norm.normBanner({"data": "foo", "hash": 123})["hash"] == 123
-        assert norm.normBanner({"data": "foo"})["hash"] == -156908512
-        assert norm.normBanner({})["hash"] is None
 
     def test_norm_ssh_key(self):
         banner = norm.normBanner(HOST_SSH["data"][0])

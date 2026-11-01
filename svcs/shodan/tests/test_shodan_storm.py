@@ -6,7 +6,7 @@ import tomllib
 
 import synapse.tests.utils as s_tests
 
-from shodansvc import __version__
+from shodansvc import __version__, norm
 from shodansvc.defs import PKGDEFS, SVC_GUID, SVC_NAME
 
 from .fakeshodan import HOST_SSH, SSH_KEY_B64, shodanSvc
@@ -34,7 +34,7 @@ class TestShodanStormPkg(s_tests.SynTest):
         assert PKGDEFS[0]["version"] == __version__
 
     async def test_pkg(self):
-        assert len(CMDS) == 29
+        assert len(CMDS) == 30
 
         async with shodanSvc(self) as (core, svc, fake):
             msgs = await core.stormlist("service.list")
@@ -253,9 +253,27 @@ class TestShodanStormSsh(s_tests.SynTest):
             for node in (file, servfile):
                 assert len(await core.nodes(f"iden {node.iden()} <(seen)- meta:source +:name=shodan")) == 1
 
-            # The banner keeps Shodan's hash, and an identical key on another server is the same file.
+            # Both are tagged as extracted from a Shodan banner.
+            for node in (file, servfile):
+                assert "rep.shodan.banner" in node.tags
+
+            # Nothing is stored on the banner, its hash is always calculated from the text.
             banner = (await core.nodes(f"inet:server={self.SERVER} -> inet:banner"))[0]
-            assert await banner.getData("shodan:hash") == HOST_SSH["data"][0]["hash"]
+            assert banner.get("text") == HOST_SSH["data"][0]["data"]
+            assert not [d async for d in banner.iterData()]
+
+    async def test_ssh_key_tag_prefix(self):
+        async with shodanSvc(self) as (core, svc, fake):
+            await core.nodes("slib.shodan.admin.tags --enable --prefix my.shodan")
+            await core.nodes("slib.shodan.host --ip 45.33.32.156")
+            assert len(await core.nodes("file:bytes#my.shodan.banner")) == 1
+            assert len(await core.nodes("inet:servfile#my.shodan.banner")) == 1
+
+            await core.nodes("slib.shodan.admin.tags --disable")
+            await core.nodes("file:bytes inet:servfile | [ -#my ]")
+            await core.nodes("slib.shodan.host --ip 45.33.32.156")
+            assert not (await core.nodes("file:bytes"))[0].tags
+            assert not (await core.nodes("inet:servfile"))[0].tags
 
     async def test_ssh_key_no_axon_perm(self):
         async with shodanSvc(self) as (core, svc, fake):
@@ -290,9 +308,55 @@ class TestShodanStormSsh(s_tests.SynTest):
             text = HOST_SSH["data"][0]["data"]
             assert await core.callStorm(q, opts={"vars": {"text": text}}) == shodanhash
 
+            # Long banners aren't truncated, so the hash of the node still matches Shodan's.
+            longtext = "HTTP/1.1 200 OK\r\n" + "X-Pad: " + "a" * 50_000 + "\r\n\r\n"
+            fake.routes[("GET", "/api/shodan/host/192.0.2.10")] = (
+                200,
+                {
+                    "ip_str": "192.0.2.10",
+                    "data": [
+                        {
+                            "ip_str": "192.0.2.10",
+                            "port": 80,
+                            "data": longtext,
+                            "hash": norm.bannerHash(longtext),
+                        }
+                    ],
+                },
+            )
+            await core.nodes("slib.shodan.host --ip 192.0.2.10")
+            q = """
+                $shodan = $lib.import(slib.shodan.lib)
+                inet:server=tcp://192.0.2.10:80 -> inet:banner
+                return($shodan.bannerHash($node))
+            """
+            assert await core.callStorm(q) == norm.bannerHash(longtext)
+
             q = "$shodan = $lib.import(slib.shodan.lib) [ inet:fqdn=vertex.link ] return($shodan.bannerHash($node))"
             msgs = await core.stormlist(q)
             self.stormIsInWarn("Only inet:banner nodes have a banner hash", msgs)
+
+    async def test_hash_cmd(self):
+        async with shodanSvc(self) as (core, svc, fake):
+            await core.nodes("slib.shodan.host --ip 45.33.32.156")
+            shodanhash = HOST_SSH["data"][0]["hash"]
+
+            msgs = await core.stormlist("inet:banner | slib.shodan.hash")
+            self.stormHasNoErr(msgs)
+            self.stormIsInPrint(f"hash:{shodanhash} (the banner from {self.SERVER})", msgs)
+            # The banner passes through.
+            assert [m[1][0][0] for m in msgs if m[0] == "node"] == ["inet:banner"]
+
+            msgs = await core.stormlist('slib.shodan.hash --text foo --text "Hello, world!"')
+            self.stormHasNoErr(msgs)
+            self.stormIsInPrint("hash:-156908512", msgs)
+            self.stormIsInPrint("hash:-1070186941", msgs)
+
+            msgs = await core.stormlist("[ inet:fqdn=vertex.link ] | slib.shodan.hash")
+            self.stormIsInWarn("The node form inet:fqdn is not supported", msgs)
+
+            # Local only, no Shodan API calls.
+            assert not [r for r in fake.requests if r["path"] != "/api/shodan/host/45.33.32.156"]
 
     async def test_search_banner(self):
         async with shodanSvc(self) as (core, svc, fake):

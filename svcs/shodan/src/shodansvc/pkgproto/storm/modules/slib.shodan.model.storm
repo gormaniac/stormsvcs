@@ -70,18 +70,16 @@ function serverNode(ip, port, transport=tcp, time=$lib.null) {
     return($seen($node, $time))
 }
 
-function bannerNode(server, text, texthash=$lib.null, time=$lib.null) {
+function bannerNode(server, text, time=$lib.null) {
     [ inet:banner?=($server, $text) ]
-    // Shodan's hash of the full banner text, which is truncated in the node if it is very long.
-    // See slib.shodan.lib's bannerHash() for how it is used.
-    if ($texthash != $lib.null) { $node.data.set("shodan:hash", $texthash) }
     return($seen($node, $time))
 }
 
 // Model an SSH server's public host key as a file the server hosts (inet:servfile).
 // The file is the key as OpenSSH saves it to disk, "<algo> <base64 key>\n" (see
 // shodansvc.norm.normSshKey), so it matches .pub and keyscan output by hash.
-function sshKeyNode(server, key, time=$lib.null) {
+// The file:bytes and inet:servfile are tagged <prefix>.banner, since they're extracted from a banner.
+function sshKeyNode(server, key, time=$lib.null, tagPrefix=$lib.null) {
     // Only users allowed to upload to the Axon save the bytes, the file:bytes node is made either way.
     if $lib.user.allowed(axon.upload) {
         try { $lib.axon.put($key.text.encode()) }
@@ -99,9 +97,11 @@ function sshKeyNode(server, key, time=$lib.null) {
         :mime=text/plain
     ]
     $file = $seen($node, $time)
+    $applyTags($file, $tagPrefix, (banner,))
 
     [ inet:servfile=($server.value(), $file.value()) ]
-    $seen($node, $time)
+    $servfile = $seen($node, $time)
+    $applyTags($servfile, $tagPrefix, (banner,))
     return($file)
 }
 
@@ -206,9 +206,9 @@ function banner(b, tagPrefix=$lib.null) {
     $ipnode = $ipNode($b.ip, $b.timestamp)
     if ($b.asn and $ipnode) { $setAsn($ipnode, $b.asn, $b.org) }
 
-    if $b.data { $bannerNode($srv.repr(), $b.data, $b.hash, $b.timestamp) }
+    if $b.data { $bannerNode($srv.repr(), $b.data, $b.timestamp) }
 
-    if ($b.ssh and $b.ssh.pubkey) { $sshKeyNode($srv, $b.ssh.pubkey, $b.timestamp) }
+    if ($b.ssh and $b.ssh.pubkey) { $sshKeyNode($srv, $b.ssh.pubkey, $b.timestamp, $tagPrefix) }
 
     // See shodansvc.norm.normSoftvers for how CPEs are paired with the product/version.
     for $sv in $b.softvers { $softverNode($srv, $sv.cpe, $sv.product, $sv.version) }

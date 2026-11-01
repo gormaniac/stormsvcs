@@ -11,9 +11,6 @@ import hashlib
 import re
 from typing import Any
 
-# The max length of banner text stored in an inet:banner node.
-MAX_BANNER_LEN = 16384
-
 
 def _ts(valu: str | None) -> str | None:
     """Make a Shodan timestamp parseable by Synapse's time type.
@@ -319,13 +316,9 @@ def normBanner(banner: dict) -> dict:
     http = banner.get("http") or {}
     ssh = banner.get("ssh") or {}
 
+    # Never truncated, so the inet:banner:text is Shodan's exact data and bannerHash() of it
+    # matches Shodan's banner hash.
     text = banner.get("data") or ""
-    # Shodan's hash covers the full text, so take it (or calculate it) before truncating.
-    texthash = banner.get("hash")
-    if texthash is None and text:
-        texthash = bannerHash(text)
-    if len(text) > MAX_BANNER_LEN:
-        text = text[:MAX_BANNER_LEN]
 
     cpes = normCpes(banner.get("cpe23")) or normCpes(banner.get("cpe"))
 
@@ -344,7 +337,6 @@ def normBanner(banner: dict) -> dict:
         "cpes": cpes,
         "softvers": normSoftvers(cpes, banner.get("product"), banner.get("version")),
         "data": text,
-        "hash": texthash,
         "hostnames": [h.lower() for h in _list(banner.get("hostnames"))],
         "domains": [d.lower() for d in _list(banner.get("domains"))],
         "tags": _list(banner.get("tags")),
