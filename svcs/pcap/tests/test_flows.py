@@ -552,3 +552,127 @@ class TestOwnEvents:
         assert len(rec["_eve"]) == 3
         assert p_flows._ownEvents(kept, mine, []) is kept
 
+
+
+def _pcapRecords(path) -> tuple[tuple, list[tuple]]:
+    """A nanosecond pcap's header and its (sec, nsec, incl_len, orig_len, data) records."""
+
+    with open(path, "rb") as fd:
+        buf = fd.read()
+    header = struct.unpack_from("<IHHiIII", buf, 0)
+    recs, offs = [], 24
+    while offs < len(buf):
+        sec, nsec, incl, orig = struct.unpack_from("<IIII", buf, offs)
+        recs.append((sec, nsec, incl, orig, buf[offs + 16 : offs + 16 + incl]))
+        offs += 16 + incl
+    return header, recs
+
+
+class TestSplitLinktypes:
+    """pcapsvc.flows.splitLinktypes, the per link type pcaps libpcap based engines read."""
+
+    def frame(self, sport: int) -> bytes:
+        return g.eth(g.udp("10.0.0.1", sport, "10.0.0.2", 53, b"x"))
+
+    def test_interface_without_packets(self, tmp_path):
+        # libpcap rejects a pcapng on an IDB of another link type, even one with no packets.
+        path = tmp_path / "x.pcapng"
+        path.write_bytes(
+            g.shb() + g.idb(1) + g.idb(113)
+            + g.epb(0, g.usec(0), self.frame(1000)) + g.epb(0, g.usec(1), self.frame(1001))
+        )
+        parts = p_flows.splitLinktypes(str(path), str(tmp_path))
+        assert parts is not None
+        assert [(p.rsplit("/", 1)[-1], nums) for p, nums in parts] == [("linktype-1.pcap", [1, 2])]
+
+    def test_pcap_stops_at_header(self, tmp_path, monkeypatch):
+        # A classic pcap has one link type, its packets aren't all read to find that out.
+        path = tmp_path / "x.pcap"
+        path.write_bytes(g.pcap([(i, self.frame(1000 + i)) for i in range(50)]))
+        seen = []
+        orig = p_flows.readPackets
+
+        def counting(fd, state=None):
+            for pkt in orig(fd, state):
+                seen.append(pkt.num)
+                yield pkt
+
+        monkeypatch.setattr(p_flows, "readPackets", counting)
+        assert p_flows.splitLinktypes(str(path), str(tmp_path)) is None
+        assert seen == [1]
+
+    def test_clamps(self, tmp_path):
+        # Timestamps a pcap record can't hold, and packets over libpcap's max snaplen.
+        big = self.frame(1002) + b"\x00" * (p_flows.SPLIT_SNAPLEN + 100)
+        future = (2**33) * 1_000_000  # Microseconds, past 2106.
+        path = tmp_path / "x.pcapng"
+        path.write_bytes(
+            g.shb()
+            # Interface 0 is offset back before the epoch.
+            + g.idb(1, tsoffset=-2 * g.BASE) + g.idb(113)
+            + g.epb(0, g.usec(0), self.frame(1000))
+            + g.epb(1, future, b"\x00" * 16 + self.frame(1001)[14:])
+            + g.epb(0, g.usec(2), big)
+        )
+        parts = dict((p.rsplit("/", 1)[-1], (p, nums)) for p, nums in
+                     p_flows.splitLinktypes(str(path), str(tmp_path)))
+        assert {k: v[1] for k, v in parts.items()} == {"linktype-1.pcap": [1, 3],
+                                                       "linktype-113.pcap": [2]}
+
+        header, recs = _pcapRecords(parts["linktype-1.pcap"][0])
+        assert header == (0xA1B23C4D, 2, 4, 0, 0, p_flows.SPLIT_SNAPLEN, 1)
+        # Before the epoch is the epoch, the big packet is cut at the snaplen (its original
+        # length is kept).
+        assert recs[0][:2] == (0, 0)
+        assert recs[1][2:4] == (p_flows.SPLIT_SNAPLEN, len(big))
+        assert recs[1][4] == big[: p_flows.SPLIT_SNAPLEN]
+        _, recs = _pcapRecords(parts["linktype-113.pcap"][0])
+        assert recs[0][:2] == (2**32 - 1, 999_999_999)
+
+        # The parts are readable captures.
+        for path, nums in parts.values():
+            with open(path, "rb") as fd:
+                _, summary = p_flows.analyze(fd)
+            assert summary["packets"] == len(nums) and not summary["truncated"]
+
+
+class TestMatchLoose:
+    """pcapsvc.flows.matchLoose, engine records without a frame number."""
+
+    def flow(self, iden: str, start: int, last: int, vlans=()) -> dict:
+        return {"iden": iden, "community_id": "1:x", "time": start, "last": last,
+                "vlans": list(vlans)}
+
+    def match(self, flows, tick, rec=None) -> str:
+        matched, unmatched = p_flows.matchLoose(flows, [("1:x", tick, "eve", rec or {})])
+        assert unmatched == 0
+        (iden,) = matched
+        return iden
+
+    def test_reused_tuple(self):
+        # A reused 5-tuple: the old connection ends at 10s, the new one runs 10.1s to 70s.
+        flows = [self.flow("old", 0, 10_000), self.flow("new", 10_100, 70_000)]
+        # The new connection's own records (ex. its flow event at its start), even within a
+        # second of the old one's end.
+        assert self.match(flows, 10_100) == "new"
+        assert self.match(flows, 40_000) == "new"
+        assert self.match(flows, 5_000) == "old"
+        # Between them (neither active), within a second: the closest end.
+        assert self.match(flows, 10_050) == "old"
+        # After both (ex. logged at the end of the capture): the one that just ended.
+        assert self.match(flows, 70_500) == "new"
+        # No time: the first.
+        assert self.match(flows, None) == "old"
+
+    def test_vlans(self):
+        flows = [self.flow("tagged", 0, 1000, [10]), self.flow("untagged", 0, 1000)]
+        # Suricata leaves vlan out of EVE records of untagged traffic.
+        assert self.match(flows, 500, {"event_type": "flow"}) == "untagged"
+        assert self.match(flows, 500, {"event_type": "flow", "vlan": [10]}) == "tagged"
+        # Snort's alert_json has a vlan, 0 when untagged.
+        assert self.match(flows, 500, {"gid": 1, "vlan": 0}) == "untagged"
+        assert self.match(flows, 500, {"gid": 1, "vlan": 10}) == "tagged"
+        # A VLAN no flow has doesn't drop the record.
+        assert self.match(flows, 500, {"event_type": "flow", "vlan": [99]}) in ("tagged", "untagged")
+        assert p_flows._recVlans({"gid": 1}) is None
+        assert p_flows._recVlans({"vlan": ["x"]}) is None
