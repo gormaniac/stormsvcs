@@ -103,6 +103,40 @@ class TestIpApiStorm(s_tests.SynTest):
             assert len(nodes) == 1
             assert nodes[0].get("asn") is not None
 
+    async def test_cmd_query_place_names(self):
+        async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
+
+            async def fake_query(ipaddr):
+                return dict(SUCCESS_DATA), {}
+
+            with mock.patch.object(svc, "_query", fake_query):
+                msgs = await core.stormlist(f"{SVC_NAME}.query --query 8.8.8.8")
+                self.stormHasNoErr(msgs)
+
+            places = await core.nodes("geo:place")
+            assert len(places) == 1
+            assert places[0].get("name") == "ashburn, virginia, united states"
+
+            telems = await core.nodes("inet:ipv4=8.8.8.8 -> geo:telem:node")
+            assert len(telems) == 1
+            assert telems[0].get("place:name") == "ashburn, virginia, united states"
+
+    async def test_cmd_query_place_name_skips_empty_parts(self):
+        async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
+            data = dict(SUCCESS_DATA)
+            data["city"] = ""
+
+            async def fake_query(ipaddr):
+                return data, {}
+
+            with mock.patch.object(svc, "_query", fake_query):
+                msgs = await core.stormlist(f"{SVC_NAME}.query --query 8.8.8.8")
+                self.stormHasNoErr(msgs)
+
+            places = await core.nodes("geo:place")
+            assert len(places) == 1
+            assert places[0].get("name") == "virginia, united states"
+
     async def test_cmd_query_node_input(self):
         async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
             await core.nodes("[ inet:ipv4=8.8.8.8 ]")
@@ -177,6 +211,24 @@ class TestIpApiStorm(s_tests.SynTest):
                 nodeMsgs = [m for m in msgs if m[0] == "node"]
                 assert len(nodeMsgs) == 1
                 assert nodeMsgs[0][1][0] == ("inet:ipv4", 134744072)
+
+    async def test_cmd_query_ipv4_creates_no_ipv6(self):
+        async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
+
+            async def fake_query(ipaddr):
+                return dict(SUCCESS_DATA), {}
+
+            with mock.patch.object(svc, "_query", fake_query):
+                msgs = await core.stormlist(f"{SVC_NAME}.query --query 8.8.8.8 --yield")
+                self.stormHasNoErr(msgs)
+
+            # Synapse also parses "8.8.8.8" as inet:ipv6=::ffff:8.8.8.8, which must not be made.
+            assert len(await core.nodes("inet:ipv4=8.8.8.8")) == 1
+            assert len(await core.nodes("inet:ipv6")) == 0
+
+            telems = await core.nodes("geo:telem")
+            assert len(telems) == 1
+            assert telems[0].get("node") == ("inet:ipv4", 134744072)
 
     async def test_cmd_query_ipv6_node_input(self):
         async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
