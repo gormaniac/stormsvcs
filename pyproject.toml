@@ -9,7 +9,7 @@ readme = "README.md"
 license = "LICENSE"
 requires-python = ">=3.14"
 dependencies = [
-    "stormlibpp>=0.10.1",
+    "stormlibpp>=0.12.0",
     "synapse>=2.248.0,<3",
 ]
 

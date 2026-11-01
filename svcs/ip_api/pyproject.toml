@@ -11,7 +11,7 @@ authors = [
 # Stick with 3.11 until Synapse's base image changes
 requires-python = ">=3.11,<3.12"
 dependencies = [
-    "stormlibpp>=0.10.1",
+    "stormlibpp>=0.12.0",
 ]
 
 [build-system]

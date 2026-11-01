@@ -886,14 +886,14 @@ wheels = [
 
 [[package]]
 name = "stormlibpp"
-version = "0.10.1"
+version = "0.12.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "synapse" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/56/09/08d5107c0171ef1b0a2dcd74ef32b21fcf11891988aecbd0b08523f8d058/stormlibpp-0.10.1.tar.gz", hash = "sha256:3b9cbe2dbcc0bba6c810397e486293af95d4e82e3370197731ad200435f47026", size = 27116, upload-time = "2024-03-27T01:51:43.35Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d9/30/e7271a9201f2ab9fa602a01c37c24a8c59dc1a7066a1bdd64847035a38eb/stormlibpp-0.12.0.tar.gz", hash = "sha256:adc22a2a01f8dff3390a9fb58f40bb690cb0faeac1d87dfc3beda26d5978a4b7", size = 31097, upload-time = "2026-11-01T21:37:22.54Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/fe/05/bccfd1c0ba8dd2cf399a63ac378db04ece160c7e0cfdc43b512271f65b89/stormlibpp-0.10.1-py3-none-any.whl", hash = "sha256:cc659d49419c5258c4f2aa5a5c836d28f7a1956955984b194a7e8f6a3987be02", size = 28980, upload-time = "2024-03-27T01:51:41.611Z" },
+    { url = "https://files.pythonhosted.org/packages/50/bb/2524b67f8d83a4f347b8438d7cb456f6ff09239343680a09300067465383/stormlibpp-0.12.0-py3-none-any.whl", hash = "sha256:78379cbd1b97115caf26f35a0dc393edbaebebd5eeaa917af343c9b6f1a2cd8d", size = 34228, upload-time = "2026-11-01T21:37:21.492Z" },
 ]
 
 [[package]]
@@ -1129,7 +1129,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "pyyaml", specifier = ">=6.0" },
-    { name = "stormlibpp", specifier = ">=0.10.1" },
+    { name = "stormlibpp", specifier = ">=0.12.0" },
     { name = "yara-x", specifier = ">=1.19.0" },
 ]
 
