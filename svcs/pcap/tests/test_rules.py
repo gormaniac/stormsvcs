@@ -98,3 +98,30 @@ def test_split_options():
         ("content", r'"x\;y"'),
     ]
     assert s_rules.splitOptions('msg:"a;b"', quotes=False) == [("msg", '"a'), ('b"', None)]
+
+
+def test_rule_warnings():
+    warn = s_rules.ruleWarnings
+    assert warn('alert http any any -> any any (msg:"a"; http.uri; content:"/x"; sid:1;)') == []
+    # IP only rules (ex. blocklists) don't need content.
+    assert warn("alert ip [1.2.3.4] any -> $HOME_NET any (msg:\"c2\"; sid:2;)") == []
+    assert "no content" in warn('alert tcp any any -> any 80 (msg:"a"; flow:established; sid:3;)')[0]
+    assert "no fast pattern" in warn('alert http any any -> any any (pcre:"/a+b/"; sid:4;)')[0]
+    assert any("pass rule" in w for w in warn('pass tcp any any -> any any (content:"a"; sid:5;)'))
+    assert any(
+        "noalert" in w
+        for w in warn('alert tcp any any -> any any (content:"a"; flowbits:set,x; flowbits:noalert; sid:6;)')
+    )
+    assert any("only logged" in w for w in warn('drop tcp any any -> any any (content:"a"; sid:7;)'))
+    assert warn("not a rule") == []
+
+
+def test_check_net_vars():
+    assert s_rules.checkNetVars(None) == {}
+    assert s_rules.checkNetVars({"home_net": " [10.0.0.0/8, !10.1.0.0/16] ", "EXTERNAL_NET": "!$HOME_NET"}) == {
+        "HOME_NET": "[10.0.0.0/8, !10.1.0.0/16]",
+        "EXTERNAL_NET": "!$HOME_NET",
+    }
+    for bad in ({"HOME NET": "any"}, {"HOME_NET": "any'; os.exit()"}, {"HOME_NET": ""}, ["x"]):
+        with pytest.raises(s_rules.RuleError):
+            s_rules.checkNetVars(bad)

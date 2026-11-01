@@ -825,6 +825,33 @@ class TestSuricataRules(s_tests.SynTest):
             msgs = await core.stormlist(f"slib.pcap.flows {sha256} --hits --no-rules --no-files")
             self.stormIsInPrint("Modeled 3 flows (0 rule matches)", msgs)
 
+    async def test_suricata_warnings(self):
+        async with snortSvc(self, conf={"pcap:feeds": [], "snort:enabled": False}) as \
+                (core, svc, feeds):
+            for text in (
+                'alert http any any -> any any (msg:"fine"; http.uri; content:"/x"; sid:7001;)',
+                'pass tcp any any -> any 80 (msg:"pass"; content:"x"; sid:7002;)',
+                'alert http any any -> any any (msg:"pcre"; pcre:"/a+b/"; sid:7003;)',
+            ):
+                msgs = await core.stormlist(f"slib.pcap.rule.add --engine suricata '{text}'")
+                self.stormHasNoWarnErr(msgs)
+            pass_ = s_common.guid(("slib.pcap.custom", "suricata", 1, 7002))
+            pcre = s_common.guid(("slib.pcap.custom", "suricata", 1, 7003))
+            assert set(await svc.ruleWarnings()) == {pass_, pcre}
+
+            msgs = await core.stormlist("slib.pcap.rule.errors")
+            self.stormHasNoWarnErr(msgs)
+            self.stormIsInPrint("The engines loaded every rule.", msgs)
+            self.stormIsInPrint(f"it:app:suricata:rule={pass_} (sid 7002) warning: It's a pass rule", msgs)
+            self.stormIsInPrint(f"it:app:suricata:rule={pcre} (sid 7003) warning: It has a pcre", msgs)
+            self.stormIsInPrint("2 loaded rules have warnings.", msgs)
+            msgs = await core.stormlist("slib.pcap.rule.errors --no-warnings")
+            self.stormNotInPrint("warning:", msgs)
+
+            # Rules that aren't loaded anymore don't have warnings.
+            await core.nodes(f"it:app:suricata:rule={pass_} | slib.pcap.rule.disable")
+            assert set(await svc.ruleWarnings()) == {pcre}
+
     async def test_suricata_custom(self):
         async with snortSvc(self, conf={"pcap:feeds": []}) as (core, svc, feeds):
             text = ('alert udp any any -> any 9999 (msg:"Custom Suricata UDP"; content:"UDP-PING"; '

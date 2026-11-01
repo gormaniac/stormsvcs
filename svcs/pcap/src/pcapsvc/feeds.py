@@ -80,11 +80,6 @@ DEFAULT_FEEDS: tuple[FeedDef, ...] = (
         "The SSL Blacklist (malicious TLS certificates)",
     ),
     _abusech(
-        "abusech-sslbl-c2",
-        "https://sslbl.abuse.ch/blacklist/sslipblacklist.tar.gz",
-        "The SSL Blacklist botnet C2 IPs",
-    ),
-    _abusech(
         "abusech-feodo",
         "https://feodotracker.abuse.ch/downloads/feodotracker.tar.gz",
         "The Feodo Tracker botnet C2 IPs",

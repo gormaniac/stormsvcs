@@ -11,6 +11,7 @@ function status() { return($svc.status()) }
 function hasAxon() { return($svc.hasAxon()) }
 function feeds() { return($svc.feeds(view=$lib.view.get().iden)) }
 function ruleErrors(guids=$lib.null) { return($svc.ruleErrors(guids=$guids)) }
+function ruleWarnings(guids=$lib.null) { return($svc.ruleWarnings(guids=$guids)) }
 function ruleInfo(guid) { return($svc.ruleInfo($guid)) }
 function ruleParse(text, engine=$lib.null) { return($svc.ruleParse($text, engine=$engine)) }
 function ruleCheck(text, engine=$lib.null) { return($svc.ruleCheck($text, engine=$engine)) }
@@ -21,6 +22,13 @@ function decodeDefaults() {
     $rules = $lib.globals.get("slib:pcap:decode")
     if ($rules = $lib.null) { return(([])) }
     return($rules)
+}
+
+// The network variables (ex. HOME_NET) an admin set for every run (see slib.pcap.admin.vars).
+function netVarDefaults() {
+    $vars = $lib.globals.get("slib:pcap:vars")
+    if ($vars = $lib.null) { return(({})) }
+    return($vars)
 }
 
 // Stream a file in the Axon to the service. Returns {status, mesg, data} with the upload's ID.
@@ -85,7 +93,7 @@ function flows(sha256, opts) {
                             handshake=$opts.handshake, tshark=$opts.tshark, files=$opts.files,
                             keylogs=$keylogs, decode=$opts.decode, suricata=$opts.suricata,
                             snort=$opts.snort, rules=$opts.rules, upload=$upload,
-                            keyloguploads=$keyuploads) {
+                            keyloguploads=$keyuploads, netvars=$opts.netvars) {
         emit $retn
     }
 }

@@ -48,6 +48,20 @@ function decodeDefaults() {
     return($rules)
 }
 
+// The network variables (ex. HOME_NET) both engines use for every run, {name: address group}.
+function netVars() {
+    $vars = $lib.globals.get("slib:pcap:vars")
+    if ($vars = $lib.null) { return(({})) }
+    return($vars)
+}
+
+// Validate and save the network variables. Returns the service's retn.
+function setNetVars(vars) {
+    $retn = $svc.checkNetVars($vars)
+    if $retn.status { $lib.globals.set("slib:pcap:vars", $retn.data) }
+    return($retn)
+}
+
 // Validate and save the Decode As rules used for every run. Returns the service's retn.
 function setDecodeDefaults(rules) {
     $retn = $svc.checkDecodeAs($rules)

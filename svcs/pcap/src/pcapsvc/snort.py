@@ -505,9 +505,17 @@ class Snort:
         return errors.get("rule")
 
     async def scan(
-        self, rulespath: str, pcappath: str, onalert: Callable[[dict[str, Any]], None]
+        self,
+        rulespath: str,
+        pcappath: str,
+        onalert: Callable[[dict[str, Any]], None],
+        netvars: dict[str, str] | None = None,
     ) -> tuple[int, list[str]]:
         """Match a PCAP against a rules file, calling ``onalert`` with each alert (alert_json).
+
+        ``netvars`` (see ``pcapsvc.rules.checkNetVars``) override the config's network
+        variables for this scan, through the ``default_variables.nets`` table the stock
+        snort.lua gives ``ips.variables``.
 
         Returns the number of alerts, and Snort's warnings about the PCAP (ex. it's truncated,
         the alerts are for the packets Snort could read).
@@ -519,6 +527,10 @@ class Snort:
         """
 
         fields = " ".join(ALERT_FIELDS)
+        extra = []
+        for name, valu in (netvars or {}).items():
+            literal = "'" + str(valu).replace("\\", "\\\\").replace("'", "\\'") + "'"
+            extra.extend(("--lua", f"default_variables.nets.{name} = {literal}"))
         with tempfile.TemporaryDirectory(dir=self.workdir) as logdir:
             self.sandbox.prepare(logdir)
             rc, stdout, stderr = await self._exec(
@@ -540,6 +552,7 @@ class Snort:
                     "alert_json",
                     "--lua",
                     f"alert_json = {{ file = true, fields = '{fields}' }}",
+                    *extra,
                     *self.args,
                 ],
                 cwd=logdir,

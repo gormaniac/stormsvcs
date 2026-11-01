@@ -116,7 +116,8 @@ the directories searchable yourself if the engines can't get to their files. `sa
 | `suricata:enabled` | `true` | Use Suricata, when it's installed, by default. |
 | `suricata:bin` | `suricata` | The Suricata binary. |
 | `suricata:conf` | | The base `suricata.yaml`, the service's outputs and settings are applied over it. Defaults to the installed one. |
-| `suricata:vars` | `HOME_NET` RFC 1918, `EXTERNAL_NET` any | Suricata address variables. |
+| `suricata:vars` | `HOME_NET` RFC 1918, `EXTERNAL_NET` any | Suricata address variables (admins can override them, see `slib.pcap.admin.vars`). |
+| `suricata:set` | `{}` | Overrides of Suricata's config as dotted keys, like `suricata --set`, ex. `{"stream.memcap": "2gb"}`. They win over the service's own settings. |
 | `suricata:timeout` | `900` | Seconds before a Suricata run is killed. |
 | `snort:enabled` | `true` | Use Snort, when it's installed, by default. |
 | `snort:bin` | `snort` | The Snort 3 binary. |
@@ -210,10 +211,15 @@ readable by anyone with that permission.
 
 | Setting | Who | How |
 |---|---|---|
-| `tshark:args`, `snort:args`, `suricata:conf` | The service's operator | The service's config (`cell.yaml` or `SYN_PCAPSVC_*`). Not reachable from Storm. |
+| `tshark:args`, `snort:args`, `suricata:conf`, `suricata:set` | The service's operator | The service's config (`cell.yaml` or `SYN_PCAPSVC_*`). Not reachable from Storm. |
+| Network variables (ex. `HOME_NET`) for every run | Cortex admins with `slib.pcap.admin` | `slib.pcap.admin.vars --set "HOME_NET=[10.0.0.0/8]"`, saved in a Cortex global, over `suricata:vars` and `snort:vars`. |
 | Decode As rules for every run | Cortex admins with `slib.pcap.admin` | `slib.pcap.admin.decode --add "tcp.port==8443,tls"`, saved in a Cortex global. |
 | Decode As rules for one run | Users with `slib.pcap.user` | `slib.pcap.flows ... --decode-as "tcp.port==8443,tls"`, used with the admin's rules. |
 | TLS key logs for one run | Users with `slib.pcap.user` | `slib.pcap.flows ... --keylog <sha256>`. |
+
+Network variables become Suricata `address-groups` and Snort `default_variables.nets` entries
+for the run. Snort only uses them through that table, which the stock `snort.lua` gives
+`ips.variables`, so a custom `snort:conf` has to use it too.
 
 Decode As rules go to tshark (`-d`) and, for the protocols Suricata parses, become extra
 Suricata detection ports (`tcp.port`/`udp.port` rules only). Engines only parse protocols on
@@ -243,6 +249,11 @@ per gid:sid (Snort 2 and 3 rules share Snort's, Suricata has its own), if severa
 share one the highest `rev` wins (ties go to the lowest guid) and the others are reported as
 duplicates. Rules for an engine the service doesn't have are reported too.
 
+`slib.pcap.rule.errors` also lists warnings for rules that loaded but might not do what they
+look like they do: rules with no content match (checked against all the traffic their header
+matches) or a pcre without one (no fast pattern), `pass` rules (no other rule alerts on what
+they match), `noalert` rules, and `drop`/`reject` rules (offline they only alert).
+
 ### Custom rules
 
 Add rules from Storm, they're pushed to the service right away:
@@ -264,7 +275,7 @@ changed any other way (ex. editing `:enabled` or `:text` directly) are picked up
 |---|---|---|---|
 | `snort3-community` | `snort3` | yes | The Snort 3 Community Ruleset from Cisco Talos (GPLv2). |
 | `et-open` | `suricata` | yes | Proofpoint Emerging Threats Open, Suricata 8 syntax (MIT). |
-| `abusech-sslbl`, `abusech-sslbl-c2`, `abusech-feodo`, `abusech-urlhaus` | `suricata` | no | abuse.ch's SSL Blacklist (certificates and C2 IPs), Feodo Tracker, and URLhaus rules (CC0). |
+| `abusech-sslbl`, `abusech-feodo`, `abusech-urlhaus` | `suricata` | no | abuse.ch's SSL Blacklist (certificates), Feodo Tracker, and URLhaus rules (CC0). |
 
 Manage feeds with `slib.pcap.admin.feed`. A feed is a URL to a `.rules` file, or a `.tar.gz`,
 `.tgz`, `.gz`, or `.zip` of them, and the engine its rules are for. Feeds that need a key (ex.
@@ -340,7 +351,7 @@ TLS records, stream gaps) are listed in each flow's `:raw`.
 | `slib.pcap.user` | Analyzing captures, checking rules, and viewing the status, rule errors, and feeds. |
 | `slib.pcap.rules` | Adding, enabling, and disabling rules (pushing them to the service). Users also need the node permissions for the rule nodes. |
 | `slib.pcap.sync` | Syncing the feeds into the Cortex (as root) and pushing the rules to the service. |
-| `slib.pcap.admin` | Managing the feeds, the sync schedule, and the Decode As rules for every run. |
+| `slib.pcap.admin` | Managing the feeds, the sync schedule, and the network variables and Decode As rules for every run. |
 
 Users don't need `service.get` or Axon permissions, the `slib.pcap.priv.*` modules talk to the
 service (and the Axon) and elevate privileges only for users that hold the matching permission.
@@ -363,6 +374,7 @@ etc.).
 | `slib.pcap.feed.list` | The feeds and the state of their last download and sync. |
 | `slib.pcap.admin.feed` | Add, remove, enable, or disable a feed. |
 | `slib.pcap.admin.schedule` | Show or change the sync cron job. |
+| `slib.pcap.admin.vars` | Manage the network variables (ex. `HOME_NET`) both engines use for every run. |
 | `slib.pcap.admin.decode` | Manage the Decode As rules used for every run. |
 
 Run any command with `--help` for its options and examples.

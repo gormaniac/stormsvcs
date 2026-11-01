@@ -24,6 +24,27 @@ init {
             $lib.print("slib.pcap.rule.errors: {count} rules couldn't be loaded.", count=$lib.len($guids))
         }
     }
+
+    if (not $cmdopts.no_warnings) {
+        $warns = $pcap.ruleWarnings()
+        if $warns {
+            $wguids = ([])
+            for ($guid, $mesgs) in $warns { $wguids.append($guid) }
+            $wforms = ({})
+            $wids = ({})
+            for $rule in $model.rules($wguids) {
+                $wforms.($rule.repr()) = $rule.form()
+                $wids.($rule.repr()) = $rule.props.id
+            }
+            for ($guid, $mesgs) in $warns {
+                for $mesg in $mesgs {
+                    $lib.print("{form}={guid} (sid {id}) warning: {warning}", form=$wforms.$guid,
+                               guid=$guid, id=$wids.$guid, warning=$mesg)
+                }
+            }
+            $lib.print("slib.pcap.rule.errors: {count} loaded rules have warnings.", count=$lib.len($wguids))
+        }
+    }
 }
 
 divert $cmdopts.yield $model.nodes($nodes)

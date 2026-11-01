@@ -26,6 +26,7 @@ RETN_METHS = (
     "ruleUpdate",
     "rebuild",
     "ruleErrors",
+    "ruleWarnings",
     "ruleInfo",
     "ruleParse",
     "ruleCheck",
@@ -56,6 +57,7 @@ FLOW_OPTS = (
     "rules",
     "upload",
     "keyloguploads",
+    "netvars",
 )
 """The options ``flows`` takes (see ``PcapSvc.analyze``)."""
 
@@ -146,6 +148,11 @@ class PcapCellApi(s_cell.CellApi, s_stormsvc.StormSvc):
             return
         async for retn in self.cell.flows(sha256, **opts):
             yield retn
+
+    async def checkNetVars(self, netvars: dict[str, str]) -> TelepathRetn:
+        """Validate network variables, returning them normalized (see ``PcapSvc``)."""
+
+        return self.cell.checkNetVars(netvars)
 
     async def checkDecodeAs(self, rules: list[str]) -> TelepathRetn:
         """Validate tshark "Decode As" rules, returning them normalized (see ``PcapSvc``)."""

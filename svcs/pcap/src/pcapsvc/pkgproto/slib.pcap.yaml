@@ -1,5 +1,5 @@
 name: slib.pcap
-version: 0.4.3
+version: 0.5.0
 guid: e02a89d21d5b4eb588a03a7156b3b467
 
 synapse_minversion: [2, 234, 0]
@@ -297,8 +297,13 @@ commands:
     perms:
       - [ slib, pcap, user ]
     descr: |
-      The rules the engines couldn't load, and why.
+      The rules the engines couldn't load, and why, then warnings about rules that loaded but
+      might not do what they look like they do (ex. no content match, pass or noalert rules).
     cmdargs:
+      - - --no-warnings
+        - default: false
+          action: store_true
+          help: Don't list the warnings of rules that loaded (ex. rules with no content match).
       - - --yield
         - default: false
           action: store_true
@@ -385,6 +390,38 @@ commands:
           action: store_true
           help: Disable the cron job.
 
+  - name: slib.pcap.admin.vars
+    perms:
+      - [ slib, pcap, admin ]
+    descr: |
+      Manage the network variables (ex. HOME_NET, EXTERNAL_NET, HTTP_SERVERS) Suricata and
+      Snort use for every run, over the service's suricata:vars and snort:vars config. Prints
+      the variables without options.
+
+      Values are address groups, ex. [10.0.0.0/8,192.168.0.0/16], !$HOME_NET, or any. Snort
+      applies them through the default_variables table of the stock snort.lua, a custom
+      snort:conf has to use it too.
+
+      Examples:
+
+        slib.pcap.admin.vars --set "HOME_NET=[10.0.0.0/8,172.16.0.0/12]"
+
+        slib.pcap.admin.vars --set "DNS_SERVERS=[10.0.0.53]" --del HTTP_SERVERS
+    cmdargs:
+      - - --set
+        - type: str
+          action: append
+          default: []
+          help: A NAME=VALUE variable to set (quoted). May be used multiple times.
+      - - --del
+        - type: str
+          action: append
+          default: []
+          help: A variable to remove. May be used multiple times.
+      - - --clear
+        - default: false
+          action: store_true
+          help: Remove every variable (before any --set).
   - name: slib.pcap.admin.decode
     perms:
       - [ slib, pcap, admin ]

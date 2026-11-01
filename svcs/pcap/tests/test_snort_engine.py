@@ -112,6 +112,27 @@ class TestSnort(s_tests.SynTest):
 
             assert await snort.validate({}, path) == ([], {})
 
+    async def test_scan_netvars(self):
+        # Network variables for one scan, ex. an admin's HOME_NET (see slib.pcap.admin.vars).
+        with self.getTestDir() as dirn:
+            snort = s_engine.Snort(dirn)
+            rules = {"home": 'alert tcp $HOME_NET any -> any 80 ( msg:"x"; content:"evil"; sid:1; )'}
+            path = os.path.join(dirn, "home.rules")
+            assert (await snort.validate(rules, path))[0] == ["home"]
+            pcap = os.path.join(dirn, "sample.pcap")
+            with open(pcap, "wb") as fd:
+                fd.write(pcaps.samplePcap())
+
+            alerts = []
+            assert (await snort.scan(path, pcap, alerts.append))[0] == 2
+            alerts.clear()
+            count, _ = await snort.scan(path, pcap, alerts.append,
+                                        netvars={"HOME_NET": "[192.0.2.0/24]"})
+            assert count == 0 and alerts == []
+            count, _ = await snort.scan(path, pcap, alerts.append,
+                                        netvars={"HOME_NET": "[10.1.1.10]"})
+            assert count == 1
+
     async def test_validate_conf_error(self):
         with self.getTestDir() as dirn:
             base = os.path.join(dirn, "bad.lua")

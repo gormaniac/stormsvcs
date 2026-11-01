@@ -36,7 +36,7 @@ function _runOpts(opts) {
         "timeout": $opts.timeout, "limit": $opts.limit, "handshake": $opts.handshake,
         "tshark": $opts.tshark, "files": $opts.files, "keylogs": $keylogs,
         "decode": $decodeRules($opts.decode), "suricata": $opts.suricata, "snort": $opts.snort,
-        "rules": ($opts.rules != (false)),
+        "rules": ($opts.rules != (false)), "netvars": $priv.netVarDefaults(),
     }))
 }
 
@@ -161,6 +161,11 @@ function feeds() {
 // The guid -> error of the rules the engines couldn't load, or null if they couldn't be listed.
 function ruleErrors(guids=$lib.null) {
     return($util.data($priv.ruleErrors(guids=$guids), "Listing the rule errors"))
+}
+
+// The guid -> warnings of loaded rules that might not do what they look like they do, or null.
+function ruleWarnings(guids=$lib.null) {
+    return($util.data($priv.ruleWarnings(guids=$guids), "Listing the rule warnings"))
 }
 
 // The sync cron job's details, or null if there isn't one.

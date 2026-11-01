@@ -100,6 +100,31 @@ def test_config(suri, tmp_path):
     assert suri.baseConfig()["outputs"] == [{"fast": {"enabled": True}}]
 
 
+def test_netvars_overrides(tmp_path):
+    base = tmp_path / "suricata.yaml"
+    base.write_text(yaml.safe_dump(BASE))
+    suri = p_suricata.Suricata(
+        str(tmp_path / "work"),
+        conf=str(base),
+        addrvars={"HOME_NET": "[192.168.0.0/16]", "EXTERNAL_NET": "any"},
+        overrides={"stream.memcap": "2gb", "detect.profile": "high", "outputs": "nope"},
+    )
+    conf = suri.config(str(tmp_path), netvars={"HOME_NET": "[10.9.0.0/16]", "DNS_SERVERS": "[10.9.0.53]"})
+    assert conf["vars"]["address-groups"] == {
+        "HOME_NET": "[10.9.0.0/16]", "EXTERNAL_NET": "any", "DNS_SERVERS": "[10.9.0.53]",
+    }
+    # The operator's overrides win, even over the service's settings.
+    assert conf["stream"]["memcap"] == "2gb" and conf["detect"]["profile"] == "high"
+    assert conf["outputs"] == "nope"
+    # Without run variables the service's config is used.
+    assert suri.config(str(tmp_path))["vars"]["address-groups"]["HOME_NET"] == "[192.168.0.0/16]"
+
+    with pytest.raises(p_suricata.SuricataError, match="isn't a mapping"):
+        p_suricata.setPath({"a": 1}, "a.b", 2)
+    with pytest.raises(p_suricata.SuricataError, match="Invalid suricata:set key"):
+        p_suricata.setPath({}, "..", 2)
+
+
 def test_bad_base(tmp_path):
     suri = p_suricata.Suricata(str(tmp_path / "work"), conf=str(tmp_path / "nope.yaml"))
     with pytest.raises(p_suricata.SuricataError, match="Unable to read the base Suricata config"):

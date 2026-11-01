@@ -381,6 +381,43 @@ class TestPcapStormSettings(s_tests.SynTest):
             self.stormHasNoWarnErr(msgs)
             assert seen == [["tcp.port==22,ssh"]]
 
+    async def test_admin_vars(self):
+        async with pcapCore(self, g.pcap(g.session())) as (core, svc, (sha,)):
+            msgs = await core.stormlist("slib.pcap.admin.vars")
+            self.stormIsInPrint("slib.pcap has no network variables for every run", msgs)
+
+            q = ('slib.pcap.admin.vars --set "home_net=[10.9.0.0/16]" '
+                 '--set "DNS_SERVERS=[10.9.0.53]"')
+            msgs = await core.stormlist(q)
+            self.stormHasNoErr(msgs)
+            self.stormIsInPrint("    HOME_NET = [10.9.0.0/16]", msgs)
+            assert await core.callStorm('return($lib.globals.get("slib:pcap:vars"))') == {
+                "HOME_NET": "[10.9.0.0/16]", "DNS_SERVERS": "[10.9.0.53]",
+            }
+            msgs = await core.stormlist("slib.pcap.admin.vars --del dns_servers")
+            self.stormNotInPrint("DNS_SERVERS", msgs)
+
+            # Invalid values aren't saved.
+            msgs = await core.stormlist("""slib.pcap.admin.vars --set "HOME_NET=any'; x" """)
+            self.stormIsInWarn("Invalid HOME_NET value", msgs)
+            msgs = await core.stormlist("slib.pcap.admin.vars --set nope")
+            self.stormIsInWarn("use NAME=VALUE", msgs)
+            assert await core.callStorm('return($lib.globals.get("slib:pcap:vars"))') == {
+                "HOME_NET": "[10.9.0.0/16]",
+            }
+
+            # Every run gets them.
+            msgs = await core.stormlist(f"slib.pcap.flows {sha}", opts={"debug": True})
+            self.stormIsInPrint('"netvars":{"HOME_NET":"[10.9.0.0/16]"}', msgs)
+
+            msgs = await core.stormlist("slib.pcap.admin.vars --clear")
+            self.stormIsInPrint("no network variables", msgs)
+
+            user = await core.auth.addUser("analyst")
+            await user.allow(("slib", "pcap", "user"))
+            msgs = await core.stormlist("slib.pcap.admin.vars", opts={"user": user.iden})
+            self.stormIsInErr("slib.pcap.admin", msgs)
+
     async def test_keylog_no_tshark(self):
         async with pcapCore(self, g.pcap(g.session()), b"CLIENT_RANDOM 00 00\n") as \
                 (core, svc, (sha, keylog)):

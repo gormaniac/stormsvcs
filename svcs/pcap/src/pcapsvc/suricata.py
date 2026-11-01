@@ -168,6 +168,29 @@ def decodePorts(decode: Iterable[str]) -> dict[str, dict[str, list[str]]]:
     return ports
 
 
+def setPath(conf: dict[str, Any], key: str, valu: Any) -> None:
+    """Set a dotted key (like ``suricata --set``) in a config, ex. ``stream.memcap``.
+
+    Raises
+    ------
+    SuricataError
+        If the key is empty or a part of it is a value that isn't a mapping.
+    """
+
+    parts = [part for part in str(key).split(".") if part]
+    if not parts:
+        raise SuricataError(f"Invalid suricata:set key {key!r}.")
+    node = conf
+    for part in parts[:-1]:
+        nxt = node.get(part)
+        if nxt is None:
+            nxt = node[part] = {}
+        if not isinstance(nxt, dict):
+            raise SuricataError(f"Invalid suricata:set key {key!r}: {part} isn't a mapping.")
+        node = nxt
+    node[parts[-1]] = valu
+
+
 def iterEve(path: str) -> Iterator[dict[str, Any]]:
     """Yield every event in an EVE JSON file, skipping lines that aren't JSON."""
 
@@ -211,8 +234,10 @@ class Suricata:
         addrvars: dict[str, str] | None = None,
         timeout: float = 900,
         sandbox: p_sandbox.Sandbox | None = None,
+        overrides: dict[str, Any] | None = None,
     ) -> None:
         self.workdir = workdir
+        self.overrides = dict(overrides or {})
         self.binpath = binpath
         self.baseconf = conf
         self.addrvars = dict(DEFAULT_VARS if addrvars is None else addrvars)
@@ -252,7 +277,12 @@ class Suricata:
         return self._base
 
     def config(
-        self, outdir: str, decode: Iterable[str] = (), filestore: bool = True, maxbody: int = 0
+        self,
+        outdir: str,
+        decode: Iterable[str] = (),
+        filestore: bool = True,
+        maxbody: int = 0,
+        netvars: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """The config of a run, the base config with the service's outputs and settings.
 
@@ -267,13 +297,16 @@ class Suricata:
         maxbody : int
             The max bytes of an HTTP body (and of each stream) inspected and extracted, 0 for
             no limit.
+        netvars : dict | None
+            Address variables for this run, over ``suricata:vars`` (see
+            ``pcapsvc.rules.checkNetVars``).
         """
 
         conf = copy.deepcopy(self.baseConfig())
         etc = self._etcdir()
 
         addrs = conf.setdefault("vars", {}).setdefault("address-groups", {})
-        for name, valu in self.addrvars.items():
+        for name, valu in {**self.addrvars, **(netvars or {})}.items():
             addrs[name] = valu
 
         types: list[Any] = [
@@ -387,6 +420,9 @@ class Suricata:
         security = conf.setdefault("security", {})
         security["landlock"] = {"enabled": False}
         conf.pop("plugins", None)
+        # The operator's overrides (suricata:set) go last, they win over the service's.
+        for key, valu in self.overrides.items():
+            setPath(conf, key, valu)
         return conf
 
     def writeConfig(self, path: str, conf: dict[str, Any]) -> str:
@@ -526,6 +562,7 @@ class Suricata:
         decode: Iterable[str] = (),
         filestore: bool = True,
         maxbody: int = 0,
+        netvars: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Analyze a capture (and match it against a rules file, if given).
 
@@ -544,7 +581,9 @@ class Suricata:
 
         conf = self.writeConfig(
             os.path.join(outdir, "suricata.yaml"),
-            self.config(outdir, decode=decode, filestore=filestore, maxbody=maxbody),
+            self.config(
+                outdir, decode=decode, filestore=filestore, maxbody=maxbody, netvars=netvars
+            ),
         )
         self.sandbox.prepare(outdir)
         args = ["-c", conf, "-r", capture, "-l", outdir, "-k", "none", "--runmode", "single"]

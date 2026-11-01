@@ -96,6 +96,16 @@ def _prepare(entries: dict[str, tuple[str, str]]) -> dict[str, Any]:
     return {"rules": rules, "meta": meta, "errors": errors}
 
 
+def _warnings(texts: dict[str, str]) -> dict[str, list[str]]:
+    """The warnings (see ``pcapsvc.rules.ruleWarnings``) of the loaded rules (in an executor)."""
+
+    out = {}
+    for guid, text in texts.items():
+        if warns := p_rules.ruleWarnings(text):
+            out[guid] = warns
+    return out
+
+
 def _writeJson(path: str, valu: Any) -> None:
     with open(path, "w", encoding="utf-8") as fd:
         json.dump(valu, fd)
@@ -122,6 +132,7 @@ class RuleMixin:
         self.ruleinfo = self.slab.getSafeKeyVal("slib:pcap:ruleinfo")
         self.corpus = self.slab.getSafeKeyVal("slib:pcap:rules")
         self.ruleerrs = self.slab.getSafeKeyVal("slib:pcap:ruleerrs")
+        self.rulewarns = self.slab.getSafeKeyVal("slib:pcap:rulewarns")
         self.feeddefs = self.slab.getSafeKeyVal("slib:pcap:feeds")
         self.feedinfo = self.slab.getSafeKeyVal("slib:pcap:feedinfo")
 
@@ -276,6 +287,13 @@ class RuleMixin:
             await self.ruleerrs.truncate()
             for guid, mesg in errors.items():
                 self.ruleerrs.set(guid, mesg)
+            warns = await s_coro.executor(
+                _warnings,
+                {guid: entries[guid][0] for valid in built.values() for guid in valid or ()},
+            )
+            await self.rulewarns.truncate()
+            for guid, mesgs in warns.items():
+                self.rulewarns.set(guid, mesgs)
 
             self.active = active
             took = s_common.now() - start
@@ -451,6 +469,14 @@ class RuleMixin:
         if guids is not None:
             return {guid: mesg for guid in guids if (mesg := self.ruleerrs.get(guid)) is not None}
         return dict(self.ruleerrs.items())
+
+    async def ruleWarnings(self, guids: list[str] | None = None) -> dict[str, list[str]]:
+        """Why loaded rules might not do what they look like they do (guid -> warnings), see
+        ``pcapsvc.rules.ruleWarnings``."""
+
+        if guids is not None:
+            return {guid: w for guid in guids if (w := self.rulewarns.get(guid)) is not None}
+        return dict(self.rulewarns.items())
 
     async def ruleInfo(self, guid: str) -> dict[str, Any]:
         """Whether a rule was pushed to the service, is loaded, and its error if it isn't."""

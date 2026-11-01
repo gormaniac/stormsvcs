@@ -48,6 +48,7 @@ from . import enrich as p_enrich
 from . import eve as p_eve
 from . import feeds as p_feeds
 from . import flows as p_flows
+from . import rules as p_rules
 from . import rulesvc as p_rulesvc
 from . import sandbox as p_sandbox
 from . import snort as p_snort
@@ -269,6 +270,15 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
             "default": p_suricata.DEFAULT_VARS,
             "description": "Suricata address variables, ex. HOME_NET and EXTERNAL_NET.",
         },
+        "suricata:set": {
+            "type": "object",
+            "default": {},
+            "description": (
+                "Overrides of Suricata's config, dotted keys like suricata --set, ex. "
+                '{"stream.memcap": "2gb"} (operator only). They win over the service\'s '
+                "settings, so they can break what the service needs (ex. the EVE outputs)."
+            ),
+        },
         "suricata:timeout": {
             "type": "number",
             "default": 900,
@@ -424,6 +434,7 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
             addrvars=self.conf.get("suricata:vars"),
             timeout=self.conf.get("suricata:timeout"),
             sandbox=self.sandbox,
+            overrides=self.conf.get("suricata:set"),
         )
         self.versions: dict[str, str | None] = {}
         self.uploads: dict[str, dict[str, Any]] = {}
@@ -656,7 +667,13 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
         return frames, info
 
     async def _runSuricata(
-        self, path: str, outdir: str, decode: list[str], files: bool, rules: bool
+        self,
+        path: str,
+        outdir: str,
+        decode: list[str],
+        files: bool,
+        rules: bool,
+        netvars: dict[str, str],
     ) -> tuple[dict | None, dict]:
         info: dict[str, Any] = {"enabled": True, "error": None, "rules": 0, "warnings": []}
         active = self._acquire("suricata") if rules else None
@@ -670,6 +687,7 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
                 decode=decode,
                 filestore=files,
                 maxbody=self.conf.get("pcap:files:maxsize"),
+                netvars=netvars,
             )
             info["warnings"] = res["warnings"]
             return {**res, "index": active[1] if active else {}}, info
@@ -680,7 +698,7 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
             if active is not None:
                 self._release(active[0])
 
-    async def _runSnort(self, path: str) -> tuple[dict | None, dict]:
+    async def _runSnort(self, path: str, netvars: dict[str, str]) -> tuple[dict | None, dict]:
         info: dict[str, Any] = {"enabled": True, "error": None, "rules": 0, "warnings": []}
         active = self._acquire("snort")
         if active is None:
@@ -689,7 +707,7 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
         alerts: list[dict] = []
         try:
             info["rules"] = len(active[1])
-            count, warnings = await self.snort.scan(active[0], path, alerts.append)
+            count, warnings = await self.snort.scan(active[0], path, alerts.append, netvars=netvars)
             info["warnings"] = warnings
             info["alerts"] = count
             return {"alerts": alerts, "index": active[1]}, info
@@ -764,6 +782,7 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
         rules: bool = True,
         upload: str | None = None,
         keyloguploads: list[str] | None = None,
+        netvars: dict[str, str] | None = None,
     ) -> tuple[list[dict], dict]:
         """Analyze a capture and return its flows and a summary of it.
 
@@ -798,7 +817,8 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
         keyloguploads = list(keyloguploads or ())
         try:
             decode = p_tshark.checkDecodeAs(decode)
-        except (p_tshark.TsharkError, TypeError) as err:
+            netvars = p_rules.checkNetVars(netvars)
+        except (p_tshark.TsharkError, p_rules.RuleError, TypeError) as err:
             raise PcapSvcError(getattr(err, "mesg", str(err))) from None
 
         timeout, limit, handshake = self._opts(timeout, limit, handshake)
@@ -808,6 +828,7 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
             "snort": self.conf.get("snort:enabled") if snort is None else bool(snort),
             "files": self.conf.get("pcap:files") if files is None else bool(files),
             "rules": bool(rules),
+            "netvars": netvars,
         }
 
         if upload is None and not self.axonurl:
@@ -888,11 +909,13 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
         }
         tasks: dict[str, Any] = {}
         if opts["suricata"] and self.suricata.available():
-            tasks["suricata"] = self._runSuricata(plain, suridir, decode, saving, opts["rules"])
+            tasks["suricata"] = self._runSuricata(
+                plain, suridir, decode, saving, opts["rules"], opts["netvars"]
+            )
         elif opts["suricata"]:
             info["suricata"]["error"] = "Suricata is not installed"
         if opts["snort"] and opts["rules"] and self.snort.available():
-            tasks["snort"] = self._runSnort(plain)
+            tasks["snort"] = self._runSnort(plain, opts["netvars"])
         if opts["tshark"] and self.tshark.available:
             tasks["tshark"] = self._runTshark(path, keylog, decode, gaps="suricata" in tasks)
         elif opts["tshark"]:
@@ -986,9 +1009,21 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
         summary["size"] = size
         summary["keylogs"] = len(keylogs) + len(keyloguploads)
         summary["decode"] = decode
+        summary["netvars"] = opts["netvars"]
         summary["engines"] = res["info"]
         summary.setdefault("files", None)
         return flows, summary
+
+    def checkNetVars(self, netvars: dict[str, str]) -> TelepathRetn:
+        """Validate network variables (ex. HOME_NET), see ``pcapsvc.rules.checkNetVars``.
+
+        The ``TelepathRetn``'s data is the normalized variables.
+        """
+
+        try:
+            return TelepathRetn(status=True, mesg="", data=p_rules.checkNetVars(netvars))
+        except p_rules.RuleError as err:
+            return TelepathRetn(status=False, mesg=err.mesg, data=None)
 
     def checkDecodeAs(self, rules: list[str]) -> TelepathRetn:
         """Validate tshark "Decode As" rules, see ``pcapsvc.tshark.checkDecodeAs``.

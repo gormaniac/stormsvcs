@@ -360,3 +360,92 @@ def ruleId(rule: Rule | dict[str, Any]) -> str:
     if rule["gid"] == 1:
         return str(rule["sid"])
     return ruleKey(rule["gid"], rule["sid"])
+
+
+NETVAR_NAME = re.compile(r"[A-Z][A-Z0-9_]{0,63}")
+"""A network variable's name, ex. ``HOME_NET`` or ``HTTP_SERVERS``."""
+
+NETVAR_VALU = re.compile(r"[0-9A-Za-z\[\]\.:/,!$_ -]{1,4096}")
+"""A network variable's value: an address group, ex. ``[10.0.0.0/8,!$DNS_SERVERS]`` or ``any``."""
+
+
+def checkNetVars(valu: Any) -> dict[str, str]:
+    """Validate network variables (name -> address group) both engines use, ex. ``HOME_NET``.
+
+    Raises
+    ------
+    RuleError
+        If it isn't a dict of valid names and address groups.
+    """
+
+    if valu is None:
+        return {}
+    if not isinstance(valu, dict):
+        raise RuleError("Network variables must be a dict of name -> address group.")
+    out = {}
+    for name, addrs in valu.items():
+        name = str(name).strip().upper()
+        if not NETVAR_NAME.fullmatch(name):
+            raise RuleError(f"Invalid network variable name {name!r}, ex. HOME_NET.")
+        addrs = str(addrs).strip()
+        if not NETVAR_VALU.fullmatch(addrs):
+            raise RuleError(
+                f"Invalid {name} value {addrs!r}, use an address group like [10.0.0.0/8] or any."
+            )
+        out[name] = addrs
+    return out
+
+
+_PAYLOAD_OPTS = {
+    "content",
+    "uricontent",
+    "pcre",
+    "byte_test",
+    "byte_jump",
+    "byte_math",
+    "dsize",
+    "isdataat",
+    "base64_data",
+    "regex",
+}
+"""Options that inspect a packet's (or buffer's) bytes."""
+
+
+def ruleWarnings(text: str) -> list[str]:
+    """Why a rule an engine loads might still not do what it looks like it does.
+
+    These are heuristics, not errors: ex. a rule with no content match is checked against
+    every packet its header matches, and a pass rule hides the traffic it matches from every
+    other rule.
+    """
+
+    try:
+        rule = parseRule(text, enabled=True)
+    except RuleError:
+        return []
+    start, end = rule["text"].find("("), rule["text"].rfind(")")
+    names = {name for name, _ in splitOptions(rule["text"][start + 1 : end])}
+    flowbits = [
+        valu or ""
+        for name, valu in splitOptions(rule["text"][start + 1 : end])
+        if name in ("flowbits", "xbits")
+    ]
+    proto = (rule["header"].split()[1:2] or [""])[0].lower()
+
+    warnings = []
+    if not names & _PAYLOAD_OPTS and proto not in ("ip", "ipv4", "ipv6", "pkthdr"):
+        warnings.append(
+            "It has no content (or other payload) match, so it's checked against all the "
+            "traffic its header matches, which is slow on a busy capture."
+        )
+    elif "pcre" in names and not names & {"content", "uricontent"}:
+        warnings.append("It has a pcre but no content match, so it has no fast pattern (slow).")
+    if rule["action"] == "pass":
+        warnings.append("It's a pass rule: no other rule alerts on the traffic it matches.")
+    if "noalert" in names or any("noalert" in valu for valu in flowbits):
+        warnings.append("It never alerts on its own (noalert), it only sets state for others.")
+    if rule["action"] in ("drop", "sdrop", "reject", "rejectsrc", "rejectdst", "rejectboth"):
+        warnings.append(
+            f"Its action is {rule['action']}, offline nothing is blocked: it's only logged."
+        )
+    return warnings
