@@ -301,17 +301,14 @@ function dns(flownode, f, opts) {
 // record): an it:app:snort:rule (Snort 2.x and 3 rules) or it:app:suricata:rule.
 // enabled is only set when it isn't null.
 function rule(r, enabled=$lib.null) {
-    $engine = $lib.null
-    $family = $lib.null
-    if ($r.form != "it:app:suricata:rule") {
-        // Only Snort rules have an engine and a family.
-        $engine = ({"snort2": 2, "snort3": 3}).($r.engine)
-        $family = $r.family
-        if ($engine = $lib.null) { $lib.raise(BadArg, `Unknown Snort engine: {$r.engine}`) }
+    // Only Snort rules have an engine and a family.
+    if ($r.form = "it:app:suricata:rule") {
+        [ it:app:suricata:rule=$r.guid ]
+    } else {
+        $engines = ({"snort2": 2, "snort3": 3})
+        [ it:app:snort:rule=$r.guid :engine=$engines.($r.engine) :family?=$r.family ]
     }
-    [ *$r.form=$r.guid
-        :engine?=$engine
-        :family?=$family
+    [
         :id=$r.id
         :text=$r.text
         :version=$lib.cast(str, $r.rev)
