@@ -1,0 +1,22 @@
+name: Hatching Triage Pipeline
+
+on:
+  workflow_dispatch:
+  workflow_call:
+  pull_request:
+    paths:
+      - "svcs/hatching/**"
+      - ".github/workflows/hatching.yml"
+      - ".github/workflows/_service.yml"
+      - "pyproject.toml" # The root ruff config, used by the ruff steps in _service.yml
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  pipeline:
+    uses: ./.github/workflows/_service.yml
+    with:
+      service: hatching
+    secrets: inherit

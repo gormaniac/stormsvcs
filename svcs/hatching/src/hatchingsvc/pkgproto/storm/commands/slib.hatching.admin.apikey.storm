@@ -1,0 +1,18 @@
+init {
+    $padmin = $lib.import(slib.hatching.priv.admin)
+    $util = $lib.import(slib.hatching.util)
+
+    if $cmdopts.clear {
+        $retn = $padmin.setApiKey($lib.null)
+        if (not $util.failed($retn, "Clearing the API key")) { $lib.print($retn.mesg) }
+    }
+    elif $cmdopts.apikey {
+        $retn = $padmin.setApiKey($cmdopts.apikey)
+        if (not $util.failed($retn, "Setting the API key")) { $lib.print($retn.mesg) }
+    }
+    else {
+        $retn = $padmin.hasApiKey()
+        if $retn.data { $lib.print("slib.hatching: A service-wide API key is set.") }
+        else { $lib.print("slib.hatching: No service-wide API key is set.") }
+    }
+}

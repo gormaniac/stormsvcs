@@ -1,0 +1,15 @@
+init {
+    $padmin = $lib.import(slib.hatching.priv.admin)
+    $util = $lib.import(slib.hatching.util)
+
+    $retn = $padmin.users(limit=$cmdopts.limit)
+    if (not $util.failed($retn, "Listing users")) {
+        $rows = ([])
+        for $u in $retn.data {
+            $confirmed = (false)
+            if $u.email_confirmed_at { $confirmed = (true) }
+            $rows.append(($u.email, $u.name, $u.role, $confirmed, $u.created_at, $u.id))
+        }
+        $util.table((("email", 32), ("name", 20), ("role", 22), ("confirmed", 9), ("created", 20), ("id", 36)), $rows)
+    }
+}

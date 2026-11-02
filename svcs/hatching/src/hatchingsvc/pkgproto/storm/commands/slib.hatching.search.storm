@@ -1,0 +1,26 @@
+init {
+    $priv = $lib.import(slib.hatching.priv.user)
+    $hatching = $lib.import(slib.hatching.lib)
+    $util = $lib.import(slib.hatching.util)
+}
+
+spin |
+
+$retn = $priv.search($cmdopts.query, limit=$cmdopts.limit)
+if (not $util.failed($retn, `Searching for {$cmdopts.query}`)) {
+    if ($cmdopts.model or $cmdopts.yield) {
+        for $sample in $retn.data {
+            if ($sample.status = "reported") {
+                $n = $hatching.model($sample.id, tasks=$cmdopts.tasks)
+                if ($cmdopts.yield and $n) { yield $n }
+            }
+            else {
+                $lib.print("slib.hatching.search: Skipping sample {id}, it's {status}.", id=$sample.id, status=$sample.status)
+            }
+        }
+    }
+    else {
+        $lib.print("slib.hatching.search: {count} samples matched {query}.", count=$lib.len($retn.data), query=$cmdopts.query)
+        $util.printSamples($retn.data)
+    }
+}

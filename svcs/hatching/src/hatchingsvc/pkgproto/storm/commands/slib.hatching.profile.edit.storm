@@ -1,0 +1,16 @@
+init {
+    $pman = $lib.import(slib.hatching.priv.manage)
+    $util = $lib.import(slib.hatching.util)
+
+    $tags = $lib.null
+    if $cmdopts.tag { $tags = $cmdopts.tag }
+    $retn = $pman.editProfile($cmdopts.profile, name=$cmdopts.name, tags=$tags, timeout=$cmdopts.timeout,
+                              network=$cmdopts.network, geolocation=$cmdopts.geolocation)
+    if (not $util.failed($retn, `Editing profile {$cmdopts.profile}`)) {
+        $p = $retn.data
+        $network = $p.network
+        if $p.geolocation { $network = `{$network} ({$p.geolocation})` }
+        $lib.print("slib.hatching.profile.edit: Updated profile {name}: network={network} timeout={timeout} tags={tags}",
+                   name=$p.name, network=$network, timeout=$p.timeout, tags=(",").join($p.tags))
+    }
+}

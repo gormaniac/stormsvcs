@@ -1,0 +1,20 @@
+init {
+    $padmin = $lib.import(slib.hatching.priv.admin)
+    $util = $lib.import(slib.hatching.util)
+
+    if ($cmdopts.magic != $lib.null) {
+        $enabled = ($cmdopts.magic = "on")
+        $retn = $padmin.setMagicLinks($enabled)
+        if (not $util.failed($retn, "Changing the magic link setting")) {
+            $lib.print("slib.hatching.admin.org: Turned magic links {state}.", state=$cmdopts.magic)
+        }
+    }
+    elif $cmdopts.stats {
+        $retn = $padmin.orgStats()
+        if (not $util.failed($retn, "Getting the organization's usage stats")) { $util.printJson($retn.data) }
+    }
+    else {
+        $retn = $padmin.orgSettings()
+        if (not $util.failed($retn, "Getting the organization's settings")) { $util.printJson($retn.data) }
+    }
+}

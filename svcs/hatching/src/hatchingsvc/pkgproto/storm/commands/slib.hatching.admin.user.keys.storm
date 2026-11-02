@@ -1,0 +1,16 @@
+init {
+    $padmin = $lib.import(slib.hatching.priv.admin)
+    $util = $lib.import(slib.hatching.util)
+
+    $retn = $padmin.userKeys($cmdopts.user)
+    if (not $util.failed($retn, `Listing the API keys of {$cmdopts.user}`)) {
+        $rows = ([])
+        for $k in $retn.data {
+            // Only show the start of each key.
+            $key = $k.key
+            if $key { $key = `{$key.slice(0, 4)}...` }
+            $rows.append(($k.name, $key))
+        }
+        $util.table((("name", 32), ("key", 12)), $rows)
+    }
+}

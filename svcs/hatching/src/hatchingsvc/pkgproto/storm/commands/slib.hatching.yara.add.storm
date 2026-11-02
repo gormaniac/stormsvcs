@@ -1,0 +1,37 @@
+init {
+    $pman = $lib.import(slib.hatching.priv.manage)
+    $util = $lib.import(slib.hatching.util)
+
+    function add(name, text) {
+        if ((not $name) or ((not $text) and (not $cmdopts.rename))) {
+            $lib.warn("slib.hatching.yara.add: A rule needs a name and text.")
+            return((false))
+        }
+        if $cmdopts.rename {
+            $retn = $pman.renameRule($cmdopts.rename, $name, text=$text)
+            if $util.failed($retn, `Renaming Yara rule {$cmdopts.rename}`) { return((false)) }
+            $lib.print("slib.hatching.yara.add: Renamed Yara rule {old} to {name}.", old=$cmdopts.rename, name=$name)
+            return((true))
+        }
+        if $cmdopts.update { $retn = $pman.editRule($name, $text) $verb = Updated }
+        else { $retn = $pman.addRule($name, $text) $verb = Added }
+        if $util.failed($retn, `Saving Yara rule {$name}`) { return((false)) }
+        $lib.print("slib.hatching.yara.add: {verb} Yara rule {name}.", verb=$verb, name=$name)
+        return((true))
+    }
+}
+
+if $cmdopts.name {
+    // --name/--text ignore inbound nodes.
+    spin |
+    $add($cmdopts.name, $cmdopts.text)
+}
+else {
+    if ($node.form() != "it:app:yara:rule") {
+        $lib.warn("slib.hatching.yara.add: The node form {form} is not supported.", form=$node.form())
+        spin
+    }
+    $name = :name
+    if $name { $name = `{$name}.yara` }
+    $add($name, :text)
+}

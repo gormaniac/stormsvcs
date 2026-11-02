@@ -1,0 +1,7 @@
+init {
+    $priv = $lib.import(slib.hatching.priv.user)
+    $util = $lib.import(slib.hatching.util)
+
+    $retn = $priv.stats()
+    if (not $util.failed($retn, "Getting your usage stats")) { $util.printJson($retn.data) }
+}

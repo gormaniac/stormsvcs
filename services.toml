@@ -33,6 +33,11 @@ name = "PCAP"
 src = "svcs/pcap/"
 workflow = ".github/workflows/pcap.yml"
 
+[stormsvcs.hatching]
+name = "Hatching Triage"
+src = "svcs/hatching/"
+workflow = ".github/workflows/hatching.yml"
+
 # [stormsvcs.report-ingest]
 # name = "Report Ingest"
 # src = "svcs/report-ingest/"

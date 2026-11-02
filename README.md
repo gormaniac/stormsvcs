@@ -59,6 +59,8 @@ Each service must have the following:
   - Run Mandiant's capa against files in the Axon, model the matched rules, and tag files with the rule namespaces.
 - `pcap`
   - Analyze PCAPs (pcap, pcapng, gzip): model their network flows as `inet:flow` nodes with DNS, certificates, SSH keys, software, and transferred files (Suricata, tshark), and match them against Snort and Suricata rules from feeds or the graph, with every engine sandboxed.
+- `hatching`
+  - The whole Hatching Triage Sandbox API: submit files and URLs, model analyses (configs, processes, network, dropped files), download samples/pcaps/dropped files, and manage profiles, Yara rules, and users.
 
 
 ## Services Wish List/Plan
@@ -69,8 +71,6 @@ This is a ToDo/wish list, check `services.toml` for the current list of develope
   - Search various sources for available bytes for a given `hash:*` node.
 - `enrich`
   - Enrich any supported node from all possible enrichment sources.
-- `hatching`
-  - Enrich from and submit to Hatching Triage Sandbox (tria.ge).
 - `ipinfo`
   - Enrich from ipinfo.io.
 - `mandiant`

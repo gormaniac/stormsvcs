@@ -1,0 +1,9 @@
+init {
+    $priv = $lib.import(slib.hatching.priv.user)
+    $util = $lib.import(slib.hatching.util)
+
+    $retn = $priv.samples(subset=$cmdopts.subset, limit=$cmdopts.limit)
+    if (not $util.failed($retn, `Listing {$cmdopts.subset} samples`)) {
+        $util.printSamples($retn.data)
+    }
+}

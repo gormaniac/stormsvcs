@@ -1,0 +1,11 @@
+init {
+    $priv = $lib.import(slib.hatching.priv.user)
+    $util = $lib.import(slib.hatching.util)
+
+    $retn = $priv.geolocations()
+    if (not $util.failed($retn, "Listing the VPN geolocations")) {
+        $rows = ([])
+        for $g in $retn.data { $rows.append(($g.name, (",").join($g.tags))) }
+        $util.table((("name", 16), ("tags", 48)), $rows)
+    }
+}

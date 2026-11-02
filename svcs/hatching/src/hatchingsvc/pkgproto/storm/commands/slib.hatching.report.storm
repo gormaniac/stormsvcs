@@ -1,0 +1,24 @@
+init {
+    $priv = $lib.import(slib.hatching.priv.user)
+    $util = $lib.import(slib.hatching.util)
+
+    if $cmdopts.urlscan {
+        $task = $cmdopts.task
+        if (not $task) { $task = urlscan1 }
+        $retn = $priv.urlscanReport($cmdopts.sample, $task)
+        $what = `The UrlScan report of {$cmdopts.sample}`
+    }
+    elif $cmdopts.task {
+        $retn = $priv.taskReport($cmdopts.sample, $cmdopts.task)
+        $what = `The {$cmdopts.task} report of {$cmdopts.sample}`
+    }
+    elif $cmdopts.static {
+        $retn = $priv.staticReport($cmdopts.sample)
+        $what = `The static report of {$cmdopts.sample}`
+    }
+    else {
+        $retn = $priv.overview($cmdopts.sample)
+        $what = `The overview report of {$cmdopts.sample}`
+    }
+    if (not $util.failed($retn, $what)) { $util.printJson($retn.data) }
+}

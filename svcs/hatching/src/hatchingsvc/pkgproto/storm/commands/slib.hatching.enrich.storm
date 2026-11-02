@@ -1,0 +1,28 @@
+init {
+    $hatching = $lib.import(slib.hatching.lib)
+    $model = $lib.import(slib.hatching.model)
+}
+
+if $cmdopts.sample {
+    // --sample ignores inbound nodes.
+    spin |
+    for $sid in $cmdopts.sample {
+        $n = $hatching.model($sid, tasks=$cmdopts.tasks)
+        if ($cmdopts.yield and $n) { yield $n }
+    }
+}
+else {
+    switch $node.form() {
+        "file:bytes": { }
+        "hash:md5": { }
+        "hash:sha1": { }
+        "hash:sha256": { }
+        "hash:sha512": { }
+        "inet:url": { }
+        *: {
+            $lib.warn("slib.hatching.enrich: The node form {form} is not supported.", form=$node.form())
+            spin
+        }
+    }
+    divert $cmdopts.yield $model.nodes(($hatching.enrich($node, tasks=$cmdopts.tasks),))
+}

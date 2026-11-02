@@ -1,0 +1,17 @@
+init {
+    $priv = $lib.import(slib.hatching.priv.user)
+    $hatching = $lib.import(slib.hatching.lib)
+    $util = $lib.import(slib.hatching.util)
+}
+
+spin |
+for $sample in $cmdopts.sample {
+    $retn = $priv.wait($sample, timeout=$cmdopts.timeout)
+    if (not $util.failed($retn, `Waiting for sample {$sample}`)) {
+        $lib.print("slib.hatching.sample.wait: Sample {id} is {status}.", id=$retn.data.id, status=$retn.data.status)
+        if (($cmdopts.model or $cmdopts.yield) and $retn.data.status = "reported") {
+            $n = $hatching.model($retn.data.id, tasks=$cmdopts.tasks)
+            if ($cmdopts.yield and $n) { yield $n }
+        }
+    }
+}
