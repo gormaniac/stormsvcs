@@ -40,7 +40,11 @@ HOST_8888 = {
             "version": "1.25.3",
             # Real banners list OS CPEs alongside the product's.
             "cpe23": ["cpe:2.3:a:f5:nginx:1.25.3", "cpe:2.3:o:linux:linux_kernel"],
-            "data": "HTTP/1.1 200 OK\r\nServer: nginx\r\n\r\n",
+            "data": (
+                "HTTP/1.1 200 OK\r\nServer: nginx\r\n"
+                "Date: Thu, 01 Oct 2026 12:00:00 GMT\r\n"
+                "Content-Type: text/html\r\n\r\n<html></html>"
+            ),
             "hostnames": ["dns.google"],
             "domains": ["dns.google"],
             "tags": ["cdn"],

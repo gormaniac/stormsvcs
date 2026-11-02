@@ -1,5 +1,5 @@
 name: slib.shodan
-version: 0.4.0
+version: 0.5.0
 guid: 0f6c1d0f1d8a4c3bb7a1e3d5c9b2a864
 
 synapse_minversion: [2, 137, 0]
@@ -69,7 +69,9 @@ commands:
 
       Models the IP's ASN, owner, location, hostnames (inet:dns:a/aaaa), tags, and
       vulnerabilities (risk:vulnerable), plus every service banner Shodan has seen
-      (inet:server, inet:banner, it:prod:softver, crypto:x509:cert, inet:tls:servercert).
+      (inet:server, inet:banner, it:prod:softver, crypto:x509:cert, inet:tls:servercert), and
+      the HTTP response headers in HTTP banners, except Date (inet:http:response:header, linked
+      with inet:banner -(refs)> inet:http:response:header).
 
       Uses the free InternetDB API when --internetdb is used, or automatically when
       no Shodan API key is available to the current user.

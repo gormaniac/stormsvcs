@@ -92,6 +92,18 @@ class TestShodanStormHost(s_tests.SynTest):
             assert len(await core.nodes("inet:server=tcp://8.8.8.8:443 +#rep.shodan.cdn")) == 1
             assert len(await core.nodes("inet:server -> inet:banner")) == 2
             assert len(await core.nodes("inet:asn=15169 :owner -> ou:org +:name='google llc'")) == 1
+
+            # HTTP response headers, without the Date header, are referenced by the banner.
+            nodes = await core.nodes("inet:server=tcp://8.8.8.8:443 -> inet:banner -(refs)> *")
+            assert {n.ndef for n in nodes} == {
+                ("inet:http:response:header", ("server", "nginx")),
+                ("inet:http:response:header", ("content-type", "text/html")),
+            }
+            assert len(await core.nodes("inet:http:response:header:name=date")) == 0
+            nodes = await core.nodes("inet:http:response:header=(server, nginx)")
+            assert nodes[0].get(".seen") is not None
+            query = f"meta:source={SVC_GUID} -(seen)> inet:http:response:header"
+            assert len(await core.nodes(query)) == 2
             assert len(await core.nodes("inet:dns:a=(dns.google, 8.8.8.8)")) == 1
 
             nodes = await core.nodes(
@@ -132,6 +144,7 @@ class TestShodanStormHost(s_tests.SynTest):
             assert len(await core.nodes("risk:vulnerable")) == 2
             assert len(await core.nodes("crypto:x509:cert")) == 1
             assert len(await core.nodes("it:prod:softver")) == 2
+            assert len(await core.nodes("inet:http:response:header")) == 2
 
     async def test_host_pipeline(self):
         async with shodanSvc(self) as (core, svc, fake):

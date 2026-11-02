@@ -75,6 +75,13 @@ function bannerNode(server, text, time=$lib.null) {
     return($seen($node, $time))
 }
 
+// Model an HTTP response header from a banner, linked with a -(refs)> edge from the banner.
+function httpHeaderNode(banner, header, time=$lib.null) {
+    [ inet:http:response:header?=($header.name, $header.value) ]
+    [ <(refs)+ $banner ]
+    return($seen($node, $time))
+}
+
 // Model an SSH server's public host key as a file the server hosts (inet:servfile).
 // The file is the key as OpenSSH saves it to disk, "<algo> <base64 key>\n" (see
 // shodansvc.norm.normSshKey), so it matches .pub and keyscan output by hash.
@@ -206,7 +213,13 @@ function banner(b, tagPrefix=$lib.null) {
     $ipnode = $ipNode($b.ip, $b.timestamp)
     if ($b.asn and $ipnode) { $setAsn($ipnode, $b.asn, $b.org) }
 
-    if $b.data { $bannerNode($srv.repr(), $b.data, $b.timestamp) }
+    if $b.data {
+        $bannernode = $bannerNode($srv.repr(), $b.data, $b.timestamp)
+        // Date headers aren't included, see shodansvc.norm.normHttpHeaders.
+        if $bannernode {
+            for $header in $b.http_headers { $httpHeaderNode($bannernode, $header, $b.timestamp) }
+        }
+    }
 
     if ($b.ssh and $b.ssh.pubkey) { $sshKeyNode($srv, $b.ssh.pubkey, $b.timestamp, $tagPrefix) }
 
