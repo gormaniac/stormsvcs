@@ -1,4 +1,4 @@
-# slib.shodan rework: query provenance, count modeling, inbound nodes, and host history timelines
+# slib.shodan rework: query provenance, credit-free IP lists, saved queries, inbound nodes, and host history timelines
 
 **Status:** DESIGN. No code yet. This document is the implementation plan.
 **Date:** 2026-11-02
@@ -24,11 +24,13 @@ This rework adds five capabilities to the existing `slib.shodan` service (`svcs/
 1. **Query provenance.** Each Shodan query the service runs (search, stream, count) becomes an
    `it:exec:query` node. It records what was asked, by whom and when, and `-(found)>` edges link it
    to the `inet:server`, `inet:banner` and `inet:ipv4`/`inet:ipv6` nodes the query returned.
-2. **A modeling count command (`slib.shodan.count`).** It models the infrastructure a query matches
-   without spending query credits, using the free `/shodan/host/count` endpoint. The output is an
-   IP-whois-style view (ASN, org, location, …) plus the ports each matching IP serves. It models the
-   *data* that count returns, not the counts. `slib.shodan.search --count` remains the way to print
-   totals.
+2. **Credit-free IP lists (`slib.shodan.count`).** The aim is to run as many Shodan queries as you
+   like while spending as few query credits as possible. The most valuable thing Shodan returns is
+   the list of IPs that match a query, and the free `/shodan/host/count` endpoint returns it as the
+   `ip` facet. The command makes **one** count call with `ip:<plan max>` in the facets and models each
+   IP. It spends no query credits and costs one request per query. It doesn't try to attribute other
+   data to the IPs; whois and port context come from other APIs. The counts themselves are never
+   stored, and `slib.shodan.search --count` is still the way to print them.
 3. **More inbound forms** for `slib.shodan.host`, `slib.shodan.trends`, `slib.shodan.stream` and the new
    count command.
 4. **Host history timelines.** `slib.shodan.host --history` builds one `meta:timeline` per IP and one
@@ -68,15 +70,13 @@ creates no new nodes.
 1. **`model.banner()` returns only the `inet:server`.** Both `-(found)>` and `-(refs)>` need the
    banner and IP nodes that each banner produced. The model functions have to change shape without
    breaking the documented `$lib.import(slib.shodan.lib)` API.
-2. **Facets don't nest** (API appendix §5). "Ports per IP" can't come from one count call. It takes a
-   two-stage fan-out of N+1 free calls, rate limited to 1 request per second.
-3. **Facet value formats are mostly undocumented** (API appendix §4.2, Could not verify 2–3). The
-   value formats for `asn`, `ip`, `ssl.cert.serial` and `vuln` are inferred. Normalization has to
-   accept every plausible format and validate with `$lib.trycast`.
+2. **The facet size limit depends on the plan and isn't published.** The default size is 5, so
+   `ip` alone returns only 5 IPs. The command has to ask for `ip:<N>`, find the plan's limit, and say
+   clearly when a query matches more IPs than one call can return (§5.5).
+3. **Facet values come back untyped** (API appendix §4.2). The `ip` value has been confirmed as a
+   dotted string (§5.5), but every value still goes through `$lib.trycast` before it's modeled.
 4. **`_shodan.id` is not guaranteed to exist** (API appendix §1.6). The idempotency key needs a
    deterministic fallback.
-5. **The default facet list isn't decided yet** (Open question 1). The design has to make it a single
-   constant plus a config override, so filling it in later doesn't change the code.
 
 ---
 
@@ -102,12 +102,9 @@ citations are in `shodan-api-research.md`.
   `:duration`, `:type (meta:event:taxonomy)`.
 - `meta:source -(seen)> *` is the service's existing provenance convention (`slib.shodan.model`
   `seen()`), and it applies to every new node.
-- IP-whois forms: `inet:ipv4/6:asn/:loc/:latlong/:place/:dns:rev`, `inet:asn:name/:owner`,
-  `inet:asnet4/6`, `inet:whois:iprec` (+ `-(ipwhois)> inet:ipv4/6`), `pol:country` (via
-  `$lib.gen.polCountryByIso2`), and `ou:org` (via `$lib.gen.orgByName`).
 - `inet:ssh:hassh` does **not** exist.
-- `svcs/ip_api` is the precedent for IP-whois modeling. It sets `inet:asn` with an `:owner` org,
-  `:loc`, `:latlong`, `:place` and a `geo:telem`.
+- `svcs/ip_api` is the precedent for choosing `inet:ipv4` vs `inet:ipv6` from an untyped IP string
+  (`$lib.trycast(inet:ipv4, …)` first).
 
 ---
 
@@ -119,10 +116,10 @@ This is an existing service, so nothing about its layout changes.
 |---|---|
 | Service folder / package | `svcs/shodan/` / `shodansvc` (unchanged) |
 | Storm package | `slib.shodan` (unchanged) |
-| New commands | `slib.shodan.count`, `slib.shodan.admin.count`, `slib.shodan.query.save` |
+| New commands | `slib.shodan.count`, `slib.shodan.query.save` |
 | New taxonomies | `meta:timeline:type=svc.shodan.host.history.` and `meta:event:type=svc.shodan.banner.`, under the same `svc.shodan.` root as the existing `meta:rule:type=svc.shodan.query.`. New `meta:rule:type` children: `svc.shodan.query.community.` and `svc.shodan.query.local.` (§5.9). |
-| New globals | `slib:shodan:count:facets` (facet list override) and `slib:shodan:count:facetmap` (custom mappings), set by `slib.shodan.admin.count` |
-| Versions | Each roadmap phase is one **minor** bump: 0.6.0 → 0.9.0 (§16). The version is set in `pyproject.toml`, `__init__.py`, `slib.shodan.yaml` and `uv.lock` (edit the lock entry directly, then `uv lock --check`), per `CLAUDE.md`. |
+| New globals | None. The plan's facet limit is cached in the service's memory, not in globals (§4.2). |
+| Versions | Each roadmap phase is one **minor** bump: 0.6.0 → 0.10.0 (§16). The version is set in `pyproject.toml`, `__init__.py`, `slib.shodan.yaml` and `uv.lock` (edit the lock entry directly, then `uv lock --check`), per `CLAUDE.md`. |
 | Dependencies | None new |
 
 ---
@@ -133,11 +130,10 @@ This is an existing service, so nothing about its layout changes.
 
 ```
 svcs/shodan/src/shodansvc/
-├── norm.py          # + normFacetValue(), normCountFacets(); normBanner keeps _shodan.options.scan
-│                    #   and metadata.truncated
-├── svc.py           # + countIps() helper (two-stage fan-out), stays in the 1 rps limiter
-├── api.py           # + "countIps" in RETN_METHS (generator, like searchGenr)
-├── defs.py          # + COUNT_IP_FACETS / COUNT_QUERY_FACETS placeholders (Open question 1)
+├── norm.py          # normBanner keeps _shodan.options.scan and metadata.truncated
+├── svc.py           # + countIps(): one count call with the ip facet, finds the plan's facet limit
+├── api.py           # + "countIps" in RETN_METHS
+├── defs.py          # + COUNT_IP_SIZE (the size first asked for, 131072)
 └── pkgproto/
     ├── slib.shodan.yaml                       # new commands, cmdinputs, options
     └── storm/
@@ -145,32 +141,28 @@ svcs/shodan/src/shodansvc/
         ├── modules/slib.shodan.lib.storm      # host() timeline support, count(), streamValues()
         ├── modules/slib.shodan.priv.user.storm# + countIps() wrapper
         ├── commands/slib.shodan.count.storm   # new
-        ├── commands/slib.shodan.admin.count.storm # new
+        ├── commands/slib.shodan.query.save.storm # new
         └── commands/{search,stream,host,trends}.storm  # query nodes, inbound nodes
 ```
 
 ### 4.2 Python changes
 
-- **`ShodanSvc.countIps(query, ipfacets, limit, apikey)`** is an async generator:
-  1. `count(query, facets=f"ip:{limit}")` gets the top IPs.
-  2. For each IP: `count(f"{query} ip:{ip}", facets=<per-IP facets>)` (Open question 4 covers
-     whether IPv6 needs `ip:` or `net:`).
-  3. Yield `{"ip": <dotted>, "facets": {name: [value, ...]}}`. The counts are dropped here, so Storm
-     never sees them.
+- **`ShodanSvc.countIps(query, size=None, facets=None, apikey=None)`** returns
+  `{"ips": [<str>, ...], "size": <n>, "full": <bool>, "facets": {...}}`:
+  1. Call `count(query, facets=f"ip:{size}" + extra facets)`. When no `size` is given, use the
+     limit cached for this key, or `defs.COUNT_IP_SIZE` (131,072, the largest published value).
+  2. If Shodan answers `Facet size too big for current subscription (limit: N)` (the exact text,
+     verified on the Membership plan), parse `N`, cache it in memory under the SHA-256 of the API key,
+     and retry once with `ip:N`. That costs one extra free call the first time each key is used. The
+     cache is never written to disk or globals, and it never holds the key itself.
+  3. Return only the IP values, with the counts dropped so Storm never sees them. `full` is true
+     when the number of IPs returned equals the size asked for, which means the query probably
+     matches more IPs than one call can return. (`total` counts banners, not IPs, so it can't be
+     used for this check.)
+  4. `facets` holds any extra facets the caller asked for, with their counts, **for printing only**
+     (§5.5).
 
-  It goes through the existing `RateLimiter` (1 rps) and 429 retry in `client.py`. An error in step 1
-  ends the generator. An error for one IP yields a `status=False` item and the loop continues, so a
-  single plan-gated or bad IP doesn't throw away the rest of the run.
-- **`norm.normFacetValue(facet, value)`** normalizes values from formats we haven't confirmed:
-  - `asn`: strip any `AS` prefix and cast to int.
-  - `ip`: if the value is an int, convert it to dotted form.
-  - `vuln` / `vuln.verified`: upper-case; drop values that start with `!` (gotcha 20).
-  - `port`: int.
-  - `ssl.cert.serial`: int → hex string, the same as the existing `normCert`.
-  - Anything else: `str(value)`.
-
-  Storm then `$lib.trycast`s each value into its target type, so a bad format is skipped with a
-  warning and never raises.
+  It goes through the existing `RateLimiter` (1 rps) and 429 retry in `client.py`.
 - **`normBanner`** also keeps:
   - `scan`: `_shodan.options.scan`.
   - `region`: `_shodan.region` or `_shodan.options.region`, whichever is set (gotcha 3).
@@ -220,7 +212,7 @@ it is.
 | `:synuser` | `$lib.user.iden` |
 | `:api:url` | Endpoint without the key, ex. `https://api.shodan.io/shodan/host/search`, `https://api.shodan.io/shodan/host/count`, `https://stream.shodan.io/shodan/asn/3303,15169` |
 | `:offset` | The number of results consumed: banners for search/stream, IPs for count |
-| `:opts` | `{"command": "slib.shodan.search", "limit", "page", "minify"}`, `{"kind", "values", "limit", "timeout"}` for streams, or `{"ipfacets", "limit"}` for count. **Never the key.** |
+| `:opts` | `{"command": "slib.shodan.search", "limit", "page", "minify"}`, `{"kind", "values", "limit", "timeout"}` for streams, or `{"size", "facets", "full"}` for count. **Never the key.** |
 
 Edges:
 
@@ -237,7 +229,7 @@ Which commands create query nodes:
 | `search` (ingest mode) | Yes. One per query executed: per inbound node, or once for a bare query. |
 | `search --count/--tokens/--filters` | **No.** These are print-only modes and model nothing. |
 | `stream` | Yes, one per run. |
-| `count` | Yes. One per stage-1 query. Per-IP stage-2 calls attach to the same node, since they are one logical execution. |
+| `count` | Yes. One per count call, i.e. per query (per inbound node, or once for a bare query). |
 | `trends` | No. It prints aggregates and models nothing. |
 | `host`, `dns.*`, `cve`, `cpe` | No. These are lookups, not queries (Open question 5). |
 
@@ -282,64 +274,47 @@ Rules:
 - A host with 1,000 historical banners creates 1,000 events. That's acceptable, and the timeline
   makes it browsable. Re-runs are free because the events are idempotent.
 
-### 5.5 Count modeling (`slib.shodan.count`)
+### 5.5 Credit-free IP lists (`slib.shodan.count`)
 
-What it models: **the infrastructure a query matches, with no counts.**
+**Goal:** get the list of IPs that match a query without spending query credits, so you can run as
+many queries as you like. Context such as whois and ports comes from other APIs.
 
-**Stage 1:** `count(<query>, facets=ip:<limit>)` returns the matching IPs.
+**What it does, per query:**
 
-- Each IP becomes an `inet:ipv4/6` node, linked with `it:exec:query -(found)>`.
+1. One call to `/shodan/host/count` with `facets=ip:<size>` (§4.2). No query credits. It can't
+   return more IPs than the plan's facet limit.
+2. Each `ip` value becomes `inet:ipv4` or `inet:ipv6` (decided by `$lib.trycast`, the same way
+   `svcs/ip_api` does it), gets the usual `meta:source -(seen)>`, and is linked with
+   `it:exec:query -(found)>`.
+3. Nothing else is modeled. The counts and the other facets aren't stored in props, node data or
+   tags.
 
-**Stage 2**, for each IP: `count(<query> ip:<ip>, facets=<per-IP facet list>)`. Each facet's values
-are mapped onto that IP's nodes:
+**Verified behaviour** (live calls on 2026-11-02 with a Membership-plan key; count calls used no
+query credits, `api-info` still showed 100/100):
 
-| Facet | Model | Status |
-|---|---|---|
-| `port` | `inet:server=tcp://<ip>:<port>` (+ `-(found)>` from the query). Each `port` value is a port that **matched the query** on that IP, not every open port. That's the intended meaning. | built-in |
-| `asn` | `inet:ipv4/6:asn ?=`, via the existing `model.setAsn()` | built-in candidate |
-| `org` / `isp` | `inet:asn:owner` via `$lib.gen.orgByName` (`ip_api` precedent) | built-in candidate |
-| `country` | `inet:ipv4/6:loc ?=` (lower-cased ISO2), and `pol:country` via `$lib.gen.polCountryByIso2` | built-in candidate |
-| `city` / `region` | Extend `:loc` (`us.va.ashburn`), using the same loc-building rules as `ip_api.buildLoc` | built-in candidate |
-| `domain` / `hostname` | `inet:dns:a/aaaa=(<fqdn>, <ip>)`, the same evidence `model.banner()` already uses for banner hostnames | built-in candidate |
-| *others* | through the custom mapping (§5.6) | maintainer list |
+| Request (`facets=`) | Result |
+|---|---|
+| `ip` | 5 IPs, the default size |
+| `ip:100` | 100 IPs |
+| `ip:1000` | 1,000 IPs |
+| `ip:10000` | `Facet size too big for current subscription (limit: 1000)` |
+| `ip:1000,port:50` | 1,000 IPs plus a separate list of 50 ports. Facets are independent top lists over the whole query, so the ports can't be tied to IPs. |
 
-**The facet list is deliberately left open** (Open question 1). The maintainer will supply a list
-that produces an IP-whois view "à la `ip_api`" with ports per result. The design only fixes:
+`ip` values are dotted strings (`"185.212.47.222"`). Other formats seen: `asn` is lower-case with a
+prefix (`"as39378"`), `port` is an integer, and `hostname` isn't a facet (Shodan silently drops it).
+Limits for the other plans aren't published (Open question 2).
 
-- `defs.COUNT_IP_FACETS`: the default per-IP list (placeholder: `["port:1000"]` until the maintainer
-  supplies the list).
-- `slib:shodan:count:facets`: an admin override.
-- `--facets`: per-run additions.
+**When there are more IPs than one call returns:** if `full` is true, the command warns:
+`slib.shodan.count: <query> returned <size> IPs, the most your plan allows in one call. It likely
+matches more; narrow the query (ex. add country: or asn:) to get the rest.` Automatic splitting is
+Open question 3.
 
-Edges and nodes:
+**Extra facets (`--facets`):** optional and **print-only**. They're shown as tables after the IPs
+are modeled, the same way `search --count --facets` prints them, as context for the run. They
+aren't attributed to IPs and aren't stored. Whether to request any by default is Open question 1.
 
-- `-(found)>` goes only to the IPs and `inet:server` nodes.
-- Whois-style data lives in props on, or one hop from, those nodes. This meets the reachability rule
-  without breaking the three-class edge decision.
-- Query-level facets that aren't scoped to an IP (ex. top orgs across all results) are **not
-  modeled**. They'd have no IP to attach to (Open question 2).
-
-### 5.6 Custom facet → model mappings
-
-Stored in `slib:shodan:count:facetmap` by `slib.shodan.admin.count --map`. The format is
-declarative, not Storm, so no admin-supplied code ever runs as other users:
-
-```json
-{
-  "http.title":  {"kind": "node", "form": "it:dev:str"},
-  "ssl.jarm":    {"kind": "node", "form": "inet:ssl:jarmhash"},
-  "os":          {"kind": "node", "form": "it:prod:softver", "props": {"name": "$valu"}},
-  "hostname":    {"kind": "comp", "form": "inet:dns:a", "valu": ["$valu", "$ip"]}
-}
-```
-
-- `kind=prop` sets a prop on the IP node.
-- `kind=node` creates `<form>=<valu or props>`, linked `inet:ipv4 -(refs)> <node>`.
-  (Open question 3: confirm the edge, or use only `prop`/`comp` kinds.)
-- `kind=comp` builds a comp form that contains the IP.
-- Values go through `normFacetValue`, then `$lib.trycast` to the target type. Invalid values are
-  skipped with one warning per facet.
-- Built-in mappings take precedence unless the custom map explicitly overrides them.
+**Order of results:** Shodan orders facet values by banner count, so with `full` true you get the
+IPs with the most matching banners, not a random sample.
 
 ### 5.7 Tags & taxonomies
 
@@ -412,9 +387,8 @@ There are no scheduled syncs. Every run is an on-demand command.
 - **History:** each `host --history` run adds new events and is a no-op for events already seen.
   Running it on a schedule (cron) extends a timeline beyond the 90-day API window. That's the only
   way to keep longer history.
-- **Count fan-out:** N+1 requests at 1 request per second. `--limit` (IPs) defaults to 100, about
-  100 seconds. `--limit 0` is capped at the plan's facet maximum and is warned about. Each IP is
-  modeled as soon as its call returns, so an interrupted run keeps what it already ingested.
+- **Count:** one request per query (two the first time a key is used, to find its facet limit).
+  With inbound nodes, each node is one request at 1 request per second, and no query credits.
 
 ---
 
@@ -424,25 +398,19 @@ There are no scheduled syncs. Every run is an on-demand command.
 
 | Perm | Covers |
 |---|---|
-| `slib.shodan.user` | `count` (new), and the existing user commands |
-| `slib.shodan.admin` | `admin.count` (new: facet list and mappings) |
+| `slib.shodan.user` | `count` and `query.save` (new), and the existing user commands |
 
 ### 7.2 Commands
 
 **`slib.shodan.count`** (new)
 
 - `query` (positional, AND'd with the query built for each inbound node)
-- `--limit <n>`: IPs, default 100
-- `--facets <csv>`: extra per-IP facets for this run
-- `--yield`: yield the `it:exec:query` nodes instead of the inbound nodes; by default it yields the
-  IPs, matching `search`
+- `--size <n>`: the number of IPs to ask for. Defaults to the plan's limit (§4.2). A size above the
+  limit is lowered to the limit with a warning.
+- `--facets <csv>`: extra facets to print for context; never modeled
+- `--yield-query`: yield the `it:exec:query` nodes instead of the IPs. By default it yields the IPs,
+  matching `search`.
 - cmdinputs: every `search` form, through `$shodan.searchQuery()`
-
-**`slib.shodan.admin.count`** (new)
-
-- `--facets <csv>` / `--reset`
-- `--map <json>` / `--unmap <facet>`
-- `--list`
 
 **`slib.shodan.search`**
 
@@ -516,10 +484,8 @@ query to its results and walking a timeline.
 
 - Never put the API key in `:opts` or `:api:url`. Build `:api:url` from `client.BASE_URLS` plus the
   path, without params.
-- Escape IPs in stage-2 queries with the existing `quote()` logic. An IP comes from Shodan's own
-  facet output, which is still untrusted input to a query string.
-- `countIps` must not hold the rate-limiter lock across yields. It already uses
-  `RateLimiter.wait()` per request.
+- Parse the facet-limit error with a strict regex (`\(limit: (\d+)\)`). If the message doesn't
+  match, return the error as it is and don't retry.
 
 ---
 
@@ -532,17 +498,17 @@ query to its results and walking a timeline.
   - one banner with `_shodan.id: null`
   - one with `_shodan.options.scan`
   - one with `metadata.truncated`
-- `/shodan/host/count` that inspects the `ip:` filter and returns per-IP facets. The facet values
-  should use the awkward formats: `AS`-prefixed and bare ASNs, an integer IP, lower-case CVEs and a
-  `!CVE`.
+- `/shodan/host/count` that honors `ip:<N>` and returns the verified limit error above a
+  configured limit. Its `ip` values include IPv4, IPv6 and one junk value.
 
 **Python unit tests**
 
-- `normFacetValue` for every case above.
 - `countIps`:
   - drops the counts
-  - continues after a per-IP error
-  - honors the limit
+  - finds the limit from the error and retries once
+  - caches the limit per key hash
+  - sets `full` correctly
+  - doesn't retry on an unrecognized error
 
 **StormPkgTest**
 
@@ -558,10 +524,10 @@ query to its results and walking a timeline.
   - the fallback key is used when `id` is null
   - events reference only server, banner and IP
 - **Count:**
-  - IPs, servers and mapped props are created
-  - no count values are stored in props, node data or tags
-  - custom mapping kinds work
-  - an invalid mapping value is skipped with a warning
+  - one query node per inbound node, with `-(found)>` to each IP
+  - IPv4 and IPv6 values model as the right form, and the junk value is skipped with a warning
+  - no counts or extra facets stored anywhere
+  - the "full" warning appears when expected
 - **Inbound:** each new cmdinput form on host, trends and stream.
 - **Saved queries:**
   - `--source local`, `--source shodan` and `--source all` each list the right rows.
@@ -579,7 +545,8 @@ query to its results and walking a timeline.
 
 - One keyed `host?history=true` call that records whether host-level fields are current-only and
   whether `_shodan.id` is stable across two calls (Open questions 6 and 9).
-- One count call with `ip` and `asn` facets to pin down the value formats.
+- One count call with `ip:1000` that checks the values are dotted strings and the call used no query
+  credits (`api-info` before and after).
 
 ---
 
@@ -594,7 +561,7 @@ Unchanged.
 | Dimension | Target | Mechanism |
 |---|---|---|
 | History events per host | ≤ 1,000 per lookup | API cap. Idempotent guids keep re-runs a no-op. |
-| Count fan-out | 100 IPs ≈ 100 seconds | 1 rps limiter, `--limit`, IPs modeled as they arrive |
+| Count | Up to the plan's facet limit in IPs (1,000 on Membership) per request, 0 query credits | One call per query; limit cached per key |
 | Query nodes | 1 per execution | `-(found)>` only to 3 forms, so edge count ≤ 3 × results |
 
 ---
@@ -602,7 +569,7 @@ Unchanged.
 ## 12. Security considerations
 
 - The key is never stored on graph nodes. Strip `api_key` from any `/shodan/scans` data (gotcha 6).
-- Custom mappings are declarative JSON stored by admins. No Storm text from globals is ever evaluated.
+- The facet-limit cache is keyed by a hash of the key and kept only in memory.
 - Facet values and banner fields are attacker-controlled. Everything goes through
   `$lib.trycast`/`?=`, and `:title`/`:summary` are built from typed fields only.
 
@@ -621,9 +588,12 @@ inet:ipv4=1.2.3.4 | slib.shodan.host --history
 meta:timeline:title="Shodan history: 1.2.3.4" -> meta:event | sort :time
 meta:event:type=svc.shodan.banner. +:time@=(-30 days, now) -(refs)> inet:banner
 
-// Model the infrastructure behind a query, with no query credits.
-slib.shodan.count "ssl.jarm:2ad2ad0002ad2ad00042d42d00000069d641f34fe76acdc05c40262f8815e5" --limit 50
-inet:ipv4 <(found)- it:exec:query:text~="ssl.jarm" | -> inet:server
+// Every IP matching a query, with no query credits, plus a printed country breakdown for context.
+slib.shodan.count "http.favicon.hash:-1166125415" --facets country:10
+
+// The same for saved queries, then take only the IPs.
+meta:rule:type^=svc.shodan.query. | slib.shodan.count
+it:exec:query:api:url=https://api.shodan.io/shodan/host/count -(found)> inet:ipv4
 
 // Inbound nodes on the commands that gained them.
 inet:server:port=22 | slib.shodan.host
@@ -653,21 +623,20 @@ meta:rule:type^=svc.shodan.query. | slib.shodan.search --limit 200
   and link them to a `meta:event`. The search costs credits, but it's free through count.
 - **Search and stream banners landing in the IP's timeline**, behind a global toggle.
 - **`it:exec:query:service:platform`** pointing at an `inet:service:platform` for Shodan.
-- **`inet:whois:iprec`** from a host lookup's org and netblock, if the maintainer's facet list
-  calls for it.
+- **Automatic splitting for large results** (Open question 3).
 
 ---
 
 ## 15. Open questions
 
-1. **Default count facet list.** The maintainer will supply it. It goes in `defs.COUNT_IP_FACETS`,
-   and the built-in mapper table in §5.5 gets trimmed or extended to match.
-2. **Query-level (non-IP) facets.** Skip them (the current design), or model them linked only from
-   the query? Linking them from the query would add `-(found)>` targets beyond the three agreed
-   classes.
-3. **Custom `kind=node` link.** Is `inet:ipv4 -(refs)> <node>` acceptable, or should custom mappings
-   be limited to `prop` and `comp`?
-4. **IPv6 in stage-2 queries.** Is it `ip:<v6>` or `net:<v6>/128`? Settle this with a live call.
+1. **Default context facets for `count`.** Should it print any by default (for example `country`,
+   `org`, `port`), or only when `--facets` is given? Either way they're print-only.
+2. **Facet limits on other plans.** Only Membership is confirmed (1,000). The maintainer is finding
+   the others. The design doesn't depend on them, because the limit is found at run time.
+3. **Automatic splitting when `full` is true.** Should `count --split country,asn` re-run the query
+   once per value of a facet (`<query> country:US`, …) and merge the IPs? It stays free but uses
+   more calls, and it's only exact if no value list is itself full. Deferred until it's needed.
+4. **IPv6 values from the `ip` facet.** Confirm the format with a query that matches IPv6 hosts.
 5. **Query nodes for `host`, `dns`, `cve` and `cpe` lookups.** Currently no.
 6. **Can `metadata.truncated` include `data` on historical banners?** Settle with a live call. §5.4
    handles it either way.
@@ -690,7 +659,7 @@ meta:rule:type^=svc.shodan.query. | slib.shodan.search --limit 200
 | Phase | Version | Scope | Exit criteria |
 |---|---|---|---|
 | 1 | 0.6.0 | `bannerNodes()` refactor. `it:exec:query` on `search` and `stream`. `--yield-query`. | Provenance tests; existing tests still pass. |
-| 2 | 0.7.0 | Host history timeline: `--timeline`, `--history`, fallback key, `normBanner` additions. | Idempotency tests; live check of Open questions 6 and 9. |
-| 3 | 0.8.0 | Inbound nodes for `host`, `trends` and `stream`. | Per-form tests. |
-| 4 | 0.9.0 | Saved queries: `queries --source/--yield`, `query.save`, the community/local `meta:rule` types, and `searchQuery()` accepting the whole `svc.shodan.query.` subtree. | Saved-query tests. |
-| 5 | 0.10.0 | `slib.shodan.count`, `admin.count`, `countIps`, `normFacetValue`, custom mappings. | **Blocked on Open question 1** (the facet list); count tests. |
+| 2 | 0.7.0 | `slib.shodan.count` and `countIps`: credit-free IP lists, limit detection, the "full" warning, print-only `--facets`. | Count tests; live check that count uses no credits. |
+| 3 | 0.8.0 | Host history timeline: `--timeline`, `--history`, fallback key, `normBanner` additions. | Idempotency tests; live check of Open questions 6 and 9. |
+| 4 | 0.9.0 | Inbound nodes for `host`, `trends` and `stream`. | Per-form tests. |
+| 5 | 0.10.0 | Saved queries: `queries --source/--yield`, `query.save`, the community/local `meta:rule` types, and `searchQuery()` accepting the whole `svc.shodan.query.` subtree. | Saved-query tests. |

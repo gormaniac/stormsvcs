@@ -565,6 +565,28 @@ Base `https://stream.shodan.io`. Output is newline-separated JSON (`t=json`) or 
 
 ---
 
+## Live verification (2026-11-02)
+
+These were checked with keyed calls using the maintainer's Membership-plan key (`api-info` → `plan: "dev"`, 100 query credits, 16 monitored IPs). Every call was `/shodan/host/count` or `/api-info`. Afterward, `api-info` still showed 100 of 100 query credits left, so count calls are confirmed free.
+
+| Call | Result |
+|---|---|
+| `query=hash:1489948211`, `facets=ip` and `ip:1000` | `total: 1`, 1 IP (`130.94.23.114`). The query only matches one banner. |
+| `query=http.favicon.hash:-1166125415`, `facets=ip` | 5 IPs (the default size), `total: 13247` |
+| same, `facets=ip:100` | 100 IPs |
+| same, `facets=ip:1000` | 1,000 IPs |
+| same, `facets=ip:10000` | `{"error": "Facet size too big for current subscription (limit: 1000)"}` |
+| same, `facets=ip:1000,port:50` | 1,000 IPs plus 50 ports, as two separate lists (not nested) |
+| `query=http.favicon.hash:-1166125415 ip:185.212.47.222`, `facets=port:1000,asn,org,isp,country,city,domain,hostname` | `total: 1924`; `port` had 1,000 values (hit the cap), `asn: "as39378"`, `org`/`isp: "servinga GmbH"`, `country: "DE"`, `city: "Frankfurt am Main"`, `domain: []`. **`hostname` was missing from the response.** |
+
+What this settles:
+
+- **Could not verify 2 (`ip` format):** a dotted IPv4 string.
+- **Could not verify 3 (`asn` format):** lower-case with an `as` prefix (`"as39378"`).
+- **Could not verify 4 (plan facet limits):** Membership allows 1,000 values per facet. Other plans are still unknown.
+- **New:** `hostname` is not a facet; unknown facets are dropped silently rather than raising an error.
+- **New:** the facet-limit error text is exactly `Facet size too big for current subscription (limit: N)`.
+
 ## Could not verify
 
 Each item below is open because I couldn't confirm it without a key, or because Shodan's site

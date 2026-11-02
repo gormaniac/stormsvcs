@@ -22,7 +22,7 @@ pages. The dump script is reproduced at the end. The package's declared `synapse
    to every new node (queries, timelines, events).
 6. **`meta:rule`** is documented as "A generic rule linked to matches with -(matches)> edges"; its
    `:type` is `meta:rule:type:taxonomy` (the service already uses `svc.shodan.query.`).
-7. **IP "whois"-style forms** (for the count command's facet modeling):
+7. **IP "whois"-style forms** (researched for an earlier per-IP count design; the count command now models only the IPs, see DESIGN.md §5.5):
    - `inet:ipv4` / `inet:ipv6`: `:asn`, `:loc (loc)`, `:latlong`, `:place (geo:place)`, `:dns:rev`, `:type`.
    - `inet:asn`: `:name (str)`, `:owner (ou:org)`.
    - `inet:asnet4` / `inet:asnet6`: `(asn, net4/net6)` comp — ASN ↔ netblock.
