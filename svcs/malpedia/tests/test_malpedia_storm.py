@@ -262,8 +262,9 @@ class TestMalpediaStormSync(s_tests.SynTest):
             text = fm.YARA_WANNA_W0.replace("20170515", "20261031")
             state["yara"]["tlp_white"]["win.wannacryptor_w0.yar"] = ("win.wannacryptor", text)
             state["yara_after"] = {"tlp_white": ["win.wannacryptor_w0.yar"]}
-            # An analyst's edit to an article survives.
+            # An analyst's edits to an article and a tag's doc survive.
             await core.nodes(getNews(fm.URL_SEDNIT) + " [ :title='my title' ]")
+            await core.nodes("syn:tag=rep.malpedia.mal.win.xagent [ :doc='our notes' ]")
 
             msgs = await core.stormlist("slib.malpedia.sync")
             self.stormHasNoErr(msgs)
@@ -284,6 +285,9 @@ class TestMalpediaStormSync(s_tests.SynTest):
             xagent = (await core.nodes(TOOL.format("win.xagent")))[0]
             assert xagent.get("soft:names") == ("chopstick", "sofacy agent", "splm")
             assert xagent.get("desc") == "A backdoor."
+            tagnode = (await core.nodes("syn:tag=rep.malpedia.mal.win.xagent"))[0]
+            assert tagnode.get("doc") == "our notes"
+            assert tagnode.get("title") == "X-Agent"
 
             apt28 = (await core.nodes(THREAT.format("apt28")))[0]
             assert apt28.get("mitre:attack:group") is None

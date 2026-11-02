@@ -170,11 +170,12 @@ function actor(item, conf) {
     return($n)
 }
 
-// Give a threat's or tool's syn:tag a title and doc, so the tag explains itself.
+// Give a threat's or tool's syn:tag a title and (unless it has one) a doc, so the tag explains
+// itself. An analyst's doc is never replaced.
 function _tagTitle(tag, title, url) {
     if (not $tag) { return() }
     [ syn:tag=$tag :title?=$title ]
-    if $url { [ :doc?=`Malpedia: {$url}` ] }
+    if $url { [ :doc*unset?=`Malpedia: {$url}` ] }
     return()
 }
 

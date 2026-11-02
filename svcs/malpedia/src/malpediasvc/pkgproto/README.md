@@ -88,8 +88,8 @@ service.add slib.malpedia tcp://root:<password>@<host>:27492/
 When the service is first added, it (unless `malpedia:autosync` is off):
 
 1. creates the `malpedia` `meta:source` and the default tag settings,
-2. schedules `slib.malpedia.sync` to run **daily** at a random time (so deployments don't all hit Malpedia at once), in the view the service was added from,
-3. and starts the **initial sync** in the background (a one time cron job), so `service.add` doesn't wait for it. The first sync models ~19k articles, ~1.1k actors, ~3.8k families, and ~2.3k YARA rules, which takes 10-15 minutes.
+2. schedules `slib.malpedia.sync` to run **daily** at a random time (so deployments don't all hit Malpedia at once), in the Cortex's default view (move it with `slib.malpedia.admin.schedule --period` from another view),
+3. and starts the **initial sync**, also in the default view, in the background (a one time cron job), so `service.add` doesn't wait for it. The first sync models ~19k articles, ~1.1k actors, ~3.8k families, and ~2.3k YARA rules, which takes 10-15 minutes.
 
 ### Configuration
 

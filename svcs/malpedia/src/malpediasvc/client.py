@@ -12,6 +12,8 @@ exponential backoff instead of hammering the server.
 """
 
 import asyncio
+import contextlib
+import contextvars
 import datetime
 import email.utils
 import io
@@ -47,6 +49,12 @@ MAX_RETRY_AFTER = 600
 # The largest response body (in bytes) the client accepts. The biggest public endpoint
 # (/api/get/yara/tlp_white/zip) is ~4MB today, this leaves plenty of room to grow.
 MAX_BODY = 256 * 1024 * 1024
+
+
+# The request counter of the current task, see MalpediaClient.counter().
+_REQUESTS: contextvars.ContextVar[list[int] | None] = contextvars.ContextVar(
+    "malpedia_requests", default=None
+)
 
 
 class MalpediaApiError(Exception):
@@ -118,6 +126,20 @@ class MalpediaClient:
         # The number of requests sent, so callers can report their cost.
         self.count = 0
 
+    @contextlib.contextmanager
+    def counter(self):
+        """Count the requests the current task sends, as ``box[0]`` of the yielded list.
+
+        Unlike ``count``, requests sent concurrently by other tasks aren't included.
+        """
+
+        box = [0]
+        token = _REQUESTS.set(box)
+        try:
+            yield box
+        finally:
+            _REQUESTS.reset(token)
+
     async def _send(self, path: str) -> tuple[int, bytes, str]:
         """GET a path and return (status, body, content type), retrying transient failures."""
 
@@ -127,6 +149,9 @@ class MalpediaClient:
         for attempt in range(MAX_RETRIES + 1):
             await self.throttle.wait()
             self.count += 1
+            box = _REQUESTS.get()
+            if box is not None:
+                box[0] += 1
             try:
                 async with self.session.get(url, headers=headers, timeout=self.timeout) as resp:
                     size = resp.content_length

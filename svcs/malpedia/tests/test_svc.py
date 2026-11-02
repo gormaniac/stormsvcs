@@ -152,16 +152,17 @@ class TestMalpediaPull(s_tests.SynTest):
             assert set(fams) == {"win.xagent", "win.wannacryptor"}
             assert fams["win.xagent"]["drop"] == {}
             assert list(fams["win.xagent"]["rec"]["aliases"]) == ["Sofacy Agent", "chopstick", "splm"]
-            assert fams["win.wannacryptor"]["drop"]["actors"] == ["lazarus_group"]
-            assert fams["win.wannacryptor"]["drop"]["actortags"] == [["lazarus_group", "threat.lazarus_group"]]
+            # Only the fields Storm undoes are in the drop diff.
+            assert fams["win.wannacryptor"]["drop"] == {"actortags": [["lazarus_group", "threat.lazarus_group"]]}
 
             assert [item["key"] for item in changes["actor"]["removed"]] == ["[vault_7_8]"]
             assert changes["actor"]["removed"][0]["rec"]["name"] == "[Vault 7/8]"
 
             yara = {item["key"]: item for item in changes["yara"]["upsert"]}
             assert set(yara) == {"win.wannacryptor_w0.yar", "win.wannacryptor_w1.yar", "win.sedreco_w0.yar"}
-            assert yara["win.wannacryptor_w0.yar"]["drop"] == {"updated": "2017-05-15", "text": fm.YARA_WANNA_W0,
-                                                               "sha256": yara["win.wannacryptor_w0.yar"]["drop"]["sha256"]}
+            # A new rule text doesn't need anything undone (and the old text isn't sent).
+            assert yara["win.wannacryptor_w0.yar"]["drop"] == {}
+            assert yara["win.wannacryptor_w0.yar"]["rec"]["updated"] == "2026-10-31"
             assert yara["win.sedreco_w0.yar"]["rec"]["familyname"] == "Sedreco"
             assert [item["key"] for item in changes["yara"]["removed"]] == ["win.xagent_auto.yar"]
 
@@ -281,8 +282,17 @@ class TestMalpediaPull(s_tests.SynTest):
             assert "Refusing to remove" in exc.exception.mesg
             assert (await svc.status())["counts"]["family"] == 3
 
+            # The same version isn't downloaded again just to be refused again.
+            start = len(fake.requests)
+            with self.raises(MalpediaSvcError) as exc:
+                await svc.pull()
+            assert "was refused because it removes too much" in exc.exception.mesg
+            assert fake.requests[start:] == ["/api/get/version"]
+            assert "was refused" in (await svc.status())["failed"]
+
             summary = await svc.pull(force=True)
             assert summary["removed"]["family"] == 2
+            assert (await svc.status())["failed"] is None
 
 
 class TestMalpediaViews(s_tests.SynTest):
@@ -351,6 +361,8 @@ class TestMalpediaViews(s_tests.SynTest):
             assert (await svc.record("actor", "apt28"))["name"] == "APT28"
             assert (await svc.record("news", fm.URL_SEDNIT))["title"] == "Sednit reloaded: Back in the trenches"
             assert (await svc.record("news", norm.urlKey(fm.URL_SEDNIT)))["url"] == fm.URL_SEDNIT
+            assert (await svc.record("news", fm.URL_SEDNIT + "?"))["url"] == fm.URL_SEDNIT
+            assert await svc.record("news", "?") is None
 
             found = await svc.find("actor", " fancy ")
             assert found == [{"name": "apt28", "common_name": "APT28", "synonyms": fake.state["actors"]["APT28"]["meta"]["synonyms"], "known": True}]

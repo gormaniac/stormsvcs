@@ -85,7 +85,18 @@ def _listify(valu: Any) -> Any:
     return valu
 
 
-def dropDiff(old: Mapping | None, new: Mapping) -> dict:
+# The fields of each record kind that the Storm model undoes when they change (see
+# slib.malpedia.model). dropDiff only reports these, so Storm isn't sent data it ignores, ex. a
+# YARA rule's old text.
+DROP_FIELDS = {
+    "news": ("actors", "families"),
+    "actor": ("desc", "uuid", "country", "mitre", "sectors"),
+    "family": ("desc", "actortags"),
+    "yara": ("tlp", "familytag", "family"),
+}
+
+
+def dropDiff(old: Mapping | None, new: Mapping, fields: Iterable[str] | None = None) -> dict:
     """What a record lost since ``old``: removed list items and changed/removed scalars.
 
     Storm uses this to undo edits it made for the old record (ex. an article that's no longer
@@ -95,7 +106,8 @@ def dropDiff(old: Mapping | None, new: Mapping) -> dict:
     if not old:
         return {}
     drop = {}
-    for name, oldv in old.items():
+    for name in old if fields is None else fields:
+        oldv = old.get(name)
         newv = new.get(name)
         # Stored records come back from msgpack with tuples instead of lists.
         if isinstance(oldv, (list, tuple)):
@@ -238,7 +250,8 @@ class MalpediaSvc(s_cell.Cell):
 
         async with self.pulllock:
             try:
-                summary = await self._pull(force=force)
+                with self.client.counter() as reqs:
+                    summary = await self._pull(reqs, force=force)
             except (MalpediaApiError, MalpediaSvcError) as err:
                 # The next sync retries, even within malpedia:pull:minage hours.
                 self.info.set("failed", err.mesg)
@@ -252,9 +265,8 @@ class MalpediaSvc(s_cell.Cell):
             self.info.pop("failed")
             return summary
 
-    async def _pull(self, force: bool = False) -> dict:
+    async def _pull(self, reqs: list[int], force: bool = False) -> dict:
         now = s_common.now()
-        start = self.client.count
         complete = self.info.get("complete", False)
         summary = {
             "pulled": False,
@@ -277,7 +289,7 @@ class MalpediaSvc(s_cell.Cell):
             return summary
 
         version = await self.client.version()
-        summary["requests"] = self.client.count - start
+        summary["requests"] = reqs[0]
 
         if not force and complete and version.get("version") == self.info.get("version"):
             # Only a successful check counts, a failed pull is retried by the next sync.
@@ -285,11 +297,23 @@ class MalpediaSvc(s_cell.Cell):
             summary["reason"] = "unchanged"
             return summary
 
+        rejected = self.info.get("rejected")
+        if not force and rejected is not None and version.get("version") == rejected:
+            # Don't download the same version again just to refuse it again.
+            raise MalpediaSvcError(
+                f"Malpedia version {rejected} was refused because it removes too much (see the "
+                "last failed pull). Use a forced sync to apply it anyway, or wait for a new version."
+            )
+
         raw = await self._fetch(complete, summary)
         new = await s_coro.executor(self._build, raw, summary["warnings"])
 
         if not force:
-            self._reqNoShrink(new)
+            try:
+                self._reqNoShrink(new)
+            except MalpediaSvcError:
+                self.info.set("rejected", version.get("version"))
+                raise
 
         for kind in norm.KINDS:
             added, updated, removed = await self._store(kind, new[kind])
@@ -303,11 +327,12 @@ class MalpediaSvc(s_cell.Cell):
         self.info.set("checked", now)
         self.info.set("yaradate", _today().isoformat())
         self.info.set("complete", True)
+        self.info.pop("rejected")
 
         summary["pulled"] = True
         summary["version"] = version.get("version")
         summary["date"] = version.get("date")
-        summary["requests"] = self.client.count - start
+        summary["requests"] = reqs[0]
         self.info.set("last", summary)
         self.info.set("requests", self.info.get("requests", 0) + summary["requests"])
         return summary
@@ -561,7 +586,7 @@ class MalpediaSvc(s_cell.Cell):
                         "hash": item["hash"],
                         "new": old is None,
                         "rec": item["rec"],
-                        "drop": dropDiff(oldrec, item["rec"]),
+                        "drop": dropDiff(oldrec, item["rec"], DROP_FIELDS[kind]),
                     }
                 )
             yield batch
@@ -664,7 +689,10 @@ class MalpediaSvc(s_cell.Cell):
         """A record from the snapshot (news can be looked up by URL), or None."""
 
         if kind == "news" and not (len(key) == 64 and all(c in "0123456789abcdef" for c in key)):
-            key = norm.urlKey(key)
+            url = norm.canonUrl(key)
+            if url is None:
+                return None
+            key = norm.urlKey(url)
         item = self._snapkv(kind).get(key)
         return item["rec"] if item else None
 

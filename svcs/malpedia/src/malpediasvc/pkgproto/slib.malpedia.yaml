@@ -183,7 +183,7 @@ commands:
       Show or change the cron job that runs slib.malpedia.sync.
 
       The service schedules a daily sync (at a random time) when it's first added to the
-      Cortex, in the view it's added from. --period replaces the job with one on a new
+      Cortex, in the Cortex's default view. --period replaces the job with one on a new
       schedule in the current view. Periods use cron.add --period syntax, ex. daily@03:17.
 
       Malpedia is a free community resource, please don't sync more than daily. Syncs within

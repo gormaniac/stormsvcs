@@ -130,6 +130,31 @@ async def test_retry_after():
         datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=1), usegmt=True)) <= 3600
 
 
+async def test_counter():
+    async with fm.FakeMalpedia() as fake:
+        session, cli = await _client(fake)
+        async with session:
+
+            go = asyncio.Event()
+
+            async def other():
+                await go.wait()
+                await cli.listActors()
+                await cli.listFamilies()
+
+            # Another task (ex. a concurrent Telepath call) started outside the counter.
+            task = asyncio.create_task(other())
+            with cli.counter() as mine:
+                go.set()
+                await asyncio.gather(cli.version(), task)
+                await cli.getActors()
+            # Only this task's requests are counted, the other task's aren't.
+            assert mine == [2]
+            assert cli.count == 4
+            await cli.version()
+            assert mine == [2]
+
+
 async def test_connection_errors():
     session = aiohttp.ClientSession()
     async with session:
