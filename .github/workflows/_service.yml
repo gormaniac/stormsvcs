@@ -165,7 +165,21 @@ jobs:
 
       - name: Push to GHCR
         # Runs on pushes to main via _main.yml and manual runs on main — never on pull_request.
+        # _main.yml pushes every service at once, and they all share the base image's layers,
+        # so GHCR sometimes fails a push with "unknown blob" while another job is uploading
+        # the same layer. Pushes are idempotent (layers already there are skipped), so retry
+        # a few times with a backoff before failing.
         if: env.PUBLISH == 'true'
         run: |
           docker load -i /tmp/stormsvcs-${{ inputs.service }}.tar
-          docker push --all-tags ghcr.io/gormaniac/stormsvcs/${{ inputs.service }}
+          for attempt in 1 2 3 4; do
+            if docker push --all-tags ghcr.io/gormaniac/stormsvcs/${{ inputs.service }}; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 4 ]; then
+              echo "::warning::Pushing to GHCR failed (attempt $attempt of 4), retrying in $((attempt * 15))s."
+              sleep $((attempt * 15))
+            fi
+          done
+          echo "::error::Pushing to GHCR failed after 4 attempts."
+          exit 1
