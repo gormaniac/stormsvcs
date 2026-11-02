@@ -1,6 +1,6 @@
 [project]
 name = "hatchingsvc"
-version = "0.1.0"
+version = "0.1.1"
 description = "A Hatching Triage Sandbox Storm Service"
 readme = "README.md"
 license-files = ["LICENSE"]
@@ -11,7 +11,7 @@ authors = [
 # Stick with 3.11 until Synapse's base image changes
 requires-python = ">=3.11,<3.12"
 dependencies = [
-    "pyhatching>=1.0.0",
+    "pyhatching>=1.1.0",
     "stormlibpp>=0.10.1",
 ]
 

@@ -1,5 +1,5 @@
 name: slib.hatching
-version: 0.1.0
+version: 0.1.1
 guid: 921df2db53ea47a49328d32b3b7c7d62
 
 synapse_minversion: [2, 137, 0]
