@@ -192,6 +192,15 @@ class TestLiveKeyed(s_tests.SynTest):
             count = await svc.count(f"hash:{ssh[0]['hash']}")
             assert count["total"] >= 1
 
+            # Its web page has a favicon, Shodan's favicon and HTML hashes are MurmurHash3s too.
+            http = [b["http"] for b in banners if b.get("http", {}).get("favicon")]
+            assert http
+            favicon = base64.b64decode(http[0]["favicon"]["data"])
+            assert norm.faviconHash(favicon) == http[0]["favicon"]["hash"]
+            assert norm.htmlHash(http[0]["html"].encode()) == http[0]["html_hash"]
+            count = await svc.count(f"http.favicon.hash:{norm.faviconHash(favicon)}")
+            assert count["total"] >= 1
+
             msgs = await core.stormlist("slib.shodan.host --ip 45.33.32.156")
             self.stormHasNoErr(msgs)
             nodes = await core.nodes("inet:server=tcp://45.33.32.156:22 -> inet:servfile -> file:bytes")

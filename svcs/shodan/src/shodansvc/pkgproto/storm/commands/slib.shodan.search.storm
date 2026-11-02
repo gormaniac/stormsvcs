@@ -24,8 +24,8 @@ init {
     }
     $tagPrefix = $priv.tagPrefix()
 
-    // Set once an inbound inet:banner is searched for, so the query isn't also searched on its own.
-    $state = ({"banners": (false)})
+    // Set once there are inbound nodes, so the query isn't also searched on its own.
+    $state = ({"nodes": (false)})
 }
 
 // Run a search. Prints the --tokens/--count/--facets output, then (unless only printing)
@@ -54,29 +54,24 @@ function run(query) {
     }
 }
 
-// Inbound inet:banner nodes are searched for by their Shodan banner hash, AND'd with any query.
-// NOTE: The flag is set in the switch so it only runs for inbound nodes, a bare "$state.banners = (true)"
-// is runtsafe and would also run (once) without any inbound nodes.
-switch $node.form() {
-    "inet:banner": { $state.banners = (true) }
-    *: {
-        $lib.warn("slib.shodan.search: The node form {form} is not supported.", form=$node.form())
-        spin
-    }
-}
-$texthash = $shodan.bannerHash($node)
-if ($texthash = $lib.null) { spin }
+// Inbound nodes are searched for with the query built for their form (see the command's help),
+// AND'd with any query. Unsupported nodes are warned about and dropped.
+// NOTE: The flag is set in an if on $node so it only runs for inbound nodes, a bare
+// "$state.nodes = (true)" is runtsafe and would also run (once) without any inbound nodes.
+if $node { $state.nodes = (true) }
+$nodequery = $shodan.searchQuery($node, filehash=$cmdopts.file_hash)
+if ($nodequery = $lib.null) { spin }
 
-$hashquery = `hash:{$texthash}`
-if $query { $hashquery = `{$hashquery} {$query}` }
-divert (true) $run($hashquery)
+// NOTE: Not "if $query {...}", which is runtsafe and would run without inbound nodes too.
+$nodequery = (" ").join(($nodequery, $query)).strip()
+divert (true) $run($nodequery)
 
-// Without inbound inet:banner nodes, run the query on its own (once).
-| if (not $state.banners) {
+// Without inbound nodes, run the query on its own (once).
+| if (not $state.nodes) {
     if $query {
         for $ipnode in $run($query) { yield $ipnode }
     } elif (not $cmdopts.filters) {
-        $lib.raise(BadArg, "slib.shodan.search requires a query, inbound inet:banner nodes, or --filters.")
+        $lib.raise(BadArg, "slib.shodan.search requires a query, inbound nodes, or --filters.")
     }
 }
 

@@ -36,6 +36,13 @@ def _rotl32(valu: int, bits: int) -> int:
     return ((valu << bits) | (valu >> (32 - bits))) & 0xFFFFFFFF
 
 
+# The kinds of file hashes Shodan can search for, and the filter for each.
+FILE_HASH_FILTERS = {
+    "favicon": "http.favicon.hash",
+    "html": "http.html_hash",
+}
+
+
 def bannerHash(text: str) -> int:
     """Calculate Shodan's banner ``hash`` for a banner's text (its ``data``).
 
@@ -43,7 +50,40 @@ def bannerHash(text: str) -> int:
     encoded banner text, the same as ``mmh3.hash(text)``.
     """
 
-    data = text.encode("utf-8")
+    return murmur3(text.encode("utf-8"))
+
+
+def faviconHash(byts: bytes) -> int:
+    """Calculate Shodan's ``http.favicon.hash`` for a favicon file.
+
+    It is the MurmurHash3 of the file's base64 with a newline every 76 characters and a
+    trailing newline (Python's ``base64.encodebytes()``), not of the raw bytes.
+    """
+
+    return murmur3(base64.encodebytes(byts))
+
+
+def htmlHash(byts: bytes) -> int:
+    """Calculate Shodan's ``http.html_hash`` for an HTML file: the MurmurHash3 of its raw bytes."""
+
+    return murmur3(byts)
+
+
+def fileHash(byts: bytes, kind: str) -> int:
+    """Calculate Shodan's hash of a file's bytes, ``kind`` is one of ``FILE_HASH_FILTERS``."""
+
+    if kind == "favicon":
+        return faviconHash(byts)
+    if kind == "html":
+        return htmlHash(byts)
+    raise ValueError(
+        f"Unknown file hash kind {kind!r}, expected one of: {', '.join(FILE_HASH_FILTERS)}"
+    )
+
+
+def murmur3(data: bytes) -> int:
+    """A signed 32-bit MurmurHash3 (x86_32, seed 0), the same as ``mmh3.hash(data)``."""
+
     size = len(data)
     c1 = 0xCC9E2D51
     c2 = 0x1B873593

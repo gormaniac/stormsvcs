@@ -84,8 +84,8 @@ function sshKeyNode(server, key, time=$lib.null, tagPrefix=$lib.null) {
     if $lib.user.allowed(axon.upload) {
         try { $lib.axon.put($key.text.encode()) }
         catch * as err {
-            $lib.warn("slib.shodan: Unable to save the SSH key {sha256} to the Axon: {mesg}",
-                      sha256=$key.sha256, mesg=$err.mesg)
+            $lib.warn("slib.shodan: Unable to save the SSH key {sha256} to the Axon: {error}",
+                      sha256=$key.sha256, error=$err.mesg)
         }
     }
 

@@ -26,7 +26,11 @@ from .fakeshodan import (
     EUVD_NO_CVE,
     GHSA_LOG4SHELL,
     HOST_8888,
+    FAVICON_B64,
+    FAVICON_HASH,
     HOST_SSH,
+    SCANME_HTML,
+    SCANME_HTML_HASH,
     INTERNETDB_1111,
     SSH_KEY_B64,
     FakeShodan,
@@ -365,6 +369,25 @@ class TestNorm(s_tests.SynTest):
         banner = norm.normBanner({"ip_str": "1.2.3.4", "port": 1, "data": text})
         assert banner["data"] == text
         assert banner["transport"] == "tcp"
+
+    def test_file_hash(self):
+        # Real files with the hashes Shodan returned for them.
+        favicon = base64.b64decode(FAVICON_B64)
+        assert norm.faviconHash(favicon) == FAVICON_HASH
+        assert norm.fileHash(favicon, "favicon") == FAVICON_HASH
+        # Not a hash of the raw bytes, or of base64 without newlines.
+        assert norm.murmur3(favicon) != FAVICON_HASH
+        assert norm.murmur3(base64.b64encode(favicon)) != FAVICON_HASH
+
+        assert norm.htmlHash(SCANME_HTML.encode()) == SCANME_HTML_HASH
+        assert norm.fileHash(SCANME_HTML.encode(), "html") == SCANME_HTML_HASH
+
+        # Expected values are from mmh3.hash() of bytes.
+        assert norm.murmur3(b"") == 0
+        assert norm.murmur3(b"\x00\xff\x10") == -109153956
+
+        with self.raises(ValueError):
+            norm.fileHash(b"foo", "nope")
 
     def test_banner_hash(self):
         # Expected values are from mmh3.hash(), which Shodan's banner hash matches.
@@ -714,6 +737,13 @@ class TestShodanSvc(s_tests.SynTest):
 
                 retn = await prox.bannerHash("foo")
                 assert retn == {"status": True, "mesg": "", "data": -156908512}
+
+                html = SCANME_HTML.encode()
+                retn = await prox.fileHash([html[:1000], html[1000:]], "html")
+                assert retn == {"status": True, "mesg": "", "data": SCANME_HTML_HASH}
+                retn = await prox.fileHash([b"foo"], "nope")
+                assert retn["status"] is False
+                assert "Unknown file hash kind" in retn["mesg"]
 
                 retn = await prox.setApiKey("newkey")
                 assert retn["status"] is True

@@ -23,6 +23,7 @@ RETN_METHS = (
     "searchFilters",
     "searchTokens",
     "bannerHash",
+    "fileHash",
     # On-demand scanning
     "ports",
     "protocols",

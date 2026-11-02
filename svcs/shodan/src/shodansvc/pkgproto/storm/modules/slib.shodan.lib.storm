@@ -147,6 +147,184 @@ function bannerHash(banner) {
     return($retn.data)
 }
 
+// The max size of a file:bytes to read from the Axon and hash (16 MiB).
+// Storm reads the Axon at most 1 MiB at a time.
+function maxFileHashSize() { return((16777216)) }
+
+// Calculate Shodan's hash of a file:bytes node's bytes, for "http.favicon.hash:<n>" (kind=favicon)
+// or "http.html_hash:<n>" (kind=html) searches. Without a kind, it comes from the file's :mime,
+// image/* is a favicon and text/html (or application/xhtml+xml) is HTML.
+//
+// The bytes must be in the Axon, and the user needs axon.has and axon.get.
+// Returns ({"kind": <kind>, "hash": <n>}), or null.
+function fileHash(file, kind=$lib.null) {
+    if ($file.form() != "file:bytes") {
+        $lib.warn("slib.shodan: Only file:bytes nodes have a file hash, not {form}.", form=$file.form())
+        return($lib.null)
+    }
+
+    if (not $kind) {
+        $mime = $file.props.mime
+        if ($mime and $mime.startswith("image/")) { $kind = favicon }
+        elif ($mime = "text/html" or $mime = "application/xhtml+xml") { $kind = html }
+        else {
+            $lib.warn("slib.shodan: Unable to tell if file:bytes {file} is a favicon or HTML from its :mime ({mime}), use --file-hash.",
+                      file=$file.repr(), mime=$mime)
+            return($lib.null)
+        }
+    }
+
+    $sha256 = $file.props.sha256
+    if (not $sha256) {
+        $lib.warn("slib.shodan: file:bytes {file} has no :sha256 to read it from the Axon.", file=$file.repr())
+        return($lib.null)
+    }
+
+    try {
+        $size = $lib.axon.size($sha256)
+        if ($size = $lib.null) {
+            $lib.warn("slib.shodan: file:bytes {file} isn't in the Axon.", file=$file.repr())
+            return($lib.null)
+        }
+        if ($size > $maxFileHashSize()) {
+            $lib.warn("slib.shodan: file:bytes {file} is too large to hash ({size} bytes).", file=$file.repr(), size=$size)
+            return($lib.null)
+        }
+
+        $chunks = ([])
+        $offs = (0)
+        while ($offs < $size) {
+            $chunks.append($lib.axon.read($sha256, offs=$offs))
+            $offs = ($offs + 1048576)
+        }
+    } catch AuthDeny as err {
+        $lib.warn("slib.shodan: Unable to read file:bytes {file} from the Axon: {error}", file=$file.repr(), error=$err.mesg)
+        return($lib.null)
+    }
+
+    $retn = $priv.fileHash($chunks, $kind)
+    if $util.failed($retn, "Calculating the file hash") { return($lib.null) }
+    return(({"kind": $kind, "hash": $retn.data}))
+}
+
+// Quote a value for a Shodan search filter. A comma is Shodan's OR within a filter's value
+// (ex. port:22,80), so commas (and quotes) are escaped.
+function quote(valu) {
+    $valu = $lib.cast(str, $valu).replace('"', '\"').replace(",", '\,')
+    return(`"{$valu}"`)
+}
+
+function certQuery(cert) {
+    // Shodan's ssl.cert.fingerprint is the SHA-1 only, a SHA-256 never matches.
+    if $cert.props.sha1 { return(`ssl.cert.fingerprint:{$cert.props.sha1}`) }
+    if $cert.props.serial {
+        $serial = $lib.regex.replace("^0+(?=.)", "", $cert.props.serial)
+        return(`ssl.cert.serial:0x{$serial}`)
+    }
+    $lib.warn("slib.shodan: crypto:x509:cert {cert} has no :sha1 or :serial to search for.", cert=$cert.repr())
+    return($lib.null)
+}
+
+function cpeQuery(cpe) {
+    $props = $cpe.props
+    $query = `cpe:{$quote(`cpe:2.3:{$props.part}:{$props.vendor}:{$props.product}`)}`
+    // Shodan's cpe filter ignores the CPE's version, so it's searched with the version filter.
+    if ($props.version and $props.version != "*" and $props.version != "-") {
+        $query = `{$query} version:{$quote($props.version)}`
+    }
+    return($query)
+}
+
+function liftCert(guid) {
+    crypto:x509:cert=$guid
+    return($node)
+}
+
+function liftCpe(cpe) {
+    it:sec:cpe=$cpe
+    return($node)
+}
+
+// Build the Shodan search query that finds the services matching a node. Returns the query,
+// or null (with a warning) for unsupported nodes or nodes missing the needed props.
+// See slib.shodan.search's help for every supported form and the query it becomes.
+//
+// filehash sets which hash a file:bytes is searched for (favicon or html), see fileHash().
+function searchQuery(n, filehash=$lib.null) {
+    $props = $n.props
+    switch $n.form() {
+        "inet:banner": {
+            $texthash = $bannerHash($n)
+            if ($texthash = $lib.null) { return($lib.null) }
+            return(`hash:{$texthash}`)
+        }
+        "file:bytes": {
+            $info = $fileHash($n, $filehash)
+            if (not $info) { return($lib.null) }
+            if ($info.kind = "favicon") { return(`http.favicon.hash:{$info.hash}`) }
+            return(`http.html_hash:{$info.hash}`)
+        }
+        "crypto:x509:cert": { return($certQuery($n)) }
+        "inet:tls:servercert": {
+            $cert = $liftCert($props.cert)
+            if $cert { return($certQuery($cert)) }
+        }
+        "it:sec:cpe": { return($cpeQuery($n)) }
+        "it:prod:softver": {
+            if $props.cpe {
+                $cpe = $liftCpe($props.cpe)
+                if $cpe { return($cpeQuery($cpe)) }
+            }
+            $name = $props.name
+            if (not $name) { $name = $props."software:name" }
+            if $name {
+                $query = `product:{$quote($name)}`
+                if $props.vers { $query = `{$query} version:{$quote($props.vers)}` }
+                return($query)
+            }
+        }
+        "it:sec:cve": { return(`vuln:{$n.repr().upper()}`) }
+        "risk:vuln": {
+            if $props.cve { return(`vuln:{$props.cve.upper()}`) }
+        }
+        "inet:ssl:jarmhash": { return(`ssl.jarm:{$n.repr()}`) }
+        "inet:tls:ja3s:sample": { return(`ssl.ja3s:{$props.ja3s}`) }
+        "inet:asn": { return(`asn:AS{$n.repr()}`) }
+        "inet:cidr4": { return(`net:{$n.repr()}`) }
+        "inet:cidr6": { return(`net:{$n.repr()}`) }
+        "inet:fqdn": { return(`hostname:{$quote($n.repr())}`) }
+        "inet:server": {
+            $ip = $lib.null
+            if ($props.ipv4 != $lib.null) { $ip = $lib.repr(inet:ipv4, $props.ipv4) }
+            elif $props.ipv6 { $ip = $props.ipv6 }
+            if $ip { return(`ip:{$quote($ip)} port:{$props.port}`) }
+        }
+        "ou:org": {
+            if $props.name { return(`org:{$quote($props.name)}`) }
+        }
+        "ou:name": { return(`org:{$quote($n.repr())}`) }
+        // A bare search, the string is the query.
+        "it:dev:str": { return($n.repr()) }
+        "meta:rule": {
+            if ($props.type = "svc.shodan.query.") {
+                if $props.text { return($props.text) }
+            } else {
+                $lib.warn("slib.shodan: meta:rule {rule} isn't a Shodan query, its :type must be svc.shodan.query.",
+                          rule=$n.repr())
+                return($lib.null)
+            }
+        }
+        *: {
+            $lib.warn("slib.shodan: The node form {form} is not supported.", form=$n.form())
+            return($lib.null)
+        }
+    }
+
+    $lib.warn("slib.shodan: {form} {repr} is missing the props needed to search for it.",
+              form=$n.form(), repr=$n.repr())
+    return($lib.null)
+}
+
 // Enrich any supported node with the best matching Shodan API. Returns a list of the resulting nodes.
 function enrich(node) {
     switch $node.form() {
