@@ -1,0 +1,46 @@
+// Unprivileged helpers shared by the slib.malpedia commands.
+
+// The data from a service retn, or null (with a warning) if the call failed.
+function data(retn, what) {
+    if $retn.status { return($retn.data) }
+    $lib.warn("slib.malpedia: {what} failed: {err}", what=$what, err=$retn.mesg)
+    return($lib.null)
+}
+
+// Format an epoch millis time (or null) for printing.
+function when(time) {
+    if ($time = $lib.null) { return(never) }
+    return($lib.time.format($time, "%Y-%m-%d %H:%M:%S UTC"))
+}
+
+// Print a table. columns is a list of (name, width) and rows is a list of lists.
+function table(columns, rows) {
+    $cols = ([])
+    for ($name, $width) in $columns {
+        $cols.append(({"name": $name, "width": $width}))
+    }
+    $printer = $lib.tabular.printer(({"columns": $cols}))
+    $lib.print($printer.header())
+    for $row in $rows {
+        $lib.print($printer.row($row))
+    }
+}
+
+// "a, b, c" from a dict of per-kind counts.
+function kindCounts(counts) {
+    if (not $counts) { return("none") }
+    $parts = ([])
+    for $kind in (news, actor, family, yara) {
+        $count = $counts.$kind
+        if ($count = $lib.null) { $count = (0) }
+        $parts.append(`{$kind}={$count}`)
+    }
+    return($lib.str.join(", ", $parts))
+}
+
+// Yield the (non-null) nodes in a list.
+function nodes(items) {
+    for $item in $items {
+        if $item { yield $item }
+    }
+}

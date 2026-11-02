@@ -1,0 +1,141 @@
+// Privileged (asroot) syncing for slib.malpedia.sync and slib.malpedia.refresh.
+//
+// The service pulls Malpedia and keeps track of what each view has modeled. This asks it for
+// the records that changed since the current view's last sync, models them (with
+// slib.malpedia.model, as root, so slib.malpedia.sync holders don't need node permissions),
+// and tells the service which ones were modeled. A record that fails to model isn't marked
+// as synced, so the next sync tries it again.
+
+init {
+    $svc = $lib.service.get("slib.malpedia")
+    $model = $lib.import(slib.malpedia.model)
+    $kinds = (news, actor, family, yara)
+    // The most per-record errors a sync reports, the rest are only counted.
+    $maxerrs = (10)
+}
+
+// Pull Malpedia into the service's snapshot (if it's due). Returns the service's retn.
+function pull(force=(false)) { return($svc.pull(force=$force)) }
+
+function _err(summary, mesg) {
+    if ($lib.len($summary.errors) < $maxerrs) { $summary.errors.append($mesg) }
+    return()
+}
+
+// Model one batch of changes. Returns null, or an error message if the service failed.
+function _batch(view, kind, batch, conf, summary) {
+    $counts = $summary.kinds.$kind
+    $done = ([])
+    for $item in $batch.upsert {
+        try {
+            $model.model($kind, $item, $conf)
+            $done.append(($item.key, $item.hash))
+            if $item.new { $counts.added = ($counts.added + 1) }
+            else { $counts.updated = ($counts.updated + 1) }
+        } catch * as err {
+            $counts.failed = ($counts.failed + 1)
+            $_err($summary, `{$kind} {$item.key}: {$err.mesg}`)
+        }
+    }
+
+    $gone = ([])
+    for $item in $batch.removed {
+        try {
+            $model.removed($kind, $item.rec, $conf)
+            $gone.append($item.key)
+            $counts.removed = ($counts.removed + 1)
+        } catch * as err {
+            $counts.failed = ($counts.failed + 1)
+            $_err($summary, `removed {$kind} {$item.key}: {$err.mesg}`)
+        }
+    }
+
+    $retn = $svc.synced($view, $kind, done=$done, removed=$gone)
+    if (not $retn.status) { return($retn.mesg) }
+    return($lib.null)
+}
+
+// Sync Malpedia into the current view.
+//
+// Returns a summary: {"pull": the pull summary (or null), "pullerror": why the pull failed
+// (the view is still synced from the service's last good pull), "error": why the sync
+// stopped, "kinds": {kind: {"total", "added", "updated", "removed", "failed"}}, "errors"}.
+function sync(force=(false), full=(false), pull=(true), progress=(false)) {
+    $view = $lib.view.get().iden
+    $summary = ({"pull": $lib.null, "pullerror": $lib.null, "error": $lib.null, "kinds": ({}), "errors": ([])})
+    for $kind in $kinds {
+        $summary.kinds.$kind = ({"total": (0), "added": (0), "updated": (0), "removed": (0), "failed": (0)})
+    }
+
+    if $pull {
+        $retn = $svc.pull(force=$force)
+        if $retn.status { $summary.pull = $retn.data }
+        else { $summary.pullerror = $retn.mesg }
+    }
+
+    $conf = $model.conf()
+    for $kind in $kinds {
+        $first = (true)
+        for $retn in $svc.changes($view, $kind, full=$full) {
+            if (not $retn.status) {
+                $summary.error = $retn.mesg
+                return($summary)
+            }
+            $batch = $retn.data
+            if $first {
+                $summary.kinds.$kind.total = $batch.total
+                $first = (false)
+                if ($progress and $batch.total) {
+                    $lib.print("slib.malpedia.sync: Modeling {count} {kind} records.", count=$batch.total, kind=$kind)
+                }
+            }
+            $mesg = $_batch($view, $kind, $batch, $conf, $summary)
+            if $mesg {
+                $summary.error = $mesg
+                return($summary)
+            }
+        }
+    }
+
+    $retn = $svc.viewSynced($view)
+    if (not $retn.status) { $summary.error = $retn.mesg }
+    return($summary)
+}
+
+// Get actors and families straight from Malpedia and model them (see slib.malpedia.refresh).
+//
+// Returns {"nodes": [the risk:threat and risk:tool:software nodes], "counts": {kind: n},
+// "errors": [...], "warnings": [...]}.
+function refresh(actors, families) {
+    $conf = $model.conf()
+    $summary = ({"nodes": ([]), "counts": ({}), "errors": ([]), "warnings": ([])})
+    for $kind in $kinds { $summary.counts.$kind = (0) }
+
+    $todo = ([])
+    for $id in $actors { $todo.append((actor, $id)) }
+    for $id in $families { $todo.append((family, $id)) }
+
+    for ($what, $id) in $todo {
+        $retn = $svc.refresh($what, $id)
+        if (not $retn.status) {
+            $_err($summary, `{$what} {$id}: {$retn.mesg}`)
+            continue
+        }
+        $data = $retn.data
+        for $warn in $data.warnings { $summary.warnings.append($warn) }
+
+        // Model in sync order, so the main node exists before the articles link to it.
+        for $kind in (actor, family, yara, news) {
+            for $item in $data.$kind {
+                try {
+                    $n = $model.model($kind, $item, $conf)
+                    $summary.counts.$kind = ($summary.counts.$kind + 1)
+                    if ($n and $kind = $what and $item.rec.id = $id) { $summary.nodes.append($n) }
+                } catch * as err {
+                    $_err($summary, `{$kind} {$item.key}: {$err.mesg}`)
+                }
+            }
+        }
+    }
+    return($summary)
+}

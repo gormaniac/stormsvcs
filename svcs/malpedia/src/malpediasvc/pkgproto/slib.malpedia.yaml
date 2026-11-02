@@ -1,0 +1,260 @@
+name: slib.malpedia
+version: 0.1.0
+guid: 7cd3f7d3485c4aed874fd561e954a28c
+
+synapse_version: ">=2.234.0,<3.0.0"
+
+genopts:
+    dotstorm: true
+
+author:
+  url: https://github.com/gormaniac
+  name: John Gorman
+
+desc: A Storm Service that keeps Malpedia's library (media:news), threat actors (risk:threat), malware families (risk:tool:software), and YARA rules (it:app:yara:rule) in sync with Synapse, with a single bulk pull and small daily updates.
+
+docs:
+  - title: README
+    path: README.md
+
+perms:
+  - perm: [ slib, malpedia, user ]
+    gate: cortex
+    desc: Search Malpedia's actors and families and view the service's sync status.
+  - perm: [ slib, malpedia, sync ]
+    gate: cortex
+    desc: Sync Malpedia into the current view and refresh single actors and families from Malpedia (creating and editing media:news, risk:threat, risk:tool:software, and it:app:yara:rule nodes).
+  - perm: [ slib, malpedia, admin ]
+    gate: cortex
+    desc: Manage the scheduled sync, tag settings, forced pulls, and a view's sync state.
+
+modules:
+  # Privileged modules - the only modules that talk to the service.
+  # They run asroot so users don't need the service.get permission.
+  - name: slib.malpedia.priv.user
+    asroot:perms:
+      - [ slib, malpedia, user ]
+  - name: slib.malpedia.priv.sync
+    asroot:perms:
+      - [ slib, malpedia, sync ]
+  - name: slib.malpedia.priv.admin
+    asroot:perms:
+      - [ slib, malpedia, admin ]
+
+  # Unprivileged modules.
+  - name: slib.malpedia.model
+  - name: slib.malpedia.util
+
+commands:
+
+  - name: slib.malpedia.sync
+    perms:
+      - [ slib, malpedia, sync ]
+    descr: |
+      Sync Malpedia into the current view.
+
+      First the service pulls Malpedia, if it's due: it asks for Malpedia's version, and only
+      if that changed does it download the library, actors, families, and new YARA rules (a
+      handful of bulk requests, never one per actor or family). The very first pull downloads
+      everything, every pull after that only what changed. Pulls happen at most once every
+      malpedia:pull:minage hours (12 by default) unless --force is used.
+
+      Then every record that changed since this view's last sync is modeled, in this order:
+
+        media:news          The library's articles (from Malpedia's BibTeX), with their
+                            publisher, authors, and publication date.
+        risk:threat         The actors, with their aliases, country, and targeted sectors.
+        risk:tool:software  The malware families, with their aliases, and -(uses)> edges from
+                            the actors they're attributed to.
+        it:app:yara:rule    The families' YARA rules, with -(detects)> edges to the families.
+
+      Articles are linked to the actors and families they're tagged with by -(about)> edges
+      and the actors' and families' tags. Everything is -(seen)> by the malpedia meta:source.
+
+      The service schedules this to run daily when it's added to the Cortex, see
+      slib.malpedia.admin.schedule.
+
+      Examples:
+
+        // Sync Malpedia into the current view.
+        slib.malpedia.sync
+
+        // Model every record into this view again, without pulling Malpedia.
+        slib.malpedia.sync --full --no-pull
+    cmdargs:
+      - - --force
+        - default: false
+          action: store_true
+          help: Pull Malpedia now even if it was checked recently or hasn't changed (needs slib.malpedia.admin).
+      - - --full
+        - default: false
+          action: store_true
+          help: Model every record into this view, not only the ones that changed since its last sync.
+      - - --no-pull
+        - default: false
+          action: store_true
+          help: Don't pull Malpedia, only model the service's copy of it.
+
+  - name: slib.malpedia.refresh
+    perms:
+      - [ slib, malpedia, sync ]
+    descr: |
+      Get actors or families straight from Malpedia and model them, between daily syncs.
+
+      An actor is modeled with its families (and their -(uses)> edges) and the articles
+      about it. A family is modeled with its actors, YARA rules, and the articles about it.
+      This only adds data, the daily sync handles removals.
+
+      Takes risk:threat and risk:tool:software nodes from Malpedia (with a :reporter:name of
+      malpedia), or IDs with --actor and --family. Each one costs 2-3 requests to Malpedia.
+
+      Examples:
+
+        slib.malpedia.refresh --actor apt28 --family win.xagent
+
+        risk:tool:software:id=win.emotet | slib.malpedia.refresh --yield
+    cmdargs:
+      - - --actor
+        - type: str
+          action: append
+          default: []
+          help: A Malpedia actor ID (ex. apt28) to refresh. May be used multiple times.
+      - - --family
+        - type: str
+          action: append
+          default: []
+          help: A Malpedia family ID (ex. win.xagent) to refresh. May be used multiple times.
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the refreshed risk:threat and risk:tool:software nodes instead of the inbound nodes.
+    cmdinputs:
+      - form: risk:threat
+        help: Malpedia actors to refresh.
+      - form: risk:tool:software
+        help: Malpedia families to refresh.
+
+  - name: slib.malpedia.search
+    perms:
+      - [ slib, malpedia, user ]
+    descr: |
+      Search Malpedia's actor and family names and synonyms.
+
+      Prints every match, and whether the service has synced it yet. Searches both actors and
+      families unless --actors or --families is used.
+
+      Examples:
+
+        slib.malpedia.search "fancy bear"
+
+        // Yield the matching families that are in the current view.
+        slib.malpedia.search emotet --families --yield
+    cmdargs:
+      - - needle
+        - type: str
+          help: The text to search for.
+      - - --actors
+        - default: false
+          action: store_true
+          help: Only search actors.
+      - - --families
+        - default: false
+          action: store_true
+          help: Only search families.
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the matching risk:threat and risk:tool:software nodes in the current view.
+
+  - name: slib.malpedia.status
+    perms:
+      - [ slib, malpedia, user ]
+    descr: |
+      Show the service's Malpedia snapshot and the current view's sync state.
+
+      Examples:
+
+        slib.malpedia.status
+
+  - name: slib.malpedia.admin.schedule
+    perms:
+      - [ slib, malpedia, admin ]
+    descr: |
+      Show or change the cron job that runs slib.malpedia.sync.
+
+      The service schedules a daily sync (at a random time) when it's first added to the
+      Cortex, in the view it's added from. --period replaces the job with one on a new
+      schedule in the current view. Periods use cron.add --period syntax, ex. daily@03:17.
+
+      Malpedia is a free community resource, please don't sync more than daily. Syncs within
+      malpedia:pull:minage hours of the last check don't contact Malpedia anyway.
+
+      Examples:
+
+        slib.malpedia.admin.schedule
+
+        slib.malpedia.admin.schedule --period daily@04:41
+
+        slib.malpedia.admin.schedule --disable
+    cmdargs:
+      - - --period
+        - type: str
+          default: null
+          help: Replace the sync cron job with one on this period, in the current view.
+      - - --enable
+        - default: false
+          action: store_true
+          help: Enable the sync cron job.
+      - - --disable
+        - default: false
+          action: store_true
+          help: Disable the sync cron job.
+      - - --delete
+        - default: false
+          action: store_true
+          help: Delete the sync cron job.
+
+  - name: slib.malpedia.admin.tags
+    perms:
+      - [ slib, malpedia, admin ]
+    descr: |
+      Show or change the tags slib.malpedia applies.
+
+      Actors are tagged <prefix>.threat.<actor id>, families <prefix>.mal.<family id> (ex.
+      rep.malpedia.mal.win.xagent), and YARA rules <tlp prefix>.<tlp> (ex.
+      rep.malpedia.tlp.white). Records Malpedia removed are tagged <prefix>.removed.
+
+      Changing a prefix doesn't retag existing nodes, run slib.malpedia.sync --full --no-pull
+      to apply the new tags (the old tags stay).
+
+      Examples:
+
+        slib.malpedia.admin.tags
+
+        slib.malpedia.admin.tags --prefix rep.mp --tlp-prefix tlp
+    cmdargs:
+      - - --prefix
+        - type: str
+          default: null
+          help: The tag prefix for actors, families, and removed records.
+      - - --tlp-prefix
+        - type: str
+          default: null
+          help: The tag prefix for YARA rule TLPs.
+
+  - name: slib.malpedia.admin.reset
+    perms:
+      - [ slib, malpedia, admin ]
+    descr: |
+      Forget what the current view has synced, so its next sync models every record again.
+
+      This doesn't contact Malpedia, or change any nodes.
+
+      Examples:
+
+        slib.malpedia.admin.reset --yes
+    cmdargs:
+      - - --yes
+        - default: false
+          action: store_true
+          help: Confirm the reset.

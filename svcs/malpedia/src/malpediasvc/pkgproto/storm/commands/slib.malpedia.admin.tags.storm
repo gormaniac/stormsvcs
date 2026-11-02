@@ -1,0 +1,14 @@
+init {
+    $admin = $lib.import(slib.malpedia.priv.admin)
+    $name = "slib.malpedia.admin.tags"
+
+    try {
+        if ($cmdopts.prefix != $lib.null) { $admin.setTagPrefix(prefix, $cmdopts.prefix) }
+        if ($cmdopts.tlp_prefix != $lib.null) { $admin.setTagPrefix(tlp, $cmdopts.tlp_prefix) }
+    } catch * as err {
+        $lib.warn("{name}: Invalid tag prefix: {err}", name=$name, err=$err.mesg)
+    }
+
+    $settings = $admin.tagSettings()
+    $lib.print("{name}: prefix={prefix} tlp={tlp}", name=$name, prefix=$settings.prefix, tlp=$settings.tlp)
+}

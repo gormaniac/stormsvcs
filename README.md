@@ -61,6 +61,8 @@ Each service must have the following:
   - Analyze PCAPs (pcap, pcapng, gzip): model their network flows as `inet:flow` nodes with DNS, certificates, SSH keys, software, and transferred files (Suricata, tshark), and match them against Snort and Suricata rules from feeds or the graph, with every engine sandboxed.
 - `hatching`
   - The whole Hatching Triage Sandbox API: submit files and URLs, model analyses (configs, processes, network, dropped files), download samples/pcaps/dropped files, and manage profiles, Yara rules, and users.
+- `malpedia`
+  - Keep Malpedia's library (`media:news`), threat actors (`risk:threat`), malware families (`risk:tool:software`), and YARA rules (`it:app:yara:rule`) in sync, with one bulk pull on registration and small daily updates from the public API.
 
 
 ## Services Wish List/Plan

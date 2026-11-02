@@ -1,0 +1,50 @@
+init {
+    // The sync edits nodes as root in this view, so only users that can add Malpedia's nodes
+    // to the view's layer may run it here.
+    $layer = $lib.layer.get().iden
+    for $form in (media:news, risk:threat, risk:tool:software, it:app:yara:rule) {
+        if (not $lib.user.allowed(`node.add.{$form}`, gateiden=$layer)) {
+            $lib.raise(AuthDeny, `slib.malpedia.sync edits nodes in the current view, it needs permission to add {$form} nodes to its layer.`)
+        }
+    }
+    if ($cmdopts.force and not $lib.user.allowed(slib.malpedia.admin)) {
+        $lib.raise(AuthDeny, "slib.malpedia.sync --force needs the slib.malpedia.admin permission.")
+    }
+
+    $sync = $lib.import(slib.malpedia.priv.sync)
+    $util = $lib.import(slib.malpedia.util)
+    $name = "slib.malpedia.sync"
+
+    if (not $cmdopts.no_pull) {
+        $retn = $sync.pull(force=$cmdopts.force)
+        if (not $retn.status) {
+            $lib.warn("{name}: Pulling Malpedia failed, syncing the service's last pull instead: {err}", name=$name, err=$retn.mesg)
+        } else {
+            $p = $retn.data
+            if $p.pulled {
+                $lib.print("{name}: Pulled Malpedia version {version} ({date}) with {count} requests: added {added}; updated {updated}; removed {removed}.",
+                    name=$name, version=$p.version, date=$p.date, count=$p.requests,
+                    added=$util.kindCounts($p.added), updated=$util.kindCounts($p.updated), removed=$util.kindCounts($p.removed))
+            } elif ($p.reason = "unchanged") {
+                $lib.print("{name}: Malpedia is unchanged since the last pull (version {version}).", name=$name, version=$p.version)
+            } else {
+                $lib.print("{name}: Malpedia was checked recently, not pulling it again yet.", name=$name)
+            }
+            for $warn in $p.warnings { $lib.warn("{name}: {warn}", name=$name, warn=$warn) }
+        }
+    }
+
+    $s = $sync.sync(full=$cmdopts.full, pull=(false), progress=(true))
+
+    $rows = ([])
+    for ($kind, $c) in $s.kinds {
+        $rows.append(($kind, $c.total, $c.added, $c.updated, $c.removed, $c.failed))
+    }
+    $lib.print("{name}: Modeled the changes into this view:", name=$name)
+    $util.table(([["kind", 8], ["changes", 9], ["added", 9], ["updated", 9], ["removed", 9], ["failed", 8]]), $rows)
+
+    for $err in $s.errors { $lib.warn("{name}: Unable to model {err}", name=$name, err=$err) }
+    if $s.error {
+        $lib.warn("{name}: The sync stopped early, the next sync will continue it: {err}", name=$name, err=$s.error)
+    }
+}

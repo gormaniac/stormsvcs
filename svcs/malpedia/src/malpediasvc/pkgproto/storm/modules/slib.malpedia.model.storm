@@ -1,0 +1,397 @@
+// Model normalized Malpedia records (see malpediasvc.norm) in Synapse.
+//
+// slib.malpedia.priv.sync calls these (as root) with the items from the service's changes()
+// and refresh(): {"rec": record, "drop": what the record lost since the view last synced it}.
+//
+// Identity:
+//   risk:threat         (malpedia, <actor id>)        :ext:id=<actor id>
+//   risk:tool:software  (malpedia, <family id>)       :id=<family id>
+//   it:app:yara:rule    (malpedia, <rule file name>)  :ext:id=<rule file name>
+//   media:news          $lib.gen.newsByUrl(<url>), so articles merge with other sources'.
+//
+// Malpedia's own nodes (threats, tools, rules) always take Malpedia's values. Articles can
+// come from anywhere, so only their unset props are filled in.
+//
+// NOTE: A for loop that runs while a node is in a function's pipeline sends the node
+// downstream after its first iteration. So functions here only yield a node when they
+// don't loop, and loops call helpers that edit the node in their own runtime instead.
+
+init {
+    $sourceGuid = "15b7f8ff9cef4e8fa9fedd9f2b10c1a5"
+}
+
+// ---- Settings ----
+
+// The settings every model function needs: the tag prefixes, and the guids of the reporter
+// ou:org and the YARA meta:ruleset.
+function conf() {
+    $prefix = $lib.globals.get("slib:malpedia:tag:prefix")
+    if ($prefix = $lib.null) { $prefix = "rep.malpedia" }
+    $tlp = $lib.globals.get("slib:malpedia:tag:tlp")
+    if ($tlp = $lib.null) { $tlp = `{$prefix}.tlp` }
+
+    $org = $lib.gen.orgByName(malpedia)
+    [ meta:ruleset=(malpedia, yara)
+        :name="malpedia yara rules"
+        :desc="YARA rules from Malpedia (https://malpedia.caad.fkie.fraunhofer.de)."
+    ]
+    $ruleset = $node.value()
+
+    return(({
+        "prefix": $prefix,
+        "tlp": $tlp,
+        "removed": `{$prefix}.removed`,
+        "reporter": $org.value(),
+        "ruleset": $ruleset,
+    }))
+}
+
+// A full tag from a prefix and a record's tag suffix.
+function fullTag(prefix, suffix) {
+    if (not $suffix) { return($lib.null) }
+    return(`{$prefix}.{$suffix}`)
+}
+
+// ---- Generic helpers ----
+
+// Link a node to the malpedia meta:source and remove the removed tag (it's back in Malpedia).
+function seen(n, conf) {
+    $removed = $conf.removed
+    yield $n
+    [ <(seen)+ { meta:source=$sourceGuid } -#$removed ]
+    return($n)
+}
+
+function addTag(n, tag) {
+    if (not $tag) { return($n) }
+    yield $n
+    [ +#$tag ]
+    return($n)
+}
+
+function delTag(n, tag) {
+    if (not $tag) { return($n) }
+    yield $n
+    [ -#$tag ]
+    return($n)
+}
+
+// Add (or remove) a -(verb)> edge from n to dest.
+function edge(n, verb, dest, add=(true)) {
+    if ($dest = $lib.null) { return($n) }
+    yield $n
+    if $add { [ +($verb)> $dest ] }
+    else { [ -($verb)> $dest ] }
+    return($n)
+}
+
+// A ps:contact for a name (an author), deconflicted by name. Returns its guid, or null.
+function contact(name) {
+    ($ok, $norm) = $lib.trycast(ps:name, $name)
+    if (not $ok) { return($lib.null) }
+    [ ps:contact=({"name": $norm}) ]
+    return($node.value())
+}
+
+// ---- Actors ----
+
+// The risk:threat for an actor ID, created with its identity if it doesn't exist.
+function threat(id, suffix, conf) {
+    $tag = $fullTag($conf.prefix, $suffix)
+    [ risk:threat=(malpedia, $id)
+        :ext:id=$id
+        :reporter=$conf.reporter
+        :reporter:name=malpedia
+    ]
+    if $tag { [ :tag=$tag +#$tag ] }
+    return($node)
+}
+
+// The existing risk:threat for an actor ID, or null.
+function getThreat(id) {
+    risk:threat=(malpedia, $id)
+    return($node)
+}
+
+function _actorProps(n, rec, drop) {
+    $country = $lib.null
+    if $rec.country { $country = $lib.gen.polCountryByIso2($rec.country, try=(true)) }
+
+    yield $n
+    [ :name=$rec.name :org:name?=$rec.name ]
+
+    if $rec.aliases { [ :org:names?=$rec.aliases ] }
+    else { [ -:org:names ] }
+
+    if $rec.desc { [ :desc=$rec.desc ] }
+    elif $drop.desc { [ -:desc ] }
+
+    if $rec.uuid { [ :ext:ids?=($rec.uuid,) ] }
+    elif $drop.uuid { [ -:ext:ids ] }
+
+    if $rec.country {
+        [ :country:code?=$rec.country ]
+        if $country { [ :country=$country ] }
+    } elif $drop.country {
+        [ -:country:code -:country ]
+    }
+
+    if $rec.mitre { [ :mitre:attack:group?=$rec.mitre ] }
+    elif $drop.mitre { [ -:mitre:attack:group ] }
+    return($n)
+}
+
+// Model an actor record as a risk:threat. Returns the node.
+function actor(item, conf) {
+    $rec = $item.rec
+    $drop = $item.drop
+
+    $n = $threat($rec.id, $rec.tag, $conf)
+    $_actorProps($n, $rec, $drop)
+    $seen($n, $conf)
+    $_tagTitle($fullTag($conf.prefix, $rec.tag), $rec.name, $rec.url)
+
+    for $sector in $rec.sectors {
+        $edge($n, targets, $lib.gen.industryByName($sector))
+    }
+    if $drop.sectors {
+        for $sector in $drop.sectors {
+            $edge($n, targets, $lib.gen.industryByName($sector), add=(false))
+        }
+    }
+    return($n)
+}
+
+// Give a threat's or tool's syn:tag a title and doc, so the tag explains itself.
+function _tagTitle(tag, title, url) {
+    if (not $tag) { return() }
+    [ syn:tag=$tag :title?=$title ]
+    if $url { [ :doc?=`Malpedia: {$url}` ] }
+    return()
+}
+
+// ---- Families ----
+
+// The risk:tool:software for a family ID, created with its identity if it doesn't exist.
+function software(id, suffix, conf) {
+    $tag = $fullTag($conf.prefix, $suffix)
+    [ risk:tool:software=(malpedia, $id)
+        :id=$id
+        :reporter=$conf.reporter
+        :reporter:name=malpedia
+    ]
+    if $tag { [ :tag=$tag +#$tag ] }
+    return($node)
+}
+
+// The existing risk:tool:software for a family ID, or null.
+function getSoftware(id) {
+    risk:tool:software=(malpedia, $id)
+    return($node)
+}
+
+function _familyProps(n, rec, drop) {
+    yield $n
+    [ :soft:name?=$rec.name ]
+
+    if $rec.aliases { [ :soft:names?=$rec.aliases ] }
+    else { [ -:soft:names ] }
+
+    if $rec.desc { [ :desc=$rec.desc ] }
+    elif $drop.desc { [ -:desc ] }
+    return($n)
+}
+
+// Add (or remove) the -(uses)> edge from an actor to a family.
+function uses(actorid, actortag, tool, conf, add=(true)) {
+    if $add { $actor = $threat($actorid, $actortag, $conf) }
+    else { $actor = $getThreat($actorid) }
+    if ($actor = $lib.null) { return() }
+    $edge($actor, uses, $tool, add=$add)
+    return()
+}
+
+// Model a family record as a risk:tool:software. Returns the node.
+function family(item, conf) {
+    $rec = $item.rec
+    $drop = $item.drop
+
+    $n = $software($rec.id, $rec.tag, $conf)
+    $_familyProps($n, $rec, $drop)
+    $seen($n, $conf)
+    $_tagTitle($fullTag($conf.prefix, $rec.tag), $rec.name, $rec.url)
+
+    for ($aid, $atag) in $rec.actortags { $uses($aid, $atag, $n, $conf) }
+    if $drop.actortags {
+        for ($aid, $atag) in $drop.actortags { $uses($aid, $atag, $n, $conf, add=(false)) }
+    }
+    return($n)
+}
+
+// ---- News ----
+
+function _newsProps(n, rec, publisher, authors) {
+    yield $n
+    if $rec.title { [ :title*unset?=$rec.title ] }
+    if $rec.published { [ :published*unset?=$rec.published ] }
+    if $rec.publisher { [ :publisher:name*unset?=$rec.publisher ] }
+    if $publisher { [ :publisher*unset=$publisher ] }
+    if $authors { [ :authors*unset=$authors ] }
+    if $rec.keys { [ :ext:id*unset?=$rec.keys.0 ] }
+    return($n)
+}
+
+// Tag an article with an actor's or family's tag and link it with an -(about)> edge, or undo that.
+function about(n, dest, tag, add=(true)) {
+    if $add { $addTag($n, $tag) }
+    else { $delTag($n, $tag) }
+    $edge($n, about, $dest, add=$add)
+    return($n)
+}
+
+// The existing media:news for a URL, or null.
+function getNews(url) {
+    ($ok, $norm) = $lib.trycast(inet:url, $url)
+    if (not $ok) { return($lib.null) }
+    media:news:url=$norm
+    return($node)
+}
+
+// Model a news record as a media:news. Returns the node, or null if its URL isn't valid.
+function news(item, conf) {
+    $rec = $item.rec
+    $drop = $item.drop
+
+    $n = $lib.gen.newsByUrl($rec.url, try=(true))
+    if ($n = $lib.null) { return($lib.null) }
+
+    // Only build the publisher and authors if the article doesn't have them yet.
+    $publisher = $lib.null
+    if ($rec.publisher and not $n.props.publisher) {
+        $publisher = $lib.gen.orgByName($rec.publisher).value()
+    }
+    $authors = ([])
+    if ($rec.authors and not $n.props.authors) {
+        for $name in $rec.authors {
+            $guid = $contact($name)
+            if $guid { $authors.append($guid) }
+        }
+    }
+
+    $_newsProps($n, $rec, $publisher, $authors)
+    $seen($n, $conf)
+
+    for ($id, $suffix) in $rec.actors {
+        $about($n, $threat($id, $suffix, $conf), $fullTag($conf.prefix, $suffix))
+    }
+    for ($id, $suffix) in $rec.families {
+        $about($n, $software($id, $suffix, $conf), $fullTag($conf.prefix, $suffix))
+    }
+    if $drop.actors {
+        for ($id, $suffix) in $drop.actors {
+            $about($n, $getThreat($id), $fullTag($conf.prefix, $suffix), add=(false))
+        }
+    }
+    if $drop.families {
+        for ($id, $suffix) in $drop.families {
+            $about($n, $getSoftware($id), $fullTag($conf.prefix, $suffix), add=(false))
+        }
+    }
+    return($n)
+}
+
+// ---- YARA ----
+
+function _yaraProps(n, rec, author) {
+    yield $n
+    [ :name=$rec.name :text=$rec.text :ext:id=$rec.file ]
+
+    if $rec.url { [ :url?=$rec.url ] }
+    if $rec.created { [ :created?=$rec.created ] }
+    if $rec.updated { [ :updated?=$rec.updated ] }
+
+    if $rec.familyname { [ :family?=$rec.familyname ] }
+    else { [ -:family ] }
+
+    if $author { [ :author=$author ] }
+    else { [ -:author ] }
+    return($n)
+}
+
+function _inRuleset(n, ruleset) {
+    yield $n
+    [ <(has)+ { meta:ruleset=$ruleset } ]
+    return($n)
+}
+
+// Model a YARA rule record as an it:app:yara:rule. Returns the node.
+//
+// Its :enabled isn't set, enabling Malpedia's rules (ex. for slib.yara) is up to the analyst.
+function yara(item, conf) {
+    $rec = $item.rec
+    $drop = $item.drop
+
+    $author = $lib.null
+    if $rec.author { $author = $contact($rec.author) }
+
+    [ it:app:yara:rule=(malpedia, $rec.file) ]
+    $n = $node
+    $_yaraProps($n, $rec, $author)
+    $seen($n, $conf)
+
+    $_inRuleset($n, $conf.ruleset)
+
+    if $drop.tlp { $delTag($n, $fullTag($conf.tlp, $drop.tlp)) }
+    if $rec.tlp { $addTag($n, $fullTag($conf.tlp, $rec.tlp)) }
+
+    if $drop.familytag { $delTag($n, $fullTag($conf.prefix, $drop.familytag)) }
+    if $drop.family { $edge($n, detects, $getSoftware($drop.family), add=(false)) }
+
+    if $rec.family {
+        $tool = $software($rec.family, $rec.familytag, $conf)
+        $addTag($n, $fullTag($conf.prefix, $rec.familytag))
+        $edge($n, detects, $tool)
+    }
+    return($n)
+}
+
+// ---- Dispatch ----
+
+// Model an item of any record kind. Returns the node (or null).
+function model(kind, item, conf) {
+    switch $kind {
+        news: { return($news($item, $conf)) }
+        actor: { return($actor($item, $conf)) }
+        family: { return($family($item, $conf)) }
+        yara: { return($yara($item, $conf)) }
+    }
+    $lib.raise(BadArg, `Unknown slib.malpedia record kind: {$kind}`)
+}
+
+// Handle a record Malpedia removed. Articles lose the tags and edges they got from Malpedia,
+// actors, families, and YARA rules are tagged <prefix>.removed (and rules leave the ruleset).
+function removed(kind, rec, conf) {
+    switch $kind {
+        news: {
+            $n = $getNews($rec.url)
+            if ($n = $lib.null) { return($lib.null) }
+            for ($id, $suffix) in $rec.actors {
+                $about($n, $getThreat($id), $fullTag($conf.prefix, $suffix), add=(false))
+            }
+            for ($id, $suffix) in $rec.families {
+                $about($n, $getSoftware($id), $fullTag($conf.prefix, $suffix), add=(false))
+            }
+            return($n)
+        }
+        actor: { $n = $getThreat($rec.id) }
+        family: { $n = $getSoftware($rec.id) }
+        yara: {
+            it:app:yara:rule=(malpedia, $rec.file)
+            [ <(has)- { meta:ruleset=$conf.ruleset } ]
+            $n = $node
+        }
+        *: { $lib.raise(BadArg, `Unknown slib.malpedia record kind: {$kind}`) }
+    }
+    if ($n = $lib.null) { return($lib.null) }
+    return($addTag($n, $conf.removed))
+}

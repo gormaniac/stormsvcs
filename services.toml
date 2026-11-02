@@ -38,6 +38,11 @@ name = "Hatching Triage"
 src = "svcs/hatching/"
 workflow = ".github/workflows/hatching.yml"
 
+[stormsvcs.malpedia]
+name = "Malpedia"
+src = "svcs/malpedia/"
+workflow = ".github/workflows/malpedia.yml"
+
 # [stormsvcs.report-ingest]
 # name = "Report Ingest"
 # src = "svcs/report-ingest/"
