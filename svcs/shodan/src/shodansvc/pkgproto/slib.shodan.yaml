@@ -1,5 +1,5 @@
 name: slib.shodan
-version: 0.6.0
+version: 0.7.0
 guid: 0f6c1d0f1d8a4c3bb7a1e3d5c9b2a864
 
 synapse_minversion: [2, 137, 0]
@@ -311,6 +311,107 @@ commands:
         help: Searched for by org name.
       - form: it:dev:str
         help: Searched for as-is, a bare query.
+      - form: meta:rule
+        help: Rules with :type svc.shodan.query, their :text is the query.
+
+  - name: slib.shodan.count
+    perms:
+      - [ slib, shodan, user ]
+    descr: |
+      List the IPs matching a Shodan query, without using query credits, and model them.
+      Yields the inet:ipv4/inet:ipv6 nodes.
+
+      Uses the free count API's "ip" facet, so a query is a single request, and only the IPs are
+      modeled. Nothing else about the results (banners, ports, orgs, ...) or the counts is stored,
+      use slib.shodan.search for the banners, or other APIs for context about the IPs.
+
+      One count returns at most as many IPs as your Shodan plan allows per facet (ex. 1,000 for a
+      Membership, 5,120 for a Freelancer). By default it asks for that many: the limit is learned
+      from Shodan the first time your API key asks for too many, costing one extra (free) request.
+      When the IPs fill the limit, the query likely matches more, and a warning says so. Narrow the
+      query (ex. add country: or asn:) to get the rest. IPs are returned busiest first, by the
+      number of matching banners.
+
+      Each count is recorded as an it:exec:query (:text is the query sent to Shodan), linked with
+      -(found)> edges to every IP, and with a -(refs)> edge to the inbound node the query was built
+      from. Use --yield-query to yield the it:exec:query nodes instead of the IPs.
+
+      Inbound nodes are each counted with the query slib.shodan.search builds for their form (see
+      its help), AND'd with any query given.
+
+      Examples:
+
+        // Every IP presenting a favicon.
+        slib.shodan.count "http.favicon.hash:-1166125415"
+
+        // The first 100 US IPs, printing their top orgs for context.
+        slib.shodan.count "product:nginx country:US" --size 100 --facets org:10
+
+        // The IPs behind saved queries, or presenting a certificate.
+        meta:rule:type=svc.shodan.query | slib.shodan.count
+        crypto:x509:cert:sha1=e652c8bd1cafd04a44239fa8dab0c59deacb79ee | slib.shodan.count
+    cmdargs:
+      - - query
+        - type: str
+          nargs: "?"
+          default: ""
+          help: The Shodan search query. AND'd with the query built for each inbound node.
+      - - --size
+        - type: int
+          default: null
+          help: The number of IPs to ask for. Defaults to the most your Shodan plan allows.
+      - - --facets
+        - type: str
+          default: null
+          help: |
+            Comma separated facets to print for context (ex. "country,org:10"). Printed as tables,
+            never modeled.
+      - - --file-hash
+        - type: str
+          default: null
+          choices: [favicon, html]
+          help: Count inbound file:bytes as a favicon or HTML page, instead of going by their :mime.
+      - - --yield-query
+        - default: false
+          action: store_true
+          help: Yield the it:exec:query node of each count instead of the IP nodes.
+    cmdinputs:
+      - form: inet:banner
+        help: Counted by their Shodan banner hash.
+      - form: file:bytes
+        help: Counted by their favicon or HTML hash.
+      - form: crypto:x509:cert
+        help: Counted by their SHA-1 fingerprint (or serial).
+      - form: inet:tls:servercert
+        help: Counted by their certificate.
+      - form: it:sec:cpe
+        help: Counted by the CPE's product and version.
+      - form: it:prod:softver
+        help: Counted by their CPE, or product name and version.
+      - form: it:sec:cve
+        help: Counted by vuln.
+      - form: risk:vuln
+        help: Counted by their CVE.
+      - form: inet:ssl:jarmhash
+        help: Counted by JARM.
+      - form: inet:tls:ja3s:sample
+        help: Counted by JA3S.
+      - form: inet:asn
+        help: Counted by ASN.
+      - form: inet:cidr4
+        help: Counted by network.
+      - form: inet:cidr6
+        help: Counted by network.
+      - form: inet:fqdn
+        help: Counted by hostname.
+      - form: inet:server
+        help: Counted by IP and port.
+      - form: ou:org
+        help: Counted by org name.
+      - form: ou:name
+        help: Counted by org name.
+      - form: it:dev:str
+        help: Counted as-is, a bare query.
       - form: meta:rule
         help: Rules with :type svc.shodan.query, their :text is the query.
 

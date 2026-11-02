@@ -6,7 +6,9 @@ Shodan's data as-is (or normalized, for the ``norm*`` variants) and raise
 ``TelepathRetn`` convention for Storm.
 """
 
+import hashlib
 import json
+import re
 from collections.abc import AsyncIterator
 from typing import Any
 from urllib.parse import quote, urlencode
@@ -32,6 +34,15 @@ STREAM_KINDS = {
 
 # The default number of results Shodan returns per search page.
 SEARCH_PAGE_SIZE = 100
+
+# The ip facet size countIps() asks for before it knows the plan's limit: the most facet values
+# Shodan has published it returns (https://book.shodan.io/changelog/2025-11-06/). A plan with a
+# lower limit gets FACET_LIMIT_RE's error, and the request is retried with that limit.
+COUNT_IP_SIZE = 131072
+
+# Shodan's error for a facet size over the plan's limit, ex.
+# "Facet size too big for current subscription (limit: 1000)".
+FACET_LIMIT_RE = re.compile(r"Facet size too big.*\(limit: (\d+)\)")
 
 
 def _streamPath(
@@ -109,6 +120,10 @@ class ShodanSvc(s_cell.Cell):
 
         self.session = aiohttp.ClientSession(trust_env=True)
         self.onfini(self.session.close)
+
+        # The facet size limit of each API key's plan, keyed by the SHA-256 of the key. Only ever
+        # kept in memory, and never holds a key itself. See countIps().
+        self.facetlimits: dict[str, int] = {}
 
         self.client = ShodanClient(
             self.session,
@@ -193,6 +208,68 @@ class ShodanSvc(s_cell.Cell):
         return await self._api(
             "get", "/shodan/host/count", apikey, params={"query": query, "facets": facets}
         )
+
+    async def countIps(self, query: str, size: int | None = None, facets=None, apikey=None) -> dict:
+        """List the IPs matching a query with the free count API's ``ip`` facet (no query credits).
+
+        ``size`` is the number of IPs to ask for, defaulting to the most the key's plan allows. The
+        plan's limit is learned from Shodan's error the first time a key asks for too many, then
+        cached in memory, so later calls with that key need a single request.
+
+        ``facets`` are extra facets (a comma separated str or a list) returned for printing only.
+
+        Returns ``{"ips": [str, ...], "size": int, "full": bool, "lowered": bool, "facets": {...}}``.
+        ``full`` is true when the IPs fill the size asked for, so the query likely matches more IPs
+        than were returned. ``lowered`` is true when ``size`` was over the plan's limit and was
+        lowered to it. The ``ip`` facet's counts are dropped.
+        """
+
+        if size is not None and size < 1:
+            raise ShodanApiError(f"The number of IPs to count must be at least 1, not {size}.")
+
+        key = self.getApiKey(apikey)
+        keyhash = hashlib.sha256(key.encode()).hexdigest() if key else None
+        limit = self.facetlimits.get(keyhash)
+
+        asked = size or limit or COUNT_IP_SIZE
+        lowered = False
+        if limit and asked > limit:
+            asked = limit
+            lowered = True
+
+        if isinstance(facets, str):
+            facets = facets.split(",")
+        # Any ip facet given is replaced by the sized one.
+        extra = [f.strip() for f in facets or () if f.strip() and f.strip().split(":")[0] != "ip"]
+
+        def facetstr(n: int) -> str:
+            return ",".join([f"ip:{n}", *extra])
+
+        try:
+            data = await self.count(query, facets=facetstr(asked), apikey=apikey)
+        except ShodanApiError as err:
+            match = FACET_LIMIT_RE.search(err.mesg)
+            # A limit at or over the size asked for means another facet was too big.
+            if match is None or int(match.group(1)) >= asked:
+                raise
+            limit = int(match.group(1))
+            self.facetlimits[keyhash] = limit
+            lowered = size is not None
+            asked = limit
+            data = await self.count(query, facets=facetstr(asked), apikey=apikey)
+
+        facetdata = dict((data or {}).get("facets") or {})
+        ips = [
+            str(v["value"]) for v in facetdata.pop("ip", None) or () if v.get("value") is not None
+        ]
+
+        return {
+            "ips": ips,
+            "size": asked,
+            "full": len(ips) >= asked,
+            "lowered": lowered,
+            "facets": facetdata,
+        }
 
     async def search(
         self, query: str, page: int = 1, facets=None, minify: bool = True, fields=None, apikey=None

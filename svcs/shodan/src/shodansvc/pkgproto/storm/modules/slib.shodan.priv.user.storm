@@ -39,6 +39,10 @@ function count(query, facets=$lib.null) {
     return($svc.count($query, facets=$facets, apikey=$userKey()))
 }
 
+function countIps(query, size=$lib.null, facets=$lib.null) {
+    return($svc.countIps($query, size=$size, facets=$facets, apikey=$userKey()))
+}
+
 function search(query, page=(1), facets=$lib.null, minify=(false)) {
     return($svc.search($query, page=$page, facets=$facets, minify=$minify, apikey=$userKey()))
 }

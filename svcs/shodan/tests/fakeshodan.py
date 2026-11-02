@@ -296,10 +296,6 @@ ROUTES: dict[tuple[str, str], Any] = {
     ("GET", "/api/shodan/host/8.8.8.8"): (200, HOST_8888),
     ("GET", "/api/shodan/host/45.33.32.156"): (200, HOST_SSH),
     ("GET", "/api/shodan/host/10.0.0.1"): (404, {"error": "No information available for that IP."}),
-    ("GET", "/api/shodan/host/count"): (
-        200,
-        {"total": 1234, "facets": {"port": [{"value": 443, "count": 1000}]}},
-    ),
     ("GET", "/api/shodan/host/search"): (200, SEARCH_PAGE),
     ("GET", "/api/shodan/host/search/facets"): (200, ["country", "port"]),
     ("GET", "/api/shodan/host/search/filters"): (200, ["port", "product"]),
@@ -424,6 +420,15 @@ ROUTES: dict[tuple[str, str], Any] = {
 
 STREAM_BANNERS = [HOST_8888["data"][0], HOST_8888["data"][1]]
 
+# The ip facet values the fake count API returns, busiest first. The last isn't an IP.
+COUNT_IPS = ["8.8.8.8", "2001:4860:4860::8888", "1.2.3.4", "notanip"]
+
+# The values of the other facets the fake count API returns.
+COUNT_FACETS = {
+    "port": [{"value": 443, "count": 1000}],
+    "country": [{"value": "US", "count": 900}, {"value": "DE", "count": 100}],
+}
+
 
 # Endpoints that only read their arguments from a form body, and the argument they require.
 FORM_ROUTES = {
@@ -439,7 +444,33 @@ class FakeShodan:
     def __init__(self):
         self.requests: list[dict] = []
         self.routes = dict(ROUTES)
+        self.routes[("GET", "/api/shodan/host/count")] = self._count
         self.urls: dict[str, str] = {}
+        # The most values a facet may ask for, like a Shodan plan's limit.
+        self.facetlimit = 1000
+
+    def _count(self, request: web.Request) -> tuple[int, dict]:
+        """GET /shodan/host/count, honoring facet sizes ("name:N", default 5) and the plan limit."""
+
+        facets = {}
+        for facet in (request.query.get("facets") or "").split(","):
+            if not facet:
+                continue
+            name, _, size = facet.partition(":")
+            size = int(size) if size else 5
+            if size > self.facetlimit:
+                mesg = f"Facet size too big for current subscription (limit: {self.facetlimit})"
+                return 400, {"error": mesg}
+            if name == "ip":
+                vals = [{"value": ip, "count": 10 - i} for i, ip in enumerate(COUNT_IPS)]
+            else:
+                vals = COUNT_FACETS.get(name)
+                # Like Shodan, an unknown facet is left out of the response.
+                if vals is None:
+                    continue
+            facets[name] = vals[:size]
+
+        return 200, {"total": 1234, "facets": facets}
 
     async def _handle(self, request: web.Request) -> web.StreamResponse:
         body = None

@@ -75,6 +75,7 @@ need the normal node permissions for the nodes the commands create.
 | `slib.shodan.host` | Look up IPs and model everything Shodan knows (ASN, location, hostnames, tags, vulns, every banner). `--history`, `--minify`, `--internetdb`. |
 | `slib.shodan.enrich` | Enrich any supported node with the best API: IPs → host, `inet:fqdn` → DNS, `risk:vuln`/`it:sec:cve` → CVEDB, `it:sec:cpe` → CVEs. |
 | `slib.shodan.search` | Search Shodan, model each banner, and yield the IPs. `--count` and `--facets` are free, `--tokens` explains a query, `--filters` lists filters/facets. Inbound nodes are searched for with a query built for their form (see below), AND'd with any query. |
+| `slib.shodan.count` | List the IPs matching a query with the free count API (no query credits), model them, and yield them. One request per query, up to your plan's facet limit in IPs. `--facets` prints extra facets for context. Takes the same inbound nodes as `search`. |
 | `slib.shodan.stream` | Read banners from the Streaming API (`banners`, `asn`, `countries`, `ports`, `tags`, `vulns`, `custom`, `alert`) for `--limit` banners or `--timeout` seconds. |
 | `slib.shodan.hash` | Print Shodan's hash filter for `inet:banner` nodes or `--text` (`hash:<n>`), and favicon or HTML `file:bytes` (`http.favicon.hash:<n>`, `http.html_hash:<n>`). Local only, no API calls. |
 | `slib.shodan.dns.domain` | Model every DNS record and subdomain Shodan knows for a domain. |
@@ -128,13 +129,14 @@ $vulns = $shodan.cves(product=log4j, kev=(true))
 
 ## Query runs
 
-Every `slib.shodan.search` and `slib.shodan.stream` run is recorded as an `it:exec:query`:
+Every `slib.shodan.search`, `slib.shodan.count`, and `slib.shodan.stream` run is recorded as an
+`it:exec:query`:
 
 - `:text` is the query sent to Shodan (ex. `ports:443,53` for a stream).
 - `:language` is `shodan`, plus `:time`, `:synuser`, `:api:url` (never with the API key),
-  `:offset` (the number of banners read), and `:opts` (the command's options).
+  `:offset` (the number of banners or IPs read), and `:opts` (the command's options).
 - `-(found)>` edges link it to the `inet:server`, `inet:banner`, and `inet:ipv4`/`inet:ipv6` of
-  every banner it returned. Everything else from a banner (certs, software, vulns, headers) is one
+  every banner it returned (only the IPs, for counts). Everything else from a banner (certs, software, vulns, headers) is one
   hop from those.
 - A `-(refs)>` edge links it to the inbound node the query was built from.
 
@@ -149,7 +151,25 @@ crypto:x509:cert:sha1=e652c8bd1cafd04a44239fa8dab0c59deacb79ee | slib.shodan.sea
 inet:asn=15169 <(refs)- it:exec:query | sort :time
 ```
 
-From Storm, `$shodan.search($query)` returns `({"query": <it:exec:query>, "ips": [...]})`.
+From Storm, `$shodan.search($query)` returns `({"query": <it:exec:query>, "ips": [...]})`, and
+`$shodan.count($query)` does the same (plus `size` and `full`) without using query credits.
+
+## Listing IPs without query credits
+
+`slib.shodan.count` gets the IPs matching a query from the free count API's `ip` facet. It makes
+one request per query and models only the IPs: no banners, ports, or counts. Use it to run as many
+queries as you like, then `slib.shodan.search` (which uses credits) or other APIs for details.
+
+- One count returns at most your plan's facet limit in IPs (ex. 1,000 for a Membership, 5,120 for a
+  Freelancer). It asks for that many by default. The service learns the limit from Shodan the first
+  time a key asks for too many (one extra free request), and remembers it in memory.
+- When the IPs fill the limit, the query likely matches more, and a warning says so. Narrow the
+  query (ex. add `country:` or `asn:`) to get the rest. IPs come back busiest first.
+
+```
+slib.shodan.count "http.favicon.hash:-1166125415"
+meta:rule:type=svc.shodan.query | slib.shodan.count --facets country:10
+```
 
 ## Searching from nodes
 
@@ -198,7 +218,7 @@ the service (`$lib.service.get(slib.shodan)`, for those with `service.get`).
 | Endpoint | Storm |
 |---|---|
 | `GET /shodan/host/{ip}` | `slib.shodan.host`, `slib.shodan.enrich` |
-| `GET /shodan/host/count` | `slib.shodan.search --count/--facets` |
+| `GET /shodan/host/count` | `slib.shodan.count`, `slib.shodan.search --count/--facets` |
 | `GET /shodan/host/search` | `slib.shodan.search` |
 | `GET /shodan/host/search/facets`, `/filters` | `slib.shodan.search --filters`, `slib.shodan.ref facets/filters` |
 | `GET /shodan/host/search/tokens` | `slib.shodan.search --tokens` |

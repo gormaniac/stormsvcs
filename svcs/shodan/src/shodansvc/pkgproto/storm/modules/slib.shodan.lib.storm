@@ -48,7 +48,7 @@ function searchUrl() { return("https://api.shodan.io/shodan/host/search") }
 function ingest(retns, what, text, apiurl, opts, ref=$lib.null) {
     $tagPrefix = $priv.tagPrefix()
     $qnode = $lib.null
-    $count = (0)
+    $nread = (0)
     $failed = (false)
 
     for $retn in $retns {
@@ -58,7 +58,7 @@ function ingest(retns, what, text, apiurl, opts, ref=$lib.null) {
         }
         if ($qnode = $lib.null) { $qnode = $model.queryNode($text, $apiurl, $opts, $ref) }
 
-        $count = ($count + 1)
+        $nread = ($nread + 1)
         $res = $model.bannerNodes($retn.data, $tagPrefix)
         if $res {
             $model.found($qnode, ($res.server, $res.banner, $res.ip))
@@ -71,7 +71,7 @@ function ingest(retns, what, text, apiurl, opts, ref=$lib.null) {
 
     // A query that matched nothing is still a run worth recording.
     if ($qnode = $lib.null) { $qnode = $model.queryNode($text, $apiurl, $opts, $ref) }
-    $model.setOffset($qnode, $count)
+    $model.setOffset($qnode, $nread)
     emit ({"query": $qnode, "ip": $lib.null, "done": (true)})
 }
 
@@ -98,6 +98,50 @@ function search(query, limit=(100), minify=(false), page=(1), ref=$lib.null) {
     }
     if ($qnode = $lib.null) { return($lib.null) }
     return(({"query": $qnode, "ips": $ips}))
+}
+
+// The endpoint recorded as the :api:url of a count's it:exec:query.
+function countUrl() { return("https://api.shodan.io/shodan/host/count") }
+
+// List the IPs matching a query with Shodan's free count API (no query credits) and model them,
+// recording the run as an it:exec:query linked -(found)> to each IP. Only the IPs are modeled,
+// never the counts. ref is the node the query was built from, if any.
+//
+// size is the number of IPs to ask for, defaulting to the most the API key's plan allows (one
+// call returns at most that many). facets are extra facets to return for printing only.
+//
+// Returns ({"query": <it:exec:query>, "ips": [<inet:ipv4/6>, ...], "size": <n>, "full": <bool>,
+// "facets": {...}}), or null if the count failed (reported as a warning). full is true when the IPs
+// fill the size asked for, so the query likely matches more IPs than were returned.
+function count(query, size=$lib.null, facets=$lib.null, ref=$lib.null) {
+    $query = $lib.cast(str, $query)
+    $retn = $priv.countIps($query, size=$size, facets=$facets)
+    if $util.failed($retn, `Counting {$query}`) { return($lib.null) }
+    $data = $retn.data
+
+    if $data.lowered {
+        $lib.warn("slib.shodan: Your plan returns at most {size} IPs per count, asked for {asked}.",
+                  size=$data.size, asked=$size)
+    }
+
+    $opts = ({"command": "slib.shodan.lib.count", "size": $data.size, "facets": $facets, "full": $data.full})
+    $qnode = $model.queryNode($query, $countUrl(), $opts, $ref)
+
+    $ips = ([])
+    for $ip in $data.ips {
+        $ipnode = $model.ipNode($ip)
+        if $ipnode { $ips.append($ipnode) }
+        else { $lib.warn("slib.shodan: Skipping {ip} from the count of {query}, it isn't an IP.", ip=$ip, query=$query) }
+    }
+    $model.found($qnode, $ips)
+    $model.setOffset($qnode, $ips.size())
+
+    if $data.full {
+        $lib.warn("slib.shodan: {query} returned {size} IPs, the most your plan allows in one call. It likely matches more, narrow the query (ex. add country: or asn:) to get the rest.",
+                  query=$query, size=$data.size)
+    }
+
+    return(({"query": $qnode, "ips": $ips, "size": $data.size, "full": $data.full, "facets": $data.facets}))
 }
 
 // Retrieve and model the DNS records for a domain. Returns a list of the subdomain inet:fqdn nodes.

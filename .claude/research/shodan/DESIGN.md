@@ -133,7 +133,6 @@ svcs/shodan/src/shodansvc/
 ├── norm.py          # normBanner keeps _shodan.options.scan and metadata.truncated
 ├── svc.py           # + countIps(): one count call with the ip facet, finds the plan's facet limit
 ├── api.py           # + "countIps" in RETN_METHS
-├── defs.py          # + COUNT_IP_SIZE (the size first asked for, 131072)
 └── pkgproto/
     ├── slib.shodan.yaml                       # new commands, cmdinputs, options
     └── storm/
@@ -150,7 +149,7 @@ svcs/shodan/src/shodansvc/
 - **`ShodanSvc.countIps(query, size=None, facets=None, apikey=None)`** returns
   `{"ips": [<str>, ...], "size": <n>, "full": <bool>, "facets": {...}}`:
   1. Call `count(query, facets=f"ip:{size}" + extra facets)`. When no `size` is given, use the
-     limit cached for this key, or `defs.COUNT_IP_SIZE` (131,072, the largest published value).
+     limit cached for this key, or `svc.COUNT_IP_SIZE` (131,072, the largest published value).
   2. If Shodan answers `Facet size too big for current subscription (limit: N)` (the exact text,
      verified on the Membership plan), parse `N`, cache it in memory under the SHA-256 of the API key,
      and retry once with `ip:N`. That costs one extra free call the first time each key is used. The
@@ -660,7 +659,7 @@ meta:rule:type^=svc.shodan.query. | slib.shodan.search --limit 200
 | Phase | Version | Scope | Exit criteria |
 |---|---|---|---|
 | 1 | 0.6.0 | `bannerNodes()` refactor. `it:exec:query` on `search` and `stream`. `--yield-query`. | **Done.** Provenance tests; existing tests still pass. |
-| 2 | 0.7.0 | `slib.shodan.count` and `countIps`: credit-free IP lists, limit detection, the "full" warning, print-only `--facets`. | Count tests; live check that count uses no credits. |
+| 2 | 0.7.0 | `slib.shodan.count` and `countIps`: credit-free IP lists, limit detection, the "full" warning, print-only `--facets`. | **Done.** Count tests; live check that count uses no credits. |
 | 3 | 0.8.0 | Host history timeline: `--timeline`, `--history`, fallback key, `normBanner` additions. | Idempotency tests; live check of Open questions 6 and 9. |
 | 4 | 0.9.0 | Inbound nodes for `host`, `trends` and `stream`. | Per-form tests. |
 | 5 | 0.10.0 | Saved queries: `queries --source/--yield`, `query.save`, the community/local `meta:rule` types, and `searchQuery()` accepting the whole `svc.shodan.query.` subtree. | Saved-query tests. |

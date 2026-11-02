@@ -18,6 +18,7 @@ RETN_METHS = (
     "host",
     "normHost",
     "count",
+    "countIps",
     "search",
     "searchFacets",
     "searchFilters",

@@ -45,7 +45,7 @@ class TestShodanStormPkg(s_tests.SynTest):
         assert PKGDEFS[0]["version"] == __version__
 
     async def test_pkg(self):
-        assert len(CMDS) == 30
+        assert len(CMDS) == 31
 
         async with shodanSvc(self) as (core, svc, fake):
             msgs = await core.stormlist("service.list")
@@ -760,6 +760,97 @@ class TestShodanStormQueries(s_tests.SynTest):
             qnode = (await core.nodes("it:exec:query"))[0]
             assert qnode.get("text") == "port:22 country:US"
             assert qnode.get("api:url") == "https://stream.shodan.io/shodan/custom?query=port%3A22+country%3AUS"
+
+
+class TestShodanStormCount(s_tests.SynTest):
+    """slib.shodan.count models the IPs matching a query, from the free count API."""
+
+    async def test_count(self):
+        async with shodanSvc(self) as (core, svc, fake):
+            msgs = await core.stormlist('slib.shodan.count "product:nginx" --facets country')
+            self.stormHasNoErr(msgs)
+            # The junk ip facet value is skipped.
+            self.stormIsInWarn("Skipping notanip from the count of product:nginx", msgs)
+            self.stormIsInPrint("slib.shodan.count: 3 IPs (product:nginx)", msgs)
+            # Extra facets are printed, never modeled.
+            self.stormIsInPrint("US", msgs)
+
+            nodes = [m[1][0] for m in msgs if m[0] == "node"]
+            assert nodes == [("inet:ipv4", 134744072), ("inet:ipv6", "2001:4860:4860::8888"), ("inet:ipv4", 16909060)]
+
+            # No search credits are used, only the count API.
+            assert not [r for r in fake.requests if r["path"] == "/api/shodan/host/search"]
+
+            qnode = (await core.nodes("it:exec:query"))[0]
+            assert qnode.get("text") == "product:nginx"
+            assert qnode.get("language") == "shodan"
+            assert qnode.get("api:url") == "https://api.shodan.io/shodan/host/count"
+            assert qnode.get("offset") == 3
+            assert qnode.get("opts") == {
+                "command": "slib.shodan.lib.count",
+                "size": 1000,
+                "facets": "country",
+                "full": False,
+            }
+
+            # Only the IPs are found, and nothing else is modeled from the count.
+            assert await nodeset(core, "it:exec:query -(found)> *") == {
+                ("inet:ipv4", "8.8.8.8"),
+                ("inet:ipv6", "2001:4860:4860::8888"),
+                ("inet:ipv4", "1.2.3.4"),
+            }
+            assert not await core.nodes("inet:server")
+            assert not await core.nodes("pol:country")
+            assert len(await core.nodes(f"inet:ipv4=1.2.3.4 <(seen)- meta:source={SVC_GUID}")) == 1
+
+    async def test_count_full(self):
+        async with shodanSvc(self) as (core, svc, fake):
+            fake.facetlimit = 2
+            msgs = await core.stormlist('slib.shodan.count "product:nginx" --size 10 --yield-query')
+            self.stormHasNoErr(msgs)
+            self.stormIsInWarn("Your plan returns at most 2 IPs per count, asked for 10", msgs)
+            self.stormIsInWarn("product:nginx returned 2 IPs, the most your plan allows in one call", msgs)
+
+            nodes = [m[1] for m in msgs if m[0] == "node"]
+            assert [n[0][0] for n in nodes] == ["it:exec:query"]
+            assert nodes[0][1]["props"]["opts"]["full"] is True
+            assert len(await core.nodes("it:exec:query -(found)> *")) == 2
+
+    async def test_count_inputs(self):
+        async with shodanSvc(self) as (core, svc, fake):
+            await core.nodes("[ inet:asn=15169 inet:fqdn=vertex.link ]")
+            msgs = await core.stormlist('inet:asn=15169 inet:fqdn=vertex.link | slib.shodan.count "country:US" --yield-query')
+            self.stormHasNoErr(msgs)
+
+            queries = sorted(
+                r["query"]["query"] for r in fake.requests if r["path"] == "/api/shodan/host/count"
+            )
+            # The first count also learns the plan's limit, so it's sent twice.
+            assert queries == ["asn:AS15169 country:US", "asn:AS15169 country:US", 'hostname:"vertex.link" country:US']
+
+            assert len(await core.nodes("it:exec:query")) == 2
+            assert await nodeset(core, "it:exec:query:text='asn:AS15169 country:US' -(refs)> *") == {("inet:asn", "15169")}
+
+    async def test_count_errors(self):
+        async with shodanSvc(self) as (core, svc, fake):
+            msgs = await core.stormlist("slib.shodan.count")
+            self.stormIsInErr("requires a query or inbound nodes", msgs)
+
+            fake.routes[("GET", "/api/shodan/host/count")] = (403, {"error": "Access denied"})
+            msgs = await core.stormlist('slib.shodan.count "nginx"')
+            self.stormIsInWarn("Counting nginx failed: Access denied", msgs)
+            assert not await core.nodes("it:exec:query")
+
+            q = """
+                $shodan = $lib.import(slib.shodan.lib)
+                if ($shodan.count("nginx") = $lib.null) { $lib.print("null") }
+            """
+            msgs = await core.stormlist(q)
+            self.stormIsInPrint("null", msgs)
+
+        async with shodanSvc(self, apikey=None) as (core, svc, fake):
+            msgs = await core.stormlist('slib.shodan.count "nginx"')
+            self.stormIsInWarn("No Shodan API key is configured", msgs)
 
 
 class TestShodanStormDns(s_tests.SynTest):

@@ -1,0 +1,45 @@
+init {
+    $shodan = $lib.import(slib.shodan.lib)
+    $util = $lib.import(slib.shodan.util)
+    $query = $cmdopts.query
+
+    // Set once there are inbound nodes, so the query isn't also counted on its own.
+    $state = ({"nodes": (false)})
+}
+
+// Count a query: model the matching IPs and record the run, print any --facets, and yield the
+// IP nodes (or the it:exec:query with --yield-query). ref is the inbound node the query was built from.
+// NOTE: No return() here, it would make this a function that returns a value instead of yielding nodes.
+function run(query, ref=$lib.null) {
+    $res = $shodan.count($query, size=$cmdopts.size, facets=$cmdopts.facets, ref=$ref)
+    if $res {
+        $lib.print("slib.shodan.count: {n} IPs ({query})", n=$res.ips.size(), query=$query)
+        $util.printFacets($res.facets)
+
+        if $cmdopts.yield_query { yield $res.query }
+        else {
+            for $ipnode in $res.ips { yield $ipnode }
+        }
+    }
+}
+
+// Inbound nodes are counted with the query built for their form (see slib.shodan.search's help),
+// AND'd with any query. Unsupported nodes are warned about and dropped.
+// NOTE: The flag is set in an if on $node so it only runs for inbound nodes (see slib.shodan.search).
+if $node { $state.nodes = (true) }
+$nodequery = $shodan.searchQuery($node, filehash=$cmdopts.file_hash)
+if ($nodequery = $lib.null) { spin }
+
+$nodequery = (" ").join(($nodequery, $query)).strip()
+divert (true) $run($nodequery, ref=$node)
+
+// Without inbound nodes, run the query on its own (once).
+| if (not $state.nodes) {
+    if $query {
+        for $n in $run($query) { yield $n }
+    } else {
+        $lib.raise(BadArg, "slib.shodan.count requires a query or inbound nodes.")
+    }
+}
+
+| uniq

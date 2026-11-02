@@ -657,6 +657,54 @@ class TestShodanSvc(s_tests.SynTest):
                 "filters": {"ip": ["1.2.3.0/24"]}
             }
 
+    async def test_count_ips(self):
+        async with shodanSvc(self) as (core, svc, fake):
+            counts = lambda: [r for r in fake.requests if r["path"] == "/api/shodan/host/count"]
+
+            # The first call asks for the published max, learns the plan's limit, and retries.
+            retn = await svc.countIps("product:nginx")
+            assert retn == {
+                "ips": ["8.8.8.8", "2001:4860:4860::8888", "1.2.3.4", "notanip"],
+                "size": 1000,
+                "full": False,
+                "lowered": False,
+                "facets": {},
+            }
+            assert [r["query"]["facets"] for r in counts()] == ["ip:131072", "ip:1000"]
+
+            # The limit is cached for the key (by its hash), so later calls need one request.
+            assert list(svc.facetlimits.values()) == [1000]
+            assert "testkey" not in repr(svc.facetlimits)
+            await svc.countIps("product:nginx")
+            assert counts()[-1]["query"]["facets"] == "ip:1000"
+            assert len(counts()) == 3
+
+            # A size over the known limit is lowered without asking Shodan.
+            retn = await svc.countIps("product:nginx", size=5000)
+            assert (retn["size"], retn["lowered"]) == (1000, True)
+            assert len(counts()) == 4
+
+            # A size that the IPs fill is full, and extra facets are returned (ip ones replaced).
+            retn = await svc.countIps("product:nginx", size=2, facets="country, ip:9,nope")
+            assert retn["ips"] == ["8.8.8.8", "2001:4860:4860::8888"]
+            assert (retn["size"], retn["full"], retn["lowered"]) == (2, True, False)
+            assert retn["facets"] == {"country": [{"value": "US", "count": 900}, {"value": "DE", "count": 100}][:5]}
+            assert counts()[-1]["query"]["facets"] == "ip:2,country,nope"
+
+            # Each key learns its own limit.
+            fake.facetlimit = 3
+            retn = await svc.countIps("product:nginx", apikey="otherkey", size=10)
+            assert (retn["size"], retn["full"], retn["lowered"]) == (3, True, True)
+            assert sorted(svc.facetlimits.values()) == [3, 1000]
+
+            # An extra facet over the limit isn't mistaken for the ip facet's limit.
+            with self.raises(ShodanApiError) as cm:
+                await svc.countIps("product:nginx", apikey="otherkey", facets="port:50")
+            assert "limit: 3" in cm.exception.mesg
+
+            with self.raises(ShodanApiError):
+                await svc.countIps("product:nginx", size=0)
+
     async def test_cvedb(self):
         async with shodanSvc(self) as (core, svc, fake):
             # CVEDB's short CPEs are padded.
