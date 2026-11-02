@@ -29,9 +29,6 @@ TERMINAL = ("reported", "failed")
 UNAVAILABLE = ("NOT_FOUND", "REPORT_NOT_AVAILABLE", "NOT_AVAILABLE")
 """API error names meaning a report doesn't exist (yet), rather than that the request failed."""
 
-MAX_PAGE = 200
-"""The largest page the Triage API returns (``limit`` on paginated endpoints)."""
-
 MAX_TIMEOUT = 3600
 """The longest analysis timeout, in seconds, the Triage API accepts."""
 
@@ -279,33 +276,6 @@ class HatchingSvc(s_cell.Cell):
                 )
             raise HatchingApiError(f"Hatching Triage: HTTP {resp.status}", status=resp.status)
         return data
-
-    async def _pagedList(
-        self, apikey: str | None, uri: str, model: type, limit: int | None = None
-    ) -> list[dict]:
-        """Every item of a paginated list endpoint (``{"data": [...], "next": ...}``).
-
-        Follows ``next`` until ``limit`` items (None or 0 for all of them), in pages of
-        at most ``MAX_PAGE``. Each item is validated with the pyhatching ``model``.
-        """
-
-        ret: list[dict] = []
-        offset = None
-        async with self.useClient(apikey) as client:
-            while True:
-                size = MAX_PAGE if not limit else min(MAX_PAGE, limit - len(ret))
-                resp, data = await client._request(  # pylint: disable=W0212
-                    "get", uri, params={"limit": size, "offset": offset}
-                )
-                if resp.status >= 400 or not isinstance(data, dict) or "data" not in data:
-                    # Raises the API's error (raise_on_api_err is set).
-                    client.convert_resp(model, resp, data)
-                    raise HatchingApiError(f"Hatching Triage: unexpected response from {uri}.")
-                items = data.get("data") or []
-                ret.extend(dump(model(**item)) for item in items)
-                offset = data.get("next")
-                if not items or not offset or (limit and len(ret) >= limit):
-                    return ret[:limit] if limit else ret
 
     # ---- Samples ----
 
@@ -712,7 +682,7 @@ class HatchingSvc(s_cell.Cell):
 
     async def profiles(self, apikey: str | None = None) -> list[dict]:
         """GET /v0/profiles - every page."""
-        return await self._pagedList(apikey, "/v0/profiles", p_base.HatchingProfileResponse)
+        return await self._call(apikey, "get_profiles")
 
     async def profile(self, profile: str, apikey: str | None = None) -> dict:
         """GET /v0/profiles/{id or name}"""
@@ -830,8 +800,8 @@ class HatchingSvc(s_cell.Cell):
     # ---- Users and API keys (private and self-hosted instances) ----
 
     async def users(self, limit: int | None = None, apikey: str | None = None) -> list[dict]:
-        """GET /v0/users - up to ``limit`` users (None or 0 for all of them)."""
-        return await self._pagedList(apikey, "/v0/users", p_base.User, limit=limit)
+        """GET /v0/users - up to ``limit`` users (None or 0 for all of them), every page."""
+        return await self._call(apikey, "get_users", limit=limit or None)
 
     async def user(self, user: str, apikey: str | None = None) -> dict:
         """GET /v0/users/{id}"""

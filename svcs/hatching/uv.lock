@@ -370,7 +370,7 @@ wheels = [
 
 [[package]]
 name = "hatchingsvc"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "." }
 dependencies = [
     { name = "pyhatching" },
@@ -385,7 +385,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "pyhatching", specifier = ">=1.0.0" },
+    { name = "pyhatching", specifier = ">=1.1.0" },
     { name = "stormlibpp", specifier = ">=0.10.1" },
 ]
 
@@ -729,15 +729,15 @@ wheels = [
 
 [[package]]
 name = "pyhatching"
-version = "1.0.0"
+version = "1.1.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e8/80/e3214abd3efac4191d07ccd96d6a17b10e281be7d8f2a26ad03faae9ad67/pyhatching-1.0.0.tar.gz", hash = "sha256:bb1cef5649cd48d1d10c28cea07cf6b1fba876a5a3f65cd3d212fc8df49e7ade", size = 46227, upload-time = "2026-11-01T21:45:32.535Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c2/55/5cd83bc23b4710d01f38ee56b3900e425c49a242539bfc112262e3077484/pyhatching-1.1.0.tar.gz", hash = "sha256:14dec368797f74056b81cae4534f61a13e36305d915f02c20ca148e7dca46f13", size = 47455, upload-time = "2026-11-02T01:20:32.549Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e7/03/f1cbeb8b3d984b5fe26d8371d710fe117500e968e3ba5a1a7d5fc09c7fdb/pyhatching-1.0.0-py3-none-any.whl", hash = "sha256:4df949e6dc376a8ccf305d417882530af22d25e20944250a9aeb20f61fbe046e", size = 39388, upload-time = "2026-11-01T21:45:31.488Z" },
+    { url = "https://files.pythonhosted.org/packages/2e/17/c4c48964c67afee32a55a5de4af4549b36a6b3ae47b5170524cc30d2aaac/pyhatching-1.1.0-py3-none-any.whl", hash = "sha256:2703902684fec99dfb4a6439c23c1368eb15d053908577ff98a40bed47324fae", size = 40168, upload-time = "2026-11-02T01:20:31.51Z" },
 ]
 
 [[package]]
