@@ -33,6 +33,73 @@ function host(ip, history=(false), minify=(false), internetdb=(false)) {
     return($model.host($retn.data, $tagPrefix))
 }
 
+// The endpoint recorded as the :api:url of a search's it:exec:query.
+function searchUrl() { return("https://api.shodan.io/shodan/host/search") }
+
+// Model the banners from a Shodan query, recording the run as an it:exec:query (see
+// slib.shodan.model.queryNode) linked -(found)> to each banner's inet:server, inet:banner, and IP.
+//
+// retns is a generator of the service's {status, mesg, data} dicts with normalized banners, ex.
+// $priv.searchGenr(). text, apiurl, opts, and ref are recorded on the it:exec:query.
+//
+// Emits ({"query": <it:exec:query>, "ip": <inet:ipv4/6 or null>}) for each banner, then a final
+// ({"query": <it:exec:query>, "ip": null, "done": (true)}). The query node is only created once the
+// query has succeeded, so failed queries (reported as warnings) leave nothing behind and emit nothing.
+function ingest(retns, what, text, apiurl, opts, ref=$lib.null) {
+    $tagPrefix = $priv.tagPrefix()
+    $qnode = $lib.null
+    $count = (0)
+    $failed = (false)
+
+    for $retn in $retns {
+        if $util.failed($retn, $what) {
+            $failed = (true)
+            break
+        }
+        if ($qnode = $lib.null) { $qnode = $model.queryNode($text, $apiurl, $opts, $ref) }
+
+        $count = ($count + 1)
+        $res = $model.bannerNodes($retn.data, $tagPrefix)
+        if $res {
+            $model.found($qnode, ($res.server, $res.banner, $res.ip))
+            emit ({"query": $qnode, "ip": $res.ip})
+        }
+    }
+
+    // A failure after some results still records the results that were ingested.
+    if ($failed and $qnode = $lib.null) { stop }
+
+    // A query that matched nothing is still a run worth recording.
+    if ($qnode = $lib.null) { $qnode = $model.queryNode($text, $apiurl, $opts, $ref) }
+    $model.setOffset($qnode, $count)
+    emit ({"query": $qnode, "ip": $lib.null, "done": (true)})
+}
+
+// Search Shodan, model every matching banner, and record the run as an it:exec:query.
+// ref is the node the query was built from, if any. Returns ({"query": <it:exec:query>,
+// "ips": [<inet:ipv4/6>, ...]}), or null if the search failed (reported as a warning).
+function search(query, limit=(100), minify=(false), page=(1), ref=$lib.null) {
+    $query = $lib.cast(str, $query)
+    $opts = ({"command": "slib.shodan.lib.search", "limit": $limit, "page": $page, "minify": $minify})
+    $genr = $priv.searchGenr($query, limit=$limit, minify=$minify, page=$page)
+
+    $qnode = $lib.null
+    $ips = ([])
+    $seen = ({})
+    for $res in $ingest($genr, "Search", $query, $searchUrl(), $opts, ref=$ref) {
+        $qnode = $res.query
+        if $res.ip {
+            $iden = $res.ip.iden()
+            if (not $seen.$iden) {
+                $seen.$iden = (true)
+                $ips.append($res.ip)
+            }
+        }
+    }
+    if ($qnode = $lib.null) { return($lib.null) }
+    return(({"query": $qnode, "ips": $ips}))
+}
+
 // Retrieve and model the DNS records for a domain. Returns a list of the subdomain inet:fqdn nodes.
 function domain(domain, history=(false), rtype=$lib.null, maxpages=(10)) {
     $domain = $lib.cast(str, $domain)

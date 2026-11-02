@@ -9,14 +9,14 @@ Shodan's data as-is (or normalized, for the ``norm*`` variants) and raise
 import json
 from collections.abc import AsyncIterator
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 import aiohttp
 import synapse.lib.cell as s_cell
 
 from . import norm
 from .api import ShodanCellApi
-from .client import ShodanApiError, ShodanClient
+from .client import BASE_URLS, ShodanApiError, ShodanClient
 
 # Streaming API endpoints and whether they take a comma separated list of values.
 STREAM_KINDS = {
@@ -32,6 +32,34 @@ STREAM_KINDS = {
 
 # The default number of results Shodan returns per search page.
 SEARCH_PAGE_SIZE = 100
+
+
+def _streamPath(
+    kind: str, values=None, query: str | None = None, aid: str | None = None
+) -> tuple[str, dict]:
+    """Build the path and params of a Streaming API endpoint (without the API key)."""
+
+    if kind not in STREAM_KINDS:
+        raise ShodanApiError(
+            f"Unknown stream type {kind}, expected one of: {', '.join(STREAM_KINDS)}"
+        )
+
+    params = {}
+    path = f"/shodan/{kind}"
+    if STREAM_KINDS[kind]:
+        if not values:
+            raise ShodanApiError(f"The {kind} stream requires at least one value.")
+        if isinstance(values, (list, tuple)):
+            values = ",".join(str(v) for v in values)
+        path = f"{path}/{quote(str(values), safe=',')}"
+    elif kind == "custom":
+        if not query:
+            raise ShodanApiError("The custom stream requires a query.")
+        params["query"] = query
+    elif kind == "alert" and aid:
+        path = f"{path}/{_seg(aid)}"
+
+    return path, params
 
 
 def _seg(valu: Any) -> str:
@@ -605,6 +633,21 @@ class ShodanSvc(s_cell.Cell):
 
     # ---- Streaming ----
 
+    async def streamUrl(
+        self, kind: str = "banners", values=None, query: str | None = None, aid: str | None = None
+    ) -> str:
+        """The public URL of a Streaming API endpoint, without the API key.
+
+        Recorded as the ``:api:url`` of the stream's ``it:exec:query``. It always uses Shodan's
+        public base URL, even when ``shodan:urls`` overrides it, so internal hosts aren't recorded.
+        """
+
+        path, params = _streamPath(kind, values=values, query=query, aid=aid)
+        url = BASE_URLS["stream"] + path
+        if params:
+            url = f"{url}?{urlencode(params)}"
+        return url
+
     async def stream(
         self,
         kind: str = "banners",
@@ -622,26 +665,7 @@ class ShodanSvc(s_cell.Cell):
         and ``aid`` optionally narrows the alert stream to a single alert.
         """
 
-        if kind not in STREAM_KINDS:
-            raise ShodanApiError(
-                f"Unknown stream type {kind}, expected one of: {', '.join(STREAM_KINDS)}"
-            )
-
-        params = {}
-        path = f"/shodan/{kind}"
-        if STREAM_KINDS[kind]:
-            if not values:
-                raise ShodanApiError(f"The {kind} stream requires at least one value.")
-            if isinstance(values, (list, tuple)):
-                values = ",".join(str(v) for v in values)
-            path = f"{path}/{quote(str(values), safe=',')}"
-        elif kind == "custom":
-            if not query:
-                raise ShodanApiError("The custom stream requires a query.")
-            params["query"] = query
-        elif kind == "alert" and aid:
-            path = f"{path}/{_seg(aid)}"
-
+        path, params = _streamPath(kind, values=values, query=query, aid=aid)
         async for banner in self.client.stream(
             path, apikey=self.getApiKey(apikey), params=params, limit=limit, timeout=timeout
         ):

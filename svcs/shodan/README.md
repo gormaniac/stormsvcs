@@ -126,6 +126,31 @@ $ipnode = $shodan.host(8.8.8.8, history=(true))
 $vulns = $shodan.cves(product=log4j, kev=(true))
 ```
 
+## Query runs
+
+Every `slib.shodan.search` and `slib.shodan.stream` run is recorded as an `it:exec:query`:
+
+- `:text` is the query sent to Shodan (ex. `ports:443,53` for a stream).
+- `:language` is `shodan`, plus `:time`, `:synuser`, `:api:url` (never with the API key),
+  `:offset` (the number of banners read), and `:opts` (the command's options).
+- `-(found)>` edges link it to the `inet:server`, `inet:banner`, and `inet:ipv4`/`inet:ipv6` of
+  every banner it returned. Everything else from a banner (certs, software, vulns, headers) is one
+  hop from those.
+- A `-(refs)>` edge links it to the inbound node the query was built from.
+
+Each run is its own node. Failed searches and the print-only modes (`--count`, `--tokens`,
+`--filters`) record nothing. `--yield-query` yields the `it:exec:query` nodes instead of the IPs:
+
+```
+// What did the searches for this cert find?
+crypto:x509:cert:sha1=e652c8bd1cafd04a44239fa8dab0c59deacb79ee | slib.shodan.search --yield-query | -(found)> inet:server
+
+// Every search ever run for a node, and when.
+inet:asn=15169 <(refs)- it:exec:query | sort :time
+```
+
+From Storm, `$shodan.search($query)` returns `({"query": <it:exec:query>, "ips": [...]})`.
+
 ## Searching from nodes
 
 Nodes piped to `slib.shodan.search` are each searched for with a query built for their form,

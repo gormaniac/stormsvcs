@@ -116,6 +116,11 @@ function cpes(product, limit=(100), count=(false)) {
 
 // Streaming
 
+// Doesn't need an API key, the URL never includes one.
+function streamUrl(kind=banners, values=$lib.null, query=$lib.null, aid=$lib.null) {
+    return($svc.streamUrl(kind=$kind, values=$values, query=$query, aid=$aid))
+}
+
 function stream(kind=banners, values=$lib.null, query=$lib.null, aid=$lib.null, limit=(100), timeout=(60)) {
     for $retn in $svc.stream(kind=$kind, values=$values, query=$query, aid=$aid,
                              limit=$limit, timeout=$timeout, apikey=$userKey()) {

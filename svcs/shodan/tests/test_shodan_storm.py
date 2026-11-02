@@ -628,6 +628,140 @@ class TestShodanStormSearch(s_tests.SynTest):
             self.stormIsInWarn("requires at least one value", msgs)
 
 
+FOUND_FORMS = {"inet:server", "inet:banner", "inet:ipv4", "inet:ipv6"}
+
+
+class TestShodanStormQueries(s_tests.SynTest):
+    """Each Shodan query run is recorded as an it:exec:query."""
+
+    async def test_search_query_node(self):
+        async with shodanSvc(self) as (core, svc, fake):
+            msgs = await core.stormlist('slib.shodan.search "product:nginx"')
+            self.stormHasNoErr(msgs)
+
+            nodes = await core.nodes("it:exec:query")
+            assert len(nodes) == 1
+            qnode = nodes[0]
+            assert qnode.get("text") == "product:nginx"
+            assert qnode.get("language") == "shodan"
+            assert qnode.get("api:url") == "https://api.shodan.io/shodan/host/search"
+            assert qnode.get("synuser") == core.auth.rootuser.iden
+            assert qnode.get("time") is not None
+            assert qnode.get("offset") == 2
+            assert qnode.get("opts") == {
+                "command": "slib.shodan.search",
+                "limit": 100,
+                "page": 1,
+                "minify": False,
+            }
+
+            # -(found)> only reaches the servers, banners, and IPs of the 2 banners.
+            found = await nodeset(core, "it:exec:query -(found)> *")
+            assert {form for form, _ in found} == FOUND_FORMS
+            assert len([1 for form, _ in found if form == "inet:server"]) == 2
+            assert len([1 for form, _ in found if form == "inet:banner"]) == 2
+            assert ("inet:ipv4", "8.8.8.8") in found
+            assert ("inet:ipv6", "2001:4860:4860::8888") in found
+
+            assert len(await core.nodes(f"it:exec:query <(seen)- meta:source={SVC_GUID}")) == 1
+
+            # The API key is never recorded.
+            assert "testkey" not in repr(qnode.pack())
+
+            # Every run is its own execution.
+            await core.nodes('slib.shodan.search "product:nginx"')
+            assert len(await core.nodes("it:exec:query:text=product:nginx")) == 2
+
+    async def test_search_query_refs(self):
+        async with shodanSvc(self) as (core, svc, fake):
+            await core.nodes("[ inet:asn=15169 inet:fqdn=vertex.link ]")
+            msgs = await core.stormlist('inet:asn=15169 inet:fqdn=vertex.link | slib.shodan.search --yield-query')
+            self.stormHasNoErr(msgs)
+
+            # One query per inbound node, each yielded, and each refs its inbound node.
+            nodes = [m[1] for m in msgs if m[0] == "node"]
+            assert {n[0][0] for n in nodes} == {"it:exec:query"}
+            assert {n[1]["props"]["text"] for n in nodes} == {"asn:AS15169", 'hostname:"vertex.link"'}
+
+            assert await nodeset(core, "it:exec:query:text=asn:AS15169 -(refs)> *") == {("inet:asn", "15169")}
+            assert await nodeset(core, 'it:exec:query:text=\'hostname:"vertex.link"\' -(refs)> *') == {
+                ("inet:fqdn", "vertex.link")
+            }
+            # Both searches found the same 2 servers.
+            assert len(await core.nodes("it:exec:query -(found)> inet:server | uniq")) == 2
+
+    async def test_search_query_not_recorded(self):
+        async with shodanSvc(self) as (core, svc, fake):
+            # Print-only modes record nothing.
+            await core.nodes('slib.shodan.search "nginx" --count --facets port')
+            await core.nodes('slib.shodan.search "nginx" --tokens')
+            await core.nodes("slib.shodan.search --filters")
+            assert not await core.nodes("it:exec:query")
+
+            # Neither does a failed search.
+            fake.routes[("GET", "/api/shodan/host/search")] = (403, {"error": "Access denied"})
+            msgs = await core.stormlist('slib.shodan.search "nginx"')
+            self.stormIsInWarn("Search failed: Access denied", msgs)
+            assert not await core.nodes("it:exec:query")
+
+            # A search that matches nothing is still a run.
+            fake.routes[("GET", "/api/shodan/host/search")] = (200, {"total": 0, "matches": []})
+            msgs = await core.stormlist('slib.shodan.search "nginx" --yield-query')
+            self.stormHasNoErr(msgs)
+            nodes = [m[1] for m in msgs if m[0] == "node"]
+            assert len(nodes) == 1
+            assert nodes[0][1]["props"]["offset"] == 0
+            assert not await core.nodes("it:exec:query -(found)> *")
+
+    async def test_lib_search(self):
+        async with shodanSvc(self) as (core, svc, fake):
+            q = """
+                $shodan = $lib.import(slib.shodan.lib)
+                $res = $shodan.search("product:nginx")
+                $lib.print("ips={n} query={t}", n=$res.ips.size(), t=$res.query.props.text)
+            """
+            msgs = await core.stormlist(q)
+            self.stormHasNoErr(msgs)
+            self.stormIsInPrint("ips=2 query=product:nginx", msgs)
+
+    async def test_stream_query_node(self):
+        async with shodanSvc(self) as (core, svc, fake):
+            msgs = await core.stormlist(
+                "slib.shodan.stream ports --value 443 --value 53 --limit 0 --timeout 5 --yield-query"
+            )
+            self.stormHasNoErr(msgs)
+            nodes = [m[1] for m in msgs if m[0] == "node"]
+            assert [n[0][0] for n in nodes] == ["it:exec:query"]
+
+            qnode = (await core.nodes("it:exec:query"))[0]
+            assert qnode.get("text") == "ports:443,53"
+            assert qnode.get("api:url") == "https://stream.shodan.io/shodan/ports/443,53"
+            assert qnode.get("offset") == 2
+            assert qnode.get("opts") == {
+                "command": "slib.shodan.stream",
+                "kind": "ports",
+                "values": ("443", "53"),
+                "alert": None,
+                "limit": 0,
+                "timeout": 5,
+            }
+            found = await nodeset(core, "it:exec:query -(found)> *")
+            assert {form for form, _ in found} == {"inet:server", "inet:banner", "inet:ipv4"}
+            assert ("inet:ipv4", "8.8.8.8") in found
+
+            # A stream that can't start records nothing.
+            msgs = await core.stormlist("slib.shodan.stream ports")
+            self.stormIsInWarn("requires at least one value", msgs)
+            assert len(await core.nodes("it:exec:query")) == 1
+
+    async def test_stream_custom_url(self):
+        async with shodanSvc(self) as (core, svc, fake):
+            await core.nodes('slib.shodan.stream custom --query "port:22 country:US" --timeout 5')
+            qnode = (await core.nodes("it:exec:query"))[0]
+            assert qnode.get("text") == "port:22 country:US"
+            assert qnode.get("api:url") == "https://stream.shodan.io/shodan/custom?query=port%3A22+country%3AUS"
+
+
 class TestShodanStormDns(s_tests.SynTest):
     async def test_dns_domain(self):
         async with shodanSvc(self) as (core, svc, fake):

@@ -1,5 +1,5 @@
 name: slib.shodan
-version: 0.5.0
+version: 0.6.0
 guid: 0f6c1d0f1d8a4c3bb7a1e3d5c9b2a864
 
 synapse_minversion: [2, 137, 0]
@@ -160,6 +160,12 @@ commands:
     descr: |
       Search Shodan and model every matching banner. Yields the matching inet:ipv4/inet:ipv6 nodes.
 
+      Each search run is recorded as an it:exec:query (:text is the query sent to Shodan), linked
+      with -(found)> edges to the inet:server, inet:banner, and inet:ipv4/inet:ipv6 nodes of every
+      banner it returned, and with a -(refs)> edge to the inbound node the query was built from.
+      Use --yield-query to yield the it:exec:query nodes instead of the IPs. The --count, --tokens,
+      and --filters modes only print, and record nothing.
+
       Inbound nodes are each searched for with the query below, AND'd with any query given,
       ex. "country:US". Unsupported nodes, and nodes missing the props a query needs, are
       warned about and skipped. Values are quoted, with commas escaped (a comma is Shodan's
@@ -222,6 +228,9 @@ commands:
 
         // Run saved Shodan queries.
         meta:rule:type=svc.shodan.query | slib.shodan.search --limit 200
+
+        // Every server found by searches run for a certificate.
+        crypto:x509:cert:sha1=e652c8bd1cafd04a44239fa8dab0c59deacb79ee | slib.shodan.search --yield-query | -(found)> inet:server
     cmdargs:
       - - query
         - type: str
@@ -261,6 +270,10 @@ commands:
           default: null
           choices: [favicon, html]
           help: Search for inbound file:bytes as a favicon or HTML page, instead of going by their :mime.
+      - - --yield-query
+        - default: false
+          action: store_true
+          help: Yield the it:exec:query node of each search instead of the IP nodes.
     cmdinputs:
       - form: inet:banner
         help: Searched for by their Shodan banner hash.
@@ -620,6 +633,10 @@ commands:
 
       Streams never end on their own, so this stops after --limit banners or --timeout seconds.
 
+      The run is recorded as an it:exec:query (:text is ex. "ports:443,53", or the custom query),
+      linked with -(found)> edges to the inet:server, inet:banner, and inet:ipv4/inet:ipv6 nodes of
+      every banner read. Use --yield-query to yield the it:exec:query instead of the IPs.
+
       Examples:
 
         // Banners for 2 ASNs.
@@ -658,6 +675,10 @@ commands:
         - type: int
           default: 60
           help: Stop after this many seconds (0 for no timeout).
+      - - --yield-query
+        - default: false
+          action: store_true
+          help: Yield the it:exec:query node instead of the IP nodes.
 
   - name: slib.shodan.apikey
     perms:

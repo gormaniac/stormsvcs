@@ -87,6 +87,8 @@ RETN_METHS = (
     "normVuln",
     "cves",
     "cpes",
+    # Streaming
+    "streamUrl",
 )
 
 

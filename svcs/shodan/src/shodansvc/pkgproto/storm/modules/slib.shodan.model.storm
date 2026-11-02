@@ -206,6 +206,15 @@ function dnsRecordNode(rec) {
 
 // Model a normalized banner. Returns the inet:server node.
 function banner(b, tagPrefix=$lib.null) {
+    $res = $bannerNodes($b, $tagPrefix)
+    if ($res = $lib.null) { return($lib.null) }
+    return($res.server)
+}
+
+// Model a normalized banner. Returns ({"server": <inet:server>, "banner": <inet:banner or null>,
+// "ip": <inet:ipv4/6 or null>}), the nodes the banner itself describes, or null.
+// Queries and timelines link to only these nodes, everything else is one hop from them.
+function bannerNodes(b, tagPrefix=$lib.null) {
     $srv = $serverNode($b.ip, $b.port, $b.transport, $b.timestamp)
     if ($srv = $lib.null) { return($lib.null) }
     $applyTags($srv, $tagPrefix, $b.tags)
@@ -213,6 +222,7 @@ function banner(b, tagPrefix=$lib.null) {
     $ipnode = $ipNode($b.ip, $b.timestamp)
     if ($b.asn and $ipnode) { $setAsn($ipnode, $b.asn, $b.org) }
 
+    $bannernode = $lib.null
     if $b.data {
         $bannernode = $bannerNode($srv.repr(), $b.data, $b.timestamp)
         // Date headers aren't included, see shodansvc.norm.normHttpHeaders.
@@ -232,7 +242,46 @@ function banner(b, tagPrefix=$lib.null) {
 
     for $hostname in $b.hostnames { $dnsNode($hostname, $b.ip, $b.timestamp) }
 
-    return($srv)
+    return(({"server": $srv, "banner": $bannernode, "ip": $ipnode}))
+}
+
+// ---- Query executions ----
+
+// Create the it:exec:query for one run of a Shodan query. Every run is its own node.
+// ref is the inbound node the query was built from, if any (it:exec:query -(refs)> ref).
+// opts must never hold an API key.
+function queryNode(text, apiurl, opts, ref=$lib.null) {
+    [ it:exec:query=*
+        :text=$text
+        :language=shodan
+        :time=now
+        :synuser=$lib.user.iden
+        :api:url?=$apiurl
+        :opts=$opts
+    ]
+    if $ref { [ +(refs)> $ref ] }
+    return($seen($node))
+}
+
+// Link a query to the nodes it returned (it:exec:query -(found)> n), skipping nulls.
+function found(query, nodes) {
+    // No node in this function's pipeline, so looping is safe (see the NOTE at the top).
+    for $n in $nodes {
+        if $n { $linkFound($query, $n) }
+    }
+}
+
+function linkFound(query, n) {
+    yield $n
+    [ <(found)+ $query ]
+    return($n)
+}
+
+// Record how many results a query consumed.
+function setOffset(query, offset) {
+    yield $query
+    [ :offset=$offset ]
+    return($query)
 }
 
 // Model a normalized host (from the Shodan host API or InternetDB). Returns the IP node.
