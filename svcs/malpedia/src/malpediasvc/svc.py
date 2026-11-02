@@ -166,6 +166,7 @@ class MalpediaSvc(s_cell.Cell):
         self.viewinfo = self.slab.getSafeKeyVal("slib:malpedia:viewinfo")
 
         self.pulllock = asyncio.Lock()
+        self._actorcache: dict[str, dict] | None = None
 
         self.session = aiohttp.ClientSession(trust_env=True)
         self.onfini(self.session.close)
@@ -201,6 +202,16 @@ class MalpediaSvc(s_cell.Cell):
 
     def _snapRecs(self, kind: str) -> dict[str, dict]:
         return {key: item["rec"] for key, item in self._snapkv(kind).items()}
+
+    def _snapActors(self) -> dict[str, dict]:
+        """The snapshot's actor records, cached in memory until the next pull changes them.
+
+        Callers must not modify the returned dict.
+        """
+
+        if self._actorcache is None:
+            self._actorcache = self._snapRecs("actor")
+        return self._actorcache
 
     def _counts(self) -> dict[str, int]:
         return {kind: sum(1 for _ in _kvkeys(self._snapkv(kind))) for kind in norm.KINDS}
@@ -319,15 +330,24 @@ class MalpediaSvc(s_cell.Cell):
         # /api/list/actors) are requested one by one, up to a limit.
         matched, unmatched = norm.resolveActorIds(raw["actors"], raw["actorids"])
         missing = sorted(set(raw["actorids"]) - set(matched))
-        for aid in missing[:MAX_GAP_REQUESTS]:
-            try:
-                raw["extra_actors"][aid] = await self.client.getActor(aid)
-            except MalpediaApiError as err:
-                warns.append(f"Unable to get the actor {aid}: {err.mesg}")
+        snapactors = self._snapActors()
+        # Actors that are still listed, but couldn't be requested, keep their last known
+        # record. Otherwise they'd look removed until a later pull got them.
+        raw["kept_actors"] = {}
+        for i, aid in enumerate(missing):
+            if i < MAX_GAP_REQUESTS:
+                try:
+                    raw["extra_actors"][aid] = await self.client.getActor(aid)
+                    continue
+                except MalpediaApiError as err:
+                    warns.append(f"Unable to get the actor {aid}: {err.mesg}")
+            if aid in snapactors:
+                raw["kept_actors"][aid] = snapactors[aid]
         if len(missing) > MAX_GAP_REQUESTS:
             warns.append(
                 f"{len(missing) - MAX_GAP_REQUESTS} actors were not in /api/get/actors and "
-                "were not requested individually, they'll be retried on the next pull."
+                "were not requested individually (they keep their last known data), they'll be "
+                "retried on the next pull."
             )
         if unmatched:
             warns.append(
@@ -337,6 +357,8 @@ class MalpediaSvc(s_cell.Cell):
 
         listing = norm.yaraListing(raw["yaralist"])
         have = self._snapRecs("yara")
+        # _build runs in a thread, so it gets the stored rules here instead of reading the slab.
+        raw["haveyara"] = have
 
         if not complete or not have:
             # The first pull gets every rule in one request.
@@ -386,12 +408,17 @@ class MalpediaSvc(s_cell.Cell):
         return raw
 
     def _build(self, raw: dict, warns: list[str]) -> dict[str, dict[str, dict]]:
-        """Normalize a pull's raw data into ``{kind: {key: record}}``. Runs in a thread."""
+        """Normalize a pull's raw data into ``{kind: {key: record}}``.
+
+        This runs in a thread, so it must not touch the slab, everything it needs is in raw.
+        """
 
         matched, _ = norm.resolveActorIds(raw["actors"], raw["actorids"])
         matched.update(raw["extra_actors"])
 
         actors = {aid: norm.normActor(aid, data) for aid, data in matched.items()}
+        for aid, rec in raw.get("kept_actors", {}).items():
+            actors.setdefault(aid, rec)
         index = norm.ActorIndex(actors.values())
 
         families = {}
@@ -419,7 +446,7 @@ class MalpediaSvc(s_cell.Cell):
         listing = norm.yaraListing(raw["yaralist"])
         texts = {}
         if not raw["yara"]["full"]:
-            for key, rec in self._snapRecs("yara").items():
+            for key, rec in raw["haveyara"].items():
                 texts[key] = (
                     f"tlp_{rec['tlp']}" if rec.get("tlp") else None,
                     key,
@@ -466,6 +493,8 @@ class MalpediaSvc(s_cell.Cell):
 
         kv = self._snapkv(kind)
         added = updated = removed = 0
+        if kind == "actor":
+            self._actorcache = None
 
         for key in list(_kvkeys(kv)):
             if key not in recs:
@@ -689,8 +718,7 @@ class MalpediaSvc(s_cell.Cell):
                 "drop": {},
             }
 
-        snapactors = self._snapRecs("actor")
-        snapfams = self._snapRecs("family")
+        snapactors = dict(self._snapActors())
         out = {"actor": [], "family": [], "yara": [], "news": []}
         warns = []
 
@@ -718,10 +746,9 @@ class MalpediaSvc(s_cell.Cell):
             data = await self.client.getFamily(ident)
             index = norm.ActorIndex(snapactors.values())
             fam = norm.withActorTags(norm.normFamily(ident, data, index))
-            snapfams[ident] = fam
             out["family"].append(item(fam))
             for tlp, filename, text in norm.yaraTlpRules(await self.client.getYaraFamily(ident)):
-                rec = norm.normYara(filename, text, tlp=tlp, family=ident, families=snapfams)
+                rec = norm.normYara(filename, text, tlp=tlp, family=ident, families={ident: fam})
                 if rec is not None:
                     out["yara"].append(item(rec))
             bibtext = await self.client.getBibFamily(ident)

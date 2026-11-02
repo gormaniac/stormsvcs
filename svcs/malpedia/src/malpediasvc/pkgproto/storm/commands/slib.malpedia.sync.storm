@@ -38,10 +38,10 @@ init {
 
     $rows = ([])
     for ($kind, $c) in $s.kinds {
-        $rows.append(($kind, $c.total, $c.added, $c.updated, $c.removed, $c.failed))
+        $rows.append(($kind, $c.total, $c.added, $c.updated, $c.removed, $c.skipped, $c.failed))
     }
     $lib.print("{name}: Modeled the changes into this view:", name=$name)
-    $util.table(([["kind", 8], ["changes", 9], ["added", 9], ["updated", 9], ["removed", 9], ["failed", 8]]), $rows)
+    $util.table(([["kind", 8], ["changes", 9], ["added", 9], ["updated", 9], ["removed", 9], ["skipped", 9], ["failed", 8]]), $rows)
 
     for $err in $s.errors { $lib.warn("{name}: Unable to model {err}", name=$name, err=$err) }
     if $s.error {

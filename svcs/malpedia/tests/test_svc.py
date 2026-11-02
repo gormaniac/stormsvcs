@@ -208,7 +208,32 @@ class TestMalpediaPull(s_tests.SynTest):
             assert any("have no matching actor ID: Unknown Name" in w for w in summary["warnings"])
             assert summary["added"]["actor"] == 4
 
+            # An actor that's still listed but can't be requested keeps its last known data,
+            # it isn't removed.
             fake.state["version"]["version"] += 1
+            fake.state["errors"]["/api/get/actor/turla"] = [500] * 10
+            summary = await svc.pull()
+            assert any("Unable to get the actor turla" in w for w in summary["warnings"])
+            assert summary["removed"]["actor"] == 0
+            assert (await svc.record("actor", "turla"))["name"] == "Turla"
+            fake.state["errors"].clear()
+
+            # Same for actors past the per-pull request limit.
+            fake.state["version"]["version"] += 1
+            with mock.patch.object(m_svc, "MAX_GAP_REQUESTS", 0):
+                summary = await svc.pull()
+            assert summary["removed"]["actor"] == 0
+            assert summary["updated"]["actor"] == 0
+            assert (await svc.record("actor", "turla"))["name"] == "Turla"
+
+            # An actor that's no longer listed is removed.
+            fake.state["version"]["version"] += 1
+            fake.state["actorids"].remove("turla")
+            summary = await svc.pull()
+            assert summary["removed"]["actor"] == 1
+
+            fake.state["version"]["version"] += 1
+            fake.state["actorids"].append("turla")
             with mock.patch.object(m_svc, "MAX_GAP_REQUESTS", 1):
                 summary = await svc.pull()
             assert any("weren't requested" in w or "were not requested" in w for w in summary["warnings"])

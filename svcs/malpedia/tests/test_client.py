@@ -1,6 +1,8 @@
 """Tests for the Malpedia API client."""
 
 import asyncio
+import datetime
+import email.utils
 import io
 import zipfile
 
@@ -98,6 +100,34 @@ async def test_errors_and_retries():
             fake.state["references"] = None
             with pytest.raises(MalpediaApiError, match="no references"):
                 await cli.getReferences()
+
+
+async def test_retry_after():
+    async with fm.FakeMalpedia() as fake:
+        session, cli = await _client(fake)
+        async with session:
+            loop = asyncio.get_running_loop()
+            fake.state["errors"]["/api/get/version"] = [(429, "1")]
+            start = loop.time()
+            assert (await cli.version())["version"] == 26601
+            # The backoff is 0, but Malpedia asked for a second.
+            assert loop.time() - start >= 0.9
+
+            # Asking for too long a wait isn't retried at all.
+            fake.state["errors"]["/api/get/version"] = [(503, "86400")]
+            before = len(fake.requests)
+            with pytest.raises(MalpediaApiError, match="asked to wait 86400.0 seconds"):
+                await cli.version()
+            assert len(fake.requests) == before + 1
+
+    assert m_client.retryAfter(None) is None
+    assert m_client.retryAfter("") is None
+    assert m_client.retryAfter("garbage") is None
+    assert m_client.retryAfter("-5") == 0.0
+    assert m_client.retryAfter(" 30 ") == 30.0
+    assert m_client.retryAfter("Wed, 21 Oct 2015 07:28:00 GMT") == 0.0
+    assert 3500 < m_client.retryAfter(email.utils.format_datetime(
+        datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=1), usegmt=True)) <= 3600
 
 
 async def test_connection_errors():

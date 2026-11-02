@@ -265,7 +265,11 @@ class FakeMalpedia:
         errs = self.state["errors"].get(path)
         if errs:
             code = errs.pop(0)
-            return web.json_response({"detail": f"fake error {code}"}, status=code)
+            headers = {}
+            # (code, Retry-After) tuples send a Retry-After header.
+            if isinstance(code, tuple):
+                code, headers["Retry-After"] = code
+            return web.json_response({"detail": f"fake error {code}"}, status=code, headers=headers)
 
         state = self.state
         parts = path.strip("/").split("/")

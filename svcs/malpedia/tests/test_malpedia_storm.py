@@ -340,6 +340,12 @@ class TestMalpediaStormSync(s_tests.SynTest):
             assert nodes[0].get("published") == 1493596800000
             assert nodes[0].get("ext:id") == "talos:20170512:wannacry:aaaa111"
             assert "rep.malpedia.threat.lazarus_group" in nodes[0].tags
+            # Its :publisher:name is another org, so Malpedia's publisher org isn't linked.
+            assert nodes[0].get("publisher") is None
+            # Articles without a publisher name get Malpedia's.
+            nodes = await core.nodes(getNews(fm.URL_SEDNIT))
+            assert nodes[0].get("publisher:name") == "eset research"
+            assert await count(core, getNews(fm.URL_SEDNIT) + " :publisher -> ou:org +:name='eset research'") == 1
 
     async def test_sync_views(self):
         async with fm.malpediaSvc(self) as (core, svc, fake):
@@ -403,6 +409,10 @@ class TestMalpediaStormSync(s_tests.SynTest):
             nodes = await core.nodes(getNews("https://example.com/bad"))
             assert nodes[0].get("published") is None
             assert await count(core, "media:news") == 6
+            # The invalid URL is skipped (and not retried, it'd never work).
+            self.stormIsInPrint(" news     | 7         | 6         | 0         | 0         | 1         | 0 ", msgs)
+            msgs = await core.stormlist("slib.malpedia.sync")
+            self.stormIsInPrint(" news     | 0         | 0 ", msgs)
 
     async def test_tag_prefix(self):
         async with fm.malpediaSvc(self) as (core, svc, fake):

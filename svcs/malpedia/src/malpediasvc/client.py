@@ -12,6 +12,8 @@ exponential backoff instead of hammering the server.
 """
 
 import asyncio
+import datetime
+import email.utils
 import io
 import json
 import zipfile
@@ -38,6 +40,9 @@ MAX_RETRIES = 3
 
 # HTTP status codes that are worth retrying.
 RETRY_CODES = frozenset((429, 500, 502, 503, 504))
+
+# The longest Retry-After (in seconds) the client honors before giving up on a retry.
+MAX_RETRY_AFTER = 600
 
 # The largest response body (in bytes) the client accepts. The biggest public endpoint
 # (/api/get/yara/tlp_white/zip) is ~4MB today, this leaves plenty of room to grow.
@@ -144,6 +149,7 @@ class MalpediaClient:
                     body = b"".join(chunks)
                     code = resp.status
                     ctype = resp.content_type or ""
+                    retryafter = retryAfter(resp.headers.get("Retry-After"))
             except (aiohttp.ClientError, TimeoutError) as err:
                 if attempt < MAX_RETRIES:
                     await asyncio.sleep(self.backoff * 2**attempt)
@@ -151,7 +157,17 @@ class MalpediaClient:
                 raise MalpediaApiError(f"Unable to connect to Malpedia ({path}): {err}") from err
 
             if code in RETRY_CODES and attempt < MAX_RETRIES:
-                await asyncio.sleep(self.backoff * 2**attempt)
+                # Honor Malpedia's Retry-After, never retry sooner than it asks.
+                wait = self.backoff * 2**attempt
+                if retryafter is not None:
+                    if retryafter > MAX_RETRY_AFTER:
+                        raise MalpediaApiError(
+                            f"Malpedia asked to wait {retryafter} seconds before retrying {path} "
+                            f"(HTTP {code}), not retrying.",
+                            code=code,
+                        )
+                    wait = max(wait, retryafter)
+                await asyncio.sleep(wait)
                 continue
 
             if code >= 400:
@@ -290,6 +306,25 @@ def unzipRules(body: bytes) -> dict[str, str]:
             except (zipfile.BadZipFile, OSError, RuntimeError) as err:
                 raise MalpediaApiError(f"Unable to read {name} from the YARA zip: {err}") from err
     return rules
+
+
+def retryAfter(valu: str | None) -> float | None:
+    """The seconds a Retry-After header asks to wait (seconds or an HTTP date), or None."""
+
+    if not valu:
+        return None
+    valu = valu.strip()
+    try:
+        return max(float(valu), 0.0)
+    except ValueError:
+        pass
+    try:
+        when = email.utils.parsedate_to_datetime(valu)
+    except (TypeError, ValueError):
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=datetime.UTC)
+    return max((when - datetime.datetime.now(datetime.UTC)).total_seconds(), 0.0)
 
 
 def errMesg(path: str, code: int, body: bytes) -> str:

@@ -119,6 +119,28 @@ def test_family_and_attribution():
     assert norm.normFamily("nodot", {})["platform"] is None
 
 
+def test_canon_url():
+    assert norm.canonUrl(" https://a.example/b? ") == "https://a.example/b"
+    assert norm.canonUrl("https://a.example/b#") == "https://a.example/b"
+    assert norm.canonUrl("https://a.example/b?x=1") == "https://a.example/b?x=1"
+    assert norm.canonUrl("?") is None
+    assert norm.canonUrl(None) is None
+
+    # Variants that are the same inet:url are one article, with both of their tags.
+    text = fm.bibEntry("online", "k1", "A", "T", "2020", "O", "https://a.example/b?")
+    bibs, errors = norm.parseBib(text)
+    refs = {
+        "https://a.example/b": [{"type": "actor", "id": "apt28"}],
+        "https://a.example/b?": [{"type": "family", "id": "win.xagent"}],
+    }
+    news = list(norm.buildNews(bibs, refs).values())
+    assert len(news) == 1
+    assert news[0]["url"] == "https://a.example/b"
+    assert news[0]["title"] == "T"
+    assert news[0]["actors"] == [["apt28", "threat.apt28"]]
+    assert news[0]["families"] == [["win.xagent", "mal.win.xagent"]]
+
+
 def test_news():
     fake = fm.FakeMalpedia()
     bibs, errors = norm.parseBib(fake.bibText() + "\n@online{nourl, title = {x}}\n" + fm.bibEntry(

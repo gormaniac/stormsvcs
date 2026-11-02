@@ -28,6 +28,9 @@ _ESCRE = re.compile(r"\\[&%_#${}]")
 
 _NAMERE = re.compile(r"[A-Za-z][\w\-:.]*")
 
+# A bare (unquoted, unbraced) value, ex. a number or an @string name.
+_BARERE = re.compile(r"[^\s,#}]+")
+
 
 class BibError(Exception):
     """A BibTeX entry could not be parsed."""
@@ -134,7 +137,7 @@ class _Reader:
             elif char == '"':
                 parts.append(self.quoted())
             else:
-                match = re.compile(r"[^\s,#}]+").match(self.text, self.offs)
+                match = _BARERE.match(self.text, self.offs)
                 if match is None:
                     raise BibError(f"Expected a value at offset {self.offs}.")
                 self.offs = match.end()

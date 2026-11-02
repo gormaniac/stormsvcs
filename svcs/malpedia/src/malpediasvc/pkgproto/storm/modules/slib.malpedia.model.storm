@@ -107,6 +107,14 @@ function threat(id, suffix, conf) {
     return($node)
 }
 
+// The risk:threat for an actor ID: the existing node, or a new one with its identity. Cheaper
+// than threat() when the node usually exists, ex. when linking articles to it.
+function threatRef(id, suffix, conf) {
+    $n = $getThreat($id)
+    if $n { return($n) }
+    return($threat($id, $suffix, $conf))
+}
+
 // The existing risk:threat for an actor ID, or null.
 function getThreat(id) {
     risk:threat=(malpedia, $id)
@@ -184,6 +192,13 @@ function software(id, suffix, conf) {
     return($node)
 }
 
+// The risk:tool:software for a family ID: the existing node, or a new one with its identity.
+function softwareRef(id, suffix, conf) {
+    $n = $getSoftware($id)
+    if $n { return($n) }
+    return($software($id, $suffix, $conf))
+}
+
 // The existing risk:tool:software for a family ID, or null.
 function getSoftware(id) {
     risk:tool:software=(malpedia, $id)
@@ -204,7 +219,7 @@ function _familyProps(n, rec, drop) {
 
 // Add (or remove) the -(uses)> edge from an actor to a family.
 function uses(actorid, actortag, tool, conf, add=(true)) {
-    if $add { $actor = $threat($actorid, $actortag, $conf) }
+    if $add { $actor = $threatRef($actorid, $actortag, $conf) }
     else { $actor = $getThreat($actorid) }
     if ($actor = $lib.null) { return() }
     $edge($actor, uses, $tool, add=$add)
@@ -265,10 +280,15 @@ function news(item, conf) {
     $n = $lib.gen.newsByUrl($rec.url, try=(true))
     if ($n = $lib.null) { return($lib.null) }
 
-    // Only build the publisher and authors if the article doesn't have them yet.
+    // Only build the publisher and authors if the article doesn't have them yet. The
+    // publisher ou:org must match the article's :publisher:name, if another source set one.
     $publisher = $lib.null
     if ($rec.publisher and not $n.props.publisher) {
-        $publisher = $lib.gen.orgByName($rec.publisher).value()
+        ($ok, $pname) = $lib.trycast(ou:name, $rec.publisher)
+        $have = $n.props."publisher:name"
+        if ($ok and ($have = $lib.null or $have = $pname)) {
+            $publisher = $lib.gen.orgByName($pname).value()
+        }
     }
     $authors = ([])
     if ($rec.authors and not $n.props.authors) {
@@ -282,10 +302,10 @@ function news(item, conf) {
     $seen($n, $conf)
 
     for ($id, $suffix) in $rec.actors {
-        $about($n, $threat($id, $suffix, $conf), $fullTag($conf.prefix, $suffix))
+        $about($n, $threatRef($id, $suffix, $conf), $fullTag($conf.prefix, $suffix))
     }
     for ($id, $suffix) in $rec.families {
-        $about($n, $software($id, $suffix, $conf), $fullTag($conf.prefix, $suffix))
+        $about($n, $softwareRef($id, $suffix, $conf), $fullTag($conf.prefix, $suffix))
     }
     if $drop.actors {
         for ($id, $suffix) in $drop.actors {
@@ -348,7 +368,7 @@ function yara(item, conf) {
     if $drop.family { $edge($n, detects, $getSoftware($drop.family), add=(false)) }
 
     if $rec.family {
-        $tool = $software($rec.family, $rec.familytag, $conf)
+        $tool = $softwareRef($rec.family, $rec.familytag, $conf)
         $addTag($n, $fullTag($conf.prefix, $rec.familytag))
         $edge($n, detects, $tool)
     }

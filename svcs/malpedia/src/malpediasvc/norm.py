@@ -63,6 +63,21 @@ def recHash(rec: Any) -> str:
     return hashlib.sha256(byts.encode("utf-8")).hexdigest()
 
 
+def canonUrl(url: Any) -> str | None:
+    """A URL as one article: stripped, without an empty trailing query or fragment.
+
+    Synapse's inet:url drops an empty ``?``/``#``, so ``https://a/b?`` and ``https://a/b`` are
+    the same media:news. Malpedia lists a few articles both ways, and they must be one record,
+    or one variant's changes would undo the tags the other one still asserts.
+    """
+
+    url = _str(url)
+    if url is None:
+        return None
+    url = url.rstrip("?#")
+    return url or None
+
+
 def urlKey(url: str) -> str:
     """The record key of a news article, a hash of its URL (URLs can exceed LMDB key limits)."""
 
@@ -352,7 +367,7 @@ def normBib(entry: Mapping) -> dict | None:
     """Normalize a parsed BibTeX entry (see ``bib.parse``), or None if it has no URL."""
 
     fields = entry.get("fields") or {}
-    url = _str(fields.get("url"))
+    url = canonUrl(fields.get("url"))
     if url is None:
         return None
     return {
@@ -451,7 +466,7 @@ def buildNews(
         link(url)
 
     for url, tags in references.items():
-        url = _str(url)
+        url = canonUrl(url)
         if url is None:
             continue
         actors, fams = link(url)

@@ -28,9 +28,11 @@ function _batch(view, kind, batch, conf, summary) {
     $done = ([])
     for $item in $batch.upsert {
         try {
-            $model.model($kind, $item, $conf)
+            $n = $model.model($kind, $item, $conf)
             $done.append(($item.key, $item.hash))
-            if $item.new { $counts.added = ($counts.added + 1) }
+            // Only articles can be skipped: their URL isn't a valid inet:url.
+            if ($n = $lib.null) { $counts.skipped = ($counts.skipped + 1) }
+            elif $item.new { $counts.added = ($counts.added + 1) }
             else { $counts.updated = ($counts.updated + 1) }
         } catch * as err {
             $counts.failed = ($counts.failed + 1)
@@ -59,12 +61,13 @@ function _batch(view, kind, batch, conf, summary) {
 //
 // Returns a summary: {"pull": the pull summary (or null), "pullerror": why the pull failed
 // (the view is still synced from the service's last good pull), "error": why the sync
-// stopped, "kinds": {kind: {"total", "added", "updated", "removed", "failed"}}, "errors"}.
+// stopped, "kinds": {kind: {"total", "added", "updated", "removed", "skipped", "failed"}},
+// "errors"}.
 function sync(force=(false), full=(false), pull=(true), progress=(false)) {
     $view = $lib.view.get().iden
     $summary = ({"pull": $lib.null, "pullerror": $lib.null, "error": $lib.null, "kinds": ({}), "errors": ([])})
     for $kind in $kinds {
-        $summary.kinds.$kind = ({"total": (0), "added": (0), "updated": (0), "removed": (0), "failed": (0)})
+        $summary.kinds.$kind = ({"total": (0), "added": (0), "updated": (0), "removed": (0), "skipped": (0), "failed": (0)})
     }
 
     if $pull {
