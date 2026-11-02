@@ -1,8 +1,8 @@
 name: slib.shodan
-version: 0.3.1
+version: 0.4.0
 guid: 0f6c1d0f1d8a4c3bb7a1e3d5c9b2a864
 
-synapse_version: ">=2.145.0,<3.0.0"
+synapse_minversion: [2, 137, 0]
 
 genopts:
     dotstorm: true
@@ -158,6 +158,42 @@ commands:
     descr: |
       Search Shodan and model every matching banner. Yields the matching inet:ipv4/inet:ipv6 nodes.
 
+      Inbound nodes are each searched for with the query below, AND'd with any query given,
+      ex. "country:US". Unsupported nodes, and nodes missing the props a query needs, are
+      warned about and skipped. Values are quoted, with commas escaped (a comma is Shodan's
+      OR within a filter's value).
+
+        inet:banner           hash:<n>  (Shodan's banner hash, a MurmurHash3 of :text,
+                                         see slib.shodan.hash)
+        file:bytes            http.favicon.hash:<n> or http.html_hash:<n>  (see below)
+        crypto:x509:cert      ssl.cert.fingerprint:<:sha1>, or ssl.cert.serial:0x<:serial>
+                              without a :sha1 (Shodan only matches the SHA-1 fingerprint)
+        inet:tls:servercert   The query for its :cert.
+        it:sec:cpe            cpe:"cpe:2.3:<part>:<vendor>:<product>" version:"<version>"
+                              (Shodan's cpe filter ignores the version, so it's separate)
+        it:prod:softver       The query for its :cpe, otherwise
+                              product:"<:name or :software:name>" version:"<:vers>"
+        it:sec:cve            vuln:<CVE>
+        risk:vuln             vuln:<:cve>
+        inet:ssl:jarmhash     ssl.jarm:<hash>
+        inet:tls:ja3s:sample  ssl.ja3s:<:ja3s>
+        inet:asn              asn:AS<n>
+        inet:cidr4/6          net:<cidr>
+        inet:fqdn             hostname:"<fqdn>"
+        inet:server           ip:"<:ipv4 or :ipv6>" port:<:port>
+        ou:org                org:"<:name>"
+        ou:name               org:"<name>"
+        it:dev:str            <str>  (a bare search, the string is the query)
+        meta:rule             <:text>  (only rules with :type svc.shodan.query)
+
+      A file:bytes is searched for as a favicon (http.favicon.hash, the MurmurHash3 of the
+      file's base64 with a newline every 76 characters) when its :mime is image/*, or as an
+      HTML page (http.html_hash, the MurmurHash3 of the raw bytes) when it's text/html or
+      application/xhtml+xml. Use --file-hash for files without one of those :mime values.
+      The bytes are read from the Axon (up to 16 MiB), which needs axon.has and axon.get.
+
+      Shodan doesn't support OR between filters, so each node is its own search.
+
       Each page of 100 results consumes one Shodan query credit. Use --count to get
       the total (and any --facets) for free without ingesting anything.
 
@@ -174,12 +210,22 @@ commands:
 
         // List the available search filters and facets.
         slib.shodan.search --filters
+
+        // Free: count the US services presenting the same SSH banner.
+        inet:server=tcp://1.2.3.4:22 -> inet:banner | slib.shodan.search "country:US" --count
+
+        // Every service with this certificate, or this favicon.
+        crypto:x509:cert:sha1=e652c8bd1cafd04a44239fa8dab0c59deacb79ee | slib.shodan.search
+        file:bytes:mime=image/x-icon | slib.shodan.search --count
+
+        // Run saved Shodan queries.
+        meta:rule:type=svc.shodan.query | slib.shodan.search --limit 200
     cmdargs:
       - - query
         - type: str
           nargs: "?"
           default: ""
-          help: The Shodan search query.
+          help: The Shodan search query. AND'd with the query built for each inbound node.
       - - --limit
         - type: int
           default: 100
@@ -208,6 +254,93 @@ commands:
         - default: false
           action: store_true
           help: Print the available search filters and facets and stop.
+      - - --file-hash
+        - type: str
+          default: null
+          choices: [favicon, html]
+          help: Search for inbound file:bytes as a favicon or HTML page, instead of going by their :mime.
+    cmdinputs:
+      - form: inet:banner
+        help: Searched for by their Shodan banner hash.
+      - form: file:bytes
+        help: Searched for by their favicon or HTML hash.
+      - form: crypto:x509:cert
+        help: Searched for by their SHA-1 fingerprint (or serial).
+      - form: inet:tls:servercert
+        help: Searched for by their certificate.
+      - form: it:sec:cpe
+        help: Searched for by the CPE's product and version.
+      - form: it:prod:softver
+        help: Searched for by their CPE, or product name and version.
+      - form: it:sec:cve
+        help: Searched for by vuln.
+      - form: risk:vuln
+        help: Searched for by their CVE.
+      - form: inet:ssl:jarmhash
+        help: Searched for by JARM.
+      - form: inet:tls:ja3s:sample
+        help: Searched for by JA3S.
+      - form: inet:asn
+        help: Searched for by ASN.
+      - form: inet:cidr4
+        help: Searched for by network.
+      - form: inet:cidr6
+        help: Searched for by network.
+      - form: inet:fqdn
+        help: Searched for by hostname.
+      - form: inet:server
+        help: Searched for by IP and port.
+      - form: ou:org
+        help: Searched for by org name.
+      - form: ou:name
+        help: Searched for by org name.
+      - form: it:dev:str
+        help: Searched for as-is, a bare query.
+      - form: meta:rule
+        help: Rules with :type svc.shodan.query, their :text is the query.
+
+  - name: slib.shodan.hash
+    perms:
+      - [ slib, shodan, user ]
+    descr: |
+      Calculate Shodan's hashes, and print the search filter that finds every service with the
+      exact same banner, favicon, or HTML page. Pipe the same nodes to slib.shodan.search to run
+      the search directly.
+
+        inet:banner   hash:<n>, a MurmurHash3 of the banner :text
+        file:bytes    http.favicon.hash:<n>, a MurmurHash3 of the file's base64 (with a newline
+                      every 76 characters), when its :mime is image/*
+                      http.html_hash:<n>, a MurmurHash3 of the raw bytes, when its :mime is
+                      text/html or application/xhtml+xml
+                      Use --file-hash for files without one of those :mime values. The bytes
+                      are read from the Axon (up to 16 MiB), which needs axon.has and axon.get.
+
+      Runs locally, no Shodan API calls or query credits. The hashes are signed 32-bit
+      MurmurHash3s (the same as Python's mmh3.hash()), so they work for nodes from any source.
+
+      Examples:
+
+        inet:server=tcp://1.2.3.4:22 -> inet:banner | slib.shodan.hash
+
+        file:bytes:mime=image/x-icon | slib.shodan.hash
+
+        slib.shodan.hash --text "SSH-2.0-OpenSSH_8.9\r\n"
+    cmdargs:
+      - - --text
+        - type: str
+          action: append
+          default: []
+          help: Banner text to hash instead of using the inbound nodes. May be used multiple times.
+      - - --file-hash
+        - type: str
+          default: null
+          choices: [favicon, html]
+          help: Hash inbound file:bytes as a favicon or HTML page, instead of going by their :mime.
+    cmdinputs:
+      - form: inet:banner
+        help: Banners to hash.
+      - form: file:bytes
+        help: Favicons and HTML pages to hash.
 
   - name: slib.shodan.dns.domain
     perms:

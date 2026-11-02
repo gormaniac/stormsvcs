@@ -1,4 +1,5 @@
 init {
+    $shodan = $lib.import(slib.shodan.lib)
     $priv = $lib.import(slib.shodan.priv.user)
     $model = $lib.import(slib.shodan.model)
     $util = $lib.import(slib.shodan.util)
@@ -17,43 +18,60 @@ init {
             $lib.print("Facets: {facets}", facets=(", ").join($retn.data))
         }
     }
-    elif (not $query) {
-        $lib.raise(BadArg, "slib.shodan.search requires a query (or --filters).")
-    }
-    elif $cmdopts.tokens {
-        $retn = $priv.searchTokens($query)
-        if (not $util.failed($retn, "Parsing the query")) { $util.printJson($retn.data) }
-    }
-    elif $cmdopts.count {
-        $retn = $priv.count($query, facets=$cmdopts.facets)
-        if (not $util.failed($retn, "Counting results")) {
-            $lib.print("Total results: {total}", total=$retn.data.total)
-            $util.printFacets($retn.data.facets)
-        }
-    }
-    elif $cmdopts.facets {
-        // Facets come from a dedicated call to the free count API so we don't fetch page 1 twice.
-        $retn = $priv.count($query, facets=$cmdopts.facets)
-        if (not $util.failed($retn, "Retrieving facets")) {
-            $lib.print("Total results: {total}", total=$retn.data.total)
-            $util.printFacets($retn.data.facets)
-        }
-    }
 
-    if ($cmdopts.limit = 0) {
+    if ($cmdopts.limit = 0 and not $printonly) {
         $lib.warn("slib.shodan.search: --limit 0 retrieves every result, using a query credit per 100 results.")
     }
     $tagPrefix = $priv.tagPrefix()
+
+    // Set once there are inbound nodes, so the query isn't also searched on its own.
+    $state = ({"nodes": (false)})
 }
 
-spin |
+// Run a search. Prints the --tokens/--count/--facets output, then (unless only printing)
+// models every matching banner and yields the IP nodes.
+// NOTE: No return() here, it would make this a function that returns a value instead of yielding nodes.
+function run(query) {
+    if $cmdopts.tokens {
+        $retn = $priv.searchTokens($query)
+        if (not $util.failed($retn, "Parsing the query")) { $util.printJson($retn.data) }
+    } elif ($cmdopts.count or $cmdopts.facets) {
+        // Facets come from a dedicated call to the free count API so we don't fetch page 1 twice.
+        $retn = $priv.count($query, facets=$cmdopts.facets)
+        if (not $util.failed($retn, "Counting results")) {
+            $lib.print("Total results: {total} ({query})", total=$retn.data.total, query=$query)
+            $util.printFacets($retn.data.facets)
+        }
+    }
 
-if (not $printonly) {
-    for $retn in $priv.searchGenr($query, limit=$cmdopts.limit, minify=$cmdopts.minify, page=$cmdopts.page) {
-        if $util.failed($retn, "Search") { break }
-        $model.banner($retn.data, $tagPrefix)
-        $ipnode = $model.ipNode($retn.data.ip)
-        if $ipnode { yield $ipnode }
+    if (not $printonly) {
+        for $retn in $priv.searchGenr($query, limit=$cmdopts.limit, minify=$cmdopts.minify, page=$cmdopts.page) {
+            if $util.failed($retn, "Search") { break }
+            $model.banner($retn.data, $tagPrefix)
+            $ipnode = $model.ipNode($retn.data.ip)
+            if $ipnode { yield $ipnode }
+        }
+    }
+}
+
+// Inbound nodes are searched for with the query built for their form (see the command's help),
+// AND'd with any query. Unsupported nodes are warned about and dropped.
+// NOTE: The flag is set in an if on $node so it only runs for inbound nodes, a bare
+// "$state.nodes = (true)" is runtsafe and would also run (once) without any inbound nodes.
+if $node { $state.nodes = (true) }
+$nodequery = $shodan.searchQuery($node, filehash=$cmdopts.file_hash)
+if ($nodequery = $lib.null) { spin }
+
+// NOTE: Not "if $query {...}", which is runtsafe and would run without inbound nodes too.
+$nodequery = (" ").join(($nodequery, $query)).strip()
+divert (true) $run($nodequery)
+
+// Without inbound nodes, run the query on its own (once).
+| if (not $state.nodes) {
+    if $query {
+        for $ipnode in $run($query) { yield $ipnode }
+    } elif (not $cmdopts.filters) {
+        $lib.raise(BadArg, "slib.shodan.search requires a query, inbound nodes, or --filters.")
     }
 }
 

@@ -74,8 +74,9 @@ need the normal node permissions for the nodes the commands create.
 |---|---|
 | `slib.shodan.host` | Look up IPs and model everything Shodan knows (ASN, location, hostnames, tags, vulns, every banner). `--history`, `--minify`, `--internetdb`. |
 | `slib.shodan.enrich` | Enrich any supported node with the best API: IPs → host, `inet:fqdn` → DNS, `risk:vuln`/`it:sec:cve` → CVEDB, `it:sec:cpe` → CVEs. |
-| `slib.shodan.search` | Search Shodan, model each banner, and yield the IPs. `--count` and `--facets` are free, `--tokens` explains a query, `--filters` lists filters/facets. |
+| `slib.shodan.search` | Search Shodan, model each banner, and yield the IPs. `--count` and `--facets` are free, `--tokens` explains a query, `--filters` lists filters/facets. Inbound nodes are searched for with a query built for their form (see below), AND'd with any query. |
 | `slib.shodan.stream` | Read banners from the Streaming API (`banners`, `asn`, `countries`, `ports`, `tags`, `vulns`, `custom`, `alert`) for `--limit` banners or `--timeout` seconds. |
+| `slib.shodan.hash` | Print Shodan's hash filter for `inet:banner` nodes or `--text` (`hash:<n>`), and favicon or HTML `file:bytes` (`http.favicon.hash:<n>`, `http.html_hash:<n>`). Local only, no API calls. |
 | `slib.shodan.dns.domain` | Model every DNS record and subdomain Shodan knows for a domain. |
 | `slib.shodan.dns.lookup` | Resolve `inet:fqdn`s and reverse-resolve IPs. |
 | `slib.shodan.cve` | Model CVEDB details (CVSS, KEV, references, linked GHSA/EUVD IDs) on `risk:vuln`s. Accepts CVE, GHSA, and EUVD IDs. Search by `--cpe`/`--product` with `--kev`, `--epss`, `--start`, `--end`, `--count`. |
@@ -125,13 +126,34 @@ $ipnode = $shodan.host(8.8.8.8, history=(true))
 $vulns = $shodan.cves(product=log4j, kev=(true))
 ```
 
+## Searching from nodes
+
+Nodes piped to `slib.shodan.search` are each searched for with a query built for their form,
+AND'd with any query given (ex. `crypto:x509:cert | slib.shodan.search "country:US" --count`).
+`$shodan.searchQuery($node)` returns the query for a node. See `slib.shodan.search --help` for
+the full list:
+
+| Form | Query |
+|---|---|
+| `inet:banner` | `hash:<n>` |
+| `file:bytes` | `http.favicon.hash:<n>` (`:mime` image/\*) or `http.html_hash:<n>` (text/html), or `--file-hash` |
+| `crypto:x509:cert`, `inet:tls:servercert` | `ssl.cert.fingerprint:<sha1>`, or `ssl.cert.serial:0x<serial>` |
+| `it:sec:cpe`, `it:prod:softver` | `cpe:"cpe:2.3:<part>:<vendor>:<product>" version:"<version>"`, or `product:"<name>" version:"<vers>"` |
+| `it:sec:cve`, `risk:vuln` | `vuln:<CVE>` |
+| `inet:ssl:jarmhash`, `inet:tls:ja3s:sample` | `ssl.jarm:<hash>`, `ssl.ja3s:<hash>` |
+| `inet:asn`, `inet:cidr4/6`, `inet:fqdn`, `inet:server` | `asn:AS<n>`, `net:<cidr>`, `hostname:"<fqdn>"`, `ip:"<ip>" port:<port>` |
+| `ou:org`, `ou:name` | `org:"<name>"` |
+| `it:dev:str` | The string, as-is |
+| `meta:rule` (`:type` `svc.shodan.query`) | Its `:text` |
+
 ## Data model
 
 | Shodan data | Synapse |
 |---|---|
 | IP, ASN, org, location | `inet:ipv4`/`inet:ipv6` (`:asn`, `:latlong`, `:loc`), `inet:asn:owner` → `ou:org` |
 | Hostnames | `inet:dns:a`/`inet:dns:aaaa` |
-| Services and banners | `inet:server`, `inet:banner` |
+| Services and banners | `inet:server`, `inet:banner` (the full banner text, never truncated) |
+| SSH host keys | `file:bytes` of the key as OpenSSH saves it (`<algo> <base64 key>\n`), served by the server via `inet:servfile`, both tagged `#rep.shodan.banner`. The bytes are saved in the Axon for users with `axon.upload`. |
 | Products and CPEs | `it:prod:softver` (`:cpe`, `:name`, `:vers`), with `inet:server -(uses)> it:prod:softver` |
 | Vulnerabilities | `risk:vuln` (via `$lib.gen.vulnByCve`), `risk:vulnerable` for the IP and the server |
 | TLS certificates | `crypto:x509:cert` (deconflicted by `:sha256`), `inet:tls:servercert` |
@@ -227,6 +249,26 @@ Notes from verifying the service against the live APIs (2026-10):
 - **Banner CPEs.** Banners list every CPE Shodan detected (ex. OpenSSH's and Ubuntu's), often
   without a version, but `product`/`version` describe only one of them. `norm.normSoftvers()`
   pairs them.
+- **Banner hash.** Every banner has a `hash`, a signed 32-bit MurmurHash3 (x86_32, seed 0, the
+  same as `mmh3.hash()`) of the banner's full `data`. This was checked against real banners from
+  several modules (ssh, http, https, ntp), and `hash:<n>` searches work. `norm.bannerHash()`
+  calculates it, so any `inet:banner` can be searched for (`slib.shodan.hash`,
+  `$shodan.bannerHash()`, or pipe it to `slib.shodan.search`). Banners are stored whole, even
+  very long ones (Synapse handles multi-MB `inet:banner:text` fine), so the hash of the node's
+  text always matches Shodan's.
+- **Favicon and HTML hashes.** `http.favicon.hash` is the MurmurHash3 of the favicon's base64
+  with a newline every 76 characters and a trailing newline (`base64.encodebytes()`), not of the
+  raw bytes. `http.html_hash` is the MurmurHash3 of the raw HTML. Both were checked against real
+  banners. `slib.shodan.search` and `slib.shodan.hash` pick one for a `file:bytes` by its `:mime`
+  (or `--file-hash`); Shodan doesn't support OR between filters (`(a OR b)` matches nothing), and
+  the two hash different inputs anyway.
+- **Search filter values.** A comma in a filter's value is Shodan's OR (`port:22,80`), so
+  `org:"GitHub, Inc."` matches nearly everything; it must be escaped (`org:"GitHub\, Inc."`).
+  `ssl.cert.fingerprint` only matches a cert's SHA-1, never its SHA-256. The `cpe` filter
+  ignores the CPE's version (a made up `openssh:99.9.9` matches every OpenSSH), so the version
+  is searched with `version:`.
+- **SSH keys.** `ssh.key` is the base64 key blob with newlines every 76 characters. Its MD5 is
+  Shodan's `ssh.fingerprint`. The algorithm is read from the blob, falling back to `ssh.type`.
 - **Host history.** `GET /shodan/host/{ip}?history=true` returned a 404 ("No information
   available for that IP.") for `8.8.8.8` and `1.1.1.1`, which have data without `history`.
 - **Unavailable endpoints.** `/shodan/query/search` and `/shodan/query/tags` returned a 503

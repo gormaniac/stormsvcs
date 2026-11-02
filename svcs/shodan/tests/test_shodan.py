@@ -16,6 +16,9 @@ from shodansvc.client import (
     normParams,
 )
 
+import base64
+import hashlib
+
 from .fakeshodan import (
     FORM_ROUTES,
     CVE_LOG4SHELL,
@@ -23,7 +26,13 @@ from .fakeshodan import (
     EUVD_NO_CVE,
     GHSA_LOG4SHELL,
     HOST_8888,
+    FAVICON_B64,
+    FAVICON_HASH,
+    HOST_SSH,
+    SCANME_HTML,
+    SCANME_HTML_HASH,
     INTERNETDB_1111,
+    SSH_KEY_B64,
     FakeShodan,
     shodanSvc,
 )
@@ -354,12 +363,79 @@ class TestNorm(s_tests.SynTest):
         assert dns["cert"] is None
         assert dns["http"] is None
 
-    def test_norm_banner_truncates(self):
-        banner = norm.normBanner(
-            {"ip_str": "1.2.3.4", "port": 1, "data": "x" * (norm.MAX_BANNER_LEN + 10)}
-        )
-        assert len(banner["data"]) == norm.MAX_BANNER_LEN
+    def test_norm_banner_not_truncated(self):
+        # Long banners are kept whole, so a hash of the inet:banner:text matches Shodan's hash.
+        text = "x" * 100_000 + "\r\n"
+        banner = norm.normBanner({"ip_str": "1.2.3.4", "port": 1, "data": text})
+        assert banner["data"] == text
         assert banner["transport"] == "tcp"
+
+    def test_file_hash(self):
+        # Real files with the hashes Shodan returned for them.
+        favicon = base64.b64decode(FAVICON_B64)
+        assert norm.faviconHash(favicon) == FAVICON_HASH
+        assert norm.fileHash(favicon, "favicon") == FAVICON_HASH
+        # Not a hash of the raw bytes, or of base64 without newlines.
+        assert norm.murmur3(favicon) != FAVICON_HASH
+        assert norm.murmur3(base64.b64encode(favicon)) != FAVICON_HASH
+
+        assert norm.htmlHash(SCANME_HTML.encode()) == SCANME_HTML_HASH
+        assert norm.fileHash(SCANME_HTML.encode(), "html") == SCANME_HTML_HASH
+
+        # Expected values are from mmh3.hash() of bytes.
+        assert norm.murmur3(b"") == 0
+        assert norm.murmur3(b"\x00\xff\x10") == -109153956
+
+        with self.raises(ValueError):
+            norm.fileHash(b"foo", "nope")
+
+    def test_banner_hash(self):
+        # Expected values are from mmh3.hash(), which Shodan's banner hash matches.
+        for text, expected in (
+            ("", 0),
+            ("a", 1009084850),
+            ("foo", -156908512),
+            ("Hello, world!", -1070186941),
+            ("SSH-2.0-OpenSSH_8.9\r\n", -947078635),
+        ):
+            assert norm.bannerHash(text) == expected, text
+
+        # A real banner and the hash Shodan returned for it.
+        banner = HOST_SSH["data"][0]
+        assert norm.bannerHash(banner["data"]) == banner["hash"]
+
+    def test_norm_ssh_key(self):
+        banner = norm.normBanner(HOST_SSH["data"][0])
+        key = banner["ssh"]["pubkey"]
+
+        b64 = "".join(SSH_KEY_B64.split())
+        text = f"ssh-rsa {b64}\n"
+        byts = text.encode()
+        assert key == {
+            "text": text,
+            "algo": "ssh-rsa",
+            "size": len(byts),
+            "md5": hashlib.md5(byts).hexdigest(),
+            "sha1": hashlib.sha1(byts).hexdigest(),
+            "sha256": hashlib.sha256(byts).hexdigest(),
+            "sha512": hashlib.sha512(byts).hexdigest(),
+        }
+
+        # Shodan's fingerprint is the MD5 of the key blob, so the base64 round trips.
+        fprint = hashlib.md5(base64.b64decode(b64)).hexdigest()
+        assert ":".join(fprint[i : i + 2] for i in range(0, 32, 2)) == HOST_SSH["data"][0]["ssh"]["fingerprint"]
+
+        # The algorithm comes from the key blob itself, over Shodan's "type".
+        assert norm.normSshKey({"type": "ssh-dss", "key": SSH_KEY_B64})["algo"] == "ssh-rsa"
+
+        # Falls back to Shodan's "type" when the blob doesn't start with an algorithm.
+        junk = base64.b64encode(b"\xff\xff\xff\xffjunk").decode()
+        assert norm.normSshKey({"type": "ssh-ed25519", "key": junk})["algo"] == "ssh-ed25519"
+
+        assert norm.normSshKey({"key": junk}) is None
+        assert norm.normSshKey({"type": "ssh-rsa", "key": "not base64!"}) is None
+        assert norm.normSshKey({"type": "ssh-rsa"}) is None
+        assert norm.normSshKey({"type": "ssh-rsa", "key": "  \n "}) is None
 
     def test_norm_internetdb(self):
         host = norm.normInternetDb(INTERNETDB_1111)
@@ -658,6 +734,16 @@ class TestShodanSvc(s_tests.SynTest):
                 retn = await prox.host("10.0.0.1")
                 assert retn["status"] is False
                 assert "No information" in retn["mesg"]
+
+                retn = await prox.bannerHash("foo")
+                assert retn == {"status": True, "mesg": "", "data": -156908512}
+
+                html = SCANME_HTML.encode()
+                retn = await prox.fileHash([html[:1000], html[1000:]], "html")
+                assert retn == {"status": True, "mesg": "", "data": SCANME_HTML_HASH}
+                retn = await prox.fileHash([b"foo"], "nope")
+                assert retn["status"] is False
+                assert "Unknown file hash kind" in retn["mesg"]
 
                 retn = await prox.setApiKey("newkey")
                 assert retn["status"] is True

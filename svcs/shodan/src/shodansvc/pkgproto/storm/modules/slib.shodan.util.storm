@@ -1,8 +1,11 @@
 // Unprivileged helpers shared by the slib.shodan commands.
 
-// Whether a string looks like an IPv6 address (vs. IPv4).
+// Whether an IP is IPv6 (vs. IPv4). Synapse also parses IPv4 strings as valid
+// inet:ipv6 values (::ffff:x.x.x.x), so only treat it as IPv6 when it doesn't
+// cast to inet:ipv4.
 function isIpv6(ip) {
-    return(($lib.cast(str, $ip) ~= ":"))
+    ($isIpv4, $ipv4) = $lib.trycast(inet:ipv4, $ip)
+    return((not $isIpv4))
 }
 
 // Split a "name=value" string into a (name, value) list. Returns null if there is no "=".

@@ -10,13 +10,15 @@ These assert on the shape of Shodan's responses and that they model cleanly,
 not on specific values, since Shodan's data changes constantly.
 """
 
+import base64
 import contextlib
+import hashlib
 import os
 
 import pytest
 import synapse.tests.utils as s_tests
 
-from shodansvc import ShodanSvc
+from shodansvc import ShodanSvc, norm
 from shodansvc.client import ShodanApiError
 
 
@@ -168,3 +170,38 @@ class TestLiveKeyed(s_tests.SynTest):
             assert await core.nodes("it:prod:softver")
             nodes = await core.nodes("it:prod:softver:cpe^='cpe:2.3:o:'")
             assert all(n.get("name") is None and n.get("vers") is None for n in nodes)
+
+    async def test_banner_hash_and_ssh_key(self):
+        async with liveSvc(self, apikey=APIKEY) as (core, svc):
+            # scanme.nmap.org, which Nmap allows scanning, has long had SSH on port 22.
+            host = await svc.host("45.33.32.156")
+            banners = host["data"]
+            assert banners
+            for banner in banners:
+                # Shodan's banner hash is a MurmurHash3 of the banner's text.
+                assert norm.bannerHash(banner["data"]) == banner["hash"], banner["port"]
+
+            ssh = [b for b in banners if b.get("ssh")]
+            assert ssh
+            key = norm.normSshKey(ssh[0]["ssh"])
+            blob = base64.b64decode(key["text"].split()[1])
+            fprint = hashlib.md5(blob).hexdigest()
+            assert ":".join(fprint[i : i + 2] for i in range(0, 32, 2)) == ssh[0]["ssh"]["fingerprint"]
+
+            # The free count API supports searching by the hash.
+            count = await svc.count(f"hash:{ssh[0]['hash']}")
+            assert count["total"] >= 1
+
+            # Its web page has a favicon, Shodan's favicon and HTML hashes are MurmurHash3s too.
+            http = [b["http"] for b in banners if b.get("http", {}).get("favicon")]
+            assert http
+            favicon = base64.b64decode(http[0]["favicon"]["data"])
+            assert norm.faviconHash(favicon) == http[0]["favicon"]["hash"]
+            assert norm.htmlHash(http[0]["html"].encode()) == http[0]["html_hash"]
+            count = await svc.count(f"http.favicon.hash:{norm.faviconHash(favicon)}")
+            assert count["total"] >= 1
+
+            msgs = await core.stormlist("slib.shodan.host --ip 45.33.32.156")
+            self.stormHasNoErr(msgs)
+            nodes = await core.nodes("inet:server=tcp://45.33.32.156:22 -> inet:servfile -> file:bytes")
+            assert [n.ndef[1] for n in nodes] == [f"sha256:{key['sha256']}"]

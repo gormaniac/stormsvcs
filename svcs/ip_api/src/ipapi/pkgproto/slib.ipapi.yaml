@@ -1,8 +1,8 @@
 name: slib.ipapi
-version: 0.2.2
+version: 0.2.3
 guid: 92cc9d722c63125d64911389cd39c685
 
-synapse_version: ">=2.145.0,<3.0.0"
+synapse_minversion: [2, 137, 0]
 
 genopts:
     dotstorm: true

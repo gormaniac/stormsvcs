@@ -1,0 +1,30 @@
+init {
+    $shodan = $lib.import(slib.shodan.lib)
+
+    // --text ignores inbound nodes, ex. text from a response captured outside of Shodan.
+    for $text in $cmdopts.text {
+        $texthash = $shodan.bannerHash($text)
+        if ($texthash != $lib.null) { $lib.print("hash:{texthash}", texthash=$texthash) }
+    }
+}
+
+if $cmdopts.text { spin }
+
+switch $node.form() {
+    "inet:banner": {
+        $texthash = $shodan.bannerHash($node)
+        if ($texthash != $lib.null) {
+            $lib.print("hash:{texthash} (the banner from {server})", texthash=$texthash, server=:server)
+        }
+    }
+    "file:bytes": {
+        $info = $shodan.fileHash($node, kind=$cmdopts.file_hash)
+        if $info {
+            if ($info.kind = "favicon") { $filter = "http.favicon.hash" } else { $filter = "http.html_hash" }
+            $lib.print("{filter}:{texthash} (file:bytes {file})", filter=$filter, texthash=$info.hash, file=$node.repr())
+        }
+    }
+    *: {
+        $lib.warn("slib.shodan.hash: The node form {form} is not supported.", form=$node.form())
+    }
+}

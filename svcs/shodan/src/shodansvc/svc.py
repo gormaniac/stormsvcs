@@ -495,6 +495,22 @@ class ShodanSvc(s_cell.Cell):
         """GET trends.shodan.io/api/v1/search/filters"""
         return await self._api("get", "/api/v1/search/filters", apikey, base="trends")
 
+    # ---- Local helpers (no API calls) ----
+
+    async def bannerHash(self, text: str) -> int:
+        """Calculate Shodan's banner ``hash`` for banner text, for use in ``hash:<n>`` searches."""
+        return norm.bannerHash(text)
+
+    async def fileHash(self, chunks: list[bytes], kind: str) -> int:
+        """Calculate Shodan's ``favicon`` or ``html`` hash of a file, given its bytes in chunks.
+
+        Storm reads files from the Axon at most 1 MiB at a time, so it sends the chunks as-is.
+        """
+        if kind not in norm.FILE_HASH_FILTERS:
+            kinds = ", ".join(norm.FILE_HASH_FILTERS)
+            raise ShodanApiError(f"Unknown file hash kind {kind!r}, expected one of: {kinds}")
+        return norm.fileHash(b"".join(chunks), kind)
+
     # ---- InternetDB (free, no API key) ----
 
     async def internetdb(self, ip: str) -> dict:

@@ -5,11 +5,11 @@ reshaping here keeps the Storm modeling code short, and lets it be unit tested
 without a Cortex.
 """
 
+import base64
+import binascii
+import hashlib
 import re
 from typing import Any
-
-# The max length of banner text stored in an inet:banner node.
-MAX_BANNER_LEN = 16384
 
 
 def _ts(valu: str | None) -> str | None:
@@ -30,6 +30,142 @@ def _list(valu: Any) -> list:
     if isinstance(valu, (list, tuple, set)):
         return [v for v in valu if v not in (None, "")]
     return [valu]
+
+
+def _rotl32(valu: int, bits: int) -> int:
+    return ((valu << bits) | (valu >> (32 - bits))) & 0xFFFFFFFF
+
+
+# The kinds of file hashes Shodan can search for, and the filter for each.
+FILE_HASH_FILTERS = {
+    "favicon": "http.favicon.hash",
+    "html": "http.html_hash",
+}
+
+
+def bannerHash(text: str) -> int:
+    """Calculate Shodan's banner ``hash`` for a banner's text (its ``data``).
+
+    Shodan's hash is a signed 32-bit MurmurHash3 (x86_32, seed 0) of the UTF-8
+    encoded banner text, the same as ``mmh3.hash(text)``.
+    """
+
+    return murmur3(text.encode("utf-8"))
+
+
+def faviconHash(byts: bytes) -> int:
+    """Calculate Shodan's ``http.favicon.hash`` for a favicon file.
+
+    It is the MurmurHash3 of the file's base64 with a newline every 76 characters and a
+    trailing newline (Python's ``base64.encodebytes()``), not of the raw bytes.
+    """
+
+    return murmur3(base64.encodebytes(byts))
+
+
+def htmlHash(byts: bytes) -> int:
+    """Calculate Shodan's ``http.html_hash`` for an HTML file: the MurmurHash3 of its raw bytes."""
+
+    return murmur3(byts)
+
+
+def fileHash(byts: bytes, kind: str) -> int:
+    """Calculate Shodan's hash of a file's bytes, ``kind`` is one of ``FILE_HASH_FILTERS``."""
+
+    if kind == "favicon":
+        return faviconHash(byts)
+    if kind == "html":
+        return htmlHash(byts)
+    raise ValueError(
+        f"Unknown file hash kind {kind!r}, expected one of: {', '.join(FILE_HASH_FILTERS)}"
+    )
+
+
+def murmur3(data: bytes) -> int:
+    """A signed 32-bit MurmurHash3 (x86_32, seed 0), the same as ``mmh3.hash(data)``."""
+
+    size = len(data)
+    c1 = 0xCC9E2D51
+    c2 = 0x1B873593
+    h1 = 0
+
+    tail = size - (size % 4)
+    for i in range(0, tail, 4):
+        k1 = int.from_bytes(data[i : i + 4], "little")
+        k1 = (k1 * c1) & 0xFFFFFFFF
+        k1 = _rotl32(k1, 15)
+        k1 = (k1 * c2) & 0xFFFFFFFF
+        h1 ^= k1
+        h1 = _rotl32(h1, 13)
+        h1 = (h1 * 5 + 0xE6546B64) & 0xFFFFFFFF
+
+    k1 = 0
+    rest = size % 4
+    if rest:
+        k1 = int.from_bytes(data[tail:], "little")
+        k1 = (k1 * c1) & 0xFFFFFFFF
+        k1 = _rotl32(k1, 15)
+        k1 = (k1 * c2) & 0xFFFFFFFF
+        h1 ^= k1
+
+    h1 ^= size
+    h1 ^= h1 >> 16
+    h1 = (h1 * 0x85EBCA6B) & 0xFFFFFFFF
+    h1 ^= h1 >> 13
+    h1 = (h1 * 0xC2B2AE35) & 0xFFFFFFFF
+    h1 ^= h1 >> 16
+
+    return h1 - 0x100000000 if h1 & 0x80000000 else h1
+
+
+def _sshKeyAlgo(blob: bytes) -> str | None:
+    """Read the key algorithm (ex. ``ssh-rsa``), the first string in an SSH public key blob."""
+
+    if len(blob) < 4:
+        return None
+    size = int.from_bytes(blob[:4], "big")
+    if not 0 < size <= 64 or len(blob) < 4 + size:
+        return None
+    try:
+        algo = blob[4 : 4 + size].decode("ascii")
+    except UnicodeDecodeError:
+        return None
+    if not re.fullmatch(r"[\x21-\x7e]+", algo):
+        return None
+    return algo
+
+
+def normSshKey(ssh: dict) -> dict | None:
+    """Build the SSH server's public key file from a banner's ``ssh`` data.
+
+    The file is the key the way OpenSSH saves it to disk, ex. in a ``.pub`` or
+    ``known_hosts`` file: ``<algo> <base64 key>`` and a newline. Returns the
+    file's text, size, and hashes, or None if there is no valid key.
+    """
+
+    key = "".join((ssh.get("key") or "").split())
+    if not key:
+        return None
+    try:
+        blob = base64.b64decode(key, validate=True)
+    except (binascii.Error, ValueError):
+        return None
+
+    algo = _sshKeyAlgo(blob) or ssh.get("type")
+    if not algo:
+        return None
+
+    text = f"{algo} {key}\n"
+    byts = text.encode("ascii")
+    return {
+        "text": text,
+        "algo": algo,
+        "size": len(byts),
+        "md5": hashlib.md5(byts).hexdigest(),
+        "sha1": hashlib.sha1(byts).hexdigest(),
+        "sha256": hashlib.sha256(byts).hexdigest(),
+        "sha512": hashlib.sha512(byts).hexdigest(),
+    }
 
 
 def normCpe(cpe: str) -> str:
@@ -220,9 +356,9 @@ def normBanner(banner: dict) -> dict:
     http = banner.get("http") or {}
     ssh = banner.get("ssh") or {}
 
+    # Never truncated, so the inet:banner:text is Shodan's exact data and bannerHash() of it
+    # matches Shodan's banner hash.
     text = banner.get("data") or ""
-    if len(text) > MAX_BANNER_LEN:
-        text = text[:MAX_BANNER_LEN]
 
     cpes = normCpes(banner.get("cpe23")) or normCpes(banner.get("cpe"))
 
@@ -263,6 +399,7 @@ def normBanner(banner: dict) -> dict:
             "type": ssh.get("type"),
             "fingerprint": ssh.get("fingerprint"),
             "key": ssh.get("key"),
+            "pubkey": normSshKey(ssh),
         }
         if ssh
         else None,
