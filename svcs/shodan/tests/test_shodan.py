@@ -363,6 +363,39 @@ class TestNorm(s_tests.SynTest):
         assert dns["cert"] is None
         assert dns["http"] is None
 
+    def test_norm_http_headers(self):
+        text = (
+            "HTTP/1.1 301 Moved Permanently\r\n"
+            "Server: nginx\r\n"
+            "DATE: Thu, 01 Oct 2026 12:00:00 GMT\r\n"
+            "Set-Cookie: a=1\r\n"
+            "Set-Cookie: b=2\r\n"
+            "Set-Cookie: a=1\r\n"
+            "X-Folded: one\r\n"
+            "  two\r\n"
+            "X-Empty:\r\n"
+            "not a header\r\n"
+            "Bad Name: x\r\n"
+            "\r\n"
+            "Body: not a header\r\n"
+        )
+        assert norm.normHttpHeaders(text) == [
+            {"name": "server", "value": "nginx"},
+            {"name": "set-cookie", "value": "a=1"},
+            {"name": "set-cookie", "value": "b=2"},
+            {"name": "x-folded", "value": "one two"},
+            {"name": "x-empty", "value": ""},
+        ]
+        # Bare newlines work too, and non-HTTP banners have no headers.
+        assert norm.normHttpHeaders("HTTP/1.0 200 OK\nServer: x\n") == [
+            {"name": "server", "value": "x"}
+        ]
+        assert norm.normHttpHeaders("SSH-2.0-OpenSSH_8.9\r\nServer: x\r\n") == []
+        assert norm.normHttpHeaders("") == []
+
+        banner = norm.normBanner({"ip_str": "1.2.3.4", "port": 80, "data": text})
+        assert banner["http_headers"] == norm.normHttpHeaders(text)
+
     def test_norm_banner_not_truncated(self):
         # Long banners are kept whole, so a hash of the inet:banner:text matches Shodan's hash.
         text = "x" * 100_000 + "\r\n"

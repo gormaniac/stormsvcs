@@ -153,6 +153,7 @@ the full list:
 | IP, ASN, org, location | `inet:ipv4`/`inet:ipv6` (`:asn`, `:latlong`, `:loc`), `inet:asn:owner` → `ou:org` |
 | Hostnames | `inet:dns:a`/`inet:dns:aaaa` |
 | Services and banners | `inet:server`, `inet:banner` (the full banner text, never truncated) |
+| HTTP response headers | `inet:http:response:header`, with `inet:banner -(refs)> inet:http:response:header`. Parsed from HTTP banners, except `Date` headers (they change every scan). |
 | SSH host keys | `file:bytes` of the key as OpenSSH saves it (`<algo> <base64 key>\n`), served by the server via `inet:servfile`, both tagged `#rep.shodan.banner`. The bytes are saved in the Axon for users with `axon.upload`. |
 | Products and CPEs | `it:prod:softver` (`:cpe`, `:name`, `:vers`), with `inet:server -(uses)> it:prod:softver` |
 | Vulnerabilities | `risk:vuln` (via `$lib.gen.vulnByCve`), `risk:vulnerable` for the IP and the server |

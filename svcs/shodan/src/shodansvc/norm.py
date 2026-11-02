@@ -349,6 +349,49 @@ def _certTime(valu: str | None) -> str | None:
     return f"{valu[0:4]}/{valu[4:6]}/{valu[6:8]} {valu[8:10]}:{valu[10:12]}:{valu[12:14]}"
 
 
+# HTTP response headers that aren't modeled, they change every time a server is scanned.
+SKIP_HTTP_HEADERS = frozenset({"date"})
+
+
+def normHttpHeaders(text: str) -> list[dict]:
+    """Parse the HTTP response headers out of a banner's text (its ``data``).
+
+    Shodan's HTTP banners are the response's status line and headers, ex.
+    ``HTTP/1.1 200 OK\\r\\nServer: nginx\\r\\n\\r\\n``. Returns a list of
+    ``{"name": <lowercase name>, "value": <value>}`` dicts in the order they were sent,
+    without duplicates or the headers in ``SKIP_HTTP_HEADERS`` (ex. ``Date``). Banners
+    that aren't HTTP responses have no headers.
+    """
+
+    if not text.startswith("HTTP/"):
+        return []
+
+    lines = re.split(r"\r?\n", text)
+    headers: list[list[str]] = []
+    for line in lines[1:]:
+        if not line.strip():
+            break
+        # Obsolete line folding, a continuation of the previous header's value.
+        if line[0] in " \t":
+            if headers:
+                headers[-1][1] = f"{headers[-1][1]} {line.strip()}".strip()
+            continue
+        name, sep, valu = line.partition(":")
+        name = name.strip().lower()
+        if not sep or not name or re.search(r"\s", name):
+            continue
+        headers.append([name, valu.strip()])
+
+    retn = []
+    seen = set()
+    for name, valu in headers:
+        if name in SKIP_HTTP_HEADERS or (name, valu) in seen:
+            continue
+        seen.add((name, valu))
+        retn.append({"name": name, "value": valu})
+    return retn
+
+
 def normBanner(banner: dict) -> dict:
     """Normalize a single Shodan banner (from host lookups, search, or streams)."""
 
@@ -377,6 +420,7 @@ def normBanner(banner: dict) -> dict:
         "cpes": cpes,
         "softvers": normSoftvers(cpes, banner.get("product"), banner.get("version")),
         "data": text,
+        "http_headers": normHttpHeaders(text),
         "hostnames": [h.lower() for h in _list(banner.get("hostnames"))],
         "domains": [d.lower() for d in _list(banner.get("domains"))],
         "tags": _list(banner.get("tags")),
