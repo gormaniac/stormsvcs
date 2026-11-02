@@ -19,7 +19,7 @@ Every Shodan field appears in the API appendix.
 
 ### 1.1 Goal
 
-This rework adds four capabilities to the existing `slib.shodan` service (`svcs/shodan/`):
+This rework adds five capabilities to the existing `slib.shodan` service (`svcs/shodan/`):
 
 1. **Query provenance.** Each Shodan query the service runs (search, stream, count) becomes an
    `it:exec:query` node. It records what was asked, by whom and when, and `-(found)>` edges link it
@@ -34,6 +34,14 @@ This rework adds four capabilities to the existing `slib.shodan` service (`svcs/
 4. **Host history timelines.** `slib.shodan.host --history` builds one `meta:timeline` per IP and one
    `meta:event` per historical banner. Each event links to the `inet:server`, `inet:banner` and IP
    node created from that banner. Re-runs are idempotent.
+5. **Saved queries in Synapse.** Saved Shodan queries are `meta:rule` nodes, and they come from two
+   separate sources that **never sync**:
+   - **Community queries** are copied from Shodan's public query directory. Their `:name` starts with
+     `[Community] `.
+   - **Local queries** are saved in the Cortex by analysts with a new `slib.shodan.query.save`
+     command.
+
+   `slib.shodan.queries` lists both by default, and a `--source` flag picks one (§5.9).
 
 **Acceptance:** `inet:ipv4=1.2.3.4 | slib.shodan.host --history` gives a timeline you can lift with
 `meta:timeline:title="Shodan history: 1.2.3.4" -> meta:event | sort :time`. Each event pivots
@@ -111,8 +119,8 @@ This is an existing service, so nothing about its layout changes.
 |---|---|
 | Service folder / package | `svcs/shodan/` / `shodansvc` (unchanged) |
 | Storm package | `slib.shodan` (unchanged) |
-| New commands | `slib.shodan.count`, `slib.shodan.admin.count` |
-| New taxonomies | `meta:timeline:type=svc.shodan.host.history.`, `meta:event:type=svc.shodan.banner.` (same `svc.shodan.` root as the existing `meta:rule:type=svc.shodan.query.`) |
+| New commands | `slib.shodan.count`, `slib.shodan.admin.count`, `slib.shodan.query.save` |
+| New taxonomies | `meta:timeline:type=svc.shodan.host.history.` and `meta:event:type=svc.shodan.banner.`, under the same `svc.shodan.` root as the existing `meta:rule:type=svc.shodan.query.`. New `meta:rule:type` children: `svc.shodan.query.community.` and `svc.shodan.query.local.` (§5.9). |
 | New globals | `slib:shodan:count:facets` (facet list override) and `slib:shodan:count:facetmap` (custom mappings), set by `slib.shodan.admin.count` |
 | Versions | Each roadmap phase is one **minor** bump: 0.6.0 → 0.9.0 (§16). The version is set in `pyproject.toml`, `__init__.py`, `slib.shodan.yaml` and `uv.lock` (edit the lock entry directly, then `uv lock --check`), per `CLAUDE.md`. |
 | Dependencies | None new |
@@ -339,6 +347,7 @@ declarative, not Storm, so no admin-supplied code ever runs as other users:
 |---|---|
 | `meta:timeline:type` | `svc.shodan.host.history.` |
 | `meta:event:type` | `svc.shodan.banner.` |
+| `meta:rule:type` | `svc.shodan.query.` (parent, existing), `svc.shodan.query.community.`, `svc.shodan.query.local.` |
 | Shodan tags | unchanged: `<prefix>.<shodan tag>` via `applyTags()` when tagging is enabled |
 
 ### 5.8 Lossless fallback
@@ -346,6 +355,53 @@ declarative, not Storm, so no admin-supplied code ever runs as other users:
 The raw `_shodan` block is not stored. Every field that matters is mapped: `id` into the guid,
 `options.scan`, `crawler` and `truncated` into the summary, and `module` into the title fallback.
 Open question 8 covers whether to also store `_shodan` as node data on the event.
+
+### 5.9 Saved queries: community vs. local
+
+There are two kinds of saved query. Both are `meta:rule` nodes that `slib.shodan.search` can run,
+but they come from different places and **never sync with each other or with Shodan**.
+
+| | Community queries | Local queries |
+|---|---|---|
+| Where they come from | Shodan's public query directory (`GET /shodan/query`, `/shodan/query/search`), copied into the Cortex by `slib.shodan.queries --yield` | Saved by an analyst with `slib.shodan.query.save` (or created by hand) |
+| `:type` | `svc.shodan.query.community.` | `svc.shodan.query.local.`. Existing rules with the bare `svc.shodan.query.` type also count as local. |
+| `:name` | `"[Community] " + title` (falls back to the query text when there's no title). The prefix is only added once. | Whatever the analyst gives it, no prefix |
+| guid | `$lib.guid(slib.shodan, query, community, <query text>)` | `$lib.guid(slib.shodan, query, local, <query text>)` |
+| Updates | A snapshot. Later changes in Shodan's directory reach the Cortex only if someone runs `--yield` again. Entries removed from the directory are never deleted locally. | Never sent to Shodan. Shodan's API has no endpoint to save a directory query (only the three read endpoints exist), and sharing to the directory is done on shodan.io. |
+
+**What doesn't sync, stated plainly:**
+
+- Saving a local query does not publish it to Shodan.
+- Editing a community query in the Cortex does not change it on Shodan.
+- New or changed directory entries don't show up in the Cortex until they're ingested again.
+- A local query and a community query with the same text are **two separate nodes**, because their
+  guids use different seeds. Saving your own copy of a community query never merges it with the
+  community copy.
+
+**Community `meta:rule` props**, from the directory result fields (`title`, `description`, `query`,
+`timestamp`, `tags`, `votes`; Open question 10):
+
+| Prop | Value |
+|---|---|
+| `:name` | `?= "[Community] <title>"` |
+| `:text` | `query` (it's in the guid, so it never changes for a given node) |
+| `:desc` | `?= description` |
+| `:created` | `?= timestamp` |
+| `:url` | `?= https://www.shodan.io/search?query=<url-encoded query>` |
+| tags | the directory `tags` as `<prefix>.query.<tag>`, only when tagging is enabled |
+
+- `votes` is not stored, since it's a count (§1.2).
+- `?=` means re-ingesting never overwrites an analyst's edits to the name or description.
+
+**Local `meta:rule` props:** `:name`, `:text`, `:desc` (optional), `:created=now`, and
+`:author` is left unset. `slib.shodan.query.save` warns, without failing, if the same text already
+exists as a local query, and returns the existing node.
+
+**Running saved queries.** `searchQuery()` currently requires `:type` to equal `svc.shodan.query.`.
+It changes to accept any type at or under `svc.shodan.query.`. Lifting every saved query is then
+`meta:rule:type^=svc.shodan.query.`, and lifting one source is
+`meta:rule:type=svc.shodan.query.community.`. Each run's `it:exec:query -(refs)> meta:rule` (§5.3)
+gives every saved query its run history.
 
 ---
 
@@ -421,6 +477,34 @@ There are no scheduled syncs. Every run is an on-demand command.
   not. Check the filter prefix of the built query against a `TRENDS_FILTERS` constant in
   `slib.shodan.lib`.
 
+**`slib.shodan.queries`**
+
+Lists both kinds of saved query (§5.9).
+
+- **`--source all|local|shodan`**, default `all`:
+  - `local`: only `meta:rule` nodes stored in the Cortex. That includes local queries and any
+    community queries ingested earlier, which show their `[Community]` name.
+  - `shodan`: only the live Shodan directory.
+  - `all`: both. Local results print first.
+- The printed table gets a `source` column (`local`, `community (stored)` or `shodan`). A Shodan
+  result whose community guid already exists in the Cortex is marked `stored`.
+- `--search <text>`:
+  - On Shodan it uses `/shodan/query/search`.
+  - Locally it's a case-insensitive substring match on `:name`, `:text` and `:desc`. The match is
+    done in Storm, not as a regex, so the search text is never treated as a pattern.
+- `--yield`:
+  - Shodan results are stored as community `meta:rule` nodes, then yielded.
+  - Local results are lifted and yielded.
+  - Without `--yield`, the command only prints and creates nothing.
+- `--tags`, `--page`, `--sort` and `--order` apply to the Shodan side only. If they're used with
+  `--source local`, the command warns.
+
+**`slib.shodan.query.save`** (new)
+
+- `query` (positional), `--name <str>` (required), `--desc <str>`, `--yield`.
+- Creates a local `meta:rule` (§5.9). It never contacts Shodan.
+- Requires the `slib.shodan.user` perm and node-add permission for `meta:rule`.
+
 ### 7.3 Docs
 
 Update `README.md` and each command's `descr` with the new behavior. Add examples of pivoting from a
@@ -479,6 +563,14 @@ query to its results and walking a timeline.
   - custom mapping kinds work
   - an invalid mapping value is skipped with a warning
 - **Inbound:** each new cmdinput form on host, trends and stream.
+- **Saved queries:**
+  - `--source local`, `--source shodan` and `--source all` each list the right rows.
+  - Community rules get exactly one `[Community] ` prefix, including after re-ingest.
+  - A local and a community rule with the same text are two separate nodes.
+  - Re-ingest keeps analyst edits to `:name` and `:desc`.
+  - `query.save` makes no Shodan request (the fake server asserts no calls).
+  - Local search text containing regex characters is matched literally.
+  - `search` runs community, local and legacy `svc.shodan.query.` rules.
 - **Model existence:** `it:exec:query -(found)>`, `meta:timeline` and `meta:event` exist on the
   pinned synapse (Open question 7).
 - **Versions:** `test_versions_match` is updated each phase.
@@ -536,6 +628,12 @@ inet:ipv4 <(found)- it:exec:query:text~="ssl.jarm" | -> inet:server
 // Inbound nodes on the commands that gained them.
 inet:server:port=22 | slib.shodan.host
 inet:asn=15169 | slib.shodan.stream asn --limit 50
+
+// Saved queries: copy matching community queries in, save a local one, then run both.
+slib.shodan.queries --source shodan --search "cobalt strike" --yield
+slib.shodan.query.save "ssl.jarm:2ad2ad0002ad2ad00042d42d00000069d641f34fe76acdc05c40262f8815e5" --name "CS JARM"
+slib.shodan.queries --source local
+meta:rule:type^=svc.shodan.query. | slib.shodan.search --limit 200
 ```
 
 **Acceptance criteria:**
@@ -578,6 +676,12 @@ inet:asn=15169 | slib.shodan.stream asn --limit 50
 8. **Store `_shodan` as event node data?** Not needed now.
 9. **Is `_shodan.id` stable across repeated calls?** If it isn't, re-runs would duplicate events.
    Then the fallback key becomes the primary key, since it's built only from stable fields.
+10. **Directory result fields.** Confirm the field names in `/shodan/query` results (`title`,
+    `description`, `query`, `timestamp`, `tags`, `votes`) with one live call, and confirm there's no
+    stable directory ID. If there is one, the community guid should use it instead of the query text.
+11. **Legacy `svc.shodan.query.` rules.** Leave them as they are and treat them as local (the current
+    design), or retype them to `svc.shodan.query.local.` with a one-time migration in the package's
+    `onload`?
 
 ---
 
@@ -588,4 +692,5 @@ inet:asn=15169 | slib.shodan.stream asn --limit 50
 | 1 | 0.6.0 | `bannerNodes()` refactor. `it:exec:query` on `search` and `stream`. `--yield-query`. | Provenance tests; existing tests still pass. |
 | 2 | 0.7.0 | Host history timeline: `--timeline`, `--history`, fallback key, `normBanner` additions. | Idempotency tests; live check of Open questions 6 and 9. |
 | 3 | 0.8.0 | Inbound nodes for `host`, `trends` and `stream`. | Per-form tests. |
-| 4 | 0.9.0 | `slib.shodan.count`, `admin.count`, `countIps`, `normFacetValue`, custom mappings. | **Blocked on Open question 1** (the facet list); count tests. |
+| 4 | 0.9.0 | Saved queries: `queries --source/--yield`, `query.save`, the community/local `meta:rule` types, and `searchQuery()` accepting the whole `svc.shodan.query.` subtree. | Saved-query tests. |
+| 5 | 0.10.0 | `slib.shodan.count`, `admin.count`, `countIps`, `normFacetValue`, custom mappings. | **Blocked on Open question 1** (the facet list); count tests. |
