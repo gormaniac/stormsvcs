@@ -583,7 +583,7 @@ What this settles:
 
 - **Could not verify 2 (`ip` format):** a dotted IPv4 string.
 - **Could not verify 3 (`asn` format):** lower-case with an `as` prefix (`"as39378"`).
-- **Could not verify 4 (plan facet limits):** Membership allows 1,000 values per facet. Other plans are still unknown.
+- **Could not verify 4 (plan facet limits):** Membership allows 1,000 values per facet (verified). The maintainer reports Freelancer allows 5,120. Small Business, Corporate and Enterprise are still unknown.
 - **New:** `hostname` is not a facet; unknown facets are dropped silently rather than raising an error.
 - **New:** the facet-limit error text is exactly `Facet size too big for current subscription (limit: N)`.
 

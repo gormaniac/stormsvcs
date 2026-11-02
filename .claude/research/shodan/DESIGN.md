@@ -302,7 +302,7 @@ query credits, `api-info` still showed 100/100):
 
 `ip` values are dotted strings (`"185.212.47.222"`). Other formats seen: `asn` is lower-case with a
 prefix (`"as39378"`), `port` is an integer, and `hostname` isn't a facet (Shodan silently drops it).
-Limits for the other plans aren't published (Open question 2).
+Known limits: **Membership 1,000** (verified) and **Freelancer 5,120** (reported by the maintainer). Shodan doesn't publish the others (Open question 2).
 
 **When there are more IPs than one call returns:** if `full` is true, the command warns:
 `slib.shodan.count: <query> returned <size> IPs, the most your plan allows in one call. It likely
@@ -561,7 +561,7 @@ Unchanged.
 | Dimension | Target | Mechanism |
 |---|---|---|
 | History events per host | ≤ 1,000 per lookup | API cap. Idempotent guids keep re-runs a no-op. |
-| Count | Up to the plan's facet limit in IPs (1,000 on Membership) per request, 0 query credits | One call per query; limit cached per key |
+| Count | Up to the plan's facet limit in IPs (1,000 on Membership, 5,120 on Freelancer) per request, 0 query credits | One call per query; limit cached per key |
 | Query nodes | 1 per execution | `-(found)>` only to 3 forms, so edge count ≤ 3 × results |
 
 ---
@@ -631,8 +631,9 @@ meta:rule:type^=svc.shodan.query. | slib.shodan.search --limit 200
 
 1. **Default context facets for `count`.** Should it print any by default (for example `country`,
    `org`, `port`), or only when `--facets` is given? Either way they're print-only.
-2. **Facet limits on other plans.** Only Membership is confirmed (1,000). The maintainer is finding
-   the others. The design doesn't depend on them, because the limit is found at run time.
+2. **Facet limits on other plans.** Known so far: Membership 1,000 (verified) and Freelancer 5,120
+   (reported by the maintainer). Small Business, Corporate and Enterprise are unknown. The design
+   doesn't depend on these numbers, because the limit is read from Shodan's error at run time.
 3. **Automatic splitting when `full` is true.** Should `count --split country,asn` re-run the query
    once per value of a facet (`<query> country:US`, …) and merge the IPs? It stays free but uses
    more calls, and it's only exact if no value list is itself full. Deferred until it's needed.
