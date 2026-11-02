@@ -1,0 +1,49 @@
+init {
+    $layer = $lib.layer.get().iden
+    for $form in (media:news, risk:threat, risk:tool:software, it:app:yara:rule) {
+        if (not $lib.user.allowed(`node.add.{$form}`, gateiden=$layer)) {
+            $lib.raise(AuthDeny, `slib.malpedia.refresh edits nodes in the current view, it needs permission to add {$form} nodes to its layer.`)
+        }
+    }
+    $sync = $lib.import(slib.malpedia.priv.sync)
+    $util = $lib.import(slib.malpedia.util)
+    $name = "slib.malpedia.refresh"
+}
+
+function report(s) {
+    $lib.print("{name}: Modeled {counts}.", name=$name, counts=$util.kindCounts($s.counts))
+    for $err in $s.errors { $lib.warn("{name}: Unable to refresh {err}", name=$name, err=$err) }
+    for $warn in $s.warnings { $lib.warn("{name}: {warn}", name=$name, warn=$warn) }
+    return()
+}
+
+if ($cmdopts.actor or $cmdopts.family) {
+    // --actor and --family ignore inbound nodes.
+    spin |
+    $actors = $lib.set()
+    $families = $lib.set()
+    for $id in $cmdopts.actor { $actors.add($lib.cast(str, $id).strip()) }
+    for $id in $cmdopts.family { $families.add($lib.cast(str, $id).strip()) }
+    $s = $sync.refresh($actors.list(), $families.list())
+    $report($s)
+    if $cmdopts.yield { yield $util.nodes($s.nodes) }
+}
+else {
+    $s = $lib.null
+    switch $node.form() {
+        "risk:threat": {
+            if (:reporter:name = "malpedia" and :ext:id) { $s = $sync.refresh((:ext:id,), ([])) }
+        }
+        "risk:tool:software": {
+            if (:reporter:name = "malpedia" and :id) { $s = $sync.refresh(([]), (:id,)) }
+        }
+    }
+    if $s {
+        $report($s)
+        divert $cmdopts.yield $util.nodes($s.nodes)
+    } else {
+        $lib.warn("{name}: {form} {iden} isn't a Malpedia actor or family (a risk:threat with :reporter:name=malpedia and an :ext:id, or a risk:tool:software with :reporter:name=malpedia and an :id).",
+            name=$name, form=$node.form(), iden=$node.iden())
+        if $cmdopts.yield { spin }
+    }
+}

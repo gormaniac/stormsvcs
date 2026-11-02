@@ -1,0 +1,14 @@
+// Privileged (asroot) wrappers around the slib.malpedia service for slib.malpedia.user.
+
+init {
+    $svc = $lib.service.get("slib.malpedia")
+}
+
+// The service's state and the current view's sync state.
+function status() { return($svc.status(view=$lib.view.get().iden)) }
+
+// Search actor (kind=actor) or family (kind=family) names and synonyms.
+function find(kind, needle) { return($svc.find($kind, $needle)) }
+
+// A record from the service's snapshot.
+function record(kind, key) { return($svc.record($kind, $key)) }

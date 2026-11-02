@@ -1,0 +1,42 @@
+init {
+    $user = $lib.import(slib.malpedia.priv.user)
+    $util = $lib.import(slib.malpedia.util)
+    $name = "slib.malpedia.search"
+
+    $kinds = ([])
+    if (not $cmdopts.families) { $kinds.append(actor) }
+    if (not $cmdopts.actors) { $kinds.append(family) }
+    if ($cmdopts.actors and $cmdopts.families) { $kinds = (actor, family) }
+
+    $found = ([])
+    for $kind in $kinds {
+        $results = $util.data($user.find($kind, $cmdopts.needle), `Searching the {$kind}s`)
+        if ($results = $lib.null) { continue }
+
+        $rows = ([])
+        for $res in $results {
+            $found.append(($kind, $res.name))
+            $synonyms = $res.synonyms
+            if ($synonyms = $lib.null) { $synonyms = $res.alt_names }
+            if ($synonyms = $lib.null) { $synonyms = ([]) }
+            $display = $res.common_name
+            if ($display = $lib.null) { $display = "" }
+            $known = no
+            if $res.known { $known = yes }
+            $rows.append(($res.name, $display, $known, $lib.str.join(", ", $synonyms)))
+        }
+        if $rows {
+            $lib.print("{name}: {count} {kind}s match {needle}:", name=$name, count=$lib.len($rows), kind=$kind, needle=$cmdopts.needle)
+            $util.table(([["id", 32], ["name", 28], ["synced", 7], ["synonyms", 60]]), $rows)
+        } else {
+            $lib.print("{name}: No {kind}s match {needle}.", name=$name, kind=$kind, needle=$cmdopts.needle)
+        }
+    }
+}
+
+if $cmdopts.yield {
+    for ($kind, $id) in $found {
+        if ($kind = "actor") { risk:threat=(malpedia, $id) }
+        else { risk:tool:software=(malpedia, $id) }
+    }
+}

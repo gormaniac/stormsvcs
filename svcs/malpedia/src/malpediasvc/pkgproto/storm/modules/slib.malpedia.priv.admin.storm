@@ -1,0 +1,83 @@
+// Privileged (asroot) wrappers around the slib.malpedia service, the sync cron job, and the
+// tag settings, for slib.malpedia.admin.
+
+init {
+    $svc = $lib.service.get("slib.malpedia")
+    $cronglobal = "slib:malpedia:cron"
+}
+
+// ---- The sync cron job ----
+
+// The sync cron job, or null if there isn't one.
+function cron() {
+    $iden = $lib.globals.get($cronglobal)
+    if (not $iden) { return($lib.null) }
+    try {
+        return($lib.cron.get($iden))
+    } catch (NoSuchIden, StormRuntimeError) as err {
+        return($lib.null)
+    }
+}
+
+// Replace the sync cron job with one on a new schedule (a cron.add --period), in the current view.
+function schedule(period) {
+    $old = $cron()
+    $new = $lib.cron.add(query="slib.malpedia.sync", period=$period)
+    $new.set(name, "slib.malpedia.sync")
+    $new.set(doc, "Pull Malpedia (if it changed) and sync its library, actors, families, and YARA rules into the view.")
+    $lib.globals.set($cronglobal, $new.iden)
+    if $old { $lib.cron.del($old.iden) }
+    return($new)
+}
+
+function enable(enabled=(true)) {
+    $job = $cron()
+    if (not $job) { return($lib.null) }
+    if $enabled { $lib.cron.enable($job.iden) }
+    else { $lib.cron.disable($job.iden) }
+    return($lib.cron.get($job.iden))
+}
+
+// Delete the sync cron job. Returns whether there was one.
+function unschedule() {
+    $job = $cron()
+    $lib.globals.pop($cronglobal)
+    if (not $job) { return((false)) }
+    $lib.cron.del($job.iden)
+    return((true))
+}
+
+// Run by the one time cron job the service's add event starts (the service isn't ready during
+// the add event itself): unless malpedia:autosync is off, schedule the daily sync (at the
+// service's random time) if there isn't one. Returns whether the initial sync should run.
+function autoSchedule() {
+    $retn = $svc.schedInfo()
+    if (not $retn.status) {
+        $lib.warn("slib.malpedia: Unable to read the sync schedule: {err}", err=$retn.mesg)
+        return((false))
+    }
+    $info = $retn.data
+    if (not $info.autosync) { return((false)) }
+    if (not $cron()) { $schedule($info.period) }
+    return((true))
+}
+
+// ---- Settings ----
+
+function tagSettings() {
+    return(({
+        "prefix": $lib.globals.get("slib:malpedia:tag:prefix"),
+        "tlp": $lib.globals.get("slib:malpedia:tag:tlp"),
+    }))
+}
+
+// Set a tag prefix (name is prefix or tlp). Raises BadArg if it isn't a valid tag.
+function setTagPrefix(name, prefix) {
+    $norm = $lib.cast(syn:tag, $prefix)
+    $lib.globals.set(`slib:malpedia:tag:{$name}`, $norm)
+    return($norm)
+}
+
+// ---- Views ----
+
+function resetView() { return($svc.resetView($lib.view.get().iden)) }

@@ -1,0 +1,34 @@
+init {
+    $user = $lib.import(slib.malpedia.priv.user)
+    $util = $lib.import(slib.malpedia.util)
+    $name = "slib.malpedia.status"
+
+    $info = $util.data($user.status(), "Getting the service's status")
+    if $info {
+        if $info.complete {
+            $lib.print("{name}: Malpedia version {version} ({date}), pulled {pulled}, last checked {checked}.",
+                name=$name, version=$info.version, date=$info.date,
+                pulled=$util.when($info.pulled), checked=$util.when($info.checked))
+        } else {
+            $lib.print("{name}: Malpedia hasn't been pulled yet, run slib.malpedia.sync.", name=$name)
+        }
+        $lib.print("{name}: The service has {counts} ({requests} requests to Malpedia so far).",
+            name=$name, counts=$util.kindCounts($info.counts), requests=$info.requests)
+        $lib.print("{name}: Checks Malpedia at most every {minage} hours.", name=$name, minage=$info.minage)
+        if $info.failed {
+            $lib.warn("{name}: The last pull failed (the next sync retries it): {err}", name=$name, err=$info.failed)
+        }
+
+        $view = $info.view
+        if $view.synced {
+            $lib.print("{name}: This view was synced {synced} (Malpedia version {version}) and has {counts}.",
+                name=$name, synced=$util.when($view.synced), version=$view.version, counts=$util.kindCounts($view.counts))
+        } else {
+            $lib.print("{name}: This view hasn't been synced yet ({counts}).", name=$name, counts=$util.kindCounts($view.counts))
+        }
+
+        if $info.last {
+            for $warn in $info.last.warnings { $lib.print("{name}: Last pull warning: {warn}", name=$name, warn=$warn) }
+        }
+    }
+}
