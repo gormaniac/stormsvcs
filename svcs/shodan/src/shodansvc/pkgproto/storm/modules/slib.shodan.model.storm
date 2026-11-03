@@ -214,7 +214,8 @@ function banner(b, tagPrefix=$lib.null) {
 // Model a normalized banner. Returns ({"server": <inet:server>, "banner": <inet:banner or null>,
 // "ip": <inet:ipv4/6 or null>}), the nodes the banner itself describes, or null.
 // Queries and timelines link to only these nodes, everything else is one hop from them.
-function bannerNodes(b, tagPrefix=$lib.null) {
+// Without vulns, the banner's vulns aren't modeled (ex. for historical banners).
+function bannerNodes(b, tagPrefix=$lib.null, vulns=(true)) {
     $srv = $serverNode($b.ip, $b.port, $b.transport, $b.timestamp)
     if ($srv = $lib.null) { return($lib.null) }
     $applyTags($srv, $tagPrefix, $b.tags)
@@ -236,13 +237,34 @@ function bannerNodes(b, tagPrefix=$lib.null) {
     // See shodansvc.norm.normSoftvers for how CPEs are paired with the product/version.
     for $sv in $b.softvers { $softverNode($srv, $sv.cpe, $sv.product, $sv.version) }
 
-    for $vuln in $b.vulns { $vulnerableNode($srv, $vuln, $b.timestamp) }
+    if $vulns {
+        for $vuln in $b.vulns { $vulnerableNode($srv, $vuln, $b.timestamp) }
+    }
 
     if $b.cert { $certNode($srv.repr(), $b.cert, $b.timestamp) }
 
     for $hostname in $b.hostnames { $dnsNode($hostname, $b.ip, $b.timestamp) }
 
     return(({"server": $srv, "banner": $bannernode, "ip": $ipnode}))
+}
+
+// Model the banners of a history lookup (/shodan/host/{ip}?history=true). Returns the IP node.
+//
+// Only the banners are modeled, without their vulns: a history lookup's host-level fields (vulns,
+// ports, tags, ...) are combined over its whole history, and old vulns aren't current. The current
+// host comes from a plain lookup (see slib.shodan.lib.host). With timeline, each banner is added
+// to the IP's timeline.
+function historyBanners(h, tagPrefix=$lib.null, timeline=(false)) {
+    $ipnode = $ipNode($h.ip)
+    if ($ipnode = $lib.null) { return($lib.null) }
+
+    $tl = $lib.null
+    if ($timeline and $h.banners) { $tl = $timelineNode($ipnode) }
+    for $b in $h.banners {
+        $res = $bannerNodes($b, $tagPrefix, vulns=(false))
+        if ($tl and $res) { $eventNode($tl, $b, $res) }
+    }
+    return($ipnode)
 }
 
 // ---- Host history timelines ----

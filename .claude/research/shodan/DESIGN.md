@@ -647,18 +647,11 @@ meta:rule:type^=svc.shodan.query. | slib.shodan.search --limit 200
 9. **Is `_shodan.id` stable across repeated calls?** *Checked live 2026-11-03:* yes, identical across
    calls for all 2,229 banners, and never missing. The fallback key stays for safety.
 12. **Host-level fields on history lookups.** *Found live 2026-11-03:* with `history=true`, `ports`
-    and `vulns` are the union over the history, and `last_update` is the newest history banner. So a
-    history lookup models historical vulns as `risk:vulnerable` on the IP, the same as before this
-    rework. Keep that, or model host-level vulns only from plain lookups?
-13. **History lags the current index** by about a day (found live). `--history` could also make a
-    plain lookup (one more free call) so the newest banners land in the timeline too. For now, run
-    `slib.shodan.host --timeline` (a plain lookup) as well to add them.
-10. **Directory result fields.** *Checked live 2026-11-03:* `/shodan/query` results have exactly
-    `title`, `description`, `query`, `timestamp`, `tags` and `votes` (an int), and no ID, so the
-    community guid uses the query text. `title` and `description` can be empty strings.
-    `/shodan/query/search` returned HTTP 503 at the time.
-11. **Legacy `svc.shodan.query.` rules.** Left as they are and treated as local (implemented in
-    0.11.0). A one-time migration to `svc.shodan.query.local.` is still possible later.
+    and `vulns` are the union over the history, and `last_update` is the newest history banner.
+    *Decided (0.12.0):* no old vulns. The current host is modeled from a plain lookup, and a history
+    lookup only models its banners, without their vulns (`model.historyBanners`).
+13. **History lags the current index** by about a day (found live). *Decided (0.12.0):* `--history`
+    makes a plain lookup first (one more free call), so the newest banners land in the timeline too.
 14. **`meta:rule:name` is lower-cased by Synapse** (`lower: True, onespace: True`), so community names
     read `[community] <title>`. The original-case title isn't kept anywhere; `:desc` holds the
     directory description.
@@ -675,3 +668,4 @@ meta:rule:type^=svc.shodan.query. | slib.shodan.search --limit 200
 | 4 | 0.9.0 | Inbound nodes for `host`, `trends` and `stream`. | **Done.** Per-form tests. |
 | 4b | 0.9.1, 0.10.0 | Each request made once per run (0.9.1). `search`, `enrich`, `dns.domain` and `dns.lookup` read all inbound nodes before running, so a lift of a form they create can't feed them their own results; `--stream-inbound` keeps the old streaming behavior (0.10.0). | **Done.** Dedupe and feedback tests. |
 | 5 | 0.11.0 | **Done.** Saved queries: `queries --source/--yield`, `query.save`, the community/local `meta:rule` types, and `searchQuery()` accepting the whole `svc.shodan.query.` subtree. | Saved-query tests. |
+| 5b | 0.12.0 | **Done.** `--history` also does a plain lookup for the current data; no vulns from the history (Open questions 12, 13). | History tests. |

@@ -220,6 +220,7 @@ HISTORY_BANNERS = [
         "version": "8.9p1",
         "data": "SSH-2.0-OpenSSH_8.9p1",
         "hash": 111,
+        "vulns": {"CVE-2023-48795": {"cvss": 5.9, "verified": False, "summary": "Terrapin"}},
         "_shodan": {"module": "ssh", "id": "hist-1", "crawler": "crawler-a"},
     },
     {
@@ -250,6 +251,8 @@ HISTORY_BANNERS = [
         "data": "HTTP/1.1 200 OK (cut)",
         "hash": 333,
         "metadata": {"truncated": ["data", "http.html"]},
+        # A vuln of a service that's gone, only in the history.
+        "vulns": {"CVE-2011-3192": {"cvss": 7.8, "verified": False, "summary": "Apache Killer"}},
         "_shodan": {"module": "https", "id": "hist-4", "options": {"scan": "SCAN1"}},
     },
 ]
@@ -259,7 +262,9 @@ HOST_HISTORY = {
     "org": "Example Org",
     "last_update": "2026-10-01T12:00:00.000000",
     "hostnames": [],
-    "ports": [22, 80],
+    # With history=true, Shodan combines the host-level fields over the whole history.
+    "ports": [22, 80, 443],
+    "vulns": ["CVE-2023-48795", "CVE-2011-3192"],
     "data": HISTORY_BANNERS,
 }
 
@@ -269,7 +274,8 @@ def hostHistory(request) -> tuple[int, dict]:
 
     if request.query.get("history") == "true":
         return 200, HOST_HISTORY
-    return 200, dict(HOST_HISTORY, data=[HISTORY_BANNERS[0], HISTORY_BANNERS[2]])
+    current = [HISTORY_BANNERS[0], HISTORY_BANNERS[2]]
+    return 200, dict(HOST_HISTORY, ports=[22, 80], vulns=["CVE-2023-48795"], data=current)
 
 
 # Saved queries from Shodan's directory, with the fields it returns (checked live 2026-11-03).

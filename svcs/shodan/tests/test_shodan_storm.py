@@ -871,6 +871,18 @@ class TestShodanStormHistory(s_tests.SynTest):
             msgs = await core.stormlist(f"slib.shodan.host --ip {HISTORY_IP} --history")
             self.stormHasNoErr(msgs)
 
+            # A plain lookup for the current data, then the history (which lags it).
+            lookups = [r["query"].get("history") for r in fake.requests if r["path"] == f"/api/shodan/host/{HISTORY_IP}"]
+            assert lookups == ["false", "true"]
+
+            # Only the current vulns are modeled, not ones only in the history.
+            assert {n.get("cve") for n in await core.nodes("risk:vulnerable -> risk:vuln")} == {"cve-2023-48795"}
+            assert await nodeset(core, "risk:vulnerable :node -> *") == {
+                ("inet:ipv4", HISTORY_IP),
+                ("inet:server", f"tcp://{HISTORY_IP}:22"),
+            }
+            assert not await core.nodes("it:sec:cve=cve-2011-3192")
+
             tls = await core.nodes("meta:timeline")
             assert len(tls) == 1
             assert tls[0].get("title") == f"Shodan history: {HISTORY_IP}"

@@ -191,9 +191,13 @@ Shodan history:
 - Events are keyed by Shodan's banner ID, so re-running a lookup only adds new banners, and edits
   to an event's `:title` or `:summary` are kept.
 
-Shodan's history covers 90 days, at most the latest 1,000 banners, and lags its newest data by about
-a day. Re-run lookups (ex. on a schedule) to build a longer history, and add `--timeline` lookups to
-include the newest banners. `--no-timeline` skips the timeline for a `--history` lookup.
+A `--history` lookup is a plain lookup for the IP's current data, then a history lookup (both free),
+since Shodan's history lags its newest data by about a day. The current host (vulns, tags, ports) is
+modeled from the plain lookup, and only the banners from the history, without their vulns: the
+history's host-level fields combine all 90 days, and old vulns aren't current.
+
+Shodan's history covers 90 days, at most the latest 1,000 banners. Re-run lookups (ex. on a
+schedule) to build a longer history. `--no-timeline` skips the timeline for a `--history` lookup.
 
 ```
 inet:ipv4=45.33.32.156 | slib.shodan.host --history

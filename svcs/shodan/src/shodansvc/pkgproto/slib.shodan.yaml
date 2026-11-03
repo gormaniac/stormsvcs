@@ -1,5 +1,5 @@
 name: slib.shodan
-version: 0.11.0
+version: 0.12.0
 guid: 0f6c1d0f1d8a4c3bb7a1e3d5c9b2a864
 
 synapse_minversion: [2, 137, 0]
@@ -76,12 +76,18 @@ commands:
       Uses the free InternetDB API when --internetdb is used, or automatically when
       no Shodan API key is available to the current user.
 
+      With --history, Shodan's history of the IP is looked up too, after a plain lookup for its
+      current data (the history lags it by about a day). The current host (vulns, tags, ports, ...)
+      is modeled from the plain lookup, and only the banners from the history, without their vulns:
+      a history lookup's host-level fields combine its whole history, and old vulns aren't current.
+
       With --history (or --timeline), the IP's banners are also added to its Shodan history: one
       meta:timeline per IP (:title "Shodan history: <ip>"), with one meta:event per banner. Each
       event is when Shodan saw a service (:time), ex. "tcp/22 OpenSSH 8.9p1" (:title), and is linked
       with -(refs)> edges to the inet:server, inet:banner, and IP it describes. Events are keyed by
       Shodan's banner ID, so lookups only add banners that weren't seen before. Shodan's history
       covers 90 days, at most the latest 1,000 banners, so re-run lookups to keep a longer one.
+      A --history lookup is 2 requests (neither uses query credits).
       Minified and InternetDB lookups have no banners to add.
 
       Examples:
@@ -111,7 +117,9 @@ commands:
       - - --history
         - default: false
           action: store_true
-          help: Include historical banners, and add them to the IP's timeline (unless --no-timeline).
+          help: |
+            Also look up the IP's history (without its vulns), and add every banner to the IP's
+            timeline (unless --no-timeline).
       - - --timeline
         - default: false
           action: store_true

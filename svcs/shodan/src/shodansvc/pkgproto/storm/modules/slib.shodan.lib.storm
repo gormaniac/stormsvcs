@@ -13,10 +13,14 @@ init {
 
 // Look up an IP in Shodan (or InternetDB) and model it. Returns the IP node, or null.
 //
+// With history, Shodan's history of the IP (90 days, at most the latest 1,000 banners) is looked up
+// too, after a plain lookup of its current data: the history lags the current data by about a day.
+// The current host is modeled from the plain lookup, and only the banners from the history, without
+// their vulns (see slib.shodan.model.historyBanners).
+//
 // With timeline, each banner is also added to the IP's Shodan history meta:timeline as a meta:event
-// (see slib.shodan.model.timelineNode). It defaults to history, since a history lookup returns every
-// banner Shodan has kept (90 days, at most 1,000). Lookups without banners (minify, InternetDB)
-// have nothing to add.
+// (see slib.shodan.model.timelineNode). It defaults to history. Lookups without banners (minify,
+// InternetDB) have nothing to add.
 function host(ip, history=(false), minify=(false), internetdb=(false), timeline=$lib.null) {
     if ($timeline = $lib.null) { $timeline = $history }
     $ip = $lib.cast(str, $ip)
@@ -31,15 +35,25 @@ function host(ip, history=(false), minify=(false), internetdb=(false), timeline=
         $retn = $priv.internetdb($ip)
         $what = `InternetDB lookup of {$ip}`
     } else {
-        $retn = $priv.host($ip, history=$history, minify=$minify)
+        $retn = $priv.host($ip, minify=$minify)
         $what = `Host lookup of {$ip}`
     }
-    if $util.failed($retn, $what) { return($lib.null) }
 
     if ($timeline and ($internetdb or $minify)) {
         $lib.warn("slib.shodan: {what} has no banners to add to a timeline.", what=$what)
     }
-    return($model.host($retn.data, $tagPrefix, timeline=$timeline))
+
+    $ipnode = $lib.null
+    if (not $util.failed($retn, $what)) { $ipnode = $model.host($retn.data, $tagPrefix, timeline=$timeline) }
+
+    if ($history and not $internetdb) {
+        $hretn = $priv.host($ip, history=(true), minify=$minify)
+        if (not $util.failed($hretn, `History lookup of {$ip}`)) {
+            $hnode = $model.historyBanners($hretn.data, $tagPrefix, timeline=$timeline)
+            if ($ipnode = $lib.null) { $ipnode = $hnode }
+        }
+    }
+    return($ipnode)
 }
 
 // The endpoint recorded as the :api:url of a search's it:exec:query.
