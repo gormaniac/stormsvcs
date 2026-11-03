@@ -295,8 +295,12 @@ def test_norm_report_url_and_partial():
     # A nearly empty (still running) report doesn't fail.
     data = norm.normReport({"status": "running", "analysis": {"uuid": fa.TASK}})
     assert data["uuid"] == fa.TASK and data["file"] is None and data["procs"] == []
-    assert data["errors"] == [f"Task {fa.TASK} is running, its report may be incomplete."]
-    assert data["verdict"] is None
+    assert data["inprogress"] and data["status"] == "running"
+    # Every task has a verdict, unknown until ANY.RUN gives one.
+    assert data["verdict"] == 20 and data["threat"] is None
+
+    for status, inprogress in (("done", False), ("failed", False), ("processing", True), (None, False)):
+        assert norm.normReport({"status": status, "analysis": {}})["inprogress"] is inprogress, status
 
 
 def test_norm_status():

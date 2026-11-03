@@ -73,6 +73,10 @@ commands:
       linked to the sample with :sandbox:file. --reads also models the file and registry reads
       (it:exec:file:read, it:exec:reg:get).
 
+      Every task gets an it:av:scan:result, with an unknown verdict until ANY.RUN gives one. A
+      task that's still running is modeled as far as it got, with a warning, and a one time cron
+      job ingests it again in 10 minutes (up to 3 tries in all).
+
       Examples:
 
         // Model the newest tasks of some files.
@@ -94,6 +98,10 @@ commands:
         - default: false
           action: store_true
           help: Also model the file and registry reads (there can be many).
+      - - --attempt
+        - type: int
+          default: 1
+          help: Which try at ingesting --task this is. Set by the retries of tasks that are still running.
       - - --yield
         - default: false
           action: store_true

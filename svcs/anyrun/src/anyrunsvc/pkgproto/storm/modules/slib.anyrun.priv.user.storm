@@ -32,6 +32,40 @@ function tagPrefix() {
     return($lib.null)
 }
 
+// Retries of tasks that are still running
+
+// Schedule a one time cron job that runs "slib.anyrun.enrich --task <task> --attempt <attempt>"
+// in delay minutes, in the current view. It's created here (asroot) so users don't need the
+// cron.add permission, but it's still owned by (and runs as) the calling user, so it uses their
+// API key and node permissions. The query is only ever built from a validated task UUID, an
+// int, and a bool. Returns {"status", "mesg", "data": the job's iden, or null if it's already
+// scheduled}.
+function scheduleRetry(task, attempt, reads=(false), delay=(10)) {
+    $task = $lib.cast(str, $task)
+    if (not $lib.regex.matches("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", $task)) {
+        return(({"status": (false), "mesg": `{$task} isn't a task UUID.`, "data": $lib.null}))
+    }
+    $attempt = $lib.cast(int, $attempt)
+    $query = `slib.anyrun.enrich --task {$task} --attempt {$attempt}`
+    if $reads { $query = `{$query} --reads` }
+
+    // One job per user, view, task, and attempt, so ingesting a running task twice doesn't
+    // start two chains of retries. A job that already ran is replaced.
+    $iden = $lib.guid(slib.anyrun, retry, $lib.user.iden, $lib.view.get().iden, $task, $attempt)
+    for $job in $lib.cron.list() {
+        $info = $job.pack()
+        if ($info.iden = $iden) {
+            if ($info.startcount = 0) {
+                return(({"status": (true), "mesg": "", "data": $lib.null}))
+            }
+            $lib.cron.del($iden)
+        }
+    }
+    $job = $lib.cron.at(query=$query, minute=`+{$delay}`, iden=$iden)
+    $job.set(name, `slib.anyrun retry of task {$task} (try {$attempt} of 3)`)
+    return(({"status": (true), "mesg": "", "data": $iden}))
+}
+
 // Account
 
 function limits() { return($svc.limits(apikey=$userKey())) }

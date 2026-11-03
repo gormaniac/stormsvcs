@@ -36,6 +36,12 @@ VERDICT_TEXTS = {
 }
 """ANY.RUN's ``threatLevelText`` values as ``it:av:scan:result:verdict`` values."""
 
+UNKNOWN = 20
+"""The ``it:av:scan:result:verdict`` of a task ANY.RUN has no (known) verdict for yet."""
+
+FINISHED = ("done", "failed", "error", "canceled", "cancelled")
+"""Report statuses that mean a task won't change any more. Any other status is in progress."""
+
 THREAT_LEVELS = {1: 30, 2: 40}
 """ANY.RUN's numeric threat levels (0 no threat/no info, 1 suspicious, 2 malicious) as verdicts.
 
@@ -939,20 +945,23 @@ def normReport(report: dict, reads: bool = False) -> dict:
     network = report.get("network") if isinstance(report.get("network"), dict) else {}
     files = [f for f in (normFile(i, procs) for i in dlist(report, "modified", "files")) if f]
     errors = []
-    if report.get("status") not in (None, "done"):
-        errors.append(f"Task {uuid} is {report.get('status')}, its report may be incomplete.")
+    status = report.get("status")
+    inprogress = isinstance(status, str) and status.strip().lower() not in FINISHED
 
     return {
         "uuid": uuid,
         "link": f"https://app.any.run/tasks/{uuid}" if uuid else None,
-        "status": report.get("status"),
+        "status": status,
+        "inprogress": inprogress,
         "kind": kind,
         "url": url,
         "file": file,
         "time": start,
         "ival": ival(start, end),
+        # Every task gets a verdict, unknown until ANY.RUN gives one (ex. while it's running).
         "verdict": verdictText(verdict.get("threatLevelText"))
-        or verdictLevel(verdict.get("threatLevel")),
+        or verdictLevel(verdict.get("threatLevel"))
+        or UNKNOWN,
         "threat": verdict.get("threatLevelText"),
         "score": toInt(verdict.get("score")),
         "tags": tags,

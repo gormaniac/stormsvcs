@@ -119,9 +119,10 @@ A task's sample is modeled as a `file:bytes` (or `inet:url`, for URL tasks) with
 
 - ANY.RUN's tags and the task's threat names as tags under the prefix (`#rep.anyrun.<tag>`, ex.
   `#rep.anyrun.agenttesla`), with the task's run time as the interval.
-- An `it:av:scan:result` for ANY.RUN's verdict: `Malicious activity` is malicious,
-  `Suspicious activity` suspicious, and `No threats detected` benign. Its `:signame` is the
-  first family, and its `:categories` are the tags.
+- An `it:av:scan:result` for ANY.RUN's verdict, one for every task: `Malicious activity` is
+  malicious, `Suspicious activity` suspicious, `No threats detected` benign, and a task without
+  a verdict yet (ex. one that's still running) is unknown. Its `:signame` is the first family,
+  and its `:categories` are the tags. Modeling the task again updates the same node.
 - A `risk:tool:software` per malware family (with `:tag` set to its tag).
 - `-(uses)> it:mitre:attack:technique` for the task's ATT&CK techniques, and `-(refs)> it:dev:mutex`
   for the mutexes its important processes used.
@@ -162,7 +163,7 @@ default because a task can have thousands of them.
 
 `slib.anyrun.download` links what it downloads to the task: the PCAP, video, and screenshots get
 a `-(refs)>` edge from the task's verdict (`it:av:scan:result`, the only node unique to a task,
-so two runs of the same sample stay apart), or from the sample when ANY.RUN gave no verdict.
+so two runs of the same sample stay apart).
 Each screenshot is an `it:screenshot` (with `:image`, `:sandbox:file`, `:time`, and `:desc`),
 and a URL task's last screenshot is the `:page:image` of an `it:exec:url` for the browser's visit.
 
@@ -179,6 +180,20 @@ file and tagged `#rep.anyrun.feed` (and their labels) for the time they're valid
 
 Every node is linked to the service's `meta:source` (`any.run`) with a `-(seen)>` edge. Modeling
 a task again updates the same nodes.
+
+### Tasks that are still running
+
+A task that's still running (its report's status isn't `done`, `failed`, `error`, or
+`canceled`) is modeled as far as it got, with an unknown verdict, and the user is warned. A one
+time cron job then runs `slib.anyrun.enrich --task <task> --attempt <n>` in 10 minutes, up to 3
+tries in all, after which the user is warned that it gave up.
+
+The cron jobs are created by the privileged `slib.anyrun.priv.user` module, so users don't need
+the `cron.add` permission. They're still owned by, and run as, the user who ingested the task,
+so they use that user's API key and node permissions, in the view the task was ingested in.
+Ingesting a running task again doesn't schedule a second retry. The jobs are named
+`slib.anyrun retry of task <task> (try <n> of 3)`, and stay in `cron.list` after they run, like
+any one time job.
 
 ### Not modeled
 

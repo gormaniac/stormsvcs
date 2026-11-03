@@ -7,7 +7,7 @@ if $cmdopts.task {
     // --task ignores inbound nodes.
     spin |
     for $task in $cmdopts.task {
-        $n = $anyrun.model($task, reads=$cmdopts.reads)
+        $n = $anyrun.model($task, reads=$cmdopts.reads, attempt=$cmdopts.attempt)
         if ($cmdopts.yield and $n) { yield $n }
     }
 }

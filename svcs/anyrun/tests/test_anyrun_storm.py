@@ -1,5 +1,6 @@
 """Pytests for the slib.anyrun Storm package (commands, modules, modeling, and perms)."""
 
+import asyncio
 import copy
 import hashlib
 import pathlib
@@ -328,6 +329,101 @@ class TestStormEnrich(s_tests.SynTest):
             fake.state["lookup_429"] = 10
             msgs = await core.stormlist("inet:fqdn=c2.evil.example.com | slib.anyrun.lookup")
             self.stormIsInWarn("Too many requests", msgs)
+
+
+def runningReport(url: str) -> dict:
+    """A report of NEWTASK while it's still running: no verdict, processes, or network yet."""
+
+    report = fa.fileReport(url)
+    report["status"] = "running"
+    report["analysis"]["uuid"] = fa.NEWTASK
+    del report["analysis"]["scores"]
+    report["processes"] = []
+    report["incidents"] = []
+    report["modified"] = {"files": [], "registry": []}
+    report["malconf"] = []
+    return report
+
+
+async def retryJobs(core) -> list:
+    return await core.callStorm(
+        '$l = ([]) for $c in $lib.cron.list() { $j = $c.pack() if $j.name.startswith("slib.anyrun retry") { $l.append($j) } } return($l)'
+    )
+
+
+class TestStormInProgress(s_tests.SynTest):
+    async def test_in_progress(self):
+        async with fa.anyrunSvc(self) as (core, svc, fake):
+            fake.state["reports"][fa.NEWTASK] = runningReport(fake.url)
+            q = f"slib.anyrun.enrich --task {fa.NEWTASK} --reads --yield"
+            msgs = await core.stormlist(q)
+            self.stormHasNoErr(msgs)
+            self.stormIsInPrint(f"Modeled task {fa.NEWTASK} (no verdict yet", msgs)
+            self.stormIsInWarn(
+                f"Task {fa.NEWTASK} is still running, so it was only partly modeled. It will be "
+                "ingested again in 10 minutes (try 2 of 3).",
+                msgs,
+            )
+            # The task still gets its verdict, unknown for now.
+            assert yielded(msgs) == [("file:bytes", f"sha256:{fa.SAMPLE_SHA256}")]
+            (scan,) = await core.nodes(f"{SAMPLE} -> it:av:scan:result:target:file")
+            assert scan.get("verdict") == 20 and scan.get("scanner:name") == "any.run"
+
+            # A one time cron job, in this view, for the next try.
+            (job,) = await retryJobs(core)
+            assert job["query"] == f"slib.anyrun.enrich --task {fa.NEWTASK} --attempt 2 --reads"
+            assert job["name"] == f"slib.anyrun retry of task {fa.NEWTASK} (try 2 of 3)"
+            assert job["view"] == core.view.iden and job["creator"] == core.auth.rootuser.iden
+            assert job["recur"] is False and job["startcount"] == 0
+
+            # Ingesting it again before the job runs doesn't schedule another one.
+            msgs = await core.stormlist(q)
+            self.stormIsInWarn("it's already scheduled to be ingested again", msgs)
+            assert len(await retryJobs(core)) == 1
+
+            # The retries (run here like the cron jobs would run them).
+            msgs = await core.stormlist(job["query"])
+            self.stormIsInWarn("(try 3 of 3)", msgs)
+            jobs = await retryJobs(core)
+            assert sorted(j["query"] for j in jobs)[-1] == f"slib.anyrun.enrich --task {fa.NEWTASK} --attempt 3 --reads"
+            msgs = await core.stormlist(f"slib.anyrun.enrich --task {fa.NEWTASK} --attempt 3 --reads")
+            self.stormIsInWarn(f"Task {fa.NEWTASK} is still running after 3 tries, not trying again.", msgs)
+            assert len(await retryJobs(core)) == 2
+
+            # Once it's done, the same verdict node gets ANY.RUN's verdict.
+            report = fa.fileReport(fake.url)
+            report["analysis"]["uuid"] = fa.NEWTASK
+            fake.state["reports"][fa.NEWTASK] = report
+            msgs = await core.stormlist(f"slib.anyrun.enrich --task {fa.NEWTASK} --attempt 2")
+            self.stormHasNoWarnErr(msgs)
+            (scan,) = await core.nodes(f"{SAMPLE} -> it:av:scan:result:target:file")
+            assert scan.get("verdict") == 40
+            assert len(await retryJobs(core)) == 2
+
+    async def test_retry_job(self):
+        async with fa.anyrunSvc(self) as (core, svc, fake):
+            fake.state["reports"][fa.NEWTASK] = runningReport(fake.url)
+            # A retry job that already ran (ex. from an earlier ingest) is replaced by a new one.
+            iden = await core.callStorm(
+                f"return($lib.guid(slib.anyrun, retry, $lib.user.iden, $lib.view.get().iden, {fa.NEWTASK}, (2)))"
+            )
+            await core.callStorm(f'$job = $lib.cron.at(now=(true), query="$x = (1)", iden={iden}) $job.set(name, "slib.anyrun retry old")')
+            for _ in range(100):
+                if (await core.callStorm(f"return($lib.cron.get({iden}).pack())"))["startcount"]:
+                    break
+                await asyncio.sleep(0.1)
+            msgs = await core.stormlist(f"slib.anyrun.enrich --task {fa.NEWTASK}")
+            self.stormIsInWarn("(try 2 of 3)", msgs)
+            (job,) = await retryJobs(core)
+            assert job["iden"] == iden and job["startcount"] == 0
+            assert job["query"] == f"slib.anyrun.enrich --task {fa.NEWTASK} --attempt 2"
+
+            priv = "$lib.import(slib.anyrun.priv.user)"
+            retn = await core.callStorm(f'return({priv}.scheduleRetry("nope", 2))')
+            assert not retn["status"] and "isn't a task UUID" in retn["mesg"]
+            retn = await core.callStorm(f'return({priv}.scheduleRetry("{fa.NEWTASK} | [inet:fqdn=a.com]", 2))')
+            assert not retn["status"]
+            assert await core.count("inet:fqdn=a.com") == 0
 
 
 class TestStormTasks(s_tests.SynTest):
@@ -716,3 +812,18 @@ class TestStormPerms(s_tests.SynTest):
             await visi.addRule((True, ("slib", "anyrun", "submit")))
             msgs = await core.stormlist("slib.anyrun.submit --url http://a.com", opts=opts)
             self.stormHasNoWarnErr(msgs)
+
+            # Users without the cron.add permission still get retries of running tasks, owned
+            # by (and run as) them.
+            fake.state["reports"][fa.NEWTASK] = runningReport(fake.url)
+            msgs = await core.stormlist(f"slib.anyrun.enrich --task {fa.NEWTASK}", opts=opts)
+            self.stormHasNoErr(msgs)
+            self.stormIsInWarn("(try 2 of 3)", msgs)
+            (job,) = await retryJobs(core)
+            assert job["creator"] == visi.iden
+            msgs = await core.stormlist("$lib.cron.at(minute=\"+10\", query=\"$x = (1)\")", opts=opts)
+            self.stormIsInErr("must have permission cron.add", msgs)
+            # The job runs fine as the user.
+            msgs = await core.stormlist(job["query"], opts=opts)
+            self.stormHasNoErr(msgs)
+            self.stormIsInWarn("(try 3 of 3)", msgs)

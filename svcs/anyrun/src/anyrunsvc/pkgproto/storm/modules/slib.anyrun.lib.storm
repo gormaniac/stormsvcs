@@ -9,12 +9,18 @@ init {
     $priv = $lib.import(slib.anyrun.priv.user)
     $amodel = $lib.import(slib.anyrun.model)
     $util = $lib.import(slib.anyrun.util)
+    // How many times a task that's still running is ingested (the first try and the retries).
+    $maxTries = (3)
 }
 
 // ---- Tasks ----
 
 // Model a task's report (by UUID or app.any.run link). Returns the sample's node, or null.
-function model(task, reads=(false)) {
+//
+// A task that's still running is modeled as far as it got (with an unknown verdict until
+// ANY.RUN gives one), and a one time cron job ingests it again in 10 minutes, up to 3 tries in
+// all. attempt is which try this is.
+function model(task, reads=(false), attempt=(1)) {
     $retn = $priv.normReport($task, reads=$reads)
     if $util.failed($retn, `Modeling task {$task}`) { return($lib.null) }
     $data = $retn.data
@@ -28,9 +34,32 @@ function model(task, reads=(false)) {
 
     $fams = $lib.null
     if $data.families { $fams = (",").join($data.families) }
+    $verdict = $data.threat
+    if (not $verdict) { $verdict = "no verdict yet" }
     $lib.print("slib.anyrun: Modeled task {id} ({verdict}, families={fams}, processes={procs}).",
-               id=$data.uuid, verdict=$data.threat, fams=$fams, procs=$lib.len($data.procs))
+               id=$data.uuid, verdict=$verdict, fams=$fams, procs=$lib.len($data.procs))
+    if $data.inprogress { $_retry($data, $reads, $attempt) }
     return($snode)
+}
+
+// Warn that a task is still running and schedule the next try, unless this was the last one.
+function _retry(data, reads, attempt) {
+    if ($attempt >= $maxTries) {
+        $lib.warn("slib.anyrun: Task {id} is still {status} after {tries} tries, not trying again. Model it later with slib.anyrun.enrich --task {id}.",
+                  id=$data.uuid, status=$data.status, tries=$maxTries)
+        return((false))
+    }
+    $next = ($attempt + 1)
+    $retn = $priv.scheduleRetry($data.uuid, $next, reads=$reads)
+    if $util.failed($retn, `Scheduling another try of task {$data.uuid}`) { return((false)) }
+    if ($retn.data = $lib.null) {
+        $lib.warn("slib.anyrun: Task {id} is still {status}, it's already scheduled to be ingested again.",
+                  id=$data.uuid, status=$data.status)
+        return((true))
+    }
+    $lib.warn("slib.anyrun: Task {id} is still {status}, so it was only partly modeled. It will be ingested again in 10 minutes (try {next} of {tries}).",
+              id=$data.uuid, status=$data.status, next=$next, tries=$maxTries)
+    return((true))
 }
 
 // Whether a task (from history or TI Lookup) analyzed a node: a file by one of its hashes,

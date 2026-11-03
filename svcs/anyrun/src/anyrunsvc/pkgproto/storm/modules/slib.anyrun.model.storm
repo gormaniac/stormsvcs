@@ -192,14 +192,12 @@ function sampleNode(data) {
 }
 
 // The node a task's artifacts (PCAP, video, screenshots) are linked to with -(refs)>: the
-// task's verdict (it:av:scan:result, the only node unique to a task) or, when ANY.RUN gave no
-// verdict, the sample. Returns null if the task has no sample to model.
+// task's verdict (it:av:scan:result, the only node unique to a task). Returns null if the task
+// has no sample to model.
 function anchor(data) {
     $snode = $sampleNode($data)
     if ($snode = $lib.null) { return($lib.null) }
-    $result = $scan($snode, $data)
-    if $result { return($result) }
-    return($snode)
+    return($scan($snode, $data))
 }
 
 // Link a downloaded task artifact (a file:bytes) to the task's anchor, setting its MIME type.
@@ -238,16 +236,17 @@ function urlVisit(data, image) {
     return($seen($node))
 }
 
-// ANY.RUN's verdict on the sample.
+// ANY.RUN's verdict on the sample: one per task, unknown (20) until ANY.RUN gives one.
 function scan(snode, data) {
-    if ($data.verdict = $lib.null) { return($lib.null) }
+    $verdict = $data.verdict
+    if ($verdict = $lib.null) { $verdict = (20) }
     $target = $targetProp($snode)
     $signame = $lib.null
     if $data.families { $signame = $data.families.index(0) }
     $cats = $lib.null
     if $data.tagnames { $cats = $data.tagnames }
     [ it:av:scan:result=$lib.guid(slib.anyrun, $data.uuid, scan)
-        :scanner:name=$scanner :$target=$snode.repr() :time?=$data.time :verdict=$data.verdict
+        :scanner:name=$scanner :$target=$snode.repr() :time?=$data.time :verdict=$verdict
         :signame?=$signame :categories?=$cats ]
     return($seen($node))
 }
