@@ -2,6 +2,7 @@ init {
     $shodan = $lib.import(slib.shodan.lib)
     $priv = $lib.import(slib.shodan.priv.user)
     $util = $lib.import(slib.shodan.util)
+    $model = $lib.import(slib.shodan.model)
     $query = $cmdopts.query
 
     // Modes that only print, returning before any nodes are created.
@@ -29,8 +30,9 @@ init {
         "minify": $cmdopts.minify,
     })
 
-    // Set once there are inbound nodes, so the query isn't also searched on its own.
-    $state = ({"nodes": (false)})
+    // nodes is set once there are inbound nodes, so the query isn't also searched on its own.
+    // ran maps each query run to ({"query": <it:exec:query or null>}), dupes counts repeats.
+    $state = ({"nodes": (false), "ran": ({}), "dupes": (0)})
 }
 
 // Run a search. Prints the --tokens/--count/--facets output, then (unless only printing)
@@ -38,6 +40,7 @@ init {
 // (or the it:exec:query with --yield-query). ref is the inbound node the query was built from.
 // NOTE: No return() here, it would make this a function that returns a value instead of yielding nodes.
 function run(query, ref=$lib.null) {
+    $state.ran.$query = ({"query": $lib.null})
     if $cmdopts.tokens {
         $retn = $priv.searchTokens($query)
         if (not $util.failed($retn, "Parsing the query")) { $util.printJson($retn.data) }
@@ -53,6 +56,7 @@ function run(query, ref=$lib.null) {
     if (not $printonly) {
         $genr = $priv.searchGenr($query, limit=$cmdopts.limit, minify=$cmdopts.minify, page=$cmdopts.page)
         for $res in $shodan.ingest($genr, "Search", $query, $shodan.searchUrl(), $opts, ref=$ref) {
+            if $res.done { $state.ran.$query.query = $res.query }
             if $cmdopts.yield_query {
                 if $res.done { yield $res.query }
             } elif $res.ip {
@@ -72,6 +76,15 @@ if ($nodequery = $lib.null) { spin }
 
 // NOTE: Not "if $query {...}", which is runtsafe and would run without inbound nodes too.
 $nodequery = (" ").join(($nodequery, $query)).strip()
+
+// Inbound nodes that build the same query as an earlier one (ex. inet:banner nodes with the same
+// text, servers presenting the same cert) don't run it again. Its it:exec:query refs them too.
+$prev = $state.ran.$nodequery
+if ($prev != $lib.null) {
+    if $prev.query { $model.linkRefs($prev.query, $node) }
+    $state.dupes = ($state.dupes + 1)
+    spin
+}
 divert (true) $run($nodequery, ref=$node)
 
 // Without inbound nodes, run the query on its own (once).
@@ -84,3 +97,10 @@ divert (true) $run($nodequery, ref=$node)
 }
 
 | uniq
+
+fini {
+    if $state.dupes {
+        $lib.print("slib.shodan.search: {n} inbound nodes had the same query as an earlier one, each query was searched once.",
+                   n=$state.dupes)
+    }
+}

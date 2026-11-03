@@ -198,6 +198,10 @@ meta:rule:type=svc.shodan.query | slib.shodan.count --facets country:10
 
 Nodes piped to `slib.shodan.search` are each searched for with a query built for their form,
 AND'd with any query given (ex. `crypto:x509:cert | slib.shodan.search "country:US" --count`).
+Nodes that build the same query (ex. `inet:banner` nodes with the same text, servers presenting the
+same cert, a `risk:vuln` and its `it:sec:cve`) only run it once per command, and that run's
+`it:exec:query` refs each of them. `slib.shodan.count` and `slib.shodan.trends` do the same, and
+`slib.shodan.host`, `slib.shodan.cve`, and `slib.shodan.enrich` make each IP or CVE lookup once.
 `$shodan.searchQuery($node)` returns the query for a node. See `slib.shodan.search --help` for
 the full list:
 

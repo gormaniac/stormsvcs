@@ -547,6 +547,22 @@ function streamTarget(n) {
     return($lib.null)
 }
 
+// The lookup enrich() makes for a node, ex. "cve:CVE-2021-44228", so commands can make each lookup
+// once. Returns null for nodes enrich() doesn't support (or that are missing the needed props).
+function enrichKey(node) {
+    switch $node.form() {
+        "inet:ipv4": { return(`host:{$node.repr()}`) }
+        "inet:ipv6": { return(`host:{$node.repr()}`) }
+        "inet:fqdn": { return(`domain:{$node.repr()}`) }
+        "risk:vuln": {
+            if $node.props.cve { return(`cve:{$node.props.cve.upper()}`) }
+        }
+        "it:sec:cve": { return(`cve:{$node.repr().upper()}`) }
+        "it:sec:cpe": { return(`cpe:{$node.repr()}`) }
+    }
+    return($lib.null)
+}
+
 // Enrich any supported node with the best matching Shodan API. Returns a list of the resulting nodes.
 function enrich(node) {
     switch $node.form() {

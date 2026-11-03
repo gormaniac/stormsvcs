@@ -1041,6 +1041,82 @@ class TestShodanStormInputs(s_tests.SynTest):
             self.stormIsInWarn("The node form inet:email is not supported", msgs)
 
 
+class TestShodanStormDedupe(s_tests.SynTest):
+    """Inbound nodes that boil down to the same Shodan request only make it once per run."""
+
+    BANNERS = (
+        '[ inet:banner=(tcp://1.2.3.4:22, "SSH-2.0-same") inet:banner=(tcp://5.6.7.8:22, "SSH-2.0-same")'
+        ' inet:banner=(tcp://5.6.7.8:2222, "SSH-2.0-other") ]'
+    )
+
+    def sent(self, fake, path):
+        return [r["query"]["query"] for r in fake.requests if r["path"] == path]
+
+    async def test_search_dedupe(self):
+        async with shodanSvc(self) as (core, svc, fake):
+            await core.nodes(self.BANNERS)
+            same = norm.bannerHash("SSH-2.0-same")
+            other = norm.bannerHash("SSH-2.0-other")
+
+            # Lifted by IP, the search creates other banners while the lift is still running.
+            msgs = await core.stormlist(
+                "inet:banner:server:ipv4=1.2.3.4 inet:banner:server:ipv4=5.6.7.8 | slib.shodan.search"
+            )
+            self.stormHasNoErr(msgs)
+            assert sorted(self.sent(fake, "/api/shodan/host/search")) == sorted([f"hash:{same}", f"hash:{other}"])
+            self.stormIsInPrint("1 inbound nodes had the same query as an earlier one", msgs)
+
+            # The one run refs both banners with that text.
+            assert len(await core.nodes("it:exec:query")) == 2
+            refs = await nodeset(core, f"it:exec:query:text=hash:{same} -(refs)> *")
+            assert refs == {
+                ("inet:banner", node.repr()) for node in await core.nodes('inet:banner:text="SSH-2.0-same"')
+            }
+
+            # A risk:vuln and its CVE are the same search, and print-only modes skip repeats too.
+            await core.nodes("[ risk:vuln=* :cve=cve-2021-44228 it:sec:cve=cve-2021-44228 ]")
+            before = len(self.sent(fake, "/api/shodan/host/count"))
+            await core.nodes("risk:vuln:cve it:sec:cve | slib.shodan.search --count")
+            assert self.sent(fake, "/api/shodan/host/count")[before:] == ["vuln:CVE-2021-44228"]
+
+    async def test_count_trends_dedupe(self):
+        async with shodanSvc(self) as (core, svc, fake):
+            await core.nodes(self.BANNERS)
+            same = norm.bannerHash("SSH-2.0-same")
+
+            msgs = await core.stormlist("inet:banner | slib.shodan.count")
+            self.stormHasNoErr(msgs)
+            self.stormIsInPrint("each query was counted once", msgs)
+            # Learning the plan's limit sends the first query twice.
+            assert self.sent(fake, "/api/shodan/host/count").count(f"hash:{same}") == 2
+            assert len(await core.nodes("it:exec:query")) == 2
+            assert len(await core.nodes(f"it:exec:query:text=hash:{same} -(refs)> inet:banner")) == 2
+
+            msgs = await core.stormlist("inet:banner | slib.shodan.trends")
+            self.stormIsInPrint("each query was run once", msgs)
+            assert self.sent(fake, "/trends/api/v1/search").count(f"hash:{same}") == 1
+            assert len(self.sent(fake, "/trends/api/v1/search")) == 2
+
+    async def test_lookup_dedupe(self):
+        async with shodanSvc(self) as (core, svc, fake):
+            await core.nodes("[ risk:vuln=* :cve=cve-2021-44228 risk:vuln=* :cve=cve-2021-44228 it:sec:cve=cve-2021-44228 ]")
+            cvedb = lambda: [r for r in fake.requests if r["path"] == "/cvedb/cve/CVE-2021-44228"]
+
+            msgs = await core.stormlist("risk:vuln:cve it:sec:cve | slib.shodan.cve --yield")
+            self.stormHasNoErr(msgs)
+            assert len(cvedb()) == 1
+            await core.nodes("slib.shodan.cve --cve CVE-2021-44228 --cve cve-2021-44228")
+            assert len(cvedb()) == 2
+
+            msgs = await core.stormlist("risk:vuln:cve it:sec:cve | slib.shodan.enrich")
+            self.stormHasNoErr(msgs)
+            assert len(cvedb()) == 3
+
+            # Scan and alert targets are added once.
+            await core.nodes("[ inet:ipv4=8.8.8.8 ] | slib.shodan.scan --ip 8.8.8.8 --ip 8.8.8.8")
+            assert fake.last("/api/shodan/scan")["form"]["ips"] == "8.8.8.8"
+
+
 class TestShodanStormDns(s_tests.SynTest):
     async def test_dns_domain(self):
         async with shodanSvc(self) as (core, svc, fake):

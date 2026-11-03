@@ -1,5 +1,5 @@
 name: slib.shodan
-version: 0.9.0
+version: 0.9.1
 guid: 0f6c1d0f1d8a4c3bb7a1e3d5c9b2a864
 
 synapse_minversion: [2, 137, 0]
@@ -229,7 +229,9 @@ commands:
       application/xhtml+xml. Use --file-hash for files without one of those :mime values.
       The bytes are read from the Axon (up to 16 MiB), which needs axon.has and axon.get.
 
-      Shodan doesn't support OR between filters, so each node is its own search.
+      Shodan doesn't support OR between filters, so each node is its own search. Nodes that build
+      the same query as an earlier one (ex. inet:banner nodes with the same text) don't search it
+      again, the earlier search's it:exec:query refs them too.
 
       Each page of 100 results consumes one Shodan query credit. Use --count to get
       the total (and any --facets) for free without ingesting anything.

@@ -335,6 +335,13 @@ function queryNode(text, apiurl, opts, ref=$lib.null) {
     return($seen($node))
 }
 
+// Link a node to another it references (n -(refs)> target).
+function linkRefs(n, target) {
+    yield $n
+    [ +(refs)> $target ]
+    return($n)
+}
+
 // Link a query to the nodes it returned (it:exec:query -(found)> n), skipping nulls.
 function found(query, nodes) {
     // No node in this function's pipeline, so looping is safe (see the NOTE at the top).

@@ -78,15 +78,17 @@ init {
     $util = $lib.import(slib.shodan.util)
 
     $ips = ([])
-    for $ip in $cmdopts.ip { $ips.append($ip) }
+    for $ip in $cmdopts.ip {
+        if (not $ips.has($ip)) { $ips.append($ip) }
+    }
 }
 
 // Inbound nodes are collected and applied to the alert in the fini block.
 switch $node.form() {
-    "inet:ipv4": { $ips.append($node.repr()) }
-    "inet:ipv6": { $ips.append($node.repr()) }
-    "inet:cidr4": { $ips.append($node.repr()) }
-    "inet:cidr6": { $ips.append($node.repr()) }
+    "inet:ipv4": { if (not $ips.has($node.repr())) { $ips.append($node.repr()) } }
+    "inet:ipv6": { if (not $ips.has($node.repr())) { $ips.append($node.repr()) } }
+    "inet:cidr4": { if (not $ips.has($node.repr())) { $ips.append($node.repr()) } }
+    "inet:cidr6": { if (not $ips.has($node.repr())) { $ips.append($node.repr()) } }
     *: { $lib.warn("slib.shodan.alert.edit: The node form {form} is not supported.", form=$node.form()) }
 }
 

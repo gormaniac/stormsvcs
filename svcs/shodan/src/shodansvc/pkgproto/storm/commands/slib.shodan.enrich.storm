@@ -1,6 +1,17 @@
 init {
     $shodan = $lib.import(slib.shodan.lib)
     $model = $lib.import(slib.shodan.model)
+
+    // The results of each lookup already made, so nodes for the same thing (ex. several risk:vuln
+    // nodes for one CVE) only use one lookup. Keyed by slib.shodan.lib.enrichKey.
+    $done = ({})
 }
 
-divert $cmdopts.yield $model.nodes($shodan.enrich($node))
+$key = $shodan.enrichKey($node)
+if ($key = $lib.null) { $results = $shodan.enrich($node) }
+elif ($done.$key != $lib.null) { $results = $done.$key }
+else {
+    $results = $shodan.enrich($node)
+    $done.$key = $results
+}
+divert $cmdopts.yield $model.nodes($results)

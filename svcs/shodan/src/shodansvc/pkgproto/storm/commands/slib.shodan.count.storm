@@ -1,18 +1,22 @@
 init {
     $shodan = $lib.import(slib.shodan.lib)
     $util = $lib.import(slib.shodan.util)
+    $model = $lib.import(slib.shodan.model)
     $query = $cmdopts.query
 
-    // Set once there are inbound nodes, so the query isn't also counted on its own.
-    $state = ({"nodes": (false)})
+    // nodes is set once there are inbound nodes, so the query isn't also counted on its own.
+    // ran maps each query run to ({"query": <it:exec:query or null>}), dupes counts repeats.
+    $state = ({"nodes": (false), "ran": ({}), "dupes": (0)})
 }
 
 // Count a query: model the matching IPs and record the run, print any --facets, and yield the
 // IP nodes (or the it:exec:query with --yield-query). ref is the inbound node the query was built from.
 // NOTE: No return() here, it would make this a function that returns a value instead of yielding nodes.
 function run(query, ref=$lib.null) {
+    $state.ran.$query = ({"query": $lib.null})
     $res = $shodan.count($query, size=$cmdopts.size, facets=$cmdopts.facets, ref=$ref)
     if $res {
+        $state.ran.$query.query = $res.query
         $lib.print("slib.shodan.count: {n} IPs ({query})", n=$res.ips.size(), query=$query)
         $util.printFacets($res.facets)
 
@@ -31,6 +35,15 @@ $nodequery = $shodan.searchQuery($node, filehash=$cmdopts.file_hash)
 if ($nodequery = $lib.null) { spin }
 
 $nodequery = (" ").join(($nodequery, $query)).strip()
+
+// Inbound nodes that build the same query as an earlier one (ex. inet:banner nodes with the same
+// text, servers presenting the same cert) don't run it again. Its it:exec:query refs them too.
+$prev = $state.ran.$nodequery
+if ($prev != $lib.null) {
+    if $prev.query { $model.linkRefs($prev.query, $node) }
+    $state.dupes = ($state.dupes + 1)
+    spin
+}
 divert (true) $run($nodequery, ref=$node)
 
 // Without inbound nodes, run the query on its own (once).
@@ -43,3 +56,10 @@ divert (true) $run($nodequery, ref=$node)
 }
 
 | uniq
+
+fini {
+    if $state.dupes {
+        $lib.print("slib.shodan.count: {n} inbound nodes had the same query as an earlier one, each query was counted once.",
+                   n=$state.dupes)
+    }
+}

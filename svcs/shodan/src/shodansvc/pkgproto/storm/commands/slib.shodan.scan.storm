@@ -6,15 +6,17 @@ init {
 
     // Scan every target in one request so there is a single scan ID to track.
     $targets = ([])
-    for $ip in $cmdopts.ip { $targets.append($ip) }
+    for $ip in $cmdopts.ip {
+        if (not $targets.has($ip)) { $targets.append($ip) }
+    }
 }
 
 // Inbound nodes are collected and scanned together in the fini block.
 switch $node.form() {
-    "inet:ipv4": { $targets.append($node.repr()) }
-    "inet:ipv6": { $targets.append($node.repr()) }
-    "inet:cidr4": { $targets.append($node.repr()) }
-    "inet:cidr6": { $targets.append($node.repr()) }
+    "inet:ipv4": { if (not $targets.has($node.repr())) { $targets.append($node.repr()) } }
+    "inet:ipv6": { if (not $targets.has($node.repr())) { $targets.append($node.repr()) } }
+    "inet:cidr4": { if (not $targets.has($node.repr())) { $targets.append($node.repr()) } }
+    "inet:cidr6": { if (not $targets.has($node.repr())) { $targets.append($node.repr()) } }
     *: { $lib.warn("slib.shodan.scan: The node form {form} is not supported.", form=$node.form()) }
 }
 

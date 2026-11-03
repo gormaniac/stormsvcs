@@ -7,7 +7,10 @@ init {
 if $cmdopts.domain {
     // --domain ignores inbound nodes.
     spin |
+    $seen = ([])
     for $domain in $cmdopts.domain {
+        if $seen.has($domain) { continue }
+        $seen.append($domain)
         $subs = $shodan.domain($domain, history=$opts.history, rtype=$opts.rtype, maxpages=$opts.maxpages)
         if $cmdopts.yield { yield $model.nodes($subs) }
     }
