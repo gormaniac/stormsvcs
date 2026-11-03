@@ -1079,6 +1079,49 @@ class TestShodanStormDedupe(s_tests.SynTest):
             await core.nodes("risk:vuln:cve it:sec:cve | slib.shodan.search --count")
             assert self.sent(fake, "/api/shodan/host/count")[before:] == ["vuln:CVE-2021-44228"]
 
+    async def test_inbound_feedback(self):
+        """Lifts of a form a command creates don't feed it its own results, unless --stream-inbound."""
+        async with shodanSvc(self) as (core, svc, fake):
+            await core.nodes(self.BANNERS)
+            searches = lambda: self.sent(fake, "/api/shodan/host/search")
+
+            # The searches create more banners, but only the 2 distinct banners lifted are searched.
+            msgs = await core.stormlist("inet:banner | slib.shodan.search")
+            self.stormHasNoErr(msgs)
+            assert len(searches()) == 2
+            assert [m[1][0] for m in msgs if m[0] == "node"] == [
+                ("inet:ipv4", 134744072),
+                ("inet:ipv6", "2001:4860:4860::8888"),
+            ]
+            assert len(await core.nodes("inet:banner")) == 5
+
+            # Streamed, the lift also returns banners the searches created.
+            await core.nodes("inet:banner | slib.shodan.search --stream-inbound")
+            assert len(searches()) > 4
+
+    async def test_inbound_feedback_dns(self):
+        async with shodanSvc(self) as (core, svc, fake):
+            # A domain lookup creates subdomains, which aren't looked up too.
+            domains = lambda: [r["path"] for r in fake.requests if r["path"].startswith("/api/dns/domain/")]
+            await core.nodes("[ inet:fqdn=vertex.link ]")
+            msgs = await core.stormlist("inet:fqdn:zone=vertex.link | slib.shodan.dns.domain --yield")
+            assert domains() == ["/api/dns/domain/vertex.link"]
+            assert {m[1][0][1] for m in msgs if m[0] == "node"} == {"www.vertex.link", "api.vertex.link"}
+
+            # Streamed, the same lift also returns the subdomains it created.
+            await core.nodes("inet:fqdn:zone=vertex.link | slib.shodan.dns.domain --stream-inbound")
+            assert "/api/dns/domain/www.vertex.link" in domains()
+            fake.requests.clear()
+            msgs = await core.stormlist("inet:fqdn=vertex.link | slib.shodan.enrich")
+            assert domains() == ["/api/dns/domain/vertex.link"]
+            assert [m[1][0] for m in msgs if m[0] == "node"] == [("inet:fqdn", "vertex.link")]
+
+            # Resolving creates an IP, which isn't reverse resolved too.
+            await core.nodes("inet:fqdn=vertex.link | slib.shodan.dns.lookup")
+            await core.nodes("inet:fqdn=vertex.link inet:ipv4=1.2.3.4 | slib.shodan.dns.lookup")
+            reverses = [r for r in fake.requests if r["path"] == "/api/dns/reverse"]
+            assert len(reverses) == 1
+
     async def test_count_trends_dedupe(self):
         async with shodanSvc(self) as (core, svc, fake):
             await core.nodes(self.BANNERS)

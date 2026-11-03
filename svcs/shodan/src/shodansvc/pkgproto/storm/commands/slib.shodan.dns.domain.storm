@@ -2,6 +2,14 @@ init {
     $shodan = $lib.import(slib.shodan.lib)
     $model = $lib.import(slib.shodan.model)
     $opts = ({"history": $cmdopts.history, "rtype": $cmdopts.type, "maxpages": $cmdopts.pages})
+
+    // The inbound nodes, once all of them are read (without --stream-inbound).
+    $pending = ([])
+}
+
+// Look up an inet:fqdn's DNS records. Returns a list of the subdomain inet:fqdn nodes.
+function lookup(n) {
+    return($shodan.domain($n.repr(), history=$opts.history, rtype=$opts.rtype, maxpages=$opts.maxpages))
 }
 
 if $cmdopts.domain {
@@ -16,15 +24,29 @@ if $cmdopts.domain {
     }
 }
 else {
-    switch $node.form() {
-        "inet:fqdn": {
-            $results = $shodan.domain($node.repr(), history=$opts.history, rtype=$opts.rtype,
-                                      maxpages=$opts.maxpages)
-        }
-        *: {
-            $results = ([])
-            $lib.warn("slib.shodan.dns.domain: The node form {form} is not supported.", form=$node.form())
-        }
+    if ($node.form() != "inet:fqdn") {
+        $lib.warn("slib.shodan.dns.domain: The node form {form} is not supported.", form=$node.form())
+        // Without --yield, unsupported nodes pass through.
+        if $cmdopts.yield { spin }
     }
-    divert $cmdopts.yield $model.nodes($results)
+
+    // By default, every inbound node is read before any lookup runs, so the nodes a lookup creates
+    // can't come back in from a lift that's still running (ex. "inet:fqdn | slib.shodan.dns.domain" would also
+    // look up the subdomains it found, using a query credit each). --stream-inbound looks up each node as it arrives
+    // instead, for inbound sets too large to hold in memory.
+    if ($node.form() != "inet:fqdn") { }
+    elif $cmdopts.stream_inbound {
+        divert $cmdopts.yield $model.nodes($lookup($node))
+    } else {
+        $pending.append($node)
+        spin
+    }
+}
+
+| if $pending {
+    for $n in $pending {
+        $subs = $lookup($n)
+        if $cmdopts.yield { for $sub in $subs { if $sub { yield $sub } } }
+        else { yield $n }
+    }
 }

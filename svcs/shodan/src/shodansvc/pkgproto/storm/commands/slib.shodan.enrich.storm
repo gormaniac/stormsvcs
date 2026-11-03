@@ -5,13 +5,34 @@ init {
     // The results of each lookup already made, so nodes for the same thing (ex. several risk:vuln
     // nodes for one CVE) only use one lookup. Keyed by slib.shodan.lib.enrichKey.
     $done = ({})
+
+    // The inbound nodes, once all of them are read (without --stream-inbound).
+    $pending = ([])
 }
 
-$key = $shodan.enrichKey($node)
-if ($key = $lib.null) { $results = $shodan.enrich($node) }
-elif ($done.$key != $lib.null) { $results = $done.$key }
-else {
-    $results = $shodan.enrich($node)
-    $done.$key = $results
+// Enrich a node, once per lookup. Returns a list of the resulting nodes.
+function process(n) {
+    $key = $shodan.enrichKey($n)
+    if ($key = $lib.null) { return($shodan.enrich($n)) }
+    if ($done.$key = $lib.null) { $done.$key = $shodan.enrich($n) }
+    return($done.$key)
 }
-divert $cmdopts.yield $model.nodes($results)
+
+// By default, every inbound node is read before any lookup runs, so the nodes a lookup creates
+// can't come back in from a lift that's still running (ex. "inet:fqdn | slib.shodan.enrich" would also
+// look up the subdomains it found, using more query credits). --stream-inbound looks up each node as it arrives
+// instead, for inbound sets too large to hold in memory.
+if $cmdopts.stream_inbound {
+    divert $cmdopts.yield $model.nodes($process($node))
+} else {
+    $pending.append($node)
+    spin
+}
+
+| if $pending {
+    for $n in $pending {
+        $results = $process($n)
+        if $cmdopts.yield { for $r in $results { if $r { yield $r } } }
+        else { yield $n }
+    }
+}

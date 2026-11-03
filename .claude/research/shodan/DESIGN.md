@@ -670,4 +670,5 @@ meta:rule:type^=svc.shodan.query. | slib.shodan.search --limit 200
 | 2 | 0.7.0 | `slib.shodan.count` and `countIps`: credit-free IP lists, limit detection, the "full" warning, print-only `--facets`. | **Done.** Count tests; live check that count uses no credits. |
 | 3 | 0.8.0 | Host history timeline: `--timeline`, `--history`, fallback key, `normBanner` additions. | **Done.** Idempotency tests; Open questions 6 and 9 checked live. |
 | 4 | 0.9.0 | Inbound nodes for `host`, `trends` and `stream`. | **Done.** Per-form tests. |
-| 5 | 0.10.0 | Saved queries: `queries --source/--yield`, `query.save`, the community/local `meta:rule` types, and `searchQuery()` accepting the whole `svc.shodan.query.` subtree. | Saved-query tests. |
+| 4b | 0.9.1, 0.10.0 | Each request made once per run (0.9.1). `search`, `enrich`, `dns.domain` and `dns.lookup` read all inbound nodes before running, so a lift of a form they create can't feed them their own results; `--stream-inbound` keeps the old streaming behavior (0.10.0). | **Done.** Dedupe and feedback tests. |
+| 5 | 0.11.0 | Saved queries: `queries --source/--yield`, `query.save`, the community/local `meta:rule` types, and `searchQuery()` accepting the whole `svc.shodan.query.` subtree. | Saved-query tests. |

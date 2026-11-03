@@ -1,5 +1,5 @@
 name: slib.shodan
-version: 0.9.1
+version: 0.10.0
 guid: 0f6c1d0f1d8a4c3bb7a1e3d5c9b2a864
 
 synapse_minversion: [2, 137, 0]
@@ -157,6 +157,11 @@ commands:
         risk:vuln/it:sec:cve  -> CVEDB CVE details
         it:sec:cpe            -> CVEDB CVEs that affect the CPE
 
+      Every inbound node is read before any are run, so the nodes this command creates can't come
+      back in from a lift that's still running (ex. "inet:fqdn | slib.shodan.enrich" would otherwise
+      also run on the nodes it creates, using more query credits). --stream-inbound runs each inbound node as it
+      arrives instead, for inbound sets too large to hold in memory, with that risk.
+
       Examples:
 
         // Enrich a mixed set of nodes.
@@ -169,6 +174,13 @@ commands:
         - default: false
           action: store_true
           help: Yield the enriched/created nodes instead of the inbound nodes.
+      - - --stream-inbound
+        - default: false
+          action: store_true
+          help: |
+            Run each inbound node as it arrives, instead of reading them all first. Only for inbound
+            sets too large to hold in memory: a lift of a form this command creates (inet:fqdn, inet:ipv4, risk:vuln, ...)
+            also returns the nodes it creates while it runs, which are then run too, using more query credits.
     cmdinputs:
       - form: inet:ipv4
         help: Enriched with a host lookup.
@@ -235,6 +247,11 @@ commands:
 
       Each page of 100 results consumes one Shodan query credit. Use --count to get
       the total (and any --facets) for free without ingesting anything.
+
+      Every inbound node is read before any are run, so the nodes this command creates can't come
+      back in from a lift that's still running (ex. "inet:banner | slib.shodan.search" would otherwise
+      also run on the nodes it creates, using more query credits). --stream-inbound runs each inbound node as it
+      arrives instead, for inbound sets too large to hold in memory, with that risk.
 
       Examples:
 
@@ -305,6 +322,13 @@ commands:
         - default: false
           action: store_true
           help: Yield the it:exec:query node of each search instead of the IP nodes.
+      - - --stream-inbound
+        - default: false
+          action: store_true
+          help: |
+            Run each inbound node as it arrives, instead of reading them all first. Only for inbound
+            sets too large to hold in memory: a lift of a form this command creates (inet:banner, inet:server, crypto:x509:cert, ...)
+            also returns the nodes it creates while it runs, which are then run too, using more query credits.
     cmdinputs:
       - form: inet:banner
         help: Searched for by their Shodan banner hash.
@@ -497,6 +521,11 @@ commands:
 
       Models inet:dns:a/aaaa/cname/mx/ns/txt/soa records and the subdomains' inet:fqdn nodes.
 
+      Every inbound node is read before any are run, so the nodes this command creates can't come
+      back in from a lift that's still running (ex. "inet:fqdn | slib.shodan.dns.domain" would otherwise
+      also run on the nodes it creates, using a query credit each). --stream-inbound runs each inbound node as it
+      arrives instead, for inbound sets too large to hold in memory, with that risk.
+
       Examples:
 
         inet:fqdn=vertex.link | slib.shodan.dns.domain
@@ -525,6 +554,13 @@ commands:
         - default: false
           action: store_true
           help: Yield the subdomain inet:fqdn nodes instead of the inbound nodes.
+      - - --stream-inbound
+        - default: false
+          action: store_true
+          help: |
+            Run each inbound node as it arrives, instead of reading them all first. Only for inbound
+            sets too large to hold in memory: a lift of a form this command creates (inet:fqdn subdomains)
+            also returns the nodes it creates while it runs, which are then run too, using a query credit each.
     cmdinputs:
       - form: inet:fqdn
         help: Domains to model DNS records and subdomains for.
@@ -534,6 +570,11 @@ commands:
       - [ slib, shodan, user ]
     descr: |
       Resolve inet:fqdn nodes to IPs, and reverse resolve inet:ipv4/inet:ipv6 nodes to hostnames, using Shodan's DNS API.
+
+      Every inbound node is read before any are run, so the nodes this command creates can't come
+      back in from a lift that's still running (ex. "inet:fqdn inet:ipv4 | slib.shodan.dns.lookup" would otherwise
+      also run on the nodes it creates). --stream-inbound runs each inbound node as it
+      arrives instead, for inbound sets too large to hold in memory, with that risk.
 
       Examples:
 
@@ -545,6 +586,13 @@ commands:
         - default: false
           action: store_true
           help: Yield the resolved IP/hostname nodes instead of the inbound nodes.
+      - - --stream-inbound
+        - default: false
+          action: store_true
+          help: |
+            Run each inbound node as it arrives, instead of reading them all first. Only for inbound
+            sets too large to hold in memory: a lift of a form this command creates (inet:fqdn, inet:ipv4/6)
+            also returns the nodes it creates while it runs, which are then run too.
     cmdinputs:
       - form: inet:fqdn
         help: Hostnames to resolve.

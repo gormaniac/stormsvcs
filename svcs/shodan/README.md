@@ -202,7 +202,14 @@ Nodes that build the same query (ex. `inet:banner` nodes with the same text, ser
 same cert, a `risk:vuln` and its `it:sec:cve`) only run it once per command, and that run's
 `it:exec:query` refs each of them. `slib.shodan.count` and `slib.shodan.trends` do the same, and
 `slib.shodan.host`, `slib.shodan.cve`, and `slib.shodan.enrich` make each IP or CVE lookup once.
-`$shodan.searchQuery($node)` returns the query for a node. See `slib.shodan.search --help` for
+`$shodan.searchQuery($node)` returns the query for a node.
+
+`slib.shodan.search`, `slib.shodan.enrich`, `slib.shodan.dns.domain`, and `slib.shodan.dns.lookup`
+read every inbound node before running any. A Storm lift is still running while a command processes
+its nodes, so a lift of a form the command creates (ex. `inet:banner | slib.shodan.search`, or
+`inet:fqdn:zone=vertex.link | slib.shodan.dns.domain`) would otherwise also return the nodes the
+command creates, and run on them too, using more query credits. `--stream-inbound` runs each
+inbound node as it arrives instead, for inbound sets too large to hold in memory, with that risk. See `slib.shodan.search --help` for
 the full list:
 
 | Form | Query |
