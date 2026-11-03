@@ -5,22 +5,23 @@ the slib.bgphe Storm package to model:
 
 - Certificates (from CT logs) by domain, the subdomains with certificates, and the hostnames
   on certificates that resolve to IPs in a prefix.
-- Domain whois records.
+- Domain whois records, from RDAP when bgp.he.net has it, otherwise from whois text.
 - ASN whois records (the organization behind an ASN) and the prefixes an ASN originates.
 
 Nothing is stored, every call is a fresh query.
 """
 
 import datetime
+import json
 import logging
 from collections.abc import AsyncIterator
 
 import aiohttp
 import synapse.lib.cell as s_cell
 
-from . import certs, norm, whois
+from . import certs, norm, rdap, whois
 from .api import BgpHeCellApi
-from .client import CERT_PAGE_SIZE, BgpHeClient
+from .client import CERT_PAGE_SIZE, BgpHeApiError, BgpHeClient
 
 logger = logging.getLogger(__name__)
 
@@ -207,15 +208,56 @@ class BgpHeSvc(s_cell.Cell):
     # ---- Whois ----
 
     async def whoisDomain(self, domain: str) -> dict:
-        """A domain's whois record, as ``{"fqdn", "text", "rec": <parsed>}``.
+        """A domain's whois record, from RDAP if bgp.he.net has it, otherwise from whois text.
 
-        See ``whois.parseDomain`` for the parsed record. bgp.he.net caches whois records, the
-        record's ``asof`` is when the registry answered, if the record says.
+        Returns ``{"fqdn", "source", "text", "rec", "rdap", "rdaperr"}``:
+
+        - ``source`` is ``rdap`` or ``whois``.
+        - ``rec`` is the parsed record, the same fields either way (see ``whois.parseDomain``
+          and ``rdap.parseDomain``). Its ``asof`` is when the registry answered, if the
+          record says (bgp.he.net caches records).
+        - ``text`` is the whois text, or for RDAP, the RDAP records as indented JSON.
+        - ``rdap`` is the raw RDAP payload (or None), ``rdaperr`` why RDAP wasn't used (or None).
+
+        RDAP is skipped for whois text when bgp.he.net has no RDAP record for the domain
+        (ex. many ccTLDs), RDAP fails, or its response has no domain record. If the text
+        lookup fails too, the error says why both failed.
         """
 
         domain = self._norm(norm.normDomain, domain)
-        text = whois.fixText(await self.client.whoisDomain(domain)).strip("\n")
-        return {"fqdn": domain, "text": text, "rec": whois.parseDomain(domain, text)}
+
+        try:
+            payload = await self.client.rdapDomain(domain)
+            rec = rdap.parseDomain(domain, payload)
+        except BgpHeApiError as err:
+            rdaperr = err.mesg
+        except rdap.BadRdap as err:
+            rdaperr = f"Unusable RDAP response for {domain}: {err}"
+        else:
+            return {
+                "fqdn": domain,
+                "source": "rdap",
+                "text": json.dumps(payload, indent=1, ensure_ascii=False),
+                "rec": rec,
+                "rdap": payload,
+                "rdaperr": None,
+            }
+
+        try:
+            text = whois.fixText(await self.client.whoisDomain(domain)).strip("\n")
+        except BgpHeApiError as err:
+            raise BgpHeApiError(
+                f"No RDAP or whois record for {domain}. RDAP: {rdaperr} Whois: {err.mesg}",
+                code=err.code,
+            ) from None
+        return {
+            "fqdn": domain,
+            "source": "whois",
+            "text": text,
+            "rec": whois.parseDomain(domain, text),
+            "rdap": None,
+            "rdaperr": rdaperr,
+        }
 
     async def whoisAsn(self, asn: int | str) -> dict:
         """An ASN's whois record, from its RIR, as ``{"asn", "text", "rec": <parsed>}``.

@@ -84,10 +84,15 @@ function hosts(valu, print=(false)) {
 
 // ---- Whois ----
 
-// Look up a domain's whois record. Returns the inet:whois:rec node, or null.
+// Look up a domain's whois record (from RDAP, or whois text without it). Returns the
+// inet:whois:rec node, or null.
 function whois(domain, print=(false)) {
     $retn = $priv.whoisDomain($domain)
     if $util.failed($retn, `Looking up the whois of {$domain}`) { return() }
+    if $lib.debug {
+        $lib.print(`slib.bgphe: The whois of {$retn.data.fqdn} is from {$retn.data.source}.`)
+        if $retn.data.rdaperr { $lib.print(`slib.bgphe: RDAP wasn't used: {$retn.data.rdaperr}`) }
+    }
     if $print { $lib.print($retn.data.text) }
     return($model.whois($retn.data))
 }

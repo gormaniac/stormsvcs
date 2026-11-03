@@ -157,6 +157,9 @@ commands:
       Look up domain whois records in bgp.he.net and model them as inet:whois:rec nodes, with
       their nameservers, contacts, and emails.
 
+      RDAP is used when bgp.he.net has it (most gTLDs and some ccTLDs), the whois text
+      otherwise. With RDAP, :text is the RDAP records as JSON.
+
       bgp.he.net caches whois records. A record's :asof is when the registry answered the
       query if the record says, or the record's last update time, or now.
 
@@ -173,7 +176,7 @@ commands:
       - - --print
         - default: false
           action: store_true
-          help: Print the raw whois text.
+          help: Print the raw whois text (or RDAP JSON).
       - - --yield
         - default: false
           action: store_true

@@ -3,7 +3,7 @@
 A Storm Service for [Hurricane Electric's BGP Toolkit](https://bgp.he.net) (bgp.he.net):
 
 - **Certificates** from CT logs, by domain, by a domain's subdomains, or by IP/CIDR, modeled as `crypto:x509:cert` with their complete details.
-- **Domain whois** as `inet:whois:rec`, with nameservers, contacts, and emails.
+- **Domain whois** (RDAP first, whois text as a fallback) as `inet:whois:rec`, with nameservers, contacts, and emails.
 - **ASN whois** (from the ASN's RIR): the AS name and the organization (`ou:org`) behind it.
 - **Originated prefixes** of an ASN (from HE's Super Looking Glass) as `inet:asnet4`/`inet:asnet6`.
 
@@ -69,11 +69,15 @@ Every node the service models is linked to the `slib.bgphe` `meta:source` with a
 - an `inet:whois:contact` for each registrant/admin/tech/billing contact that isn't redacted, and one for the registrar (`:orgname`, abuse `:email`/`:phone`, `:url`, `:whois:fqdn`, and the IANA ID as `:id`),
 - an `inet:whois:email` for each contact's email. (Synapse also adds one for every email in the record's text.)
 
-The raw text is the record's `:text` (which the Synapse model lowercases), the original text and the parsed record are in its `slib:bgphe` node data.
+The record comes from **RDAP** when bgp.he.net has it (`/rdap/dns/<domain>`): the TLD registry's RDAP record, plus the registrar's own RDAP record it links to, which usually has the registrant and other contacts. RDAP often has more than the whois text, ex. the registrant (or the privacy service standing in for it) that the text redacts. The registry is preferred for the domain's dates, status, and nameservers, the registrar for contacts.
 
-bgp.he.net caches whois records. A record's `:asof` is when the registry answered the query if the record says (ex. `>>> Last update of whois database`), or its last update time, or now. So looking a domain up again doesn't make a new record unless the record changed.
+When bgp.he.net has no RDAP record for the domain (it returns HTTP 404, ex. for many ccTLDs like `.de` and `.co`), RDAP fails, or its response isn't a domain record, the whois **text** (`/whois/dns/<domain>`) is parsed instead. Either way, the same props are set.
 
-Whois has no single format, the parser handles ICANN style records, sectioned ones (ex. Nominet's `.uk`), and terse ones (ex. DENIC's `.de`), best effort.
+The record's `:text` is the whois text, or with RDAP, the RDAP records as indented JSON. The Synapse model lowercases `:text`, its `slib:bgphe` node data has the original, plus the parsed record, the `source` (`rdap` or `whois`), the raw RDAP payload, and `rdaperr` (why RDAP wasn't used). `$lib.debug` prints which source was used.
+
+bgp.he.net caches whois records. A record's `:asof` is when the registry answered the query if the record says (RDAP's `last update of RDAP database` event, or whois text's `>>> Last update of whois database`), or its last update time, or now. So looking a domain up again doesn't make a new record unless the record changed.
+
+Whois text has no single format, the parser handles ICANN style records, sectioned ones (ex. Nominet's `.uk`), and terse ones (ex. DENIC's `.de`), best effort.
 
 ### ASNs
 

@@ -47,6 +47,11 @@ def initialState() -> dict:
             name: load(f"whois_{name}.json")["data"]
             for name in ("microsoft.com", "bbc.co.uk", "google.de", "example.org", "vertex.link")
         },
+        # domain -> the /rdap/dns payload, domains without one 404.
+        "rdapdns": {
+            name: load(f"rdap_{name}.json")
+            for name in ("microsoft.com", "vertex.link", "bbc.co.uk", "example.org")
+        },
         "whoisasn": {
             asn: load(f"whois_as{asn}.json")["data"]
             for asn in (15169, 3333, 4608, 28000, 37100, 8075)
@@ -132,6 +137,12 @@ class FakeBgpHe:
                     "total_ips": 0,
                 }
             )
+
+        if path.startswith("/rdap/dns/"):
+            name = path.removeprefix("/rdap/dns/")
+            if name in state["rdapdns"]:
+                return js(state["rdapdns"][name])
+            return js({"error": "could not find rdap record"}, status=404)
 
         if path.startswith("/whois/dns/"):
             name = path.removeprefix("/whois/dns/")

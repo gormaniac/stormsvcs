@@ -2,6 +2,7 @@
 
 import base64
 import datetime
+import json
 
 import synapse.tests.utils as s_tests
 
@@ -113,6 +114,14 @@ class TestBgpHeSvc(s_tests.SynTest):
 
             data = await svc.whoisDomain("microsoft.com")
             assert data["fqdn"] == "microsoft.com"
+            assert data["source"] == "rdap" and data["rdaperr"] is None
+            assert json.loads(data["text"]) == data["rdap"]
+            assert data["rec"]["registrant"] == "Microsoft Corporation"
+
+            fake.state["rdapdns"].pop("microsoft.com")
+            data = await svc.whoisDomain("microsoft.com")
+            assert data["source"] == "whois" and data["rdap"] is None
+            assert "HTTP 404" in data["rdaperr"]
             assert data["text"].lstrip().startswith("Domain Name: MICROSOFT.COM")
             assert data["rec"]["registrant"] == "Microsoft Corporation"
 

@@ -11,7 +11,7 @@ import os
 import aiohttp
 import pytest
 
-from bgphesvc import certs, norm, whois
+from bgphesvc import certs, norm, rdap, whois
 from bgphesvc.client import BgpHeApiError, BgpHeClient
 
 LIVE = os.environ.get("SLIB_BGPHE_LIVE") == "1"
@@ -38,6 +38,12 @@ async def test_live_endpoints():
 
         rec = whois.parseDomain("vertex.link", await cli.whoisDomain("vertex.link"))
         assert rec["created"] and rec["nameservers"]
+
+        rec = rdap.parseDomain("vertex.link", await cli.rdapDomain("vertex.link"))
+        assert rec["created"] and rec["nameservers"] and rec["registrar"]["ianaid"]
+        with pytest.raises(BgpHeApiError) as exc:
+            await cli.rdapDomain("google.de")
+        assert exc.value.code == 404
 
         rec = whois.parseAsn(15169, await cli.whoisAsn(15169))
         assert rec["name"] == "GOOGLE" and rec["orgname"] == "Google LLC"

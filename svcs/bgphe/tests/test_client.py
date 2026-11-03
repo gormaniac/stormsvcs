@@ -30,6 +30,7 @@ async def test_endpoints():
             assert data["certificates"] == []
             assert len((await cli.certDomains("gormo.co"))["domains"]) == 5
             assert (await cli.certsByPrefix("8.8.8.0", 24))["has_more"] is True
+            assert (await cli.rdapDomain("microsoft.com"))[0]["ldhName"] == "MICROSOFT.COM"
             assert "MICROSOFT.COM" in await cli.whoisDomain("microsoft.com")
             assert "ASName:         GOOGLE" in await cli.whoisAsn(15169)
             assert len(await cli.prefixesOriginated(15169)) == 8
@@ -40,12 +41,13 @@ async def test_endpoints():
             "/certs/api/domain?domain=gormo.co&page=2",
             "/certs/api/list?domain=gormo.co",
             "/certs/api/certificates/by-prefix?prefix=8.8.8.0&len=24",
+            "/rdap/dns/microsoft.com",
             "/whois/dns/microsoft.com",
             "/whois/as15169",
             "/super-lg/report/api/v1/prefixes/originated/15169",
             "/super-lg/report/api/v1/prefixes/originated/99",
         ]
-        assert cli.count == 8
+        assert cli.count == 9
         assert all(h["User-Agent"] == c_client.USER_AGENT for h in fake.headers)
 
 
@@ -62,6 +64,18 @@ async def test_errors():
 
             with pytest.raises(BgpHeApiError, match="unallocated asn"):
                 await cli.whoisAsn(99)
+
+            with pytest.raises(BgpHeApiError) as exc:
+                await cli.rdapDomain("nope.com")
+            assert exc.value.code == 404
+            assert "could not find rdap record" in exc.value.mesg
+
+            fake.state["rdapdns"]["e.com"] = {"error": "oops"}
+            with pytest.raises(BgpHeApiError, match="returned an error for /rdap/dns/e.com: oops"):
+                await cli.rdapDomain("e.com")
+            fake.state["rdapdns"]["n.com"] = 5
+            with pytest.raises(BgpHeApiError, match="no RDAP data"):
+                await cli.rdapDomain("n.com")
 
             with pytest.raises(BgpHeApiError, match="Invalid IP address format"):
                 await cli.certsByPrefix("bad", 32)

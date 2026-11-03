@@ -269,25 +269,33 @@ class TestBgpHeStormPkg(s_tests.SynTest):
             msgs = await core.stormlist("[ inet:fqdn=x.com ] | slib.bgphe.certs.ip")
             self.stormIsInWarn("slib.bgphe.certs.ip: Unable to look up inet:fqdn x.com, it needs an IP or CIDR.", msgs)
 
-    async def test_whois(self):
+    async def test_whois_rdap(self):
         async with fb.bgpheSvc(self) as (core, svc, fake):
-            msgs = await core.stormlist("slib.bgphe.whois microsoft.com")
+            msgs = await core.stormlist("$lib.debug = (true) slib.bgphe.whois microsoft.com")
             self.stormHasNoWarnErr(msgs)
+            self.stormIsInPrint("slib.bgphe: The whois of microsoft.com is from rdap.", msgs)
+            # RDAP was enough, the whois text wasn't requested.
+            assert fake.count("/whois/dns/") == 0
+
             nodes = await core.nodes("inet:whois:rec")
             assert len(nodes) == 1
             rec = nodes[0]
             assert rec.get("fqdn") == "microsoft.com"
-            assert rec.get("asof") == s_time.parse("2026-09-17 16:47:14")
+            # The registry's "last update of RDAP database".
+            assert rec.get("asof") == s_time.parse("2026-10-31 10:42:59")
             assert rec.get("created") == s_time.parse("1991-05-02 04:00:00")
             assert rec.get("updated") == s_time.parse("2026-01-29 18:46:57")
             assert rec.get("expires") == s_time.parse("2027-05-03 04:00:00")
             assert rec.get("registrar") == "markmonitor inc."
             assert rec.get("registrant:name") == "microsoft corporation"
-            # The model lowercases :text, the node data has the original.
-            assert "domain name: microsoft.com" in rec.get("text")
+            # :text is the RDAP records as JSON (lowercased by the model).
+            assert '"ldhname": "microsoft.com"' in rec.get("text")
             data = await rec.getData("slib:bgphe")
-            assert "Domain Name: MICROSOFT.COM" in data["text"]
+            assert data["source"] == "rdap" and data["rdaperr"] is None
+            assert data["rdap"][0]["ldhName"] == "MICROSOFT.COM"
+            assert '"ldhName": "MICROSOFT.COM"' in data["text"]
             assert data["rec"]["dnssec"] == "unsigned"
+            assert "clientDeleteProhibited" in data["rec"]["status"]
 
             assert await count(core, "inet:whois:rec -> inet:whois:recns") == 4
             assert await count(core, "inet:whois:recns:ns=ns1-39.azure-dns.com") == 1
@@ -300,14 +308,16 @@ class TestBgpHeStormPkg(s_tests.SynTest):
             assert len(nodes) == 1
             assert nodes[0].get("orgname") == "microsoft corporation"
             assert nodes[0].get("name") == "domain administrator"
+            assert nodes[0].get("address") == "one microsoft way"
             assert nodes[0].get("city") == "redmond"
             assert nodes[0].get("country") == "us"
             assert nodes[0].get("email") == "admin@domains.microsoft"
             assert nodes[0].get("phone") == "14258828080"
+            assert nodes[0].get("fax") == "14259367329"
             nodes = await core.nodes("inet:whois:contact:type=registrar")
             assert nodes[0].get("orgname") == "markmonitor inc."
             assert nodes[0].get("email") == "abusecomplaints@markmonitor.com"
-            assert nodes[0].get("url") == "http://www.markmonitor.com"
+            assert nodes[0].get("phone") == "12086851750"
             assert nodes[0].get("whois:fqdn") == "whois.markmonitor.com"
             assert nodes[0].get("id") == "292"
             assert await count(core, "inet:whois:contact") == 3
@@ -318,6 +328,57 @@ class TestBgpHeStormPkg(s_tests.SynTest):
             await core.nodes("slib.bgphe.whois microsoft.com")
             assert await count(core, "inet:whois:rec") == 1
 
+            # RDAP has the registrant the whois text redacts (a privacy service).
+            nodes = await core.nodes("slib.bgphe.whois vertex.link")
+            assert nodes[0].get("registrant:name") == "privacy service provided by withheld for privacy llc"
+            nodes = await core.nodes("inet:whois:rec:fqdn=vertex.link -> inet:whois:contact +:type=registrant")
+            assert nodes[0].get("state") == "delaware"
+            assert nodes[0].get("id") == "038b463ab70e46320afa08d947a7cf73-namech"
+
+            # --print prints the RDAP JSON.
+            msgs = await core.stormlist("[ inet:fqdn=bbc.co.uk ] | slib.bgphe.whois --print")
+            self.stormIsInPrint('"ldhName": "bbc.co.uk"', msgs)
+            assert [m[1][0] for m in msgs if m[0] == "node"] == [("inet:fqdn", "bbc.co.uk")]
+            assert await count(core, "inet:whois:rec:fqdn=bbc.co.uk -> inet:whois:recns") == 8
+
+    async def test_whois_text(self):
+        async with fb.bgpheSvc(self) as (core, svc, fake):
+            # Without RDAP (bgp.he.net 404s), the whois text is used.
+            fake.state["rdapdns"].pop("microsoft.com")
+            msgs = await core.stormlist("$lib.debug = (true) slib.bgphe.whois microsoft.com")
+            self.stormHasNoWarnErr(msgs)
+            self.stormIsInPrint("slib.bgphe: The whois of microsoft.com is from whois.", msgs)
+            self.stormIsInPrint("RDAP wasn't used: bgp.he.net returned HTTP 404 for /rdap/dns/microsoft.com: could not find rdap record", msgs)
+
+            nodes = await core.nodes("inet:whois:rec")
+            assert len(nodes) == 1
+            rec = nodes[0]
+            assert rec.get("asof") == s_time.parse("2026-09-17 16:47:14")
+            assert rec.get("created") == s_time.parse("1991-05-02 04:00:00")
+            assert rec.get("registrar") == "markmonitor inc."
+            assert rec.get("registrant:name") == "microsoft corporation"
+            # The model lowercases :text, the node data has the original.
+            assert "domain name: microsoft.com" in rec.get("text")
+            data = await rec.getData("slib:bgphe")
+            assert data["source"] == "whois" and data["rdap"] is None
+            assert "Domain Name: MICROSOFT.COM" in data["text"]
+
+            assert await count(core, "inet:whois:rec -> inet:whois:recns") == 4
+            nodes = await core.nodes("inet:whois:contact:type=registrar")
+            assert nodes[0].get("url") == "http://www.markmonitor.com"
+            assert await count(core, "inet:whois:contact") == 3
+
+            # RDAP errors and unusable responses fall back too.
+            fake.state["errors"]["/rdap/dns/vertex.link"] = [500] * 4
+            nodes = await core.nodes("slib.bgphe.whois vertex.link")
+            data = await nodes[0].getData("slib:bgphe")
+            assert data["source"] == "whois" and "HTTP 500" in data["rdaperr"]
+
+            fake.state["rdapdns"]["bbc.co.uk"] = [{"objectClassName": "entity"}, None]
+            nodes = await core.nodes("slib.bgphe.whois bbc.co.uk")
+            data = await nodes[0].getData("slib:bgphe")
+            assert data["source"] == "whois" and "Unusable RDAP response" in data["rdaperr"]
+
             # asof falls back to the record's update time, then to now.
             nodes = await core.nodes("slib.bgphe.whois google.de")
             assert nodes[0].get("asof") == s_time.parse("2018-03-12 20:44:25")
@@ -326,20 +387,17 @@ class TestBgpHeStormPkg(s_tests.SynTest):
             nodes = await core.nodes("slib.bgphe.whois bare.com")
             assert len(nodes) == 1 and nodes[0].get("asof") > s_time.parse("2026-01-01")
 
-            # Inbound nodes and --print.
-            msgs = await core.stormlist("[ inet:fqdn=vertex.link ] | slib.bgphe.whois --print")
-            self.stormIsInPrint("Domain Name: vertex.link", msgs)
-            assert [m[1][0] for m in msgs if m[0] == "node"] == [("inet:fqdn", "vertex.link")]
-            nodes = await core.nodes("inet:fqdn=bbc.co.uk | slib.bgphe.whois --yield")
-            assert len(nodes) == 0
-            nodes = await core.nodes("[ inet:fqdn=bbc.co.uk ] | slib.bgphe.whois --yield")
+            # Inbound nodes.
+            nodes = await core.nodes("inet:fqdn=google.de | slib.bgphe.whois --yield")
             assert [n.form.name for n in nodes] == ["inet:whois:rec"]
-            assert await count(core, "inet:whois:rec:fqdn=bbc.co.uk -> inet:whois:recns") == 8
+            nodes = await core.nodes("inet:fqdn=google.de | slib.bgphe.whois")
+            assert [n.form.name for n in nodes] == ["inet:fqdn"]
 
             msgs = await core.stormlist("slib.bgphe.whois nope.com")
             self.stormIsInWarn(
-                "slib.bgphe: Looking up the whois of nope.com failed: bgp.he.net returned HTTP 400 "
-                "for /whois/dns/nope.com: whois unavailable",
+                "slib.bgphe: Looking up the whois of nope.com failed: No RDAP or whois record for "
+                "nope.com. RDAP: bgp.he.net returned HTTP 404 for /rdap/dns/nope.com: could not find "
+                "rdap record Whois: bgp.he.net returned HTTP 400 for /whois/dns/nope.com: whois unavailable",
                 msgs,
             )
             self.stormHasNoErr(msgs)

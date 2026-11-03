@@ -12,6 +12,8 @@ Endpoint                                                  What it returns
                                                           many certificates each has.
 ``/certs/api/certificates/by-prefix?prefix=<ip>&len=<n>`` IPs in a prefix, each with the hostnames
                                                           (from certificates) that resolve to it.
+``/rdap/dns/<fqdn>``                                      A domain's RDAP records (registry and
+                                                          registrar).
 ``/whois/dns/<fqdn>``                                     A domain's raw whois text.
 ``/whois/as<asn>``                                        An ASN's raw RIR whois text.
 ``/super-lg/report/api/v1/prefixes/originated/<asn>``     The prefixes an ASN originates.
@@ -191,8 +193,8 @@ class BgpHeClient:
         # The loop always returns or raises, this keeps type checkers happy.
         raise BgpHeApiError(f"Unable to request {path} from bgp.he.net.")  # pragma: no cover
 
-    async def getJson(self, path: str, params: Mapping[str, Any] | None = None) -> dict:
-        """GET a path and return its JSON object, raising BgpHeApiError for any error."""
+    async def _getAny(self, path: str, params: Mapping[str, Any] | None = None) -> tuple[int, Any]:
+        """GET a path and return (status, its parsed JSON), raising BgpHeApiError for errors."""
 
         code, body = await self._send(path, params)
         text = body.decode("utf-8", errors="replace") if body else ""
@@ -203,6 +205,12 @@ class BgpHeClient:
 
         if code >= 400:
             raise BgpHeApiError(errMesg(path, code, data, text), code=code)
+        return code, data
+
+    async def getJson(self, path: str, params: Mapping[str, Any] | None = None) -> dict:
+        """GET a path and return its JSON object, raising BgpHeApiError for any error."""
+
+        code, data = await self._getAny(path, params)
         if not isinstance(data, Mapping):
             raise BgpHeApiError(f"Unexpected response from {path}: expected a JSON object.", code)
         if data.get("error"):
@@ -255,6 +263,21 @@ class BgpHeClient:
 
         data = await self.getJson(f"/whois/dns/{seg(domain)}")
         return _reqText(data, "/whois/dns")
+
+    async def rdapDomain(self, domain: str) -> Any:
+        """GET /rdap/dns/<domain> - a domain's RDAP records.
+
+        Returns ``[<registry record>, [<registrar records>] or null]`` (see ``rdap.records``).
+        bgp.he.net returns HTTP 404 for domains without RDAP (ex. many ccTLDs).
+        """
+
+        path = f"/rdap/dns/{seg(domain)}"
+        code, data = await self._getAny(path)
+        if isinstance(data, Mapping) and data.get("error"):
+            raise BgpHeApiError(f"bgp.he.net returned an error for {path}: {data['error']}", code)
+        if not isinstance(data, (list, Mapping)):
+            raise BgpHeApiError(f"Unexpected response from {path}: no RDAP data.", code)
+        return data
 
     async def whoisAsn(self, asn: int) -> str:
         """GET /whois/as<asn> - an ASN's raw whois text, from its RIR."""
