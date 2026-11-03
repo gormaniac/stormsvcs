@@ -145,17 +145,79 @@ class TestStormEnrich(s_tests.SynTest):
             assert match.get("rule") == rule.ndef[1] and match.get("target") == aflow.ndef[1]
             assert aflow.get("src") == "tcp://10.0.2.15:49712" and aflow.get("dst:port") == 80
 
-            # Created files.
-            (add,) = await core.nodes("it:exec:file:add")
-            assert add.get("file") == f"sha256:{fa.DROPPED_SHA256}" and add.get("proc") == main.ndef[1]
+            # Created files, tagged with ANY.RUN's threat level for them.
+            (add,) = await core.nodes(f"it:exec:file:add:file=sha256:{fa.DROPPED_SHA256}")
+            assert add.get("proc") == main.ndef[1] and add.get("sandbox:file")
             assert add.get("path") == "c:/users/admin/appdata/roaming/payload.dll"
+            assert add.tags["rep.anyrun.threat_lvl.high"] == IVAL
             assert await core.count(f"{SAMPLE} -(refs)> file:bytes:sha256={fa.DROPPED_SHA256}") == 1
+            # A file without a SHA256 is modeled by path, with its MD5.
+            (add,) = await core.nodes("it:exec:file:add:path=c:/users/admin/notes.txt")
+            assert add.get("file") is None and "rep.anyrun.threat_lvl.unknown" in add.tags
+            assert await core.count("it:exec:file:add:path=c:/users/admin/notes.txt -(refs)> hash:md5") == 1
+
+            # File operations from the incidents.
+            (write,) = await core.nodes("it:exec:file:write")
+            assert write.get("path") == "c:/users/admin/notes.txt" and write.get("proc") == main.ndef[1]
+            assert "rep.anyrun.threat_lvl.unknown" in write.tags
+            dels = {n.get("path") for n in await core.nodes("it:exec:file:del")}
+            assert dels == {"c:/users/admin/appdata/local/temp/invoice.exe", "c:/users/admin/a.tmp"}
+            assert await core.count("it:exec:file:add:path=c:/users/admin/b.exe") == 1
+            (drop,) = await core.nodes("it:exec:file:add:path=c:/users/admin/second.bin")
+            assert drop.get("file") == f"sha256:{fa.DROP2_SHA256}" and not drop.tags
+            assert await core.count(f"{SAMPLE} -(refs)> file:bytes:sha256={fa.DROP2_SHA256}") == 1
+            assert await core.count("it:exec:file:add") == 4
+            assert await core.count("it:exec:file:read") == 0
+
+            # Registry operations.
+            run = f"{fa.RUNKEY}\\Updater"
+            (rset,) = await core.nodes("it:exec:reg:set:reg::key=$key", opts={"vars": {"key": run}})
+            assert rset.get("proc") == main.ndef[1] and rset.get("time") == 1793448011000
+            assert rset.get("sandbox:file") == f"sha256:{fa.SAMPLE_SHA256}"
+            (rval,) = await core.nodes("it:exec:reg:set:reg::key=$key -> it:dev:regval", opts={"vars": {"key": run}})
+            assert rval.get("str") == "C:\\Users\\admin\\AppData\\Roaming\\payload.dll"
+            assert await core.count("it:dev:regkey=$key", opts={"vars": {"key": run}}) == 1
+            (count,) = await core.nodes("it:dev:regval:key=HKEY_CURRENT_USER\\SOFTWARE\\Agent\\Count")
+            assert count.get("int") == 16
+            assert await core.count("it:exec:reg:set") == 3
+            assert await core.count("it:exec:reg:del") == 2
+            (rdel,) = await core.nodes("it:exec:reg:del:reg::key=HKEY_CURRENT_USER\\SOFTWARE\\Old")
+            assert rdel.get("proc") == child.ndef[1]
+            assert await core.count("it:exec:reg:get") == 0
 
             # Modeling again updates the same nodes.
             count = await core.count(".created")
             msgs = await core.stormlist(f"slib.anyrun.enrich --task https://app.any.run/tasks/{fa.TASK}")
             self.stormHasNoWarnErr(msgs)
             assert await core.count(".created") == count
+
+            # Reads only with --reads.
+            msgs = await core.stormlist(f"slib.anyrun.enrich --task {fa.TASK} --reads")
+            self.stormHasNoWarnErr(msgs)
+            (read,) = await core.nodes("it:exec:file:read")
+            assert read.get("path") == "c:/windows/win.ini"
+            (get,) = await core.nodes("it:exec:reg:get -> it:dev:regval")
+            assert get.get("key") == "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography\\MachineGuid"
+
+    async def test_regval_shared(self):
+        async with fa.anyrunSvc(self) as (core, svc, fake):
+            # The same value set by two tasks is one it:dev:regval.
+            report = fa.fileReport(fake.url)
+            report["analysis"]["uuid"] = fa.NEWTASK
+            fake.state["reports"][fa.NEWTASK] = report
+            for task in (fa.TASK, fa.NEWTASK):
+                msgs = await core.stormlist(f"slib.anyrun.enrich --task {task}")
+                self.stormHasNoWarnErr(msgs)
+            run = f"{fa.RUNKEY}\\Updater"
+            assert await core.count("it:exec:reg:set:reg::key=$key", opts={"vars": {"key": run}}) == 2
+            assert await core.count("it:dev:regval:key=$key", opts={"vars": {"key": run}}) == 1
+
+            # Turning tags off drops the threat level tags too.
+            await core.callStorm("slib.anyrun.admin.tags --disable")
+            await core.nodes("it:exec:file:add | [ -#rep ]")
+            msgs = await core.stormlist(f"slib.anyrun.enrich --task {fa.TASK}")
+            self.stormHasNoWarnErr(msgs)
+            assert await core.count("it:exec:file:add#rep.anyrun.threat_lvl") == 0
 
     async def test_enrich_nodes(self):
         async with fa.anyrunSvc(self) as (core, svc, fake):
@@ -310,7 +372,10 @@ class TestStormTasks(s_tests.SynTest):
             self.stormIsInPrint(f"file: {fa.SAMPLE_SHA256}", msgs)
             self.stormIsInPrint("verdict: Malicious activity (score 100)", msgs)
             self.stormIsInPrint("families: AgentTesla", msgs)
-            self.stormIsInPrint("processes: 2, DNS requests: 1, HTTP requests: 1, connections: 1, Suricata alerts: 1, files: 1", msgs)
+            self.stormIsInPrint("processes: 2, DNS requests: 1, HTTP requests: 1, connections: 1, Suricata alerts: 1", msgs)
+            self.stormIsInPrint(
+                "created files: 2, file operations: 5, registry operations: 5, screenshots: 2, video: true", msgs
+            )
 
             msgs = await core.stormlist(f"slib.anyrun.report {fa.TASK} --iocs --reputation 2")
             self.stormHasNoWarnErr(msgs)
@@ -355,6 +420,58 @@ class TestStormTasks(s_tests.SynTest):
             msgs = await core.stormlist(f"[ hash:sha1={fa.SAMPLE_SHA1} ] | slib.anyrun.download --yield")
             self.stormHasNoWarnErr(msgs)
             assert yielded(msgs) == [("file:bytes", f"sha256:{fa.SAMPLE_SHA256}")]
+
+            # The PCAP, video, and screenshots, linked to the task's verdict.
+            msgs = await core.stormlist(f"slib.anyrun.download --task {fa.TASK} --pcap --video --screenshots --yield")
+            self.stormHasNoWarnErr(msgs)
+            video = hashlib.sha256(fa.VIDEO).hexdigest()
+            jpeg1, jpeg2 = (hashlib.sha256(b).hexdigest() for b in (fa.JPEG1, fa.JPEG2))
+            assert yielded(msgs) == [
+                ("file:bytes", f"sha256:{pcap}"),
+                ("file:bytes", f"sha256:{video}"),
+                ("file:bytes", f"sha256:{jpeg1}"),
+                ("file:bytes", f"sha256:{jpeg2}"),
+            ]
+            assert await core.axon.has(hashlib.sha256(fa.VIDEO).digest())
+            scan = f"{SAMPLE} -> it:av:scan:result:target:file"
+            refs = {n.ndef for n in await core.nodes(f"{scan} -(refs)> *")}
+            assert ("file:bytes", f"sha256:{pcap}") in refs and ("file:bytes", f"sha256:{video}") in refs
+            (n,) = await core.nodes(f"file:bytes=sha256:{video}")
+            assert n.get("mime") == "video/mp4" and n.get("name") == f"{fa.TASK}.mp4"
+            (n,) = await core.nodes(f"file:bytes=sha256:{pcap}")
+            assert n.get("mime") == "application/vnd.tcpdump.pcap"
+
+            shots = await core.nodes(f"{scan} -(refs)> it:screenshot")
+            assert len(shots) == 2
+            (shot,) = await core.nodes(f"it:screenshot:image=sha256:{jpeg2}")
+            assert shot.get("sandbox:file") == f"sha256:{fa.SAMPLE_SHA256}" and shot.get("time") == 1793448030000
+            assert shot.get("desc") == f"ANY.RUN task {fa.TASK} screenshot at 30s"
+            (n,) = await core.nodes(f"file:bytes=sha256:{jpeg1}")
+            assert n.get("mime") == "image/jpeg" and n.get("name") == f"{fa.SCREEN1}.jpeg"
+            assert await core.count("it:exec:url") == 0
+
+            # Downloading again doesn't duplicate anything.
+            count = await core.count(".created")
+            msgs = await core.stormlist(f"slib.anyrun.download --task {fa.TASK} --pcap --video --screenshots")
+            self.stormHasNoWarnErr(msgs)
+            assert await core.count(".created") == count
+
+            # A URL task's screenshots, with its browser visit; it has no video.
+            report = fa.urlReport()
+            report["analysis"]["content"]["screenshots"] = [{"uuid": fa.SCREEN1, "time": 2}, {"uuid": fa.SCREEN2, "time": 9}]
+            fake.state["reports"][fa.URLTASK] = report
+            msgs = await core.stormlist(f"slib.anyrun.download --task {fa.URLTASK} --screenshots --video")
+            self.stormIsInWarn(f"Task {fa.URLTASK} has no video.", msgs)
+            (visit,) = await core.nodes("it:exec:url")
+            assert visit.get("url") == fa.URL and visit.get("page:image") == f"sha256:{jpeg2}"
+            shots = await core.nodes(f"inet:url={fa.URL} -> it:av:scan:result:target:url -(refs)> it:screenshot")
+            assert sorted(n.get("time") for n in shots) == [1793350802000, 1793350809000]
+            assert all(n.get("sandbox:file") is None for n in shots)
+
+            fake.state["reports"][fa.URLTASK]["analysis"]["content"]["screenshots"] = []
+            msgs = await core.stormlist(f"slib.anyrun.download --task {fa.URLTASK} --screenshots")
+            self.stormIsInWarn("has no screenshots", msgs)
+            fake.state["reports"] = {}
 
             msgs = await core.stormlist(f"slib.anyrun.download --task {fa.URLTASK}")
             self.stormIsInWarn("analyzed a URL, it has no sample file", msgs)

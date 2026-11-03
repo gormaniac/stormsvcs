@@ -51,6 +51,34 @@ STIX_COMPARE = re.compile(
 
 STIX_KINDS = {"ipv4-addr": "ipv4", "ipv6-addr": "ipv6", "domain-name": "fqdn", "url": "url"}
 
+HIVES = {
+    "HKLM": "HKEY_LOCAL_MACHINE",
+    "HKEY_LOCAL_MACHINE": "HKEY_LOCAL_MACHINE",
+    "\\REGISTRY\\MACHINE": "HKEY_LOCAL_MACHINE",
+    "HKCU": "HKEY_CURRENT_USER",
+    "HKEY_CURRENT_USER": "HKEY_CURRENT_USER",
+    "HKCR": "HKEY_CLASSES_ROOT",
+    "HKEY_CLASSES_ROOT": "HKEY_CLASSES_ROOT",
+    "HKU": "HKEY_USERS",
+    "HKEY_USERS": "HKEY_USERS",
+    "\\REGISTRY\\USER": "HKEY_USERS",
+    "HKCC": "HKEY_CURRENT_CONFIG",
+    "HKEY_CURRENT_CONFIG": "HKEY_CURRENT_CONFIG",
+}
+"""Registry hive names and abbreviations (upper case) as their full names."""
+
+DEFAULT_VALUES = ("", "(default)", "@")
+"""Registry value names that mean a key's default value."""
+
+FILE_OPS = {"CREATE": "add", "WRITE": "write", "DELETE": "del", "READ": "read"}
+"""ANY.RUN's file operations (incident events) as it:exec:file:<op> forms. CLOSE isn't modeled."""
+
+REG_OPS = {"write": "set", "delete key": "del", "delete value": "del", "read": "get"}
+"""ANY.RUN's registry operations (incident events) as it:exec:reg:<op> forms."""
+
+READ_OPS = ("read", "get")
+"""File and registry operations that are only normalized when reads are asked for."""
+
 
 # ---- Generic helpers ----
 
@@ -591,26 +619,280 @@ def normAlert(threat: dict, procs: _Procs) -> dict | None:
     }
 
 
+def threatLevel(valu: Any) -> str | None:
+    """A file's ANY.RUN threat level (``UNKNOWN``, ``LOW``, ``MID``, ``HIGH``) as a tag part."""
+
+    return tagPart(valu) if isinstance(valu, str) else None
+
+
 def normFile(item: dict, procs: _Procs) -> dict | None:
-    """A file the task created or changed (``modified.files[]``), or None without a SHA256."""
+    """A file the task created (``modified.files[]``), or None without a path or SHA256.
+
+    Files without a SHA256 have no ``file:bytes`` to model, but their creation is still modeled
+    by path (with any other hashes ANY.RUN reported).
+    """
 
     file = hashes(item.get("hashes"))
-    if not file.get("sha256"):
-        return None
     path = item.get("filename") if isinstance(item.get("filename"), str) else None
+    if not file.get("sha256") and not path:
+        return None
+    file.setdefault("sha256", None)
     file.update(
         {
             "path": path or None,
             "name": basename(path),
             "size": toInt(item.get("size")),
             "mime": dget(item, "info", "mime") or None,
-            "threat": item.get("threatLevel") or None,
+            "threat": threatLevel(item.get("threatLevel")),
             "proc": procs.get(item.get("process")),
             "time": toMsecs(item.get("time")),
             "url": item.get("permanentUrl") or None,
         }
     )
     return file
+
+
+def _pathKey(path: Any) -> str | None:
+    """A case-insensitive key for a Windows (or POSIX) path."""
+
+    return path.replace("/", "\\").lower() if isinstance(path, str) and path else None
+
+
+def incidentEvents(report: dict) -> list[tuple[dict, dict]]:
+    """Every (incident, event) pair of a report's incidents."""
+
+    ret = []
+    for incident in dlist(report, "incidents"):
+        if not isinstance(incident, dict):
+            continue
+        for event in dlist(incident, "events"):
+            if isinstance(event, dict):
+                ret.append((incident, event))
+    return ret
+
+
+def normFileOps(report: dict, procs: _Procs, files: list[dict], reads: bool = False) -> list[dict]:
+    """The file operations of a report's incident events (``File`` and ``FileDrop`` events).
+
+    Each is ``{op, path, name, file, proc, time, threat}``, where ``op`` is ``add``, ``write``,
+    ``del``, or ``read`` (only with ``reads``) and ``file`` is the file's hashes (from a
+    ``FileDrop`` event) or None. A rename is a ``del`` of the old path and an ``add`` of the new
+    one. Creations of files already in ``modified.files`` are left to ``files``, and every
+    operation gets the threat level ANY.RUN gave the file at the same path.
+    """
+
+    threats = {_pathKey(f["path"]): f["threat"] for f in files if f["path"] and f["threat"]}
+    created = {_pathKey(f["path"]) for f in files if f["path"]}
+    seen = set()
+    ret = []
+
+    def add(op, path, incident, event, file=None):
+        if not isinstance(path, str) or not path.strip():
+            return
+        path = path.strip()
+        pkey = _pathKey(path)
+        if op == "add" and pkey in created:
+            return
+        if op in READ_OPS and not reads:
+            return
+        proc = procs.get(incident.get("process"))
+        sha256 = (file or {}).get("sha256")
+        key = (op, pkey, proc, sha256)
+        if key in seen:
+            return
+        seen.add(key)
+        ret.append(
+            {
+                "op": op,
+                "path": path,
+                "name": basename(path),
+                "file": file or None,
+                "proc": proc,
+                "time": toMsecs(event.get("time")),
+                "threat": threats.get(pkey),
+            }
+        )
+
+    for incident, event in incidentEvents(report):
+        if "sha256" in event and "filename" in event:
+            # A FileDrop event.
+            file = hashes(event)
+            if file.get("sha256"):
+                file.update(
+                    {"size": toInt(event.get("size")), "mime": event.get("contentType") or None}
+                )
+                file["name"] = basename(event.get("filename"))
+            add(
+                "add",
+                event.get("filename"),
+                incident,
+                event,
+                file=file if file.get("sha256") else None,
+            )
+            continue
+        oper = event.get("operation")
+        if not isinstance(oper, str) or "name" not in event or "key" in event:
+            continue
+        newname = event.get("newname")
+        if isinstance(newname, str) and newname.strip() and newname.strip() != event.get("name"):
+            add("del", event.get("name"), incident, event)
+            add("add", newname, incident, event)
+            continue
+        op = FILE_OPS.get(oper.upper())
+        if op:
+            add(op, event.get("name"), incident, event)
+    return ret
+
+
+def regKey(key: Any) -> str | None:
+    """A registry key with its hive's full name (ex. ``HKCU\\Software`` is
+    ``HKEY_CURRENT_USER\\Software``), or None."""
+
+    if not isinstance(key, str) or not key.strip():
+        return None
+    key = key.strip().rstrip("\\")
+    upper = key.upper()
+    for hive in sorted(HIVES, key=len, reverse=True):
+        if upper == hive or upper.startswith(hive + "\\"):
+            return HIVES[hive] + key[len(hive) :]
+    return key
+
+
+def regOp(oper: Any) -> str | None:
+    """An operation from ``modified.registry`` as ``set``, ``del``, or ``get`` (or None).
+
+    ANY.RUN doesn't document these values, so they're matched by keyword.
+    """
+
+    if not isinstance(oper, str):
+        return None
+    low = oper.strip().lower()
+    if low in REG_OPS:
+        return REG_OPS[low]
+    if "delete" in low or "remove" in low:
+        return "del"
+    if any(w in low for w in ("write", "set", "create", "modify")):
+        return "set"
+    if any(w in low for w in ("read", "query", "open", "get")):
+        return "get"
+    return None
+
+
+def regValue(value: Any, vtype: Any = None) -> tuple[int | None, str | None]:
+    """A registry value as (int, str): an int for DWORD/QWORD values (or untyped integers)."""
+
+    if value is None or value == "":
+        return None, None
+    value = str(value)
+    vtype = str(vtype or "").upper()
+    if vtype in ("REG_DWORD", "REG_QWORD") or (not vtype and re.fullmatch(r"-?\d+", value.strip())):
+        try:
+            return int(value.strip(), 0), None
+        except ValueError:
+            pass
+    return None, value
+
+
+def normRegOps(report: dict, procs: _Procs, reads: bool = False) -> list[dict]:
+    """The registry operations of a report (``modified.registry`` and incident events).
+
+    Each is ``{op, path, key, name, int, str, type, proc, time}``, where ``op`` is ``set``,
+    ``del``, or ``get`` (only with ``reads``). ``path`` is the key with the value's name
+    appended (``it:dev:regval`` has no prop for the name), or just the key for a key's default
+    value and for deleted keys.
+    """
+
+    events = [
+        (incident, event)
+        for incident, event in incidentEvents(report)
+        if "key" in event and isinstance(event.get("operation"), str)
+    ]
+    # Only incident events have the value's type.
+    types = {
+        ((regKey(e.get("key")) or "").lower(), str(e.get("name") or "").lower()): e.get("typeValue")
+        for _, e in events
+        if e.get("typeValue")
+    }
+
+    seen = set()
+    ret = []
+
+    def add(op, key, name, value, vtype, proc, time, delkey=False):
+        key = regKey(key)
+        if not op or not key or (op == "get" and not reads):
+            return
+        name = name if isinstance(name, str) else ""
+        path = key
+        if not delkey and name.strip().lower() not in DEFAULT_VALUES:
+            path = f"{key}\\{name}"
+        if vtype is None:
+            vtype = types.get((key.lower(), name.lower()))
+        if op == "del":
+            ival, sval = None, None
+        else:
+            ival, sval = regValue(value, vtype)
+        dkey = (op, path.lower(), ival, sval, proc)
+        if dkey in seen:
+            return
+        seen.add(dkey)
+        ret.append(
+            {
+                "op": op,
+                "path": path,
+                "key": key,
+                "name": name or None,
+                "int": ival,
+                "str": sval,
+                "type": vtype or None,
+                "proc": proc,
+                "time": toMsecs(time),
+            }
+        )
+
+    for item in dlist(report, "modified", "registry"):
+        if isinstance(item, dict):
+            oper = str(item.get("operation") or "").lower()
+            add(
+                regOp(item.get("operation")),
+                item.get("key"),
+                item.get("name"),
+                item.get("value"),
+                None,
+                procs.get(item.get("process")),
+                item.get("time"),
+                delkey="key" in oper and "delete" in oper,
+            )
+    for incident, event in events:
+        oper = event["operation"].strip().lower()
+        add(
+            REG_OPS.get(oper),
+            event.get("key"),
+            event.get("name"),
+            event.get("value"),
+            event.get("typeValue"),
+            procs.get(incident.get("process")),
+            event.get("time"),
+            delkey=oper == "delete key",
+        )
+    return ret
+
+
+def normScreens(analysis: dict, start: int | None) -> list[dict]:
+    """A task's screenshots: ``{uuid, time}`` (the time is the task's start plus the offset)."""
+
+    ret = []
+    for item in dlist(analysis, "content", "screenshots"):
+        uuid = taskId(item.get("uuid")) if isinstance(item, dict) else None
+        if not uuid:
+            continue
+        offs = item.get("time")
+        time = toMsecs(offs)
+        if time is None and start is not None and isinstance(offs, (int, float)) and offs >= 0:
+            # Screenshot times are int32, too small for epoch millis, so they're offsets.
+            # ANY.RUN doesn't document their unit, seconds is the only one that fits a task.
+            time = start + int(offs * 1000)
+        ret.append({"uuid": uuid, "time": time, "offset": toInt(offs)})
+    return ret
 
 
 def normMutexes(procs: list[dict]) -> list[str]:
@@ -628,12 +910,13 @@ def normMutexes(procs: list[dict]) -> list[str]:
     return uniq(ret)
 
 
-def normReport(report: dict) -> dict:
+def normReport(report: dict, reads: bool = False) -> dict:
     """Normalize a task report (the ``data`` of GET /v1/analysis/{uuid}).
 
     Returns the task's ID and link, its main object (``kind``, ``url``, ``file``), times,
     verdict, tags, families, ATT&CK techniques, malware configs, processes, network activity
-    (DNS, HTTP, connections, Suricata alerts), created files, and mutexes.
+    (DNS, HTTP, connections, Suricata alerts), created files, file and registry operations
+    (reads only with ``reads``), mutexes, screenshots, and whether there's a video.
     """
 
     analysis = report.get("analysis") if isinstance(report.get("analysis"), dict) else {}
@@ -654,6 +937,7 @@ def normReport(report: dict) -> dict:
     tags = tagStrs(analysis.get("tags"))
 
     network = report.get("network") if isinstance(report.get("network"), dict) else {}
+    files = [f for f in (normFile(i, procs) for i in dlist(report, "modified", "files")) if f]
     errors = []
     if report.get("status") not in (None, "done"):
         errors.append(f"Task {uuid} is {report.get('status')}, its report may be incomplete.")
@@ -685,8 +969,12 @@ def normReport(report: dict) -> dict:
             c for c in (normConn(r, procs) for r in dlist(network, "connections")) if c["ip"]
         ],
         "alerts": uniqAlerts(normAlert(t, procs) for t in dlist(network, "threats")),
-        "files": [f for f in (normFile(i, procs) for i in dlist(report, "modified", "files")) if f],
+        "files": files,
+        "fileops": normFileOps(report, procs, files, reads=reads),
+        "regops": normRegOps(report, procs, reads=reads),
         "mutexes": normMutexes(rawprocs),
+        "screens": normScreens(analysis, start),
+        "video": dget(analysis, "content", "video", "present") is True,
         "env": dget(report, "environments", "os", "title"),
         "errors": errors,
     }

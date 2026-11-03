@@ -58,6 +58,8 @@ GENR_METHS = (
     "downloadSample",
     "downloadPcap",
     "downloadDropped",
+    "downloadScreenshot",
+    "downloadVideo",
     "feedObjects",
 )
 

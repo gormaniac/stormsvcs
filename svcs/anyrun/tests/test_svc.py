@@ -263,6 +263,16 @@ class TestAnyRunSvc(s_tests.SynTest):
             assert fake.requests[-1]["headers"]["Authorization"] == f"API-Key {fa.APIKEY}"
 
             assert await download(svc.downloadPcap(fa.TASK)) == fa.PCAP
+            assert await download(svc.downloadVideo(fa.TASK)) == fa.VIDEO
+            assert fake.paths()[-1] == f"/tasks/{fa.TASK}/download/mp4"
+            assert await download(svc.downloadScreenshot(fa.TASK, fa.SCREEN2)) == fa.JPEG2
+            assert fake.paths()[-1] == f"/tasks/{fa.TASK}/download/screens/{fa.SCREEN2}/image.jpeg"
+            with pytest.raises(AnyRunApiError, match="isn't a screenshot ID"):
+                await download(svc.downloadScreenshot(fa.TASK, "../x"))
+            with pytest.raises(AnyRunApiError, match="HTTP 404"):
+                await download(svc.downloadScreenshot(fa.TASK, fa.TASK))
+            data = await svc.normReport(fa.TASK, reads=True)
+            assert any(o["op"] == "read" for o in data["fileops"])
 
             files = await svc.droppedFiles(fa.TASK)
             assert [f["sha256"] for f in files] == [fa.DROPPED_SHA256]

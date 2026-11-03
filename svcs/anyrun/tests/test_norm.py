@@ -192,11 +192,91 @@ def test_norm_report():
     assert alert["sid"] == 2030171 and alert["msg"].startswith("ET MALWARE")
     assert alert["src"] == "tcp://10.0.2.15:49712" and alert["dst"] == "tcp://203.0.113.10:80"
 
-    # Files without a SHA256 are dropped.
-    (file,) = data["files"]
+    # Files without a SHA256 are kept by path.
+    file, nosha = data["files"]
     assert file["sha256"] == fa.DROPPED_SHA256 and file["name"] == "payload.dll"
     assert file["path"] == "C:\\Users\\admin\\AppData\\Roaming\\payload.dll"
-    assert file["proc"] == fa.PROC_MAIN and file["threat"] == "HIGH"
+    assert file["proc"] == fa.PROC_MAIN and file["threat"] == "high"
+    assert nosha["sha256"] is None and nosha["md5"] == "d41d8cd98f00b204e9800998ecf8427e"
+    assert nosha["path"] == "C:\\Users\\admin\\notes.txt" and nosha["threat"] == "unknown"
+
+    # File operations: the CREATE of a file in modified.files and the CLOSE aren't repeated,
+    # a rename is a del and an add, a FileDrop is an add with its hashes, and reads are skipped.
+    ops = [(o["op"], o["path"].rsplit("\\", 1)[-1], o["threat"]) for o in data["fileops"]]
+    assert ops == [
+        ("write", "notes.txt", "unknown"),
+        ("del", "invoice.exe", None),
+        ("del", "a.tmp", None),
+        ("add", "b.exe", None),
+        ("add", "second.bin", None),
+    ]
+    drop = data["fileops"][-1]
+    assert drop["file"]["sha256"] == fa.DROP2_SHA256 and drop["file"]["name"] == "second.bin"
+    assert drop["proc"] == fa.PROC_MAIN and drop["time"] == 1793448019000
+    assert all(o["file"] is None for o in data["fileops"][:-1])
+
+    # Registry operations from modified.registry and the incidents, without repeats or reads.
+    regs = {(o["op"], o["path"]): o for o in data["regops"]}
+    run = f"{fa.RUNKEY}\\Updater"
+    assert list(regs) == [
+        ("set", run),
+        ("set", "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\DisableAntiSpyware"),
+        ("del", "HKEY_CURRENT_USER\\SOFTWARE\\Old"),
+        ("set", "HKEY_CURRENT_USER\\SOFTWARE\\Agent\\Count"),
+        ("del", "HKEY_CURRENT_USER\\SOFTWARE\\Agent\\Old"),
+    ]
+    # The HKCU abbreviation is expanded, and the type comes from the incident event.
+    assert regs[("set", run)]["str"] == "C:\\Users\\admin\\AppData\\Roaming\\payload.dll"
+    assert regs[("set", run)]["type"] == "REG_SZ" and regs[("set", run)]["key"] == fa.RUNKEY
+    assert regs[("set", run)]["proc"] == fa.PROC_MAIN and regs[("set", run)]["time"] == 1793448011000
+    assert regs[("set", "HKEY_CURRENT_USER\\SOFTWARE\\Agent\\Count")]["int"] == 16
+    # An untyped integer value.
+    dis = regs[("set", "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\DisableAntiSpyware")]
+    assert dis["int"] == 1 and dis["str"] is None
+    old = regs[("del", "HKEY_CURRENT_USER\\SOFTWARE\\Old")]
+    assert old["name"] is None and old["proc"] == fa.PROC_CHILD
+
+    # Screenshots (offsets from the task's start) and the video.
+    assert data["screens"] == [
+        {"uuid": fa.SCREEN1, "time": 1793448005000, "offset": 5},
+        {"uuid": fa.SCREEN2, "time": 1793448030000, "offset": 30},
+    ]
+    assert data["video"] is True
+
+    # Reads, only when asked for.
+    data = norm.normReport(fa.fileReport("https://content.any.run"), reads=True)
+    assert [o["path"] for o in data["fileops"] if o["op"] == "read"] == ["C:\\Windows\\win.ini"]
+    (get,) = [o for o in data["regops"] if o["op"] == "get"]
+    assert get["path"] == "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography\\MachineGuid"
+
+
+def test_norm_registry_helpers():
+    assert norm.regKey("hkcu\\Software\\Run\\") == "HKEY_CURRENT_USER\\Software\\Run"
+    assert norm.regKey("\\REGISTRY\\MACHINE\\SOFTWARE") == "HKEY_LOCAL_MACHINE\\SOFTWARE"
+    assert norm.regKey("\\REGISTRY\\USER\\S-1-5-21") == "HKEY_USERS\\S-1-5-21"
+    assert norm.regKey("HKEY_local_machine\\X") == "HKEY_LOCAL_MACHINE\\X"
+    assert norm.regKey("HKLM") == "HKEY_LOCAL_MACHINE"
+    # Only whole hive names are expanded.
+    assert norm.regKey("HKLMX\\a") == "HKLMX\\a"
+    assert norm.regKey("") is None and norm.regKey(None) is None
+
+    assert norm.regOp("write") == "set" and norm.regOp("Set value") == "set"
+    assert norm.regOp("delete value") == "del" and norm.regOp("RemoveKey") == "del"
+    assert norm.regOp("read") == "get" and norm.regOp("QueryValue") == "get"
+    assert norm.regOp("unknown") is None and norm.regOp(None) is None
+
+    assert norm.regValue("0x10", "REG_DWORD") == (16, None)
+    assert norm.regValue("12") == (12, None)
+    assert norm.regValue("1", "REG_SZ") == (None, "1")
+    assert norm.regValue("nope", "REG_QWORD") == (None, "nope")
+    assert norm.regValue("") == (None, None)
+
+    # The default value's name isn't appended to the key.
+    report = {"modified": {"registry": [{"key": "HKLM\\A", "name": "(Default)", "value": "x", "operation": "write", "process": "1", "time": 1}]}}
+    (op,) = norm.normRegOps(report, norm._Procs([]))
+    assert op["path"] == "HKEY_LOCAL_MACHINE\\A" and op["str"] == "x"
+
+    assert norm.threatLevel("HIGH") == "high" and norm.threatLevel(None) is None
 
 
 def test_norm_report_url_and_partial():

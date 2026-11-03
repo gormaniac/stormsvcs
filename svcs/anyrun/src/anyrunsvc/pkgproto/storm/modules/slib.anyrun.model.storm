@@ -181,8 +181,61 @@ function report(data, prefix=$lib.null) {
     if ($data.kind = "download" and $data.url) { $edge($snode, refs, $urlNode($data.url)) }
 
     for $config in $data.configs { $c2config($snode, $data, $config, $prefix) }
-    $taskNodes($snode, $data)
+    $taskNodes($snode, $data, $prefix)
     return($snode)
+}
+
+// The sample node of a task (file:bytes, or inet:url for URL tasks), or null.
+function sampleNode(data) {
+    if ($data.kind = "url") { return($urlNode($data.url)) }
+    return($fileNode($data.file))
+}
+
+// The node a task's artifacts (PCAP, video, screenshots) are linked to with -(refs)>: the
+// task's verdict (it:av:scan:result, the only node unique to a task) or, when ANY.RUN gave no
+// verdict, the sample. Returns null if the task has no sample to model.
+function anchor(data) {
+    $snode = $sampleNode($data)
+    if ($snode = $lib.null) { return($lib.null) }
+    $result = $scan($snode, $data)
+    if $result { return($result) }
+    return($snode)
+}
+
+// Link a downloaded task artifact (a file:bytes) to the task's anchor, setting its MIME type.
+function artifact(anchor, fnode, mime=$lib.null) {
+    if ($fnode = $lib.null) { return($fnode) }
+    $setMime($fnode, $mime)
+    return($edge($anchor, refs, $fnode))
+}
+
+function setMime(fnode, mime) {
+    if ($mime = $lib.null) { return($fnode) }
+    yield $fnode
+    if (not :mime) { [ :mime=$mime ] }
+    return($node)
+}
+
+// A screenshot of a task (an it:screenshot of the downloaded JPEG), linked to the task's anchor.
+function screenshot(data, anchor, fnode, screen) {
+    $setMime($fnode, "image/jpeg")
+    $sandbox = $lib.null
+    if ($data.kind != "url" and $data.file) { $sandbox = `sha256:{$data.file.sha256}` }
+    $desc = `ANY.RUN task {$data.uuid} screenshot`
+    if ($screen.offset != $lib.null) { $desc = `{$desc} at {$screen.offset}s` }
+    [ it:screenshot=$lib.guid(slib.anyrun, $data.uuid, screenshot, $screen.uuid)
+        :image=$fnode.repr() :sandbox:file?=$sandbox :time?=$screen.time :desc=$desc ]
+    $n = $seen($node)
+    $edge($anchor, refs, $n)
+    return($n)
+}
+
+// A URL task's browser visit (it:exec:url), with a screenshot of the page as :page:image.
+function urlVisit(data, image) {
+    if ($data.kind != "url" or not $data.url) { return($lib.null) }
+    [ it:exec:url=$lib.guid(slib.anyrun, $data.uuid, visit, $data.url)
+        :url=$data.url :time?=$data.time :page:image?=$image.repr() ]
+    return($seen($node))
 }
 
 // ANY.RUN's verdict on the sample.
@@ -219,7 +272,7 @@ function c2(n, prefix, famtag, ival) {
 
 // Model a task's processes, network activity, Suricata alerts, and created files, linked to
 // the sample with :sandbox:file (when the sample is a file).
-function taskNodes(snode, data) {
+function taskNodes(snode, data, prefix=$lib.null) {
     $sandbox = $lib.null
     if ($snode.form() = "file:bytes") { $sandbox = $snode.repr() }
 
@@ -228,7 +281,12 @@ function taskNodes(snode, data) {
     for $req in $data.http { $httpNode($data, $req, $sandbox) }
     for $flow in $data.flows { $flowNode($data, $flow, $sandbox) }
     for $alert in $data.alerts { $alertNode($data, $alert, $sandbox) }
-    for $file in $data.files { $edge($snode, refs, $fileAdd($data, $file, $sandbox)) }
+    for $file in $data.files { $edge($snode, refs, $fileAdd($data, $file, $sandbox, $prefix)) }
+    for $op in $data.fileops {
+        $n = $fileOp($data, $op, $sandbox, $prefix)
+        if ($op.op = "add" and $op.file) { $edge($snode, refs, $fileNode($op.file)) }
+    }
+    for $op in $data.regops { $regOp($data, $op, $sandbox) }
     return($snode)
 }
 
@@ -318,17 +376,65 @@ function alertFlow(data, alert, sandbox) {
     return($seen($node))
 }
 
-// A file the task created or changed. Returns the file's file:bytes node.
-function fileAdd(data, file, sandbox) {
+// A file the task created (it:exec:file:add), tagged "<prefix>.threat_lvl.<level>" with
+// ANY.RUN's threat level for it. Files without a SHA256 are modeled by path (and -(refs)> their
+// hash:md5, when there is one). Returns the file's file:bytes node, or null.
+function fileAdd(data, file, sandbox, prefix=$lib.null) {
     $fnode = $fileNode(({"sha256": $file.sha256, "md5": $file.md5, "sha1": $file.sha1,
                          "ssdeep": $file.ssdeep, "size": $file.size, "name": $file.name,
                          "mime": $file.mime}))
-    if ($fnode = $lib.null) { return($lib.null) }
+    $fval = $lib.null
+    if $fnode { $fval = $fnode.repr() }
     [ it:exec:file:add=$lib.guid(slib.anyrun, $data.uuid, file, $file.path, $file.sha256)
-        :sandbox:file?=$sandbox :file=$fnode.repr() :path?=$file.path :time?=$file.time
+        :sandbox:file?=$sandbox :file?=$fval :path?=$file.path :time?=$file.time
         :proc?=$taskGuid($data, proc, $file.proc) ]
-    $seen($node)
+    $add = $seen($node)
+    $threatTag($add, $prefix, $file.threat, $data.ival)
+    if ($fnode = $lib.null and $file.md5) { $edge($add, refs, $md5Node($file.md5)) }
     return($fnode)
+}
+
+function md5Node(md5) {
+    [ hash:md5?=$md5 ]
+    return($seen($node))
+}
+
+// Tag a node "<prefix>.threat_lvl.<level>" with ANY.RUN's threat level (unknown, low, mid, high).
+function threatTag(n, prefix, level, ival=$lib.null) {
+    if (not $level) { return($n) }
+    return($tag($n, $prefix, `threat_lvl.{$level}`, $ival))
+}
+
+// A file operation from the task's incidents: an it:exec:file:add, write, del, or read,
+// tagged with ANY.RUN's threat level for the file at that path.
+function fileOp(data, op, sandbox, prefix=$lib.null) {
+    $fnode = $fileNode($op.file)
+    $fval = $lib.null
+    if $fnode { $fval = $fnode.repr() }
+    $form = `it:exec:file:{$op.op}`
+    [ *$form=$lib.guid(slib.anyrun, $data.uuid, fileop, $op.op, $op.path, $op.proc, $op.time, $fval)
+        :sandbox:file?=$sandbox :file?=$fval :path?=$op.path :time?=$op.time
+        :proc?=$taskGuid($data, proc, $op.proc) ]
+    $n = $seen($node)
+    return($threatTag($n, $prefix, $op.threat, $data.ival))
+}
+
+// A registry operation: an it:exec:reg:set, del, or get of an it:dev:regval.
+function regOp(data, op, sandbox) {
+    $rval = $regVal($op)
+    $form = `it:exec:reg:{$op.op}`
+    [ *$form=$lib.guid(slib.anyrun, $data.uuid, regop, $op.op, $op.path, $op.int, $op.str, $op.proc, $op.time)
+        :sandbox:file?=$sandbox :reg=$rval.repr() :time?=$op.time
+        :proc?=$taskGuid($data, proc, $op.proc) ]
+    return($seen($node))
+}
+
+// A registry value. Its guid doesn't include the task, so the same value set by different
+// tasks (or samples) is the same node. :key is the key with the value's name appended.
+function regVal(op) {
+    [ it:dev:regval=$lib.guid(slib.anyrun, regval, $op.path, $op.int, $op.str)
+        :key=$op.path :int?=$op.int :str?=$op.str ]
+    return($seen($node))
 }
 
 // ---- TI Lookup ----

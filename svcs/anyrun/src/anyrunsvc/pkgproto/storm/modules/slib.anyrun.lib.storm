@@ -14,8 +14,8 @@ init {
 // ---- Tasks ----
 
 // Model a task's report (by UUID or app.any.run link). Returns the sample's node, or null.
-function model(task) {
-    $retn = $priv.normReport($task)
+function model(task, reads=(false)) {
+    $retn = $priv.normReport($task, reads=$reads)
     if $util.failed($retn, `Modeling task {$task}`) { return($lib.null) }
     $data = $retn.data
     for $err in $data.errors { $lib.warn("slib.anyrun: {err}", err=$err) }
@@ -63,9 +63,9 @@ function findTask(node, lookup=(true)) {
     return($lib.null)
 }
 
-// Find the newest task of a file:bytes, hash:*, or inet:url node and model it.
-// Returns the sample's node, or null.
-function enrich(node, lookup=(true)) {
+// Find the newest task of a file:bytes, hash:*, or inet:url node and model it (with reads, also
+// its file and registry reads). Returns the sample's node, or null.
+function enrich(node, lookup=(true), reads=(false)) {
     if ($node.form() != "inet:url" and not $util.nodeHashes($node)) {
         $lib.warn("slib.anyrun: {form} {repr} has no hash or URL to look up.", form=$node.form(),
                   repr=$node.repr())
@@ -76,7 +76,7 @@ function enrich(node, lookup=(true)) {
         $lib.warn("slib.anyrun: ANY.RUN has no task for {repr}.", repr=$node.repr())
         return($lib.null)
     }
-    return($model($task))
+    return($model($task, reads=$reads))
 }
 
 // ---- TI Lookup ----
@@ -158,6 +158,66 @@ function downloadDropped(task) {
         $n = $_saved($priv.downloadDropped($task, $file.sha256), `{$task}/{$file.name}`, name=$file.name)
         if $n { $nodes.append($n) }
     }
+    return($nodes)
+}
+
+// Download a task's artifacts into the Axon. opts are the slib.anyrun.download options:
+// sample, pcap, dropped, screenshots, and video. The PCAP, video, and screenshots are linked to
+// the task (see slib.anyrun.model.anchor), and screenshots are modeled as it:screenshot nodes.
+// Returns a list of the downloaded files' file:bytes nodes.
+function downloadTask(task, opts) {
+    $nodes = ([])
+    $data = $lib.null
+    $anchor = $lib.null
+    if ($opts.pcap or $opts.screenshots or $opts.video) {
+        $retn = $priv.normReport($task)
+        if $util.failed($retn, `Getting the report of task {$task}`) { return($nodes) }
+        $data = $retn.data
+        $anchor = $amodel.anchor($data)
+    }
+    if $opts.pcap {
+        $n = $downloadPcap($task)
+        if $n {
+            $amodel.artifact($anchor, $n, mime="application/vnd.tcpdump.pcap")
+            $nodes.append($n)
+        }
+    }
+    if $opts.video {
+        if $data.video {
+            $n = $_saved($priv.downloadVideo($task), `the video of task {$task}`, name=`{$data.uuid}.mp4`)
+            if $n {
+                $amodel.artifact($anchor, $n, mime="video/mp4")
+                $nodes.append($n)
+            }
+        } else {
+            $lib.warn("slib.anyrun: Task {task} has no video.", task=$task)
+        }
+    }
+    if $opts.screenshots { $nodes.extend($_downloadScreens($data, $anchor)) }
+    if $opts.dropped { $nodes.extend($downloadDropped($task)) }
+    if $opts.sample { $nodes.append($downloadSample($task)) }
+    return($nodes)
+}
+
+// Download a task's screenshots and model them. For URL tasks, the last screenshot is also the
+// :page:image of the browser's visit (it:exec:url). Returns a list of the JPEGs' nodes.
+function _downloadScreens(data, anchor) {
+    $nodes = ([])
+    if (not $data.screens) {
+        $lib.warn("slib.anyrun: Task {task} has no screenshots.", task=$data.uuid)
+        return($nodes)
+    }
+    $last = $lib.null
+    for $screen in $data.screens {
+        $retn = $priv.downloadScreenshot($data.uuid, $screen.uuid)
+        $n = $_saved($retn, `screenshot {$screen.uuid} of task {$data.uuid}`, name=`{$screen.uuid}.jpeg`)
+        if $n {
+            $amodel.screenshot($data, $anchor, $n, $screen)
+            $nodes.append($n)
+            $last = $n
+        }
+    }
+    if $last { $amodel.urlVisit($data, $last) }
     return($nodes)
 }
 

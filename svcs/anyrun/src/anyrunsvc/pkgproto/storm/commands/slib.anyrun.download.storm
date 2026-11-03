@@ -2,16 +2,17 @@ init {
     $anyrun = $lib.import(slib.anyrun.lib)
     $model = $lib.import(slib.anyrun.model)
 
+    $any = ($cmdopts.pcap or $cmdopts.dropped or $cmdopts.screenshots or $cmdopts.video)
+    $opts = ({
+        "sample": ($cmdopts.sample or not $any),
+        "pcap": $cmdopts.pcap,
+        "dropped": $cmdopts.dropped,
+        "screenshots": $cmdopts.screenshots,
+        "video": $cmdopts.video,
+    })
+
     // Download everything the options ask for from a task. Returns a list of file:bytes nodes.
-    function download(task) {
-        $nodes = ([])
-        if $cmdopts.pcap { $nodes.append($anyrun.downloadPcap($task)) }
-        if $cmdopts.dropped { $nodes.extend($anyrun.downloadDropped($task)) }
-        if ($cmdopts.sample or not ($cmdopts.pcap or $cmdopts.dropped)) {
-            $nodes.append($anyrun.downloadSample($task))
-        }
-        return($nodes)
-    }
+    function download(task) { return($anyrun.downloadTask($task, $opts)) }
 }
 
 if $cmdopts.task {

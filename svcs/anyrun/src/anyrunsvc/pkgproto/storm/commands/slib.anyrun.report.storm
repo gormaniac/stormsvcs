@@ -39,9 +39,12 @@ init {
             $lib.print("  tags: {tags}", tags=(", ").join($d.tags))
             $lib.print("  techniques: {ttps}", ttps=(", ").join($d.ttps))
             $lib.print("  malware configs: {count}", count=$lib.len($d.configs))
-            $lib.print("  processes: {procs}, DNS requests: {dns}, HTTP requests: {http}, connections: {flows}, Suricata alerts: {alerts}, files: {files}",
+            $lib.print("  processes: {procs}, DNS requests: {dns}, HTTP requests: {http}, connections: {flows}, Suricata alerts: {alerts}",
                        procs=$lib.len($d.procs), dns=$lib.len($d.dns), http=$lib.len($d.http),
-                       flows=$lib.len($d.flows), alerts=$lib.len($d.alerts), files=$lib.len($d.files))
+                       flows=$lib.len($d.flows), alerts=$lib.len($d.alerts))
+            $lib.print("  created files: {files}, file operations: {fileops}, registry operations: {regops}, screenshots: {screens}, video: {video}",
+                       files=$lib.len($d.files), fileops=$lib.len($d.fileops), regops=$lib.len($d.regops),
+                       screens=$lib.len($d.screens), video=$d.video)
         }
     }
 }

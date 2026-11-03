@@ -339,10 +339,13 @@ class AnyRunSvc(s_cell.Cell):
 
         return await self._data(apikey, "get", f"/v1/analysis/{c_client.seg(taskArg(task))}")
 
-    async def normReport(self, task: str, apikey: str | None = None) -> dict:
-        """A task's report, normalized for modeling (see ``norm.normReport``)."""
+    async def normReport(self, task: str, reads: bool = False, apikey: str | None = None) -> dict:
+        """A task's report, normalized for modeling (see ``norm.normReport``).
 
-        return norm.normReport(await self.report(task, apikey=apikey) or {})
+        With ``reads``, also includes the file and registry reads.
+        """
+
+        return norm.normReport(await self.report(task, apikey=apikey) or {}, reads=bool(reads))
 
     async def iocs(self, task: str, reputation: int = 0, apikey: str | None = None) -> list[dict]:
         """GET /report/{uuid}/ioc/json - a task's IOCs with at least a reputation.
@@ -637,11 +640,30 @@ class AnyRunSvc(s_cell.Cell):
         for chunk in self._chunked(byts):
             yield chunk
 
+    async def downloadScreenshot(
+        self, task: str, screen: str, apikey: str | None = None
+    ) -> AsyncIterator[bytes]:
+        """Download one of a task's screenshots (a JPEG) by its UUID."""
+
+        uuid = norm.taskId(screen)
+        if not uuid:
+            raise AnyRunApiError(f"{screen!r} isn't a screenshot ID (a UUID).")
+        path = f"/tasks/{c_client.seg(taskArg(task))}/download/screens/{uuid}/image.jpeg"
+        for chunk in self._chunked(await self._fetch(apikey, path)):
+            yield chunk
+
+    async def downloadVideo(self, task: str, apikey: str | None = None) -> AsyncIterator[bytes]:
+        """Download a task's video recording (an MP4)."""
+
+        path = f"/tasks/{c_client.seg(taskArg(task))}/download/mp4"
+        for chunk in self._chunked(await self._fetch(apikey, path)):
+            yield chunk
+
     async def droppedFiles(self, task: str, apikey: str | None = None) -> list[dict]:
         """The files a task created or changed that can be downloaded (``modified.files``)."""
 
         report = norm.normReport(await self.report(task, apikey=apikey) or {})
-        return [f for f in report["files"] if f.get("url")]
+        return [f for f in report["files"] if f.get("url") and f.get("sha256")]
 
     async def downloadDropped(
         self, task: str, sha256: str, apikey: str | None = None

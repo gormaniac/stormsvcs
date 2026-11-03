@@ -44,7 +44,7 @@ function history(team=(false), skip=(0), limit=(25)) {
     return($svc.history(team=$team, skip=$skip, limit=$limit, apikey=$userKey()))
 }
 function report(task) { return($svc.report($task, apikey=$userKey())) }
-function normReport(task) { return($svc.normReport($task, apikey=$userKey())) }
+function normReport(task, reads=(false)) { return($svc.normReport($task, reads=$reads, apikey=$userKey())) }
 function iocs(task, reputation=(0)) { return($svc.iocs($task, reputation=$reputation, apikey=$userKey())) }
 function aiSummary(task) { return($svc.aiSummary($task, apikey=$userKey())) }
 function summary(task, fmt=brief) { return($svc.summary($task, fmt=$fmt, apikey=$userKey())) }
@@ -110,6 +110,10 @@ function _upload(genr) {
 }
 
 function downloadSample(task) { return($_upload($svc.downloadSample($task, apikey=$userKey()))) }
+function downloadScreenshot(task, screen) {
+    return($_upload($svc.downloadScreenshot($task, $screen, apikey=$userKey())))
+}
+function downloadVideo(task) { return($_upload($svc.downloadVideo($task, apikey=$userKey()))) }
 function downloadPcap(task) { return($_upload($svc.downloadPcap($task, apikey=$userKey()))) }
 function downloadDropped(task, sha256) {
     return($_upload($svc.downloadDropped($task, $sha256, apikey=$userKey())))

@@ -7,7 +7,7 @@ if $cmdopts.task {
     // --task ignores inbound nodes.
     spin |
     for $task in $cmdopts.task {
-        $n = $anyrun.model($task)
+        $n = $anyrun.model($task, reads=$cmdopts.reads)
         if ($cmdopts.yield and $n) { yield $n }
     }
 }
@@ -23,5 +23,5 @@ else {
             spin
         }
     }
-    divert $cmdopts.yield $model.nodes(($anyrun.enrich($node, lookup=(not $cmdopts.no_lookup)),))
+    divert $cmdopts.yield $model.nodes(($anyrun.enrich($node, lookup=(not $cmdopts.no_lookup), reads=$cmdopts.reads),))
 }

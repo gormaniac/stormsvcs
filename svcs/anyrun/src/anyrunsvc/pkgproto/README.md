@@ -10,9 +10,11 @@ specs), and covers (see [API coverage](#api-coverage)):
   MITM), privacy, and run options. Rerunning tasks, and adding time to, stopping, and deleting them.
 - Following tasks' status (including queued submissions) and waiting for them to finish.
 - Modeling task reports: the verdict, tags, malware families and configs, ATT&CK techniques,
-  processes, DNS and HTTP requests, connections, Suricata alerts, and created files.
+  processes, DNS and HTTP requests, connections, Suricata alerts, file operations, and registry
+  operations.
 - Reading reports, IOCs, AI summaries, and the STIX, MISP, brief, and tier 1 reports.
-- Downloading samples (unzipped and checked against their SHA256), PCAPs, and dropped files into the Axon.
+- Downloading samples (unzipped and checked against their SHA256), PCAPs, dropped files,
+  screenshots, and videos into the Axon, linked to their task.
 - **TI Lookup** of IPs, domains, URLs, and hashes (or any TI Lookup query).
 - **YARA Search** of ANY.RUN's samples.
 - **TI Feeds** (TAXII 2.1) of malicious IPs, domains, and URLs.
@@ -83,13 +85,13 @@ need the normal node permissions for the nodes the commands create.
 
 | Command | Description |
 |---|---|
-| `slib.anyrun.enrich` | Model the newest task of `file:bytes`, `hash:*`, and `inet:url` nodes (found in your task history, then with TI Lookup unless `--no-lookup`), or `--task` IDs. |
+| `slib.anyrun.enrich` | Model the newest task of `file:bytes`, `hash:*`, and `inet:url` nodes (found in your task history, then with TI Lookup unless `--no-lookup`), or `--task` IDs. `--reads` also models file and registry reads. |
 | `slib.anyrun.lookup` | TI Lookup IPs, FQDNs, URLs, files, and hashes and model the results on them. `--related` models the related observables, `--tasks N` the newest tasks' reports. `--query` prints any TI Lookup query's results. |
 | `slib.anyrun.history` | List your (or `--team`'s) newest tasks, or model them with `--model`/`--yield`. |
 | `slib.anyrun.task.status` | Print tasks' (or queued submissions') status, or `--follow` them. |
 | `slib.anyrun.task.wait` | Wait for tasks to finish, then optionally model them. |
 | `slib.anyrun.report` | Print a summary of a task's report, the full report (`--json`), its `--iocs`, its `--ai` summary, or another `--format` (`stix`, `misp`, `brief`, `tier1`, `json`). |
-| `slib.anyrun.download` | Download a task's sample, `--pcap`, or `--dropped` files into the Axon. |
+| `slib.anyrun.download` | Download a task's sample, `--pcap`, `--dropped` files, `--screenshots`, or `--video` into the Axon. |
 | `slib.anyrun.yara` | YARA Search with `it:app:yara:rule` nodes or a `--rule`'s text and model the matches, or get an earlier `--search`'s results. |
 | `slib.anyrun.feed` | Read a TI Feed (`full`, `ip`, `domain`, or `url`) and model (or `--print`) its indicators. `--list` lists the feeds. |
 | `slib.anyrun.limits` / `.envs` / `.presets` | Print your API limits, the analysis environments, and your saved presets. |
@@ -138,7 +140,31 @@ And, linked to the sample with `:sandbox:file` (for file and download tasks):
 - `it:app:suricata:matched` nodes for the Suricata alerts, matching an `it:app:suricata:rule`
   (`:id` is the SID, `:name` the message) to an `inet:flow` for the alert's endpoints.
 - `it:exec:file:add` nodes for the files the task created (with their path, hashes, and
-  process), and `-(refs)>` from the sample to each file.
+  process), and `-(refs)>` from the sample to each file. Files ANY.RUN reports without a SHA256
+  are modeled by path, with `-(refs)>` their `hash:md5` when there is one.
+- `it:exec:file:add`, `write`, and `del` nodes for the file operations in ANY.RUN's incidents
+  (a rename is a `del` of the old path and an `add` of the new one, and dropped files carry
+  their hashes). Every `it:exec:file:*` is tagged `#<prefix>.threat_lvl.<level>` with ANY.RUN's
+  threat level for the file at that path (`unknown`, `low`, `mid`, or `high`), when it gave one.
+- `it:exec:reg:set` and `it:exec:reg:del` nodes for the registry changes (`modified.registry`
+  and the incidents' registry events), each with its process and an `it:dev:regval`:
+  - `it:dev:regval` has no prop for a value's name, so `:key` is the key with the name
+    appended (ex. `HKEY_CURRENT_USER\SOFTWARE\Microsoft\Windows\CurrentVersion\Run\Updater`).
+    The default value and deleted keys use the bare key.
+  - Hive abbreviations are expanded (`HKCU` is `HKEY_CURRENT_USER`, `\REGISTRY\MACHINE` is
+    `HKEY_LOCAL_MACHINE`), so keys match registry data from other sources.
+  - DWORD and QWORD values (and untyped integers) are `:int`, everything else is `:str`.
+  - The value's guid doesn't include the task, so the same value set by different tasks or
+    samples is one node to pivot on.
+
+With `--reads`, `it:exec:file:read` and `it:exec:reg:get` nodes are modeled too. They're off by
+default because a task can have thousands of them.
+
+`slib.anyrun.download` links what it downloads to the task: the PCAP, video, and screenshots get
+a `-(refs)>` edge from the task's verdict (`it:av:scan:result`, the only node unique to a task,
+so two runs of the same sample stay apart), or from the sample when ANY.RUN gave no verdict.
+Each screenshot is an `it:screenshot` (with `:image`, `:sandbox:file`, `:time`, and `:desc`),
+and a URL task's last screenshot is the `:page:image` of an `it:exec:url` for the browser's visit.
 
 TI Lookup (`slib.anyrun.lookup`) tags the looked up node with ANY.RUN's tags and threat names
 (for the last time it was seen), models the threat names as `risk:tool:software`, and records
@@ -158,8 +184,10 @@ a task again updates the same nodes.
 
 - TLS fingerprints (JA3, JA3S, JARM) of connections: `inet:tls:ja3:sample` needs the sandbox's
   client address, which ANY.RUN doesn't report.
-- Registry changes, incidents (ANY.RUN's per process behavior signatures), debug strings,
-  screenshots, videos, and memory dumps.
+- Incidents (ANY.RUN's per process behavior signatures) beyond their file and registry events,
+  ATT&CK mappings for registry persistence locations, debug strings, screenshot thumbnails, SSL
+  keys, and memory dumps.
+- File `CLOSE` events, and the incidents' numeric threat levels (they rate the incident, not a file).
 - Config `Keys`, `Options`, and `Strings` beyond the config's `:raw`.
 - Process users (`it:exec:proc:user` is deprecated), and the relationships between a TI Lookup's
   indicator and its related observables (ANY.RUN only says they were seen in the same tasks; use
@@ -176,14 +204,13 @@ a task again updates the same nodes.
 | `PATCH /v1/analysis/addtime/{uuid}`, `/stop/{uuid}`, `DELETE /delete/{uuid}` | `task.addtime`, `task.stop`, `task.delete` |
 | `GET /v1/user`, `/v1/user/presets`, `/v1/environment` | `limits`, `presets`, `envs` |
 | `GET /report/{uuid}/ioc/json`, `/ai`, `/summary/{stix,misp,brief,tier1,json}` | `report` |
-| `content.any.run` sample, PCAP, and file downloads | `download` |
+| `content.any.run` sample, PCAP, file, screenshot, and video downloads | `download` |
 | `POST /v1/intelligence/api/search` (TI Lookup) | `lookup`, `enrich`, `download` |
 | `/v1/intelligence/yara-lookup/search` (YARA Search) | `yara` |
 | `/v1/feeds/taxii2/api1/collections/...` (TI Feeds) | `feed` |
 | Anything else | `admin.request` |
 
-Out of scope: the HTML reports, videos, screenshots, SSL keys, and memory dumps (they're for
-people, not the graph; their links are in the full report), the TAXII manifest endpoint, and
+Out of scope: the HTML reports, SSL keys, and memory dumps (their links are in the full report), the TAXII manifest endpoint, and
 the legacy `/v1/feeds/{stix,misp,network_iocs}.json` feeds (ANY.RUN replaced them with TAXII).
 
 ### Behavior the docs don't pin down
@@ -197,6 +224,10 @@ a live key (see [Testing](#testing)):
 - Sample downloads are zips with the password `infected` (per ANY.RUN's SDK). Every download is
   unzipped when it's a zip and checked against the SHA256 the report expects.
 - File submissions' multipart options are sent the way ANY.RUN's SDK sends them (ex. `True`/`False`).
+- Screenshot times are small integers, so they're treated as seconds into the task.
+- `modified.registry`'s operations aren't documented, so they're matched by keyword (`write`,
+  `set`, `delete`, `read`...). Unrecognized ones are skipped. Each `modified.files` entry is
+  treated as a creation (the spec calls its time the "file creation timestamp").
 
 ## Testing
 

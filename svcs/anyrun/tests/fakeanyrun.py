@@ -40,6 +40,18 @@ URL = "http://evil.example.com/landing"
 PROC_MAIN = "c3f1a2b4-0001-4a5b-8c9d-000000000001"
 PROC_CHILD = "c3f1a2b4-0002-4a5b-8c9d-000000000002"
 
+SCREEN1 = "5c0e0000-0000-4000-8000-000000000001"
+SCREEN2 = "5c0e0000-0000-4000-8000-000000000002"
+JPEG1 = b"\xff\xd8\xff\xe0 fake jpeg 1"
+JPEG2 = b"\xff\xd8\xff\xe0 fake jpeg 2"
+VIDEO = b"\x00\x00\x00\x18ftypmp42 fake video"
+
+DROP2 = b"second dropped payload"
+DROP2_SHA256 = hashlib.sha256(DROP2).hexdigest()
+DROP2_MD5 = hashlib.md5(DROP2).hexdigest()
+
+RUNKEY = "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run"
+
 MATCH_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
 YARA_RULE = 'rule grimresources {\n  strings:\n    $s1 = "loadXML"\n  condition:\n    $s1\n}'
@@ -93,7 +105,20 @@ def fileReport(url: str) -> dict:
                 },
                 "pcap": {"present": True, "permanentUrl": f"{content}/pcap"},
                 "video": {"present": True, "permanentUrl": f"{content}/mp4"},
-                "screenshots": [],
+                "screenshots": [
+                    {
+                        "uuid": SCREEN1,
+                        "time": 5,
+                        "permanentUrl": f"{content}/screens/{SCREEN1}/image.jpeg",
+                        "thumbnailUrl": f"{content}/thumbnails/{SCREEN1}/image.jpeg",
+                    },
+                    {
+                        "uuid": SCREEN2,
+                        "time": 30,
+                        "permanentUrl": f"{content}/screens/{SCREEN2}/image.jpeg",
+                        "thumbnailUrl": f"{content}/thumbnails/{SCREEN2}/image.jpeg",
+                    },
+                ],
                 "dumps": [],
             },
         },
@@ -215,9 +240,80 @@ def fileReport(url: str) -> dict:
                     "hashes": {"md5": "d41d8cd98f00b204e9800998ecf8427e"},
                 },
             ],
-            "registry": [],
+            "registry": [
+                {
+                    "key": "HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run",
+                    "name": "Updater",
+                    "value": "C:\\Users\\admin\\AppData\\Roaming\\payload.dll",
+                    "operation": "write",
+                    "process": PROC_MAIN,
+                    "time": 1793448011000,
+                },
+                {
+                    "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows Defender",
+                    "name": "DisableAntiSpyware",
+                    "value": "1",
+                    "operation": "write",
+                    "process": PROC_MAIN,
+                    "time": 1793448012000,
+                },
+                {
+                    "key": "HKEY_CURRENT_USER\\SOFTWARE\\Old",
+                    "name": "",
+                    "value": "",
+                    "operation": "delete key",
+                    "process": PROC_CHILD,
+                    "time": 1793448013000,
+                },
+            ],
         },
-        "incidents": [],
+        "incidents": [
+            {
+                "threatLevel": 2,
+                "title": "Changes the autorun value in the registry",
+                "desc": "",
+                "process": PROC_MAIN,
+                "events": [
+                    # The same write as modified.registry, with the value's type.
+                    {"_id": "e1", "time": "2026-10-31T12:00:11.000Z", "operation": "write", "key": RUNKEY,
+                     "name": "Updater", "value": "C:\\Users\\admin\\AppData\\Roaming\\payload.dll",
+                     "typeValue": "REG_SZ"},
+                    {"_id": "e2", "time": "2026-10-31T12:00:11.500Z", "operation": "write",
+                     "key": "HKEY_CURRENT_USER\\SOFTWARE\\Agent", "name": "Count", "value": "0x10",
+                     "typeValue": "REG_DWORD"},
+                    {"_id": "e3", "time": "2026-10-31T12:00:11.600Z", "operation": "delete value",
+                     "key": "HKEY_CURRENT_USER\\SOFTWARE\\Agent", "name": "Old", "value": ""},
+                    {"_id": "e4", "time": "2026-10-31T12:00:11.700Z", "operation": "read",
+                     "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography", "name": "MachineGuid",
+                     "value": "abc", "typeValue": "REG_SZ"},
+                ],
+            },
+            {
+                "threatLevel": 1,
+                "title": "Drops and changes files",
+                "desc": "",
+                "process": PROC_MAIN,
+                "events": [
+                    # Already in modified.files, so it's not modeled again.
+                    {"_id": "f1", "time": "2026-10-31T12:00:09.000Z", "operation": "CREATE", "device": "C:",
+                     "object": "", "name": "C:\\Users\\admin\\AppData\\Roaming\\payload.dll", "status": 0},
+                    {"_id": "f2", "time": "2026-10-31T12:00:14.000Z", "operation": "WRITE", "device": "C:",
+                     "object": "", "name": "C:\\Users\\admin\\notes.txt", "status": 0},
+                    {"_id": "f3", "time": "2026-10-31T12:00:15.000Z", "operation": "DELETE", "device": "C:",
+                     "object": "", "name": "C:\\Users\\admin\\AppData\\Local\\Temp\\invoice.exe", "status": 0},
+                    {"_id": "f4", "time": "2026-10-31T12:00:16.000Z", "operation": "WRITE", "device": "C:",
+                     "object": "", "name": "C:\\Users\\admin\\a.tmp", "newname": "C:\\Users\\admin\\b.exe",
+                     "status": 0},
+                    {"_id": "f5", "time": "2026-10-31T12:00:17.000Z", "operation": "READ", "device": "C:",
+                     "object": "", "name": "C:\\Windows\\win.ini", "status": 0},
+                    {"_id": "f6", "time": "2026-10-31T12:00:18.000Z", "operation": "CLOSE", "device": "C:",
+                     "object": "", "name": "C:\\Windows\\win.ini", "status": 0},
+                    {"_id": "f7", "time": "2026-10-31T12:00:19.000Z", "filename": "C:\\Users\\admin\\second.bin",
+                     "contentType": "application/octet-stream", "size": len(DROP2), "md5": DROP2_MD5,
+                     "sha1": hashlib.sha1(DROP2).hexdigest(), "sha256": DROP2_SHA256},
+                ],
+            },
+        ],
         "mitre": [
             {"id": "T1555", "name": "Credentials from Password Stores", "phases": ["Credential Access"]},
             {"id": "T1059.003", "name": "Windows Command Shell", "phases": ["Execution"]},
@@ -565,6 +661,13 @@ class FakeAnyRun:
             task = parts[1]
             if task not in reports:
                 return web.Response(status=404, text="Not found")
+            if parts[3] == "mp4":
+                return web.Response(body=VIDEO, content_type="video/mp4")
+            if parts[3] == "screens" and parts[5:] == ["image.jpeg"]:
+                byts = {SCREEN1: JPEG1, SCREEN2: JPEG2}.get(parts[4])
+                if byts is None:
+                    return web.Response(status=404, text="Not found")
+                return web.Response(body=byts, content_type="image/jpeg")
             if parts[3] == "pcap":
                 return web.Response(body=PCAP, content_type="application/octet-stream")
             if parts[3:] == ["files", PROC_MAIN, "ab12"]:

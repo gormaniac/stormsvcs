@@ -67,8 +67,11 @@ commands:
       (risk:tool:software), ATT&CK techniques (-(uses)> it:mitre:attack:technique), mutexes
       (-(refs)> it:dev:mutex), and extracted malware configs (it:sec:c2:config) with their C2
       servers tagged. The task's processes (it:exec:proc), DNS and HTTP requests, network
-      connections (inet:flow), Suricata alerts (it:app:suricata:matched), and created files
-      (it:exec:file:add) are linked to the sample with :sandbox:file.
+      connections (inet:flow), Suricata alerts (it:app:suricata:matched), file operations
+      (it:exec:file:add/write/del, tagged "<prefix>.threat_lvl.<level>" with ANY.RUN's threat
+      level for the file), and registry operations (it:exec:reg:set/del of it:dev:regval) are
+      linked to the sample with :sandbox:file. --reads also models the file and registry reads
+      (it:exec:file:read, it:exec:reg:get).
 
       Examples:
 
@@ -87,6 +90,10 @@ commands:
         - default: false
           action: store_true
           help: Only look for tasks in your task history, don't use TI Lookup.
+      - - --reads
+        - default: false
+          action: store_true
+          help: Also model the file and registry reads (there can be many).
       - - --yield
         - default: false
           action: store_true
@@ -294,10 +301,13 @@ commands:
     perms:
       - [ slib, anyrun, user ]
     descr: |
-      Download a task's sample, --pcap, or --dropped files into the Axon.
+      Download a task's sample, --pcap, --dropped files, --screenshots, or --video into the Axon.
 
       The inbound nodes' tasks are found like slib.anyrun.enrich does. Samples are unzipped
-      and checked against the task's SHA256.
+      and checked against the task's SHA256. The PCAP, video, and screenshots are linked to the
+      task's verdict (it:av:scan:result) with -(refs)> (or to its sample, when it has no
+      verdict), and each screenshot is modeled as an it:screenshot. For URL tasks, the last
+      screenshot is also the :page:image of the browser's visit (it:exec:url).
 
       Examples:
 
@@ -322,6 +332,14 @@ commands:
         - default: false
           action: store_true
           help: Download the files the task created or changed.
+      - - --screenshots
+        - default: false
+          action: store_true
+          help: Download the task's screenshots.
+      - - --video
+        - default: false
+          action: store_true
+          help: Download the task's video recording.
       - - --no-lookup
         - default: false
           action: store_true
