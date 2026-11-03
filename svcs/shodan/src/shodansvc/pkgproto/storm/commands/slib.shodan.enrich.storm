@@ -31,8 +31,10 @@ if $cmdopts.stream_inbound {
 
 | if $pending {
     for $n in $pending {
-        $results = $process($n)
-        if $cmdopts.yield { for $r in $results { if $r { yield $r } } }
-        else { yield $n }
+        if $cmdopts.yield { yield $model.nodes($process($n)) }
+        else {
+            $process($n)
+            yield $n
+        }
     }
 }

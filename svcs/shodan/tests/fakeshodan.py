@@ -251,8 +251,11 @@ HISTORY_BANNERS = [
         "data": "HTTP/1.1 200 OK (cut)",
         "hash": 333,
         "metadata": {"truncated": ["data", "http.html"]},
-        # A vuln of a service that's gone, only in the history.
+        # A vuln of a service that's gone, only in the history, from when the IP was in another ASN.
         "vulns": {"CVE-2011-3192": {"cvss": 7.8, "verified": False, "summary": "Apache Killer"}},
+        "asn": "AS1111",
+        "org": "Old Org",
+        "tags": ["honeypot"],
         "_shodan": {"module": "https", "id": "hist-4", "options": {"scan": "SCAN1"}},
     },
 ]

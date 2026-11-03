@@ -214,14 +214,15 @@ function banner(b, tagPrefix=$lib.null) {
 // Model a normalized banner. Returns ({"server": <inet:server>, "banner": <inet:banner or null>,
 // "ip": <inet:ipv4/6 or null>}), the nodes the banner itself describes, or null.
 // Queries and timelines link to only these nodes, everything else is one hop from them.
-// Without vulns, the banner's vulns aren't modeled (ex. for historical banners).
-function bannerNodes(b, tagPrefix=$lib.null, vulns=(true)) {
+// A historical banner (from a history lookup) is an old observation, so what it says about the
+// current state isn't modeled: its vulns, Shodan's tags, and the IP's ASN (which overwrites).
+function bannerNodes(b, tagPrefix=$lib.null, historical=(false)) {
     $srv = $serverNode($b.ip, $b.port, $b.transport, $b.timestamp)
     if ($srv = $lib.null) { return($lib.null) }
-    $applyTags($srv, $tagPrefix, $b.tags)
+    if (not $historical) { $applyTags($srv, $tagPrefix, $b.tags) }
 
     $ipnode = $ipNode($b.ip, $b.timestamp)
-    if ($b.asn and $ipnode) { $setAsn($ipnode, $b.asn, $b.org) }
+    if ((not $historical) and $b.asn and $ipnode) { $setAsn($ipnode, $b.asn, $b.org) }
 
     $bannernode = $lib.null
     if $b.data {
@@ -237,7 +238,7 @@ function bannerNodes(b, tagPrefix=$lib.null, vulns=(true)) {
     // See shodansvc.norm.normSoftvers for how CPEs are paired with the product/version.
     for $sv in $b.softvers { $softverNode($srv, $sv.cpe, $sv.product, $sv.version) }
 
-    if $vulns {
+    if (not $historical) {
         for $vuln in $b.vulns { $vulnerableNode($srv, $vuln, $b.timestamp) }
     }
 
@@ -250,10 +251,10 @@ function bannerNodes(b, tagPrefix=$lib.null, vulns=(true)) {
 
 // Model the banners of a history lookup (/shodan/host/{ip}?history=true). Returns the IP node.
 //
-// Only the banners are modeled, without their vulns: a history lookup's host-level fields (vulns,
-// ports, tags, ...) are combined over its whole history, and old vulns aren't current. The current
-// host comes from a plain lookup (see slib.shodan.lib.host). With timeline, each banner is added
-// to the IP's timeline.
+// Only the banners are modeled, as historical ones (see bannerNodes): a history lookup's host-level
+// fields (vulns, ports, tags, ...) are combined over its whole history, and old vulns, tags, and
+// ASNs aren't current. The current host comes from a plain lookup (see slib.shodan.lib.host). With
+// timeline, each banner is added to the IP's timeline.
 function historyBanners(h, tagPrefix=$lib.null, timeline=(false)) {
     $ipnode = $ipNode($h.ip)
     if ($ipnode = $lib.null) { return($lib.null) }
@@ -261,7 +262,7 @@ function historyBanners(h, tagPrefix=$lib.null, timeline=(false)) {
     $tl = $lib.null
     if ($timeline and $h.banners) { $tl = $timelineNode($ipnode) }
     for $b in $h.banners {
-        $res = $bannerNodes($b, $tagPrefix, vulns=(false))
+        $res = $bannerNodes($b, $tagPrefix, historical=(true))
         if ($tl and $res) { $eventNode($tl, $b, $res) }
     }
     return($ipnode)

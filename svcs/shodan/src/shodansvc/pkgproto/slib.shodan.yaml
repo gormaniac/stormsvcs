@@ -1,5 +1,5 @@
 name: slib.shodan
-version: 0.12.0
+version: 0.12.1
 guid: 0f6c1d0f1d8a4c3bb7a1e3d5c9b2a864
 
 synapse_minversion: [2, 137, 0]
@@ -283,7 +283,7 @@ commands:
         file:bytes:mime=image/x-icon | slib.shodan.search --count
 
         // Run saved Shodan queries.
-        meta:rule:type=svc.shodan.query | slib.shodan.search --limit 200
+        meta:rule:type^=svc.shodan.query | slib.shodan.search --limit 200
 
         // Every server found by searches run for a certificate.
         crypto:x509:cert:sha1=e652c8bd1cafd04a44239fa8dab0c59deacb79ee | slib.shodan.search --yield-query | -(found)> inet:server
@@ -411,7 +411,7 @@ commands:
         slib.shodan.count "product:nginx country:US" --size 100 --facets org:10
 
         // The IPs behind saved queries, or presenting a certificate.
-        meta:rule:type=svc.shodan.query | slib.shodan.count
+        meta:rule:type^=svc.shodan.query | slib.shodan.count
         crypto:x509:cert:sha1=e652c8bd1cafd04a44239fa8dab0c59deacb79ee | slib.shodan.count
     cmdargs:
       - - query

@@ -5,12 +5,13 @@ init {
 
     // What inbound nodes add to the stream (see slib.shodan.lib.streamTarget). The type is the
     // type given, or the first inbound node's, when no type is given (the default, banners).
-    $state = ({"kind": $lib.null, "values": ([]), "query": $lib.null})
+    $state = ({"kind": $lib.null, "values": ([]), "query": $lib.null, "nodes": (false)})
     if ($cmdopts.type != "banners") { $state.kind = $cmdopts.type }
 }
 
 // Inbound nodes are collected, then streamed together once (one subscription).
 if $node {
+    $state.nodes = (true)
     $target = $shodan.streamTarget($node)
     if $target {
         if ($state.kind = $lib.null) { $state.kind = $target.kind }
@@ -32,6 +33,13 @@ if $node {
 }
 
 spin |
+
+// Inbound nodes that couldn't be streamed (all warned about) mean nothing to stream, not the
+// unfiltered banners stream.
+if ($state.nodes and $state.kind = $lib.null) {
+    $lib.warn("slib.shodan.stream: None of the inbound nodes could be streamed.")
+    stop
+}
 
 $kind = $state.kind
 if ($kind = $lib.null) { $kind = banners }

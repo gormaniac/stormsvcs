@@ -88,7 +88,8 @@ RETN_METHS = (
     "normVuln",
     "cves",
     "cpes",
-    # Streaming
+    # Query provenance
+    "apiUrl",
     "streamUrl",
 )
 

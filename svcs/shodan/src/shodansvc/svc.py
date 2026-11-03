@@ -9,6 +9,7 @@ Shodan's data as-is (or normalized, for the ``norm*`` variants) and raise
 import hashlib
 import json
 import re
+import time
 from collections.abc import AsyncIterator
 from typing import Any
 from urllib.parse import quote, urlencode
@@ -39,6 +40,9 @@ SEARCH_PAGE_SIZE = 100
 # Shodan has published it returns (https://book.shodan.io/changelog/2025-11-06/). A plan with a
 # lower limit gets FACET_LIMIT_RE's error, and the request is retried with that limit.
 COUNT_IP_SIZE = 131072
+
+# How long a key's learned facet limit is trusted, in seconds, so a plan change is picked up.
+FACET_LIMIT_TTL = 86400
 
 # Shodan's error for a facet size over the plan's limit, ex.
 # "Facet size too big for current subscription (limit: 1000)".
@@ -121,9 +125,9 @@ class ShodanSvc(s_cell.Cell):
         self.session = aiohttp.ClientSession(trust_env=True)
         self.onfini(self.session.close)
 
-        # The facet size limit of each API key's plan, keyed by the SHA-256 of the key. Only ever
-        # kept in memory, and never holds a key itself. See countIps().
-        self.facetlimits: dict[str, int] = {}
+        # The facet size limit of each API key's plan, and when it was learned, keyed by the
+        # SHA-256 of the key. Only ever kept in memory, and never holds a key itself. See countIps().
+        self.facetlimits: dict[str, tuple[int, float]] = {}
 
         self.client = ShodanClient(
             self.session,
@@ -213,15 +217,17 @@ class ShodanSvc(s_cell.Cell):
         """List the IPs matching a query with the free count API's ``ip`` facet (no query credits).
 
         ``size`` is the number of IPs to ask for, defaulting to the most the key's plan allows. The
-        plan's limit is learned from Shodan's error the first time a key asks for too many, then
-        cached in memory, so later calls with that key need a single request.
+        plan's limit is learned from Shodan's error when a key asks for too many, then cached in
+        memory for ``FACET_LIMIT_TTL`` seconds, so later calls with that key need a single request.
+        A ``size`` over the cached limit is still asked for, in case the plan changed.
 
         ``facets`` are extra facets (a comma separated str or a list) returned for printing only.
 
-        Returns ``{"ips": [str, ...], "size": int, "full": bool, "lowered": bool, "facets": {...}}``.
-        ``full`` is true when the IPs fill the size asked for, so the query likely matches more IPs
-        than were returned. ``lowered`` is true when ``size`` was over the plan's limit and was
-        lowered to it. The ``ip`` facet's counts are dropped.
+        Returns ``{"ips": [str, ...], "size": int, "limit": int | None, "full": bool,
+        "lowered": bool, "facets": {...}}``. ``limit`` is the plan's limit, if known. ``full`` is
+        true when the IPs fill the size asked for, so the query likely matches more IPs than were
+        returned. ``lowered`` is true when ``size`` was over the plan's limit and was lowered to
+        it. The ``ip`` facet's counts are dropped.
         """
 
         if size is not None and size < 1:
@@ -229,13 +235,13 @@ class ShodanSvc(s_cell.Cell):
 
         key = self.getApiKey(apikey)
         keyhash = hashlib.sha256(key.encode()).hexdigest() if key else None
-        limit = self.facetlimits.get(keyhash)
+        limit = None
+        cached = self.facetlimits.get(keyhash)
+        if cached is not None and time.monotonic() - cached[1] < FACET_LIMIT_TTL:
+            limit = cached[0]
 
         asked = size or limit or COUNT_IP_SIZE
         lowered = False
-        if limit and asked > limit:
-            asked = limit
-            lowered = True
 
         if isinstance(facets, str):
             facets = facets.split(",")
@@ -253,10 +259,15 @@ class ShodanSvc(s_cell.Cell):
             if match is None or int(match.group(1)) >= asked:
                 raise
             limit = int(match.group(1))
-            self.facetlimits[keyhash] = limit
+            self.facetlimits[keyhash] = (limit, time.monotonic())
             lowered = size is not None
             asked = limit
             data = await self.count(query, facets=facetstr(asked), apikey=apikey)
+        else:
+            # A size over the cached limit worked, so the plan changed: forget the old limit.
+            if limit is not None and asked > limit:
+                self.facetlimits.pop(keyhash, None)
+                limit = None
 
         facetdata = dict((data or {}).get("facets") or {})
         ips = [
@@ -266,6 +277,7 @@ class ShodanSvc(s_cell.Cell):
         return {
             "ips": ips,
             "size": asked,
+            "limit": limit,
             "full": len(ips) >= asked,
             "lowered": lowered,
             "facets": facetdata,
@@ -357,12 +369,35 @@ class ShodanSvc(s_cell.Cell):
         )
 
     async def scans(self, page: int = 1, apikey=None) -> dict:
-        """GET /shodan/scans"""
-        return await self._api("get", "/shodan/scans", apikey, params={"page": page})
+        """GET /shodan/scans
+
+        Shodan includes the ``api_key`` that submitted each scan, which is removed so a key (ex. the
+        service-wide one) is never readable from Storm.
+        """
+        data = await self._api("get", "/shodan/scans", apikey, params={"page": page})
+        for scan in (data or {}).get("matches") or ():
+            if isinstance(scan, dict):
+                scan.pop("api_key", None)
+        if isinstance(data, dict):
+            data.pop("api_key", None)
+        return data
 
     async def scanStatus(self, scanid: str, apikey=None) -> dict:
-        """GET /shodan/scan/{id}"""
-        return await self._api("get", f"/shodan/scan/{_seg(scanid)}", apikey)
+        """GET /shodan/scan/{id} (without any ``api_key``, see scans())"""
+        data = await self._api("get", f"/shodan/scan/{_seg(scanid)}", apikey)
+        if isinstance(data, dict):
+            data.pop("api_key", None)
+        return data
+
+    async def apiUrl(self, path: str, base: str = "api") -> str:
+        """The public URL of a Shodan API endpoint, without the API key.
+
+        Recorded as the ``:api:url`` of an ``it:exec:query``. Like streamUrl(), it always uses
+        Shodan's public base URL, even when ``shodan:urls`` overrides it.
+        """
+        if base not in BASE_URLS:
+            raise ShodanApiError(f"Unknown Shodan API: {base}")
+        return BASE_URLS[base] + path
 
     # ---- Network alerts ----
 

@@ -11,6 +11,11 @@ init {
     // The meta:rule nodes to yield with --yield.
     $out = ([])
 
+    // These only apply to Shodan's directory.
+    if ($source = "local" and ($cmdopts.page != 1 or $cmdopts.sort != "timestamp" or $cmdopts.order != "desc")) {
+        $lib.warn("slib.shodan.queries: --page, --sort, and --order only apply to Shodan's directory, not --source local.")
+    }
+
     if $cmdopts.tags {
         if ($source = "local") { $lib.warn("slib.shodan.queries: --tags lists Shodan's directory tags, not local ones.") }
         $retn = $priv.queriesTags(size=$cmdopts.size)

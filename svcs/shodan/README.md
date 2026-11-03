@@ -219,7 +219,7 @@ queries as you like, then `slib.shodan.search` (which uses credits) or other API
 
 ```
 slib.shodan.count "http.favicon.hash:-1166125415"
-meta:rule:type=svc.shodan.query | slib.shodan.count --facets country:10
+meta:rule:type^=svc.shodan.query | slib.shodan.count --facets country:10
 ```
 
 ## Searching from nodes

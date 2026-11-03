@@ -817,6 +817,13 @@ class TestShodanStormCount(s_tests.SynTest):
             assert nodes[0][1]["props"]["opts"]["full"] is True
             assert len(await core.nodes("it:exec:query -(found)> *")) == 2
 
+        # A --size under the plan's limit that the IPs fill isn't blamed on the plan.
+        async with shodanSvc(self) as (core, svc, fake):
+            await core.nodes('slib.shodan.count "product:nginx"')
+            msgs = await core.stormlist('slib.shodan.count "product:nginx" --size 2')
+            self.stormIsInWarn("returned 2 IPs, the size asked for", msgs)
+            self.stormNotInWarn("the most your plan allows", msgs)
+
     async def test_count_inputs(self):
         async with shodanSvc(self) as (core, svc, fake):
             await core.nodes("[ inet:asn=15169 inet:fqdn=vertex.link ]")
@@ -882,6 +889,11 @@ class TestShodanStormHistory(s_tests.SynTest):
                 ("inet:server", f"tcp://{HISTORY_IP}:22"),
             }
             assert not await core.nodes("it:sec:cve=cve-2011-3192")
+
+            # Nor the history's old ASN or Shodan tags.
+            assert (await core.nodes(f"inet:ipv4={HISTORY_IP}"))[0].get("asn") == 64496
+            assert not await core.nodes("inet:asn=1111")
+            assert not await core.nodes("#rep.shodan.honeypot")
 
             tls = await core.nodes("meta:timeline")
             assert len(tls) == 1
@@ -1000,17 +1012,21 @@ class TestShodanStormInputs(s_tests.SynTest):
 
     async def test_trends_inputs(self):
         async with shodanSvc(self) as (core, svc, fake):
-            await core.nodes('[ inet:asn=15169 it:dev:str="apache" it:dev:str="ssh.hassh:abc port:22" ]')
+            await core.nodes(
+                '[ inet:asn=15169 it:dev:str="apache" it:dev:str="ssh.hassh:abc port:22"'
+                " it:dev:str='http.title:\"Index of: /\" (port:80)' ]"
+            )
             msgs = await core.stormlist('inet:asn=15169 it:dev:str | slib.shodan.trends "country:US"')
             self.stormHasNoErr(msgs)
 
+            # Text in a quoted value isn't mistaken for a filter.
             queries = sorted(r["query"]["query"] for r in fake.requests if r["path"] == "/trends/api/v1/search")
-            assert queries == ["apache country:US", "asn:AS15169 country:US"]
+            assert queries == ["apache country:US", "asn:AS15169 country:US", 'http.title:"Index of: /" (port:80) country:US']
             self.stormIsInWarn("Trends doesn't support the ssh.hassh filter", msgs)
             self.stormIsInPrint("Total results: 10 (asn:AS15169 country:US)", msgs)
 
             # Inbound nodes are passed through, except the skipped one.
-            assert len([m for m in msgs if m[0] == "node"]) == 2
+            assert len([m for m in msgs if m[0] == "node"]) == 3
 
             msgs = await core.stormlist("slib.shodan.trends")
             self.stormIsInErr("requires a query, inbound nodes, or --filters", msgs)
@@ -1051,6 +1067,13 @@ class TestShodanStormInputs(s_tests.SynTest):
 
             msgs = await core.stormlist("[ inet:email=visi@vertex.link ] | slib.shodan.stream")
             self.stormIsInWarn("The node form inet:email is not supported", msgs)
+
+            # Inbound nodes that can't be streamed mean no stream, not the unfiltered banners one.
+            before = len([r for r in fake.requests if r["path"].startswith("/stream/")])
+            msgs = await core.stormlist("[ risk:vuln=* ] | slib.shodan.stream --timeout 5")
+            self.stormIsInWarn("None of the inbound nodes could be streamed", msgs)
+            assert len([r for r in fake.requests if r["path"].startswith("/stream/")]) == before
+            assert not [m for m in msgs if m[0] == "node"]
 
 
 class TestShodanStormDedupe(s_tests.SynTest):
@@ -1248,6 +1271,8 @@ class TestShodanStormSavedQueries(s_tests.SynTest):
 
             # An older rule, with the parent type, counts as local.
             await core.nodes('[ meta:rule=* :type=svc.shodan.query :name="Old" :text="port:22" ]')
+            msgs = await core.stormlist('slib.shodan.query.save "port:22" --name "SSH"')
+            self.stormIsInWarn("port:22 is already a local saved query (old)", msgs)
             await core.nodes('[ meta:rule=* :type=other :name="Not shodan" :text="port:23" ]')
 
             msgs = await core.stormlist("slib.shodan.queries --source local --yield")
@@ -1277,6 +1302,8 @@ class TestShodanStormSavedQueries(s_tests.SynTest):
 
             msgs = await core.stormlist("slib.shodan.queries --source local --tags")
             self.stormIsInWarn("--tags lists Shodan's directory tags", msgs)
+            msgs = await core.stormlist("slib.shodan.queries --source local --page 2")
+            self.stormIsInWarn("--page, --sort, and --order only apply to Shodan's directory", msgs)
 
     async def test_run_saved_queries(self):
         async with shodanSvc(self) as (core, svc, fake):
