@@ -1,0 +1,246 @@
+{
+ "domains": [
+  {
+   "certificate_count": 13,
+   "domain": "url.gormo.co"
+  },
+  {
+   "certificate_count": 12,
+   "domain": "gormo.co"
+  },
+  {
+   "certificate_count": 10,
+   "domain": "www.gormo.co"
+  },
+  {
+   "certificate_count": 2,
+   "domain": "docs.gormo.co"
+  },
+  {
+   "certificate_count": 1,
+   "domain": "*.gormo.co"
+  }
+ ],
+ "duration": "325.216ms",
+ "shard_timings": [
+  {
+   "domain_count": 6,
+   "duration_micros": 530,
+   "shard_id": 113
+  },
+  {
+   "domain_count": 8,
+   "duration_micros": 161,
+   "shard_id": 2
+  },
+  {
+   "domain_count": 2,
+   "duration_micros": 129,
+   "shard_id": 61
+  },
+  {
+   "domain_count": 0,
+   "duration_micros": 0,
+   "shard_id": 102
+  },
+  {
+   "domain_count": 8,
+   "duration_micros": 161,
+   "shard_id": 57
+  },
+  {
+   "domain_count": 2,
+   "duration_micros": 155,
+   "shard_id": 62
+  },
+  {
+   "domain_count": 2,
+   "duration_micros": 151,
+   "shard_id": 111
+  },
+  {
+   "domain_count": 0,
+   "duration_micros": 0,
+   "shard_id": 115
+  },
+  {
+   "domain_count": 6,
+   "duration_micros": 223,
+   "shard_id": 71
+  },
+  {
+   "domain_count": 6,
+   "duration_micros": 201,
+   "shard_id": 76
+  },
+  {
+   "domain_count": 0,
+   "duration_micros": 0,
+   "shard_id": 123
+  },
+  {
+   "domain_count": 0,
+   "duration_micros": 0,
+   "shard_id": 137
+  },
+  {
+   "domain_count": 16,
+   "duration_micros": 176,
+   "shard_id": 8
+  },
+  {
+   "domain_count": 0,
+   "duration_micros": 0,
+   "shard_id": 66
+  },
+  {
+   "domain_count": 3,
+   "duration_micros": 239,
+   "shard_id": 116
+  },
+  {
+   "domain_count": 20,
+   "duration_micros": 133,
+   "shard_id": 91
+  },
+  {
+   "domain_count": 4,
+   "duration_micros": 175,
+   "shard_id": 82
+  },
+  {
+   "domain_count": 2,
+   "duration_micros": 139,
+   "shard_id": 132
+  },
+  {
+   "domain_count": 5,
+   "duration_micros": 37,
+   "shard_id": 4
+  },
+  {
+   "domain_count": 2,
+   "duration_micros": 119,
+   "shard_id": 114
+  },
+  {
+   "domain_count": 0,
+   "duration_micros": 0,
+   "shard_id": 124
+  },
+  {
+   "domain_count": 5,
+   "duration_micros": 154,
+   "shard_id": 63
+  },
+  {
+   "domain_count": 2,
+   "duration_micros": 129,
+   "shard_id": 101
+  },
+  {
+   "domain_count": 1,
+   "duration_micros": 152,
+   "shard_id": 138
+  },
+  {
+   "domain_count": 0,
+   "duration_micros": 0,
+   "shard_id": 56
+  },
+  {
+   "domain_count": 5,
+   "duration_micros": 144,
+   "shard_id": 105
+  },
+  {
+   "domain_count": 15,
+   "duration_micros": 123,
+   "shard_id": 81
+  },
+  {
+   "domain_count": 0,
+   "duration_micros": 0,
+   "shard_id": 134
+  },
+  {
+   "domain_count": 2,
+   "duration_micros": 134,
+   "shard_id": 74
+  },
+  {
+   "domain_count": 6,
+   "duration_micros": 136,
+   "shard_id": 93
+  },
+  {
+   "domain_count": 0,
+   "duration_micros": 0,
+   "shard_id": 112
+  },
+  {
+   "domain_count": 0,
+   "duration_micros": 0,
+   "shard_id": 54
+  },
+  {
+   "domain_count": 0,
+   "duration_micros": 0,
+   "shard_id": 53
+  },
+  {
+   "domain_count": 0,
+   "duration_micros": 0,
+   "shard_id": 55
+  },
+  {
+   "domain_count": 0,
+   "duration_micros": 0,
+   "shard_id": 75
+  },
+  {
+   "domain_count": 1,
+   "duration_micros": 122,
+   "shard_id": 133
+  },
+  {
+   "domain_count": 0,
+   "duration_micros": 0,
+   "shard_id": 130
+  },
+  {
+   "domain_count": 0,
+   "duration_micros": 0,
+   "shard_id": 131
+  },
+  {
+   "domain_count": 10,
+   "duration_micros": 29,
+   "shard_id": 1
+  },
+  {
+   "domain_count": 2,
+   "duration_micros": 123,
+   "shard_id": 73
+  },
+  {
+   "domain_count": 0,
+   "duration_micros": 0,
+   "shard_id": 65
+  },
+  {
+   "domain_count": 2,
+   "duration_micros": 157,
+   "shard_id": 64
+  },
+  {
+   "domain_count": 0,
+   "duration_micros": 0,
+   "shard_id": 103
+  }
+ ],
+ "total_before_limit": null,
+ "total_certificates": 27,
+ "total_domains": 5,
+ "truncated": false
+}

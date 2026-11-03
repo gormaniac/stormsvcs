@@ -1,0 +1,267 @@
+// Model bgp.he.net results (see bgphesvc.svc) in Synapse.
+//
+// Node edits here run as the calling user. Every node created is linked to the
+// slib.bgphe meta:source node with a -(seen)> edge.
+
+init {
+    $sourceGuid = "5cb263934371467b8844e789c39f81aa"
+}
+
+// ---- Helpers ----
+//
+// NOTE: A for loop that runs while a node is in a function's pipeline sends the
+// node downstream after its first iteration, reaching return() and ending the
+// function early. So functions here only yield a node when they don't loop, and
+// loops call helpers that yield/edit the node in their own runtime instead.
+
+// Link the node to the slib.bgphe meta:source.
+function seen(n) {
+    yield $n
+    [ <(seen)+ { [ meta:source=$sourceGuid :name="bgp.he.net" ] } ]
+    return($n)
+}
+
+// Extend the node's .seen to cover the time.
+function seenAt(n, time) {
+    yield $n
+    [ .seen ?= $time ]
+    return($n)
+}
+
+// Add a value to an array prop, skipping values that don't norm.
+function addValu(n, prop, valu) {
+    yield $n
+    [ :$prop ?+= $valu ]
+    return($n)
+}
+
+function addValus(n, prop, valus) {
+    for $valu in $valus { $addValu($n, $prop, $valu) }
+    return($n)
+}
+
+function refs(n, other) {
+    yield $n
+    [ +(refs)> $other ]
+    return($n)
+}
+
+// ---- Certificates ----
+
+// The crypto:key node for a certificate's public key, deconflicted by its SPKI SHA-256.
+function keyNode(key) {
+    if (not $key.sha256) { return() }
+    [ crypto:key=({"public:sha256": $key.sha256}) ]
+    [
+        :public ?= $key.spki
+        :public:sha1 ?= $key.sha1
+        :algorithm ?= $key.algo
+    ]
+    return($seen($node))
+}
+
+// Create the crypto:x509:cert node and set every scalar prop. Returns the node.
+//
+// bgp.he.net only has the TBSCertificate of a precertificate (no signature, so no
+// fingerprints), those are deconflicted by the TBSCertificate's SHA-256 instead.
+function certNode(c) {
+    if $c.sha256 {
+        [ crypto:x509:cert=({"sha256": $c.sha256}) ]
+        [
+            :sha1 = $c.sha1
+            :md5 = $c.md5
+            :file = `sha256:{$c.sha256}`
+        ]
+    } else {
+        [ crypto:x509:cert=(slib.bgphe, tbs, $c.tbs) ]
+    }
+    [
+        :serial ?= $c.serial
+        :subject ?= $c.subject.dn
+        :issuer ?= $c.issuer.dn
+        :validity:notbefore ?= $c.notbefore
+        :validity:notafter ?= $c.notafter
+    ]
+    $node.data.set("slib:bgphe", $c)
+    if (not $c.error) {
+        [
+            :version ?= $c.version
+            :algo ?= $c.sigalgo.oid
+            :signature ?= $c.signature
+            :selfsigned = $c.selfsigned
+        ]
+        if $c.pubkey.rsa { [ :rsa:key ?= ($c.pubkey.rsa.mod, $c.pubkey.rsa.exp) ] }
+    }
+    return($node)
+}
+
+// Model the complete details of a certificate. Returns the crypto:x509:cert node.
+//
+// Everything the Synapse model has a place for is set as props, the full details
+// (extensions, key usage, bgp.he.net's IDs and CT log shards, etc.) are stored in
+// the node's "slib:bgphe" node data. .seen covers when bgp.he.net saw it logged.
+function cert(c) {
+    $n = $seen($certNode($c))
+    if $c.he.logged { $seenAt($n, $c.he.logged) }
+
+    $addValus($n, "ext:sans", $c.sans)
+    $addValus($n, "crl:urls", $c.crls)
+    for $url in $c.crls { $addValu($n, "ext:crls", (uri, $url)) }
+    $addValus($n, "identities:fqdns", $c.identities.fqdns)
+    $addValus($n, "identities:emails", $c.identities.emails)
+    $addValus($n, "identities:ipv4s", $c.identities.ipv4s)
+    $addValus($n, "identities:ipv6s", $c.identities.ipv6s)
+    $addValus($n, "identities:urls", $c.identities.urls)
+
+    if (not $c.error) {
+        $key = $keyNode($c.pubkey)
+        if $key { $refs($n, $key) }
+    }
+
+    return($n)
+}
+
+// A domain (or subdomain) with certificates.
+function fqdn(valu) {
+    [ inet:fqdn=$valu ]
+    return($seen($node))
+}
+
+// A hostname on a certificate that resolves to an IP.
+function dns(ip, version, fqdn) {
+    if ($version = 4) {
+        [ inet:dns:a=($fqdn, $ip) ]
+    } else {
+        [ inet:dns:aaaa=($fqdn, $ip) ]
+    }
+    return($seen($node))
+}
+
+// ---- Domain whois ----
+
+// The inet:whois:rec node of a whois record, with the record (raw text and parsed) in its
+// "slib:bgphe" node data. Returns the node.
+//
+// :asof is when the registry answered the query, or when the record was last updated, or now.
+function whoisRec(w) {
+    $r = $w.rec
+    $asof = $r.asof
+    if ($asof = null) { $asof = $r.updated }
+    if ($asof = null) { $asof = $lib.time.now() }
+
+    [ inet:whois:rec=($w.fqdn, $asof) ]
+    [
+        :text = $w.text
+        :created ?= $r.created
+        :updated ?= $r.updated
+        :expires ?= $r.expires
+        :registrar ?= $r.registrar.name
+        :registrant:name ?= $r.registrant
+    ]
+    // :text is lowercased by the model, the node data keeps the original.
+    $node.data.set("slib:bgphe", $w)
+    return($seen($node))
+}
+
+function whoisNs(rec, ns) {
+    [ inet:whois:recns=($ns, $rec.value()) ]
+    return($seen($node))
+}
+
+function whoisEmail(fqdn, email) {
+    [ inet:whois:email=($fqdn, $email) ]
+    return($seen($node))
+}
+
+// A registrant/admin/tech/billing contact.
+function whoisContact(rec, c) {
+    [ inet:whois:contact=($rec.value(), $c.type) ]
+    [
+        :id ?= $c.id
+        :name ?= $c.name
+        :orgname ?= $c.orgname
+        :address ?= $c.address
+        :city ?= $c.city
+        :state ?= $c.state
+        :country ?= $c.country
+        :phone ?= $c.phone
+        :fax ?= $c.fax
+        :email ?= $c.email
+    ]
+    return($seen($node))
+}
+
+// The registrar's contact (its abuse email and phone, URL, and whois server).
+function whoisRegistrar(rec, rar) {
+    [ inet:whois:contact=($rec.value(), registrar) ]
+    [
+        :id ?= $rar.ianaid
+        :orgname ?= $rar.name
+        :email ?= $rar.email
+        :phone ?= $rar.phone
+        :url ?= $rar.url
+        :whois:fqdn ?= $rar.whois
+    ]
+    return($seen($node))
+}
+
+// Model a domain whois record (see BgpHeSvc.whoisDomain). Returns the inet:whois:rec node.
+function whois(w) {
+    $rec = $whoisRec($w)
+    $r = $w.rec
+
+    for $ns in $r.nameservers { $whoisNs($rec, $ns) }
+    for $email in $r.emails { $whoisEmail($w.fqdn, $email) }
+    for $c in $r.contacts { $whoisContact($rec, $c) }
+
+    $rar = $r.registrar
+    if ($rar.name or $rar.email or $rar.url or $rar.whois) { $whoisRegistrar($rec, $rar) }
+
+    return($rec)
+}
+
+// ---- ASNs ----
+
+// The inet:asn node of an ASN whois record, with the record in its "slib:bgphe:whois" node data.
+function asnNode(w) {
+    [ inet:asn=$w.asn ]
+    [ :name ?= $w.rec.name ]
+    $node.data.set("slib:bgphe:whois", $w)
+    return($seen($node))
+}
+
+// The ou:org responsible for an ASN, deconflicted by name. Returns null without a name.
+function orgNode(r) {
+    if (not $r.orgname) { return() }
+    gen.ou.org $r.orgname |
+    [ :country:code ?= $r.country ]
+    return($seen($node))
+}
+
+function setOwner(n, org) {
+    yield $n
+    [ :owner = $org.value() ]
+    return($n)
+}
+
+// Model an ASN whois record (see BgpHeSvc.whoisAsn).
+// Returns ({"asn": <inet:asn node>, "org": <ou:org node or null>}).
+function asn(w) {
+    $n = $asnNode($w)
+    $org = $orgNode($w.rec)
+    if $org { $setOwner($n, $org) }
+    return(({"asn": $n, "org": $org}))
+}
+
+// An originated prefix, as an inet:asnet4/inet:asnet6. Its .seen is extended to now, and its
+// visibility is stored in its "slib:bgphe" node data.
+function asnet(asn, p) {
+    if ($p.version = 4) {
+        [ inet:asnet4=($asn, $p.prefix) ]
+    } else {
+        [ inet:asnet6=($asn, $p.prefix) ]
+    }
+    [ .seen = now ]
+    $node.data.set("slib:bgphe", ({"count": $p.count, "total": $p.total}))
+    return($seen($node))
+}

@@ -1,0 +1,240 @@
+name: slib.bgphe
+version: 0.1.0
+guid: 48c4db1f7420428e87085030a45b3205
+
+synapse_version: ">=2.234.0,<3.0.0"
+
+genopts:
+    dotstorm: true
+
+author:
+  url: https://github.com/gormaniac
+  name: John Gorman
+
+desc: A Storm Service for Hurricane Electric's BGP Toolkit (bgp.he.net) - certificates by domain, subdomain, or IP, domain and ASN whois, and the prefixes an ASN originates.
+
+docs:
+  - title: README
+    path: README.md
+
+perms:
+  - perm: [ slib, bgphe, user ]
+    gate: cortex
+    desc: Query bgp.he.net and model the results.
+
+modules:
+  # The privileged module - the only module that talks to the service.
+  - name: slib.bgphe.priv
+    asroot:perms:
+      - [ slib, bgphe, user ]
+
+  # Unprivileged modules - node edits here run as the calling user.
+  - name: slib.bgphe.lib
+    perms:
+      - [ slib, bgphe, user ]
+  - name: slib.bgphe.model
+    perms:
+      - [ slib, bgphe, user ]
+  - name: slib.bgphe.util
+
+commands:
+
+  - name: slib.bgphe.certs
+    perms:
+      - [ slib, bgphe, user ]
+    descr: |
+      Look up the CT log certificates for domains in bgp.he.net and model their complete details.
+
+      Matches certificates with the domain itself in their SANs or subject. Use
+      slib.bgphe.certs.subdomains to find the domain's subdomains that have certificates.
+      bgp.he.net returns 200 certificates per request, --limit caps the requests too.
+
+      Examples:
+
+        slib.bgphe.certs vertex.link --valid
+
+        inet:fqdn=vertex.link | slib.bgphe.certs --limit 1000 --no-precerts --yield
+
+        inet:fqdn=vertex.link | slib.bgphe.certs.subdomains --yield | slib.bgphe.certs
+    cmdargs:
+      - - domains
+        - type: str
+          nargs: "*"
+          help: Domains to look up instead of using the inbound nodes. Yields the certificates.
+      - - --limit
+        - type: int
+          default: 200
+          help: The max number of certificates per domain (at most 10000).
+      - - --valid
+        - default: false
+          action: store_true
+          help: Only currently valid certificates.
+      - - --no-precerts
+        - default: false
+          action: store_true
+          help: Exclude precertificates.
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the crypto:x509:cert nodes instead of the inbound nodes.
+    cmdinputs:
+      - form: inet:fqdn
+        help: Domains to look up the certificates of.
+
+  - name: slib.bgphe.certs.subdomains
+    perms:
+      - [ slib, bgphe, user ]
+    descr: |
+      Find a domain's subdomains that have CT log certificates in bgp.he.net, and model them
+      as inet:fqdn nodes. --print lists them with how many certificates each has.
+
+      Examples:
+
+        slib.bgphe.certs.subdomains vertex.link --print
+
+        inet:fqdn=vertex.link | slib.bgphe.certs.subdomains --yield
+    cmdargs:
+      - - domains
+        - type: str
+          nargs: "*"
+          help: Domains to look up instead of using the inbound nodes. Yields the subdomains.
+      - - --print
+        - default: false
+          action: store_true
+          help: Print each subdomain and its certificate count.
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the inet:fqdn nodes (the domain and its subdomains) instead of the inbound nodes.
+    cmdinputs:
+      - form: inet:fqdn
+        help: Domains to find the subdomains of.
+
+  - name: slib.bgphe.certs.ip
+    perms:
+      - [ slib, bgphe, user ]
+    descr: |
+      Find the hostnames on CT log certificates that resolve to an IP (or to any IP in a CIDR)
+      in bgp.he.net, and model them as inet:dns:a/aaaa nodes.
+
+      bgp.he.net returns a sample of up to ~1000 hostnames per query, a warning says when
+      there are more.
+
+      Examples:
+
+        slib.bgphe.certs.ip 8.8.8.8 --print
+
+        inet:ipv4=1.1.1.1 | slib.bgphe.certs.ip --yield | -> inet:fqdn | slib.bgphe.certs
+
+        inet:cidr4=8.8.8.0/24 | slib.bgphe.certs.ip --yield
+    cmdargs:
+      - - valus
+        - type: str
+          nargs: "*"
+          help: IPs or CIDRs to look up instead of using the inbound nodes. Yields the DNS nodes.
+      - - --print
+        - default: false
+          action: store_true
+          help: Print each IP and its hostnames.
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the inet:dns:a/aaaa nodes instead of the inbound nodes.
+    cmdinputs:
+      - form: inet:ipv4
+        help: IPs to find the certificate hostnames of.
+      - form: inet:ipv6
+        help: IPs to find the certificate hostnames of.
+      - form: inet:cidr4
+        help: CIDRs to find the certificate hostnames of.
+      - form: inet:cidr6
+        help: CIDRs to find the certificate hostnames of.
+
+  - name: slib.bgphe.whois
+    perms:
+      - [ slib, bgphe, user ]
+    descr: |
+      Look up domain whois records in bgp.he.net and model them as inet:whois:rec nodes, with
+      their nameservers, contacts, and emails.
+
+      bgp.he.net caches whois records. A record's :asof is when the registry answered the
+      query if the record says, or the record's last update time, or now.
+
+      Examples:
+
+        slib.bgphe.whois vertex.link
+
+        inet:fqdn=vertex.link | slib.bgphe.whois --yield
+    cmdargs:
+      - - domains
+        - type: str
+          nargs: "*"
+          help: Domains to look up instead of using the inbound nodes. Yields the whois records.
+      - - --print
+        - default: false
+          action: store_true
+          help: Print the raw whois text.
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the inet:whois:rec nodes instead of the inbound nodes.
+    cmdinputs:
+      - form: inet:fqdn
+        help: Domains to look up the whois of.
+
+  - name: slib.bgphe.asn
+    perms:
+      - [ slib, bgphe, user ]
+    descr: |
+      Look up ASN whois records (from the ASN's RIR) in bgp.he.net, and model the AS name and
+      the organization (ou:org) responsible for it. The parsed record (contacts, emails, dates,
+      etc.) and its raw text are stored in the inet:asn's "slib:bgphe:whois" node data.
+
+      Examples:
+
+        slib.bgphe.asn 15169 --print
+
+        inet:asn=15169 | slib.bgphe.asn
+    cmdargs:
+      - - asns
+        - type: str
+          nargs: "*"
+          help: ASNs (ex. 15169 or AS15169) to look up instead of using the inbound nodes. Yields the ASNs.
+      - - --print
+        - default: false
+          action: store_true
+          help: Print a summary of each record.
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the ou:org nodes instead of the inbound nodes.
+    cmdinputs:
+      - form: inet:asn
+        help: ASNs to look up the whois of.
+
+  - name: slib.bgphe.asn.prefixes
+    perms:
+      - [ slib, bgphe, user ]
+    descr: |
+      Look up the prefixes an ASN originates, according to HE's Super Looking Glass, and model
+      them as inet:asnet4/inet:asnet6 nodes. Each one's .seen is extended to now, and its
+      visibility (how many of the looking glass's peers see the route from the ASN, of how
+      many carry it) is stored in its "slib:bgphe" node data.
+
+      Examples:
+
+        slib.bgphe.asn.prefixes 15169
+
+        inet:asn=15169 | slib.bgphe.asn.prefixes --yield | +inet:asnet4
+    cmdargs:
+      - - asns
+        - type: str
+          nargs: "*"
+          help: ASNs (ex. 15169 or AS15169) to look up instead of using the inbound nodes. Yields the prefixes.
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the inet:asnet4/inet:asnet6 nodes instead of the inbound nodes.
+    cmdinputs:
+      - form: inet:asn
+        help: ASNs to look up the prefixes of.

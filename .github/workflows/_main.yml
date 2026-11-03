@@ -100,3 +100,9 @@ jobs:
     if: ${{ !failure() && !cancelled() }}
     uses: ./.github/workflows/malpedia.yml
     secrets: inherit
+
+  bgphe:
+    needs: base
+    if: ${{ !failure() && !cancelled() }}
+    uses: ./.github/workflows/bgphe.yml
+    secrets: inherit
