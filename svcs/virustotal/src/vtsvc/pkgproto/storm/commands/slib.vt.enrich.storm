@@ -1,0 +1,36 @@
+init {
+    $vtlib = $lib.import(slib.vt.lib)
+    $util = $lib.import(slib.vt.util)
+    $opts = $cmdopts
+    $cache = (not $cmdopts.no_cache)
+
+    // Values given as options, looked up once before the inbound nodes.
+    $given = ([])
+    for $h in $cmdopts.hash { $given.append((file, $h)) }
+    for $f in $cmdopts.fqdn { $given.append((domain, $f)) }
+    for $i in $cmdopts.ip { $given.append((ip_address, $i)) }
+    for $u in $cmdopts.url { $given.append((url, $u)) }
+
+    $found = ([])
+    for ($kind, $ident) in $given {
+        $n = $vtlib.enrich($kind, $ident, engines=$opts.engines, behaviour=$opts.behaviour, cache=$cache)
+        if $n { $found.append($n) }
+    }
+}
+
+$tgt = $util.target($node)
+if ($tgt = $lib.null) {
+    $lib.warn("slib.vt.enrich: Can't look up {repr}, it has no hash.", repr=$node.repr())
+} else {
+    ($kind, $ident) = $tgt
+    $n = $vtlib.enrich($kind, $ident, engines=$opts.engines, behaviour=$opts.behaviour, cache=$cache)
+    if ($opts.yield and $n) { $found.append($n) }
+}
+
+if $opts.yield { spin }
+
+fini {
+    if $opts.yield {
+        for $n in $found { yield $n }
+    }
+}

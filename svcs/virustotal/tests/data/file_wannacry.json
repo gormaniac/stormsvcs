@@ -1,0 +1,369 @@
+{
+ "data": {
+  "id": "24d004a104d4d54034dbcffc2a4b19a11f39008a575aa614ea04703480b1022c",
+  "type": "file",
+  "links": {
+   "self": "https://www.virustotal.com/api/v3/files/24d004a104d4d54034dbcffc2a4b19a11f39008a575aa614ea04703480b1022c"
+  },
+  "attributes": {
+   "sha1": "e889544aff85ffaf8b0d0da705105dee7c97fe26",
+   "last_analysis_stats": {
+    "malicious": 68,
+    "suspicious": 0,
+    "undetected": 3,
+    "harmless": 0,
+    "timeout": 0,
+    "confirmed-timeout": 0,
+    "failure": 0,
+    "type-unsupported": 4
+   },
+   "crowdsourced_yara_results": [
+    {
+     "ruleset_id": "000fd39f0d",
+     "rule_name": "WannaCry_Ransomware",
+     "ruleset_name": "crime_wannacry",
+     "description": "Detects WannaCry Ransomware",
+     "author": "Florian Roth (Nextron Systems) (with the help of binar.ly)",
+     "match_date": 1793680201,
+     "ruleset_version": "000fd39f0d|1d926845269a3ac8de0431da133950390b5cced3",
+     "source": "https://github.com/Neo23x0/signature-base"
+    },
+    {
+     "ruleset_id": "000fd39f0d",
+     "rule_name": "WannaCry_Ransomware_Gen",
+     "ruleset_name": "crime_wannacry",
+     "description": "Detects WannaCry Ransomware",
+     "author": "Florian Roth (Nextron Systems) (based on rule by US CERT)",
+     "match_date": 1793680201,
+     "ruleset_version": "000fd39f0d|1d926845269a3ac8de0431da133950390b5cced3",
+     "source": "https://github.com/Neo23x0/signature-base"
+    }
+   ],
+   "authentihash": "1646cad4fe91337460de0d4c2c5451095023e74bdab331642aaca12647b72f46",
+   "vhash": "036046651d6570b8z201cpz31zd025z",
+   "first_seen_itw_date": 1494605298,
+   "crowdsourced_ids_results": [
+    {
+     "rule_category": "A Network Trojan was detected",
+     "alert_severity": "high",
+     "rule_msg": "ET MALWARE Possible WannaCry DNS Lookup 1",
+     "rule_id": "1:2024291",
+     "rule_source": "Proofpoint Emerging Threats Open",
+     "rule_url": "https://rules.emergingthreats.net/",
+     "rule_raw": "alert dns $HOME_NET any -> any any (msg:\"ET MALWARE Possible WannaCry DNS Lookup 1\"; dns.query; content:\"iuqerfsodp9ifjaposdfjhgosurijfaewrwergwea\"; isdataat:!6,relative; nocase; reference:cve,2017-0144; reference:url,www.endgame.com/blog/wcrywanacry-ransomware-technical-analysis; reference:url,www.bleepingcomputer.com/news/security/telefonica-tells-employees-to-shut-down-computers-amid-massive-ransomware-outbreak/; classtype:trojan-activity; sid:2024291; rev:6; metadata:affected_product Windows_XP_Vista_7_8_10_Server_32_64_Bit, attack_target Client_Endpoint, created_at 2017_05_12, cve CVE_2017_0144, deployment Perimeter, malware_family wannacry, confidence High, signature_severity Major, tag Ransomware, updated_at 2022_08_19;)",
+     "rule_references": [
+      "https://cve.mitre.org/cgi-bin/cvename.cgi?name=2017-0144",
+      "https://www.endgame.com/blog/wcrywanacry-ransomware-technical-analysis",
+      "https://www.bleepingcomputer.com/news/security/telefonica-tells-employees-to-shut-down-computers-amid-massive-ransomware-outbreak/"
+     ],
+     "alert_context": [
+      {
+       "dest_ip": "8.8.8.8",
+       "dest_port": 53
+      }
+     ]
+    },
+    {
+     "rule_category": "A Network Trojan was detected",
+     "alert_severity": "high",
+     "rule_msg": "ET MALWARE W32/WannaCry.Ransomware Killswitch Domain HTTP Request 1",
+     "rule_id": "1:2024298",
+     "rule_source": "Proofpoint Emerging Threats Open",
+     "rule_url": "https://rules.emergingthreats.net/",
+     "rule_raw": "alert http $HOME_NET any -> $EXTERNAL_NET any (msg:\"ET MALWARE W32/WannaCry.Ransomware Killswitch Domain HTTP Request 1\"; flow:established,to_server; http.host; content:\"iuqerfsodp9ifjaposdfjhgosurijfaewrwergwea\"; fast_pattern; reference:cve,2017-0144; reference:url,www.endgame.com/blog/wcrywanacry-ransomware-technical-analysis; reference:url,www.bleepingcomputer.com/news/security/telefonica-tells-employees-to-shut-down-computers-amid-massive-ransomware-outbreak/; classtype:trojan-activity; sid:2024298; rev:5; metadata:affected_product Windows_XP_Vista_7_8_10_Server_32_64_Bit, attack_target Client_Endpoint, created_at 2017_05_16, deployment Perimeter, former_category MALWARE, malware_family wannacry, signature_severity Major, tag Ransomware, updated_at 2020_10_09, mitre_tactic_id TA0040, mitre_tactic_name Impact, mitre_technique_id T1486, mitre_technique_name Data_Encrypted_for_Impact;)",
+     "rule_references": [
+      "https://cve.mitre.org/cgi-bin/cvename.cgi?name=2017-0144",
+      "https://www.endgame.com/blog/wcrywanacry-ransomware-technical-analysis",
+      "https://www.bleepingcomputer.com/news/security/telefonica-tells-employees-to-shut-down-computers-amid-massive-ransomware-outbreak/"
+     ],
+     "alert_context": [
+      {
+       "url": "http://www.iuqerfsodp9ifjaposdfjhgosurijfaewrwergwea.com/",
+       "hostname": "www.iuqerfsodp9ifjaposdfjhgosurijfaewrwergwea.com",
+       "dest_ip": "104.16.173.80",
+       "dest_port": 80
+      },
+      {
+       "url": "http://www.iuqerfsodp9ifjaposdfjhgosurijfaewrwergwea.com/",
+       "hostname": "www.iuqerfsodp9ifjaposdfjhgosurijfaewrwergwea.com",
+       "dest_ip": "104.17.244.81",
+       "dest_port": 80
+      }
+     ]
+    }
+   ],
+   "last_modification_date": 1793685963,
+   "creation_date": 1290243788,
+   "sha256": "24d004a104d4d54034dbcffc2a4b19a11f39008a575aa614ea04703480b1022c",
+   "reputation": -1809,
+   "total_votes": {
+    "harmless": 21,
+    "malicious": 180
+   },
+   "popular_threat_classification": {
+    "suggested_threat_label": "trojan.wannacry/wanna",
+    "popular_threat_name": [
+     {
+      "value": "wannacry",
+      "count": 12
+     },
+     {
+      "value": "wanna",
+      "count": 8
+     },
+     {
+      "value": "wannacrypt",
+      "count": 2
+     }
+    ],
+    "popular_threat_category": [
+     {
+      "value": "trojan",
+      "count": 24
+     },
+     {
+      "value": "ransomware",
+      "count": 21
+     },
+     {
+      "value": "worm",
+      "count": 2
+     }
+    ]
+   },
+   "type_extension": "exe",
+   "signature_info": {
+    "file version": "6.1.7601.17514 (win7sp1_rtm.101119-1850)",
+    "description": "Microsoft\u00ae Disk Defragmenter",
+    "original name": "lhdfrgui.exe",
+    "product": "Microsoft\u00ae Windows\u00ae Operating System",
+    "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+    "internal name": "lhdfrgui.exe"
+   },
+   "crowdsourced_ids_stats": {
+    "high": 4,
+    "medium": 0,
+    "low": 2,
+    "info": 0
+   },
+   "tlsh": "T1B70633A8962DA1BCF0050DB044928557EBFB3C57B7BA5A2FCF4045660D43B6F9BC0E61",
+   "first_submission_date": 1494579471,
+   "magic": "PE32 executable (GUI) Intel 80386, for MS Windows",
+   "saferpickle": {
+    "justification": "Error reading file: File 'b.wnry' is encrypted, password required for extraction",
+    "classification": "unknown"
+   },
+   "size": 3723264,
+   "magika": "PEBIN",
+   "tags": [
+    "checks-network-adapters",
+    "runtime-modules",
+    "malware",
+    "peexe",
+    "direct-cpu-clock-access",
+    "exploit",
+    "checks-user-input",
+    "cve-2017-0147",
+    "macro-create-ole",
+    "idle",
+    "detect-debug-environment",
+    "long-sleeps",
+    "cve-2017-0144"
+   ],
+   "md5": "db349b97c37d22f5ea1d1841e3c89eb4",
+   "names": [
+    "lhdfrgui.exe",
+    "cw_sample_3.exe",
+    "sample.exe",
+    "w_2.bin",
+    "Ransomware.wannacry.exe.malz"
+   ],
+   "pe_info": {
+    "timestamp": 1290243788,
+    "imphash": "9ecee117164e0b870a53dd187cdd7174",
+    "machine_type": 332,
+    "entry_point": 39446
+   },
+   "packers": {
+    "PEiD": "Microsoft Visual C++",
+    "Cyren": "rsrc"
+   },
+   "unique_sources": 1265,
+   "type_tags": [
+    "executable",
+    "windows",
+    "win32",
+    "pe",
+    "peexe"
+   ],
+   "type_description": "Win32 EXE",
+   "last_submission_date": 1793637317,
+   "last_analysis_date": 1793678530,
+   "zemana_behaviour": [
+    "dll-injection"
+   ],
+   "times_submitted": 2146,
+   "sandbox_verdicts": {
+    "Tencent HABO": {
+     "category": "malicious",
+     "sandbox_name": "Tencent HABO",
+     "malware_classification": [
+      "MALWARE"
+     ]
+    },
+    "C2AE": {
+     "category": "malicious",
+     "confidence": 70,
+     "sandbox_name": "C2AE",
+     "malware_classification": [
+      "RANSOM"
+     ],
+     "malware_names": [
+      "WannaCry",
+      "WannaCry_KillSwitch"
+     ]
+    },
+    "Lastline": {
+     "category": "malicious",
+     "sandbox_name": "Lastline",
+     "malware_classification": [
+      "MALWARE",
+      "TROJAN"
+     ]
+    },
+    "Zenbox": {
+     "category": "malicious",
+     "malware_classification": [
+      "MALWARE",
+      "RANSOM"
+     ],
+     "sandbox_name": "Zenbox",
+     "malware_names": [
+      "Wannacry"
+     ],
+     "confidence": 72
+    },
+    "SecneurX": {
+     "category": "malicious",
+     "sandbox_name": "SecneurX",
+     "malware_classification": [
+      "MALWARE"
+     ]
+    }
+   },
+   "meaningful_name": "lhdfrgui.exe",
+   "last_analysis_results": {
+    "Bkav": {
+     "method": "blacklist",
+     "engine_name": "Bkav",
+     "engine_version": "8.2.40(8338)",
+     "engine_update": "20261102",
+     "category": "malicious",
+     "result": "W32.WannaCrypLTI.Trojan"
+    },
+    "BitDefender": {
+     "method": "blacklist",
+     "engine_name": "BitDefender",
+     "engine_version": "7.2",
+     "engine_update": "20261103",
+     "category": "malicious",
+     "result": "Exploit.CVE-2017-0147.3"
+    },
+    "CrowdStrike": {
+     "method": "blacklist",
+     "engine_name": "CrowdStrike",
+     "engine_version": "1.0",
+     "engine_update": "20251219",
+     "category": "malicious",
+     "result": "win/malicious_confidence_100% (W)"
+    },
+    "ESET-NOD32": {
+     "method": "blacklist",
+     "engine_name": "ESET-NOD32",
+     "engine_version": "18.2.18.0",
+     "engine_update": "20261103",
+     "category": "malicious",
+     "result": "Win32/Exploit.CVE-2017-0147.A trojan"
+    },
+    "ClamAV": {
+     "method": "blacklist",
+     "engine_name": "ClamAV",
+     "engine_version": "1.5.4.0",
+     "engine_update": "20261102",
+     "category": "malicious",
+     "result": "Win.Ransomware.Wanna-9769986-0"
+    },
+    "Kaspersky": {
+     "method": "blacklist",
+     "engine_name": "Kaspersky",
+     "engine_version": "22.0.1.28",
+     "engine_update": "20261103",
+     "category": "malicious",
+     "result": "Trojan-Ransom.Win32.Wanna.m"
+    },
+    "Google": {
+     "method": "blacklist",
+     "engine_name": "Google",
+     "engine_version": "1793671245",
+     "engine_update": "20261103",
+     "category": "undetected",
+     "result": null
+    },
+    "Sophos": {
+     "method": "blacklist",
+     "engine_name": "Sophos",
+     "engine_version": "3.6.2.0",
+     "engine_update": "20261103",
+     "category": "malicious",
+     "result": "Troj/Ransom-EMG"
+    },
+    "Microsoft": {
+     "method": "blacklist",
+     "engine_name": "Microsoft",
+     "engine_version": "1.26100",
+     "engine_update": "20261103",
+     "category": "malicious",
+     "result": "Ransom:Win32/WannaCrypt!pz"
+    },
+    "Acronis": {
+     "method": "blacklist",
+     "engine_name": "Acronis",
+     "engine_version": "1.2.0.121",
+     "engine_update": "20240328",
+     "category": "malicious",
+     "result": "suspicious"
+    },
+    "Malwarebytes": {
+     "method": "blacklist",
+     "engine_name": "Malwarebytes",
+     "engine_version": "3.1.0.296",
+     "engine_update": "20261103",
+     "category": "malicious",
+     "result": "CVE20170147.Trojan.Exploit.DDS"
+    },
+    "Fortinet": {
+     "method": "blacklist",
+     "engine_name": "Fortinet",
+     "engine_version": "7.0.48.0",
+     "engine_update": "20261103",
+     "category": "malicious",
+     "result": "W32/RANSOM.A!tr"
+    },
+    "Avast": {
+     "method": "blacklist",
+     "engine_name": "Avast",
+     "engine_version": "23.9.8494.0",
+     "engine_update": "20261102",
+     "category": "malicious",
+     "result": "Sf:WNCryLdr-A [Trj]"
+    }
+   },
+   "filecondis": {
+    "raw_md5": "26001620989a64ac1d03b44faa1bbea5",
+    "dhash": "0000001c0c1d0000"
+   },
+   "ssdeep": "98304:wDqPoBhz1aRxcSUDk36SAEdhvxWa9P593R8yAVp2g3R:wDqPe1Cxcxk3ZAEUadzR8yc4gB",
+   "type_tag": "peexe"
+  }
+ }
+}

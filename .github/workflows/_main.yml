@@ -100,3 +100,9 @@ jobs:
     if: ${{ !failure() && !cancelled() }}
     uses: ./.github/workflows/malpedia.yml
     secrets: inherit
+
+  virustotal:
+    needs: base
+    if: ${{ !failure() && !cancelled() }}
+    uses: ./.github/workflows/virustotal.yml
+    secrets: inherit

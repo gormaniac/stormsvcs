@@ -1,0 +1,23 @@
+init {
+    $vtlib = $lib.import(slib.vt.lib)
+    $util = $lib.import(slib.vt.util)
+    $opts = $cmdopts
+    $found = ([])
+}
+
+$tgt = $util.target($node)
+if ($tgt = $lib.null) {
+    $lib.warn("slib.vt.comments: Can't look up {repr}, it has no hash.", repr=$node.repr())
+} else {
+    ($kind, $ident) = $tgt
+    $nodes = $vtlib.comments($node, $kind, $ident, limit=$opts.limit)
+    if $opts.yield { $found.extend($nodes) }
+}
+
+if $opts.yield { spin }
+
+fini {
+    if $opts.yield {
+        for $n in $found { yield $n }
+    }
+}

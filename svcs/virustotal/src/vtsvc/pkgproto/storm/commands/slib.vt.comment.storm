@@ -1,0 +1,15 @@
+init {
+    $submit = $lib.import(slib.vt.priv.submit)
+    $util = $lib.import(slib.vt.util)
+}
+
+$tgt = $util.target($node)
+if ($tgt = $lib.null) {
+    $lib.warn("slib.vt.comment: Can't comment on {repr}, it has no hash.", repr=$node.repr())
+} else {
+    ($kind, $ident) = $tgt
+    $retn = $submit.addComment($kind, $ident, $cmdopts.text)
+    if (not $util.failed($retn, `Commenting on {$ident}`)) {
+        $lib.print("slib.vt.comment: Added comment {cid} to {ident}.", cid=$retn.data.id, ident=$ident)
+    }
+}

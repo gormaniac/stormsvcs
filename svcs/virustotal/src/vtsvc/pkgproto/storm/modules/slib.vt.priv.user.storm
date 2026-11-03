@@ -1,0 +1,51 @@
+// Privileged (asroot) wrappers around the slib.vt service for slib.vt.user.
+// Every function returns the service's {status, mesg, data} dict.
+//
+// The calling user's own API key (a user scoped "virustotal" vault) is passed to the
+// service, otherwise the service falls back to its stored/configured key. Only the user
+// scope is read so this module never exposes another user's or role's secrets.
+
+init {
+    $svc = $lib.service.get("slib.vt")
+}
+
+function userKey() {
+    $vault = $lib.vault.bytype(virustotal, scope=user)
+    if ($vault = $lib.null) { return($lib.null) }
+    $secrets = $vault.secrets
+    if ($secrets = $lib.null) { return($lib.null) }
+    return($secrets.apikey)
+}
+
+function tagPrefix() {
+    if $lib.globals.get("slib:vt:tag:enabled") {
+        return($lib.globals.get("slib:vt:tag:prefix"))
+    }
+    return($lib.null)
+}
+
+function lookup(kind, ident, cache=(true)) {
+    return($svc.lookup($kind, $ident, cache=$cache, apikey=$userKey()))
+}
+
+function behaviour(sha256) { return($svc.behaviour($sha256, apikey=$userKey())) }
+
+function related(kind, ident, rel, limit=(10)) {
+    return($svc.related($kind, $ident, $rel, limit=$limit, apikey=$userKey()))
+}
+
+function rels(kind) { return($svc.rels($kind)) }
+
+function comments(kind, ident, limit=(10)) {
+    return($svc.comments($kind, $ident, limit=$limit, apikey=$userKey()))
+}
+
+function search(query, limit=(10)) { return($svc.search($query, limit=$limit, apikey=$userKey())) }
+
+function analysis(ident) { return($svc.analysis($ident, apikey=$userKey())) }
+
+function waitAnalysis(ident, timeout=(600), interval=(30)) {
+    return($svc.waitAnalysis($ident, timeout=$timeout, interval=$interval, apikey=$userKey()))
+}
+
+function quota(remote=(false)) { return($svc.quota(remote=$remote, apikey=$userKey())) }

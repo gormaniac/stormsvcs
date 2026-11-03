@@ -43,6 +43,11 @@ name = "Malpedia"
 src = "svcs/malpedia/"
 workflow = ".github/workflows/malpedia.yml"
 
+[stormsvcs.virustotal]
+name = "VirusTotal"
+src = "svcs/virustotal/"
+workflow = ".github/workflows/virustotal.yml"
+
 # [stormsvcs.report-ingest]
 # name = "Report Ingest"
 # src = "svcs/report-ingest/"

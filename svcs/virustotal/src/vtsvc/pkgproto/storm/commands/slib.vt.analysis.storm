@@ -1,0 +1,17 @@
+init {
+    $user = $lib.import(slib.vt.priv.user)
+    $vtlib = $lib.import(slib.vt.lib)
+    $util = $lib.import(slib.vt.util)
+
+    if $cmdopts.wait {
+        $retn = $user.waitAnalysis($cmdopts.id, timeout=$cmdopts.timeout, interval=$cmdopts.interval)
+    } else {
+        $retn = $user.analysis($cmdopts.id)
+    }
+
+    $n = $lib.null
+    if (not $util.failed($retn, `Getting analysis {$cmdopts.id}`)) {
+        $n = $vtlib.analysis($retn.data, engines=$cmdopts.engines)
+    }
+    if ($cmdopts.yield and $n) { yield $n }
+}

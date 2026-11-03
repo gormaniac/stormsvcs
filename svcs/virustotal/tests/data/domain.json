@@ -1,0 +1,225 @@
+{
+ "data": {
+  "id": "example.com",
+  "type": "domain",
+  "links": {
+   "self": "https://www.virustotal.com/api/v3/domains/example.com"
+  },
+  "attributes": {
+   "last_https_certificate_date": 1793715614,
+   "last_dns_records": [
+    {
+     "type": "A",
+     "ttl": 300,
+     "value": "104.20.23.154"
+    },
+    {
+     "type": "NS",
+     "ttl": 21600,
+     "value": "elliott.ns.cloudflare.com"
+    },
+    {
+     "type": "TXT",
+     "ttl": 300,
+     "value": "_k2n1y4vw3qtb4skdx9e7dxt97qrmmq9"
+    },
+    {
+     "type": "NS",
+     "ttl": 21600,
+     "value": "hera.ns.cloudflare.com"
+    },
+    {
+     "type": "TXT",
+     "ttl": 300,
+     "value": "v=spf1 -all"
+    },
+    {
+     "type": "AAAA",
+     "ttl": 300,
+     "value": "2606:4700:10::ac42:93f3"
+    },
+    {
+     "type": "SOA",
+     "ttl": 227,
+     "value": "elliott.ns.cloudflare.com",
+     "rname": "dns.cloudflare.com",
+     "serial": 2418004112,
+     "refresh": 10000,
+     "retry": 2400,
+     "expire": 604800,
+     "minimum": 1800
+    },
+    {
+     "type": "AAAA",
+     "ttl": 300,
+     "value": "2606:4700:10::6814:179a"
+    },
+    {
+     "type": "A",
+     "ttl": 300,
+     "value": "172.66.147.243"
+    },
+    {
+     "type": "MX",
+     "ttl": 292,
+     "priority": 0,
+     "value": ""
+    }
+   ],
+   "whois": "Creation Date: 1995-08-14T04:00:00Z\nDNSSEC: signedDelegation\nDomain Name: EXAMPLE.COM\nDomain Status: clientDeleteProhibited https://icann.org/epp#clientDeleteProhibited\nDomain Status: clientTransferProhibited https://icann.org/epp#clientTransferProhibited\nDomain Status: clientUpdateProhibited https://icann.org/epp#clientUpdateProhibited\nName Server: ELLIOTT.NS.CLOUDFLARE.COM\nName Server: HERA.NS.CLOUDFLARE.COM\nRegistrar IANA ID: 376\nRegistrar URL: http://res-dom.iana.org\nRegistrar WHOIS Server: whois.iana.org\nRegistrar: RESERVED-Internet Assigned Numbers Authority\nRegistry Domain ID: 2336799_DOMAIN_COM-VRSN\nRegistry Expiry Date: 2027-08-13T04:00:00Z\nUpdated Date: 2026-08-14T08:01:43Z\ncreated: 1992-01-01\ndomain: EXAMPLE.COM\norganisation: Internet Assigned Numbers Authority\nsource: IANA",
+   "last_modification_date": 1793716094,
+   "registrar": "RESERVED-Internet Assigned Numbers Authority",
+   "jarm": "27d40d40d00040d1dc42d43d00041d6183ff1bfae51ebd88d70384363d525c",
+   "whois_date": 1793314136,
+   "tld": "com",
+   "expiration_date": 1818129600,
+   "last_analysis_results": {
+    "Acronis": {
+     "method": "blacklist",
+     "engine_name": "Acronis",
+     "category": "harmless",
+     "result": "clean"
+    },
+    "0xSI_f33d": {
+     "method": "blacklist",
+     "engine_name": "0xSI_f33d",
+     "category": "undetected",
+     "result": "unrated"
+    },
+    "Abusix": {
+     "method": "blacklist",
+     "engine_name": "Abusix",
+     "category": "harmless",
+     "result": "clean"
+    },
+    "BitDefender": {
+     "method": "blacklist",
+     "engine_name": "BitDefender",
+     "category": "harmless",
+     "result": "clean"
+    },
+    "Bkav": {
+     "method": "blacklist",
+     "engine_name": "Bkav",
+     "category": "undetected",
+     "result": "unrated"
+    },
+    "Fortinet": {
+     "method": "blacklist",
+     "engine_name": "Fortinet",
+     "category": "harmless",
+     "result": "clean"
+    },
+    "Kaspersky": {
+     "method": "blacklist",
+     "engine_name": "Kaspersky",
+     "category": "harmless",
+     "result": "clean"
+    },
+    "Sophos": {
+     "method": "blacklist",
+     "engine_name": "Sophos",
+     "category": "harmless",
+     "result": "clean"
+    }
+   },
+   "creation_date": 808372800,
+   "total_votes": {
+    "harmless": 64,
+    "malicious": 10
+   },
+   "categories": {
+    "BitDefender": "computersandsoftware",
+    "Forcepoint ThreatSeeker": "information technology",
+    "Sophos": "information technology",
+    "alphaMountain.ai": "Information Technology (alphaMountain.ai)"
+   },
+   "reputation": 31,
+   "last_update_date": 1786694503,
+   "last_analysis_date": 1793715603,
+   "popularity_ranks": {
+    "Majestic": {
+     "rank": 117,
+     "timestamp": 1793632035
+    },
+    "Statvoo": {
+     "timestamp": 1684169881,
+     "rank": 12875
+    },
+    "Alexa": {
+     "timestamp": 1684083481,
+     "rank": 12875
+    },
+    "Cisco Umbrella": {
+     "rank": 4269,
+     "timestamp": 1793632025
+    },
+    "Cloudflare Radar": {
+     "rank": 200,
+     "timestamp": 1793632026
+    }
+   },
+   "last_analysis_stats": {
+    "malicious": 0,
+    "suspicious": 0,
+    "undetected": 31,
+    "harmless": 61,
+    "timeout": 0
+   },
+   "last_dns_records_date": 1793715614,
+   "tags": [],
+   "first_seen_date": 1695911288,
+   "last_https_certificate": {
+    "extensions": {
+     "CA": false,
+     "authority_key_identifier": {
+      "keyid": "8303fde7f6f54a4d1541f4ed2216d3320a3eca66"
+     },
+     "ca_information_access": {
+      "CA Issuers": "http://i.cf-i.ssl.com/Cloudflare-TLS-I-E3.cer",
+      "OCSP": "http://o.cf-i.ssl.com"
+     },
+     "subject_alternative_name": [
+      "example.com",
+      "*.example.com"
+     ],
+     "certificate_policies": [
+      "2.23.140.1.2.1",
+      "1.3.6.1.4.1.38064.1.3.1.1"
+     ],
+     "extended_key_usage": [
+      "serverAuth"
+     ],
+     "crl_distribution_points": [
+      "http://c.cf-i.ssl.com/ae801ed1c55bb579d79208b0d772acfb8cc3a208.crl"
+     ],
+     "key_usage": [
+      "digitalSignature"
+     ],
+     "1.3.6.1.4.1.44363.44": "0500",
+     "1.3.6.1.4.1.11129.2.4.2": "0481f200f0007600944e4387faecc1ef81f3192426a8186501c7d35f3802013f"
+    },
+    "validity": {
+     "not_after": "2026-12-25 22:56:35",
+     "not_before": "2026-09-26 22:49:11"
+    },
+    "size": 1002,
+    "version": "V3",
+    "public_key": {
+     "algorithm": "EC"
+    },
+    "thumbprint_sha256": "85ca6ab068e9bcce88b6c4aa3c47f7d17228134a457f870d3800e6223a0df07a",
+    "thumbprint": "899cb259e7de8df10033a2af48c22c2f6580a21d",
+    "serial_number": "1eee6aabb521d5e14fc315fd998569",
+    "issuer": {
+     "C": "US",
+     "O": "SSL Corporation",
+     "CN": "Cloudflare TLS Issuing ECC CA 3"
+    },
+    "subject": {
+     "CN": "example.com"
+    }
+   }
+  }
+ }
+}

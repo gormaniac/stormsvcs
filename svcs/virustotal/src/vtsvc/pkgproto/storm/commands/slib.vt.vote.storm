@@ -1,0 +1,15 @@
+init {
+    $submit = $lib.import(slib.vt.priv.submit)
+    $util = $lib.import(slib.vt.util)
+}
+
+$tgt = $util.target($node)
+if ($tgt = $lib.null) {
+    $lib.warn("slib.vt.vote: Can't vote on {repr}, it has no hash.", repr=$node.repr())
+} else {
+    ($kind, $ident) = $tgt
+    $retn = $submit.addVote($kind, $ident, $cmdopts.verdict)
+    if (not $util.failed($retn, `Voting on {$ident}`)) {
+        $lib.print("slib.vt.vote: Voted {ident} {verdict}.", ident=$ident, verdict=$cmdopts.verdict)
+    }
+}

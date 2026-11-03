@@ -1,0 +1,18 @@
+init {
+    $user = $lib.import(slib.vt.priv.user)
+    $model = $lib.import(slib.vt.model)
+    $util = $lib.import(slib.vt.util)
+    $model.setPrefix($user.tagPrefix())
+
+    $found = ([])
+    $retn = $user.search($cmdopts.query, limit=$cmdopts.limit)
+    if (not $util.failed($retn, "Searching")) {
+        for $obj in $retn.data.items {
+            $n = $model.obj($obj)
+            if $n { $found.append($n) }
+        }
+        $lib.print("slib.vt.search: {count} results for {query}.", count=$lib.len($found), query=$cmdopts.query)
+    }
+
+    for $n in $found { yield $n }
+}

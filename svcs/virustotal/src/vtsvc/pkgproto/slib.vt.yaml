@@ -1,0 +1,529 @@
+name: slib.vt
+version: 0.1.0
+guid: 918e0b7a0cc74c6a957f318056a77f74
+
+synapse_version: ">=2.234.0,<3.0.0"
+
+genopts:
+    dotstorm: true
+
+author:
+  url: https://github.com/gormaniac
+  name: John Gorman
+
+desc: A Storm Service for the VirusTotal Public (community) API v3 - enrich files, URLs, domains, and IPs, pivot on their relationships, and submit, rescan, comment, and vote - that stays within the Public API's rate limits.
+
+docs:
+  - title: README
+    path: README.md
+
+perms:
+  - perm: [ slib, vt, user ]
+    gate: cortex
+    desc: Look things up in VirusTotal (reports, relationships, behaviour, comments, search) and model the results.
+  - perm: [ slib, vt, submit ]
+    gate: cortex
+    desc: Send data to VirusTotal - submit files and URLs (shared with the VirusTotal community), request rescans, add comments, and vote.
+  - perm: [ slib, vt, admin ]
+    gate: cortex
+    desc: Manage the service-wide API key, the tag settings, and raw API requests.
+
+modules:
+  # Privileged modules - the only modules that talk to the service. They run asroot so users
+  # don't need the service.get permission, and so the service's stored API key is never
+  # readable from Storm.
+  - name: slib.vt.priv.user
+    asroot:perms:
+      - [ slib, vt, user ]
+  - name: slib.vt.priv.submit
+    asroot:perms:
+      - [ slib, vt, submit ]
+  - name: slib.vt.priv.admin
+    asroot:perms:
+      - [ slib, vt, admin ]
+
+  # Unprivileged modules - node edits here run as the calling user.
+  - name: slib.vt.lib
+    perms:
+      - [ slib, vt, user ]
+  - name: slib.vt.model
+  - name: slib.vt.util
+
+commands:
+
+  # ---- User commands ----
+
+  - name: slib.vt.enrich
+    perms:
+      - [ slib, vt, user ]
+    descr: |
+      Look up files, URLs, domains, and IPs in VirusTotal and model their reports.
+
+      Each node is one request (cached for vt:cache:ttl seconds), see slib.vt.quota. With a
+      Public API key the service sends at most 4 requests per minute, so big batches are slow.
+
+        file:bytes, hash:md5/sha1/sha256  Hashes, size, name, ssdeep, imphash, PE compile time.
+                                          Sandbox verdicts, crowdsourced YARA (it:app:yara:match),
+                                          IDS (it:app:snort:rule), and Sigma (it:app:sigma:rule)
+                                          matches. --behaviour adds the sandboxes' DNS lookups,
+                                          network traffic, HTTP requests, mutexes, dropped files,
+                                          and MITRE ATT&CK techniques (one more request).
+        inet:fqdn                         DNS records, whois (inet:whois:rec), and HTTPS cert.
+        inet:ipv4/inet:ipv6               ASN, country, whois (inet:whois:iprec), HTTPS cert, JARM.
+        inet:url                          Redirects (inet:urlredir), the final response's
+                                          content (inet:urlfile).
+
+      Every object's latest multi-engine scan is an it:av:scan:result (scanner "virustotal"),
+      with one it:av:scan:result per engine that detected it (see --engines). Objects get tags
+      under the slib.vt tag prefix (rep.vt by default, see slib.vt.admin.tags):
+
+        <prefix>.verdict.<malicious|suspicious|benign>  The latest scan's verdict (replaced).
+        <prefix>.tag.<tag>                              VirusTotal's tags.
+        <prefix>.family.<name>                          The top threat name (files) or threat
+                                                        names (URLs).
+        <prefix>.category.<category>                    Threat categories (files).
+
+      Examples:
+
+        // Enrich some hashes and IPs already in the Cortex.
+        #my.tag | slib.vt.enrich
+
+        // Look up a hash that isn't in the Cortex, and yield its file:bytes node.
+        slib.vt.enrich --hash 275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f --yield
+
+        // Include what VirusTotal's sandboxes saw the file do.
+        file:bytes:sha256=24d004a1... | slib.vt.enrich --behaviour
+    cmdargs:
+      - - --hash
+        - type: str
+          action: append
+          default: []
+          help: A file hash (MD5, SHA1, or SHA256) to look up. May be used multiple times.
+      - - --fqdn
+        - type: str
+          action: append
+          default: []
+          help: A domain to look up. May be used multiple times.
+      - - --ip
+        - type: str
+          action: append
+          default: []
+          help: An IP address to look up. May be used multiple times.
+      - - --url
+        - type: str
+          action: append
+          default: []
+          help: A URL to look up. May be used multiple times.
+      - - --engines
+        - type: str
+          default: detected
+          choices: [ detected, all, none ]
+          help: Which engines' results to model as it:av:scan:result nodes (the overall result is always modeled).
+      - - --behaviour
+        - default: false
+          action: store_true
+          help: Also model the file's sandbox behaviour summary (one more request per file).
+      - - --no-cache
+        - default: false
+          action: store_true
+          help: Ask VirusTotal even if the service has a recent copy of the report.
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the looked up nodes instead of the inbound nodes.
+    cmdinputs:
+      - form: file:bytes
+        help: Looked up by :sha256 (or :sha1/:md5).
+      - form: hash:md5
+      - form: hash:sha1
+      - form: hash:sha256
+      - form: inet:fqdn
+      - form: inet:ipv4
+      - form: inet:ipv6
+      - form: inet:url
+
+  - name: slib.vt.related
+    perms:
+      - [ slib, vt, user ]
+    descr: |
+      Model the objects VirusTotal relates to the inbound nodes, ex. a domain's resolutions or
+      the files that communicate with an IP.
+
+      Each page of up to 40 related objects is one request. Relationships a Public API key can
+      read (all of them, with vt:community false):
+
+        file:bytes   contacted_domains, contacted_ips, contacted_urls, dropped_files,
+                     bundled_files, execution_parents, pe_resource_children,
+                     pe_resource_parents, behaviours, comments, votes, graphs, collections
+        inet:fqdn    resolutions, subdomains, siblings, parent, immediate_parent,
+                     communicating_files, referrer_files, historical_whois,
+                     historical_ssl_certificates, comments, related_comments, votes, graphs,
+                     collections
+        inet:ipv4/6  resolutions, communicating_files, referrer_files, historical_whois,
+                     historical_ssl_certificates, comments, related_comments, votes, graphs,
+                     collections
+        inet:url     last_serving_ip_address, network_location, comments, related_comments,
+                     votes, graphs, collections
+
+      Related files, URLs, domains, and IPs are modeled like slib.vt.enrich models them (from
+      the data in the relationship, no extra requests), and linked to the inbound node with
+      -(refs)> edges (ex. file -(refs)> inet:fqdn for contacted_domains, file -(refs)> inet:ipv4
+      for communicating_files). Resolutions are inet:dns:a/aaaa nodes, comments are meta:note
+      nodes -(about)> the node, and whois and certificates are inet:whois:rec/iprec and
+      crypto:x509:cert nodes. Other objects (votes, graphs, collections, behaviours) are printed.
+
+      Examples:
+
+        // A domain's DNS resolutions.
+        inet:fqdn=example.com | slib.vt.related --rel resolutions --limit 40
+
+        // The files that communicate with an IP, yielding the file:bytes nodes.
+        inet:ipv4=1.2.3.4 | slib.vt.related --rel communicating_files --yield
+    cmdargs:
+      - - --rel
+        - type: str
+          required: true
+          help: The relationship to get.
+      - - --limit
+        - type: int
+          default: 10
+          help: The most related objects to get per node.
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the related nodes instead of the inbound nodes.
+    cmdinputs:
+      - form: file:bytes
+      - form: hash:md5
+      - form: hash:sha1
+      - form: hash:sha256
+      - form: inet:fqdn
+      - form: inet:ipv4
+      - form: inet:ipv6
+      - form: inet:url
+
+  - name: slib.vt.search
+    perms:
+      - [ slib, vt, user ]
+    descr: |
+      Search VirusTotal (the basic search, not VT Intelligence) and model the matching objects.
+      Yields the nodes of the matching files, URLs, domains, and IPs. One request.
+
+      The Public API's search looks up hashes, URLs, domains, and IPs.
+
+      Examples:
+
+        slib.vt.search 8.8.8.8
+    cmdargs:
+      - - query
+        - type: str
+          help: The search query.
+      - - --limit
+        - type: int
+          default: 10
+          help: The most results to return (up to 40).
+
+  - name: slib.vt.analysis
+    perms:
+      - [ slib, vt, user ]
+    descr: |
+      Check on a VirusTotal analysis (from slib.vt.submit or slib.vt.rescan), and model its
+      results once it's completed. Each check is one request.
+
+      Examples:
+
+        slib.vt.analysis <id>
+
+        // Check every 30 seconds, for up to 10 minutes, until it's done.
+        slib.vt.analysis <id> --wait --timeout 600
+    cmdargs:
+      - - id
+        - type: str
+          help: The analysis id.
+      - - --wait
+        - default: false
+          action: store_true
+          help: Keep checking until the analysis completes (or --timeout).
+      - - --timeout
+        - type: int
+          default: 600
+          help: The most seconds to wait with --wait.
+      - - --interval
+        - type: int
+          default: 30
+          help: Seconds between checks with --wait (at least 15 with a Public API key).
+      - - --engines
+        - type: str
+          default: detected
+          choices: [ detected, all, none ]
+          help: Which engines' results to model, see slib.vt.enrich.
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the analyzed file:bytes or inet:url node.
+
+  - name: slib.vt.quota
+    perms:
+      - [ slib, vt, user ]
+    descr: |
+      Show the service's VirusTotal request limits and how much of them your API key has used.
+
+      The service counts every request it sends, per API key. With vt:community (the default)
+      it never sends more than vt:limit:minute (4) requests per minute, and refuses requests
+      once vt:limit:day (500) or vt:limit:month are used up, until 00:00 UTC.
+
+      Examples:
+
+        slib.vt.quota
+
+        // Also ask VirusTotal for the key's quotas (counts may include other clients).
+        slib.vt.quota --remote
+    cmdargs:
+      - - --remote
+        - default: false
+          action: store_true
+          help: Also show VirusTotal's own count of the key's requests (one request).
+
+  - name: slib.vt.apikey
+    perms:
+      - [ slib, vt, user ]
+    descr: |
+      Set, show, or clear your own VirusTotal API key (stored in a user scoped "virustotal"
+      vault). Your key is used instead of the service-wide key, with its own limits.
+
+      Examples:
+
+        slib.vt.apikey <key>
+        slib.vt.apikey
+        slib.vt.apikey --clear
+    cmdargs:
+      - - apikey
+        - type: str
+          nargs: "?"
+          help: Your VirusTotal API key.
+      - - --clear
+        - default: false
+          action: store_true
+          help: Delete your API key.
+
+  # ---- Submit commands ----
+
+  - name: slib.vt.submit
+    perms:
+      - [ slib, vt, submit ]
+    descr: |
+      Submit files (from the Axon) and URLs to VirusTotal for analysis.
+
+      Submitted files and URLs are shared with the VirusTotal community. Don't submit anything
+      sensitive. Each submission is one request (two for files over 32MB), and --wait checks
+      the analysis every --interval seconds (each check is a request).
+
+      Prints the analysis id, see slib.vt.analysis. With --wait, the analysis's results are
+      modeled when it completes.
+
+      Examples:
+
+        file:bytes:sha256=... | slib.vt.submit --wait
+        slib.vt.submit --url https://example.com/login
+    cmdargs:
+      - - --url
+        - type: str
+          action: append
+          default: []
+          help: A URL to submit. May be used multiple times.
+      - - --password
+        - type: str
+          help: The password of a submitted ZIP file.
+      - - --wait
+        - default: false
+          action: store_true
+          help: Wait for the analysis to complete and model its results.
+      - - --timeout
+        - type: int
+          default: 600
+          help: The most seconds to wait with --wait.
+      - - --interval
+        - type: int
+          default: 30
+          help: Seconds between checks with --wait (at least 15 with a Public API key).
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the submitted nodes instead of the inbound nodes.
+    cmdinputs:
+      - form: file:bytes
+        help: Read from the Axon by :sha256.
+      - form: inet:url
+
+  - name: slib.vt.rescan
+    perms:
+      - [ slib, vt, submit ]
+    descr: |
+      Ask VirusTotal to analyze files, URLs, domains, or IPs it already has again. One request
+      per node. Prints the analysis id, see slib.vt.analysis.
+
+      Examples:
+
+        file:bytes:sha256=... | slib.vt.rescan
+    cmdinputs:
+      - form: file:bytes
+      - form: hash:md5
+      - form: hash:sha1
+      - form: hash:sha256
+      - form: inet:fqdn
+      - form: inet:ipv4
+      - form: inet:ipv6
+      - form: inet:url
+
+  - name: slib.vt.comments
+    perms:
+      - [ slib, vt, user ]
+    descr: |
+      Model the VirusTotal community's comments on the inbound nodes as meta:note nodes
+      -(about)> them. Each page of up to 40 comments is one request.
+
+      Examples:
+
+        inet:fqdn=example.com | slib.vt.comments --limit 20
+    cmdargs:
+      - - --limit
+        - type: int
+          default: 10
+          help: The most comments to get per node.
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the meta:note nodes instead of the inbound nodes.
+    cmdinputs:
+      - form: file:bytes
+      - form: hash:md5
+      - form: hash:sha1
+      - form: hash:sha256
+      - form: inet:fqdn
+      - form: inet:ipv4
+      - form: inet:ipv6
+      - form: inet:url
+
+  - name: slib.vt.comment
+    perms:
+      - [ slib, vt, submit ]
+    descr: |
+      Add a comment to the inbound nodes in VirusTotal (visible to the whole community).
+      Words that start with # are tags. One request per node.
+
+      Examples:
+
+        inet:fqdn=bad.example.com | slib.vt.comment "Phishing kit #phishing"
+    cmdargs:
+      - - text
+        - type: str
+          help: The comment.
+    cmdinputs:
+      - form: file:bytes
+      - form: hash:md5
+      - form: hash:sha1
+      - form: hash:sha256
+      - form: inet:fqdn
+      - form: inet:ipv4
+      - form: inet:ipv6
+      - form: inet:url
+
+  - name: slib.vt.vote
+    perms:
+      - [ slib, vt, submit ]
+    descr: |
+      Vote the inbound nodes harmless or malicious in VirusTotal. One request per node.
+
+      Examples:
+
+        inet:url=https://bad.example.com/ | slib.vt.vote malicious
+    cmdargs:
+      - - verdict
+        - type: str
+          choices: [ harmless, malicious ]
+          help: The vote.
+    cmdinputs:
+      - form: file:bytes
+      - form: hash:md5
+      - form: hash:sha1
+      - form: hash:sha256
+      - form: inet:fqdn
+      - form: inet:ipv4
+      - form: inet:ipv6
+      - form: inet:url
+
+  # ---- Admin commands ----
+
+  - name: slib.vt.admin.apikey
+    perms:
+      - [ slib, vt, admin ]
+    descr: |
+      Set, check, or clear the service-wide VirusTotal API key, used by everyone without
+      their own key (slib.vt.apikey). All of them share its limits.
+
+      Examples:
+
+        slib.vt.admin.apikey <key>
+        slib.vt.admin.apikey
+        slib.vt.admin.apikey --clear
+    cmdargs:
+      - - apikey
+        - type: str
+          nargs: "?"
+          help: The VirusTotal API key.
+      - - --clear
+        - default: false
+          action: store_true
+          help: Clear the service-wide API key.
+
+  - name: slib.vt.admin.tags
+    perms:
+      - [ slib, vt, admin ]
+    descr: |
+      Show or change the tags slib.vt applies (rep.vt by default).
+
+      Examples:
+
+        slib.vt.admin.tags
+        slib.vt.admin.tags --prefix rep.virustotal
+        slib.vt.admin.tags --disable
+    cmdargs:
+      - - --prefix
+        - type: str
+          help: The tag prefix.
+      - - --enable
+        - default: false
+          action: store_true
+          help: Enable tagging.
+      - - --disable
+        - default: false
+          action: store_true
+          help: Disable tagging.
+
+  - name: slib.vt.admin.request
+    perms:
+      - [ slib, vt, admin ]
+    descr: |
+      Send a raw request to the VirusTotal API v3 and print the JSON response. It's rate
+      limited like every other request.
+
+      Examples:
+
+        slib.vt.admin.request /popular_threat_categories
+        slib.vt.admin.request /files/<sha256>/votes --param limit=5
+    cmdargs:
+      - - path
+        - type: str
+          help: The API path, ex. /files/<sha256>.
+      - - --method
+        - type: str
+          default: get
+          help: The HTTP method.
+      - - --param
+        - type: str
+          action: append
+          default: []
+          help: A name=value query param. May be used multiple times.
+      - - --json
+        - type: str
+          help: A JSON request body.

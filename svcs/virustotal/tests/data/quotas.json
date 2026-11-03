@@ -1,0 +1,118 @@
+{
+ "data": {
+  "api_requests_hourly": {
+   "user": {
+    "allowed": 240,
+    "used": 0
+   }
+  },
+  "api_requests_daily": {
+   "user": {
+    "allowed": 500,
+    "used": 0
+   }
+  },
+  "api_requests_monthly": {
+   "user": {
+    "allowed": 15500,
+    "used": 0
+   }
+  },
+  "intelligence_downloads_monthly": {
+   "user": {
+    "allowed": 0,
+    "used": 0
+   }
+  },
+  "intelligence_searches_monthly": {
+   "user": {
+    "allowed": 0,
+    "used": 0
+   }
+  },
+  "intelligence_retrohunt_jobs_monthly": {
+   "user": {
+    "allowed": 0,
+    "used": 0
+   }
+  },
+  "intelligence_hunting_rules": {
+   "user": {
+    "allowed": 0,
+    "used": 0
+   }
+  },
+  "active_flows": {
+   "user": {
+    "allowed": 0,
+    "used": 0
+   }
+  },
+  "intelligence_graphs_private": {
+   "user": {
+    "allowed": 0,
+    "used": 0
+   }
+  },
+  "intelligence_vtdiff_creation_monthly": {
+   "user": {
+    "allowed": 0,
+    "used": 0
+   }
+  },
+  "monitor_storage_bytes": {
+   "user": {
+    "allowed": 0,
+    "used": 0
+   }
+  },
+  "monitor_storage_files": {
+   "user": {
+    "allowed": 0,
+    "used": 0
+   }
+  },
+  "monitor_uploaded_bytes": {
+   "user": {
+    "allowed": 0,
+    "used": 0
+   }
+  },
+  "monitor_uploaded_files": {
+   "user": {
+    "allowed": 0,
+    "used": 0
+   }
+  },
+  "collections_creation_monthly": {
+   "user": {
+    "allowed": 20,
+    "used": 0
+   }
+  },
+  "private_scans_monthly": {
+   "user": {
+    "allowed": 0,
+    "used": 0
+   }
+  },
+  "private_scans_per_minute": {
+   "user": {
+    "allowed": 0,
+    "used": 0
+   }
+  },
+  "private_urlscans_monthly": {
+   "user": {
+    "allowed": 0,
+    "used": 0
+   }
+  },
+  "private_urlscans_per_minute": {
+   "user": {
+    "allowed": 0,
+    "used": 0
+   }
+  }
+ }
+}
