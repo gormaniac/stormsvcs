@@ -43,11 +43,6 @@ name = "Malpedia"
 src = "svcs/malpedia/"
 workflow = ".github/workflows/malpedia.yml"
 
-[stormsvcs.anyrun]
-name = "ANY.RUN"
-src = "svcs/anyrun/"
-workflow = ".github/workflows/anyrun.yml"
-
 # [stormsvcs.report-ingest]
 # name = "Report Ingest"
 # src = "svcs/report-ingest/"
