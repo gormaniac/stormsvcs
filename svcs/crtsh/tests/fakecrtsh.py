@@ -636,13 +636,15 @@ class FakeCrtshDb:
                     for t, v in idents
                 ):
                     continue
-            if caids and row["issuer_ca_id"] not in caids:
-                continue
-            if issuers is not None and row["issuer_ca_id"] not in issuers:
-                continue
             if self._valid(cert, valid, since, until):
-                found.append(self._row(row))
-        return found[:limit]
+                found.append(row)
+        # Like crt.sh, the issuer narrows the candidates after the limit.
+        return [
+            self._row(row)
+            for row in found[:limit]
+            if (not caids or row["issuer_ca_id"] in caids)
+            and (issuers is None or row["issuer_ca_id"] in issuers)
+        ]
 
     async def certsByIssuer(
         self, caids=None, issuer=None, cert=None, valid=False, since=None, until=None, limit=1000

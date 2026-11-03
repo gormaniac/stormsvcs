@@ -386,24 +386,44 @@ async def test_sql_identity():
     assertMeta(sql)
     assert "FROM certificate_and_identities c WHERE" in sql
     assert "c.NAME_VALUE ILIKE $2 AND c.NAME_TYPE = ANY($3::text[])" in sql
-    assert "c.ISSUER_CA_ID = ANY($4::int[])" in sql
-    # The issuer's name is a subquery, not another round trip.
-    assert "c.ISSUER_CA_ID IN (SELECT ca.ID FROM ca WHERE ca.NAME ILIKE $5 LIMIT 1000)" in sql
     assert f"{NOTAFTER_KEY} >= date_trunc('year', now() AT TIME ZONE 'UTC')" in sql
-    assert "x509_notBefore(c.CERTIFICATE) >= to_timestamp($6) AT TIME ZONE 'UTC'" in sql
-    assert f"{NOTAFTER_KEY} >= to_timestamp($6) AT TIME ZONE 'UTC'" in sql
-    assert "x509_notBefore(c.CERTIFICATE) < to_timestamp($7) AT TIME ZONE 'UTC'" in sql
-    assert "LIMIT $8) sub GROUP BY sub.CERTIFICATE_ID, sub.ISSUER_CA_ID, sub.CERTIFICATE" in sql
+    assert "x509_notBefore(c.CERTIFICATE) >= to_timestamp($4) AT TIME ZONE 'UTC'" in sql
+    assert f"{NOTAFTER_KEY} >= to_timestamp($4) AT TIME ZONE 'UTC'" in sql
+    assert "x509_notBefore(c.CERTIFICATE) < to_timestamp($5) AT TIME ZONE 'UTC'" in sql
+    # The issuer filters the materialized candidates, it isn't part of their scan.
+    cand = sql.split("cand AS MATERIALIZED (", 1)[1].split("LIMIT $6)", 1)[0]
+    assert "ISSUER_CA_ID =" not in cand and "ISSUER_CA_ID IN" not in cand
+    assert (
+        "SELECT cand.ID, cand.ISSUER_CA_ID, cand.CERTIFICATE FROM cand WHERE "
+        "cand.ISSUER_CA_ID = ANY($7::int[]) AND "
+        # The issuer's name is a subquery, not another round trip.
+        "cand.ISSUER_CA_ID IN (SELECT ca.ID FROM ca WHERE ca.NAME ILIKE $8 LIMIT 1000) "
+        "GROUP BY cand.ID, cand.ISSUER_CA_ID, cand.CERTIFICATE"
+    ) in sql
     assert db.args == (
         "vertex.link",
         "%vertex.link",
         ["san:dNSName", "2.5.4.3"],
-        [2, 3],
-        "%Let's\\_Encrypt%",
         1.0,
         2.0,
         50,
+        [2, 3],
+        "%Let's\\_Encrypt%",
     )
+
+    # Identities without an issuer are still grouped from the candidates.
+    await db.certsByIdentity("vertex.link", like="%vertex.link", limit=5)
+    assert "FROM cand GROUP BY cand.ID" in db.sql
+    assert "FROM cand WHERE" not in db.sql
+
+    # Full text search alone with an issuer.
+    await db.certsByIdentity("vertex.link", issuer="Sectigo", limit=5)
+    assert (
+        "cand AS MATERIALIZED (SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate c WHERE "
+        "plainto_tsquery('certwatch', $1) @@ identities(c.CERTIFICATE) LIMIT $2)"
+    ) in db.sql
+    assert "FROM cand WHERE cand.ISSUER_CA_ID IN (SELECT ca.ID" in db.sql
+    assert "GROUP BY" not in db.sql.split("FROM cand", 1)[1].split("SELECT m.ID", 1)[0]
 
     # Name types alone still check each identity.
     await db.certsByIdentity("Sectigo", nametypes=["2.5.4.10"])

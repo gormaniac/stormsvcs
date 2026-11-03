@@ -70,6 +70,13 @@ class TestLive(s_tests.SynTest):
                     details, "dns"
                 )
 
+            # A common word and a rare issuer: "microsoft" matches hundreds of millions of
+            # certificates, few from Let's Encrypt. This used to hit the statement timeout,
+            # the issuer has to filter the candidates rather than be part of their scan.
+            async for details in svc.searchGenr(cn="microsoft", issuer="Let's Encrypt", limit=20):
+                assert "Let's Encrypt" in details["crtsh"]["issuer"]["name"]
+                assert norm.matches(details, "cn", "microsoft"), norm.fieldValues(details, "cn")
+
             # ---- CAs, issued, and chains ----
             cas = await svc.cas(name="Sectigo Public Server Authentication CA OV R36")
             ca = next(ca for ca in cas if ca["id"] == ISSUER)

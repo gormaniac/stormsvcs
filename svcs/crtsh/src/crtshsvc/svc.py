@@ -331,7 +331,10 @@ class CrtshSvc(s_cell.Cell):
                 if k in fields
             )
             text, like = identityQuery(field, fields[field], exact)
-            candidates = min(max(limit * 5, 500), self.conf.get("crtsh:candidates"))
+            candidates = self.conf.get("crtsh:candidates")
+            if not caids and not issuer:
+                candidates = min(max(limit * 5, 500), candidates)
+            # With an issuer, every candidate is fetched: they're filtered by issuer afterwards.
             rows = await self.db.certsByIdentity(
                 text,
                 like=like,

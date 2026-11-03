@@ -442,9 +442,15 @@ class CrtshDb:
         (an ILIKE pattern) and/or ``nametypes`` (see ``NAME_TYPES``), each candidate's
         individual identities are also matched in the ``certificate_and_identities``
         view before the limit is applied, exactly like crt.sh's own search, so the
-        limit counts real matches. ``caids`` and ``issuer`` (a CA name) narrow the
-        issuer. Like crt.sh, the results are an arbitrary subset (not the newest)
-        when there are more than ``limit``.
+        limit counts real matches. Like crt.sh, the results are an arbitrary subset
+        (not the newest) when there are more than ``limit``.
+
+        ``caids`` and ``issuer`` (a CA name) narrow the issuer, but only after the
+        limit: the candidates are found first, then filtered by issuer. Nothing
+        indexes a word and an issuer together, so filtering by issuer inside the
+        limit makes PostgreSQL recheck every certificate with the word until enough
+        are from the issuer, which never finishes for common words (ex. "microsoft"
+        matches hundreds of millions of certificates, few from Let's Encrypt).
         """
 
         params = Params()
@@ -455,26 +461,37 @@ class CrtshDb:
             clauses.append(f"c.NAME_VALUE ILIKE {params.add(like)}")
         if nametypes:
             clauses.append(f"c.NAME_TYPE = ANY({params.add(list(nametypes))}::text[])")
-        if caids:
-            clauses.append(f"c.ISSUER_CA_ID = ANY({params.add(list(caids))}::int[])")
-        if issuer:
-            clauses.append(f"c.ISSUER_CA_ID IN ({_issuerName(params, issuer)})")
         clauses.extend(_filters(params, valid, since, until))
         where = " AND ".join(clauses)
         limit = params.add(limit)
 
         if like is None and not nametypes:
             # Only the full text search, no need to parse every candidate's identities.
-            inner = f"SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate c WHERE {where} LIMIT {limit}"
+            cand = f"SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate c WHERE {where} LIMIT {limit}"
+            group = ""
         else:
-            # A certificate has a row per matching identity, group them back into one.
-            inner = (
-                "SELECT sub.CERTIFICATE_ID AS ID, sub.ISSUER_CA_ID, sub.CERTIFICATE FROM ("
-                "SELECT c.CERTIFICATE_ID, c.ISSUER_CA_ID, c.CERTIFICATE "
+            # A certificate has a row per matching identity, they're grouped back into one.
+            cand = (
+                "SELECT c.CERTIFICATE_ID AS ID, c.ISSUER_CA_ID, c.CERTIFICATE "
                 f"FROM certificate_and_identities c WHERE {where} LIMIT {limit}"
-                ") sub GROUP BY sub.CERTIFICATE_ID, sub.ISSUER_CA_ID, sub.CERTIFICATE"
             )
-        return await self.fetch(_withMeta(inner), *params.args)
+            group = " GROUP BY cand.ID, cand.ISSUER_CA_ID, cand.CERTIFICATE"
+
+        issuers = []
+        if caids:
+            issuers.append(f"cand.ISSUER_CA_ID = ANY({params.add(list(caids))}::int[])")
+        if issuer:
+            issuers.append(f"cand.ISSUER_CA_ID IN ({_issuerName(params, issuer)})")
+
+        if not issuers and not group:
+            return await self.fetch(_withMeta(cand), *params.args)
+
+        # The candidates are materialized so the issuer filter isn't planned into their scan.
+        filt = f" WHERE {' AND '.join(issuers)}" if issuers else ""
+        inner = f"SELECT cand.ID, cand.ISSUER_CA_ID, cand.CERTIFICATE FROM cand{filt}{group}"
+        return await self.fetch(
+            _withMeta(inner, ctes=f"cand AS MATERIALIZED ({cand})"), *params.args
+        )
 
     async def certsByIssuer(
         self,

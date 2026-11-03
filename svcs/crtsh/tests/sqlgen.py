@@ -195,6 +195,13 @@ async def record(samples: dict, caname: str) -> Recorder:
         f"Search --dns {samples['domain']} --issuer '{caname}' (the CA name is a subquery)",
         db.certsByIdentity(text, like=like, nametypes=NAME_TYPES["dns"], issuer=caname, limit=500),
     )
+    text, like = identityQuery("cn", "microsoft")
+    await q(
+        "Search --cn microsoft --issuer \"Let's Encrypt\" (a common word and a rare issuer)",
+        db.certsByIdentity(
+            text, like=like, nametypes=NAME_TYPES["cn"], issuer="Let's Encrypt", limit=10000
+        ),
+    )
 
     # Issued certificates, every CA source is one query.
     await q(

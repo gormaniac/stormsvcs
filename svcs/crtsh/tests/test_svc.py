@@ -223,6 +223,8 @@ class TestCrtshSvc(s_tests.SynTest):
             ]
             assert fake.last("certsByIdentity")["issuer"] == "Issuing CA"
             assert fake.last("certsByIdentity")["caids"] is None
+            # The issuer filters the candidates afterwards, so every candidate is fetched.
+            assert fake.last("certsByIdentity")["limit"] == 10000
             assert await ids(svc.searchGenr(dns="vertex.link", caids=[1])) == []
             assert await ids(svc.searchGenr(issuer="nope")) == []
 

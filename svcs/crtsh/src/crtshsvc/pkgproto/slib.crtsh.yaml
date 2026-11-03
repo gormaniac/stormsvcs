@@ -1,5 +1,5 @@
 name: slib.crtsh
-version: 0.2.1
+version: 0.2.2
 guid: 5dd9492c3e05485eb09964fa9508b23f
 
 synapse_version: ">=2.145.0,<3.0.0"
@@ -102,6 +102,12 @@ commands:
       text options match substrings. --exact requires whole values. Without options, inbound
       inet:fqdn, inet:email, inet:ipv4/6, inet:url, ou:name, and ou:org nodes are searched for.
 
+      Like crt.sh's own search, the text is found with crt.sh's full text index first (up to
+      crtsh:candidates certificates), so it must appear as a whole word somewhere in the
+      certificate. With --issuer or --caid, those candidates are then filtered by issuer, so a
+      common word with a rare issuer may find few matches. --since and --valid narrow the
+      candidates to newer certificates.
+
       Examples:
 
         slib.crtsh.search --dns vertex.link --valid
@@ -149,7 +155,7 @@ commands:
       - - --issuer
         - type: str
           default: null
-          help: The issuing CA's name.
+          help: The issuing CA's name (filters the text search's candidates, see above).
       - - --caid
         - type: int
           action: append

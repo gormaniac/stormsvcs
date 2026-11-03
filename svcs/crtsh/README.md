@@ -80,6 +80,15 @@ on the same IP (ex. psql) are refused, and vice versa.
 | `slib.crtsh.admin.tags` | Configure the `precert`, `revoked`, `ca`, and `root` tags (prefix `rep.crtsh`). |
 | `slib.crtsh.admin.sql` | Run raw read-only SQL against crt.sh. |
 
+Searches work like crt.sh's own: the text is found with crt.sh's full text index first (up to
+`crtsh:candidates` certificates), so it must be a whole word somewhere in the certificate (ex.
+`microsoft` finds `microsoft--web-hosting.tk` and `O=Microsoft Corporation`, but not
+`login.microsoftonline.com` alone), and the candidates are then matched field by field.
+`--issuer`/`--caid` filter those candidates too: nothing indexes a word and an issuer together,
+so a common word with a rare issuer (`--cn microsoft --issuer "Let's Encrypt"`) only finds the
+matches among the first candidates. `--since` and `--valid` move the candidates to newer
+certificates.
+
 ## Modeling
 
 Each certificate is a `crypto:x509:cert` (deconflicted by `:sha256`) with every prop the model
