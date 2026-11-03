@@ -5,9 +5,9 @@ done 2026-11-02 and 2026-11-03. The service was built and then **scrapped before
 because ANY.RUN's API needs a paid plan (see [plans and access](notes/plans-and-access.md)) and
 there's no API account to use it with.
 
-The code is gone from the branch. The last commit that had it was
-`38931731f99c9a49a40808ccbe493bda582de0a4` on `claude/anyrun-service-g6ylf1`. GitHub may
-keep it reachable by its SHA for a while, but don't count on it.
+The code was removed in the commit that added these notes, but it's still in the history of the
+`claude/anyrun-service-g6ylf1` branch. Its last version is commit
+`38931731f99c9a49a40808ccbe493bda582de0a4` (`svcs/anyrun/`), in case it's ever rebuilt.
 
 Start with the access check: none of this is usable without an API plan.
 
