@@ -453,8 +453,8 @@ Lists both kinds of saved query (§5.9).
     community queries ingested earlier, which show their `[Community]` name.
   - `shodan`: only the live Shodan directory.
   - `all`: both. Local results print first.
-- The printed table gets a `source` column (`local`, `community (stored)` or `shodan`). A Shodan
-  result whose community guid already exists in the Cortex is marked `stored`.
+- The printed table gets a `source` column: stored rows are `local` or `community`, and directory
+  rows are `shodan`, or `shodan (stored)` when their community rule already exists in the Cortex.
 - `--search <text>`:
   - On Shodan it uses `/shodan/query/search`.
   - Locally it's a case-insensitive substring match on `:name`, `:text` and `:desc`. The match is
@@ -653,12 +653,15 @@ meta:rule:type^=svc.shodan.query. | slib.shodan.search --limit 200
 13. **History lags the current index** by about a day (found live). `--history` could also make a
     plain lookup (one more free call) so the newest banners land in the timeline too. For now, run
     `slib.shodan.host --timeline` (a plain lookup) as well to add them.
-10. **Directory result fields.** Confirm the field names in `/shodan/query` results (`title`,
-    `description`, `query`, `timestamp`, `tags`, `votes`) with one live call, and confirm there's no
-    stable directory ID. If there is one, the community guid should use it instead of the query text.
-11. **Legacy `svc.shodan.query.` rules.** Leave them as they are and treat them as local (the current
-    design), or retype them to `svc.shodan.query.local.` with a one-time migration in the package's
-    `onload`?
+10. **Directory result fields.** *Checked live 2026-11-03:* `/shodan/query` results have exactly
+    `title`, `description`, `query`, `timestamp`, `tags` and `votes` (an int), and no ID, so the
+    community guid uses the query text. `title` and `description` can be empty strings.
+    `/shodan/query/search` returned HTTP 503 at the time.
+11. **Legacy `svc.shodan.query.` rules.** Left as they are and treated as local (implemented in
+    0.11.0). A one-time migration to `svc.shodan.query.local.` is still possible later.
+14. **`meta:rule:name` is lower-cased by Synapse** (`lower: True, onespace: True`), so community names
+    read `[community] <title>`. The original-case title isn't kept anywhere; `:desc` holds the
+    directory description.
 
 ---
 
@@ -671,4 +674,4 @@ meta:rule:type^=svc.shodan.query. | slib.shodan.search --limit 200
 | 3 | 0.8.0 | Host history timeline: `--timeline`, `--history`, fallback key, `normBanner` additions. | **Done.** Idempotency tests; Open questions 6 and 9 checked live. |
 | 4 | 0.9.0 | Inbound nodes for `host`, `trends` and `stream`. | **Done.** Per-form tests. |
 | 4b | 0.9.1, 0.10.0 | Each request made once per run (0.9.1). `search`, `enrich`, `dns.domain` and `dns.lookup` read all inbound nodes before running, so a lift of a form they create can't feed them their own results; `--stream-inbound` keeps the old streaming behavior (0.10.0). | **Done.** Dedupe and feedback tests. |
-| 5 | 0.11.0 | Saved queries: `queries --source/--yield`, `query.save`, the community/local `meta:rule` types, and `searchQuery()` accepting the whole `svc.shodan.query.` subtree. | Saved-query tests. |
+| 5 | 0.11.0 | **Done.** Saved queries: `queries --source/--yield`, `query.save`, the community/local `meta:rule` types, and `searchQuery()` accepting the whole `svc.shodan.query.` subtree. | Saved-query tests. |

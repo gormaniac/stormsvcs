@@ -1,0 +1,9 @@
+init {
+    $shodan = $lib.import(slib.shodan.lib)
+}
+
+spin |
+
+$rule = $shodan.saveQuery($cmdopts.query, $cmdopts.name, desc=$cmdopts.desc)
+$lib.print("slib.shodan.query.save: Saved {name} ({query}).", name=$rule.props.name, query=$rule.props.text)
+if $cmdopts.yield { yield $rule }

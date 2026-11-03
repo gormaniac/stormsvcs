@@ -426,7 +426,7 @@ function searchQuery(n, filehash=$lib.null) {
         // A bare search, the string is the query.
         "it:dev:str": { return($n.repr()) }
         "meta:rule": {
-            if ($props.type = "svc.shodan.query.") {
+            if $isQueryRule($n) {
                 if $props.text { return($props.text) }
             } else {
                 $lib.warn("slib.shodan: meta:rule {rule} isn't a Shodan query, its :type must be svc.shodan.query.",
@@ -443,6 +443,54 @@ function searchQuery(n, filehash=$lib.null) {
     $lib.warn("slib.shodan: {form} {repr} is missing the props needed to search for it.",
               form=$n.form(), repr=$n.repr())
     return($lib.null)
+}
+
+// ---- Saved queries (see slib.shodan.model's "Saved queries") ----
+
+// Whether a meta:rule is a saved Shodan query: its :type is svc.shodan.query. or under it
+// (svc.shodan.query.community. or svc.shodan.query.local.).
+function isQueryRule(rule) {
+    $type = $rule.props.type
+    if ($type = $lib.null) { return((false)) }
+    return($type.startswith("svc.shodan.query."))
+}
+
+// Whether a saved query came from Shodan's directory.
+function isCommunityRule(rule) {
+    return(($rule.props.type = "svc.shodan.query.community."))
+}
+
+// Yield the saved Shodan queries stored in the Cortex (community and local). With match, only
+// those whose :name, :text, or :desc contain it (ignoring case, not a regex).
+function storedQueries(match=$lib.null) {
+    meta:rule:type^=svc.shodan.query
+    +$isQueryRule($node)
+
+    // No loop here, the node is in the pipeline (see the NOTE in slib.shodan.model).
+    // NOTE: Storm's str.find() returns null (not -1) when the text isn't found.
+    $hay = ""
+    if :name { $hay = `{$hay}\n{:name}` }
+    if :text { $hay = `{$hay}\n{:text}` }
+    if :desc { $hay = `{$hay}\n{:desc}` }
+    +$($match = $lib.null or $hay.lower().find($lib.cast(str, $match).lower()) != $lib.null)
+}
+
+// Save a query in the Cortex as a local meta:rule (never sent to Shodan). Returns the node.
+function saveQuery(query, name, desc=$lib.null) {
+    $query = $lib.cast(str, $query).strip()
+    if (not $query) { $lib.raise(BadArg, "slib.shodan: A saved query can't be empty.") }
+    $existing = $model.liftRule($model.localGuid($query))
+    if $existing {
+        $lib.warn("slib.shodan: {query} is already a local saved query ({name}).",
+                  query=$query, name=$existing.props.name)
+        return($existing)
+    }
+    return($model.localRule($query, $lib.cast(str, $name), desc=$desc))
+}
+
+// Whether a query from Shodan's directory is already stored as a community meta:rule.
+function isStored(q) {
+    return(($model.liftRule($model.communityGuid($lib.cast(str, $q.query))) != $lib.null))
 }
 
 // The IP to look up in Shodan for a node, as a string. Returns null (with a warning) for
@@ -530,7 +578,7 @@ function streamTarget(n) {
             if $props.iso2 { return(({"kind": "countries", "value": $props.iso2.upper()})) }
         }
         "meta:rule": {
-            if ($props.type != "svc.shodan.query.") {
+            if (not $isQueryRule($n)) {
                 $lib.warn("slib.shodan: meta:rule {rule} isn't a Shodan query, its :type must be svc.shodan.query.",
                           rule=$n.repr())
                 return($lib.null)

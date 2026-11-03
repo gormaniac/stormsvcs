@@ -1,5 +1,5 @@
 name: slib.shodan
-version: 0.10.0
+version: 0.11.0
 guid: 0f6c1d0f1d8a4c3bb7a1e3d5c9b2a864
 
 synapse_minversion: [2, 137, 0]
@@ -367,7 +367,7 @@ commands:
       - form: it:dev:str
         help: Searched for as-is, a bare query.
       - form: meta:rule
-        help: Rules with :type svc.shodan.query, their :text is the query.
+        help: Saved queries (:type svc.shodan.query or under it), their :text is the query.
 
   - name: slib.shodan.count
     perms:
@@ -468,7 +468,7 @@ commands:
       - form: it:dev:str
         help: Counted as-is, a bare query.
       - form: meta:rule
-        help: Rules with :type svc.shodan.query, their :text is the query.
+        help: Saved queries (:type svc.shodan.query or under it), their :text is the query.
 
   - name: slib.shodan.hash
     perms:
@@ -782,49 +782,117 @@ commands:
       - form: it:dev:str
         help: Searched for as-is, a bare query.
       - form: meta:rule
-        help: Rules with :type svc.shodan.query, their :text is the query.
+        help: Saved queries (:type svc.shodan.query or under it), their :text is the query.
 
   - name: slib.shodan.queries
     perms:
       - [ slib, shodan, user ]
     descr: |
-      Browse the directory of saved Shodan search queries.
+      List saved Shodan queries: the ones stored in the Cortex, and Shodan's query directory.
+
+      Saved queries are meta:rule nodes (:text is the query) of two kinds, which never sync:
+
+        - Community queries are copied from Shodan's directory with --yield. Their :type is
+          svc.shodan.query.community. and their :name starts with "[Community] " (Synapse
+          lower-cases :name, so it reads ex. "[community] webcams"). They're a
+          snapshot: later changes in the directory only arrive by copying them again (edits to
+          :name or :desc are kept), and queries removed from it are never deleted here.
+        - Local queries are saved with slib.shodan.query.save. Their :type is
+          svc.shodan.query.local. (or the older svc.shodan.query.). They're never sent to Shodan,
+          its API can't save queries to the directory (share them on shodan.io).
+
+      The same query text is a separate node for each kind. --source picks which to list (both,
+      by default). Stored queries print first, with a "local" or "community" source. Directory
+      queries already copied into the Cortex print as "shodan (stored)".
+
+      Any saved query can be run by piping it to slib.shodan.search, slib.shodan.count, or
+      slib.shodan.stream.
 
       Examples:
 
-        // The most recently shared queries.
+        // Everything, or only what's in the Cortex.
         slib.shodan.queries
+        slib.shodan.queries --source local
 
-        // Search the directory, and list the popular tags.
-        slib.shodan.queries --search webcam
+        // Copy the directory's webcam queries into the Cortex, and count their IPs for free.
+        slib.shodan.queries --source shodan --search webcam --yield | slib.shodan.count
+
+        // Run every saved query.
+        meta:rule:type^=svc.shodan.query | slib.shodan.search --limit 200
+
+        // List the directory's popular tags.
         slib.shodan.queries --tags
     cmdargs:
+      - - --source
+        - type: str
+          default: all
+          choices: [ all, local, shodan ]
+          help: Which saved queries to list, the ones stored in the Cortex (local), Shodan's directory, or both.
       - - --search
         - type: str
           default: null
-          help: Search the saved queries for this text.
+          help: |
+            Only list saved queries with this text. Stored queries match it in their :name, :text,
+            or :desc (ignoring case), Shodan's directory searches for it.
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the meta:rule nodes, storing directory queries as community meta:rules.
       - - --tags
         - default: false
           action: store_true
-          help: List the most popular tags for saved queries.
+          help: List the most popular tags in Shodan's directory.
       - - --page
         - type: int
           default: 1
-          help: The page of results.
+          help: The page of Shodan's directory.
       - - --sort
         - type: str
           default: timestamp
           choices: [ timestamp, votes ]
-          help: How to sort the directory listing.
+          help: How to sort Shodan's directory.
       - - --order
         - type: str
           default: desc
           choices: [ asc, desc ]
-          help: The sort order of the directory listing.
+          help: The sort order of Shodan's directory.
       - - --size
         - type: int
           default: 10
           help: The number of tags to list with --tags.
+
+  - name: slib.shodan.query.save
+    perms:
+      - [ slib, shodan, user ]
+    descr: |
+      Save a Shodan query in the Cortex, as a local meta:rule (:type svc.shodan.query.local.).
+
+      Local queries are never sent to Shodan, and never sync with its query directory (see
+      slib.shodan.queries). Saving a query that's already saved locally warns and keeps the existing
+      one. A local query is a separate node from a community query with the same text.
+
+      Examples:
+
+        slib.shodan.query.save "ssl.jarm:2ad2ad0002ad2ad00042d42d00000069d641f34fe76acdc05c40262f8815e5" --name "CS JARM"
+
+        // Save a query and count its IPs right away.
+        slib.shodan.query.save "http.favicon.hash:-1166125415" --name "Favicon" --yield | slib.shodan.count
+    cmdargs:
+      - - query
+        - type: str
+          help: The Shodan search query.
+      - - --name
+        - type: str
+          required: true
+          help: A name for the saved query.
+      - - --desc
+        - type: str
+          default: null
+          help: A description of the saved query.
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the meta:rule node.
 
   - name: slib.shodan.info
     perms:
@@ -938,7 +1006,7 @@ commands:
       - form: pol:country
         help: Streams banners from its :iso2 country.
       - form: meta:rule
-        help: Rules with :type svc.shodan.query, a custom stream of their :text.
+        help: Saved queries (:type svc.shodan.query or under it), a custom stream of their :text.
 
   - name: slib.shodan.apikey
     perms:

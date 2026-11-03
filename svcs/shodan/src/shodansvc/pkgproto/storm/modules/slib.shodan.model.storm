@@ -317,6 +317,57 @@ function eventNode(timeline, b, res) {
     return($seen($node))
 }
 
+// ---- Saved queries ----
+//
+// Saved Shodan queries are meta:rule nodes (:text is the query) of two kinds, which never sync:
+//
+//   - Community queries, copied from Shodan's query directory: :type svc.shodan.query.community.,
+//     with a :name that starts with "[Community] " (Synapse lower-cases :name, so "[community] ").
+//   - Local queries, saved in the Cortex: :type svc.shodan.query.local. (or the older
+//     svc.shodan.query.). They're never sent to Shodan.
+//
+// The same query text is a different node for each kind. :name, :desc, and :created are only set
+// when they're unset, so analysts can edit them.
+
+function communityPrefix() { return("[Community] ") }
+
+function communityGuid(text) { return($lib.guid(slib.shodan, query, community, $text)) }
+function localGuid(text) { return($lib.guid(slib.shodan, query, local, $text)) }
+
+// Lift a meta:rule by guid. Returns the node, or null.
+function liftRule(guid) {
+    meta:rule=$guid
+    return($node)
+}
+
+// Model a saved query from Shodan's directory as a community meta:rule. Returns the node.
+function communityRule(q, tagPrefix=$lib.null) {
+    $text = $lib.cast(str, $q.query)
+    $name = $q.title
+    if (not $name) { $name = $text }
+    // :name is lower-cased, so the prefix is checked ignoring case.
+    if (not $name.lower().startswith($communityPrefix().lower())) { $name = `{$communityPrefix()}{$name}` }
+
+    [ meta:rule=$communityGuid($text) :type=svc.shodan.query.community. :text=$text ]
+    if (not :name) { [ :name=$name ] }
+    if ((not :desc) and $q.description) { [ :desc=$q.description ] }
+    if (not :created) { [ :created?=$q.timestamp ] }
+    if (not :url) { [ :url?=`https://www.shodan.io/search?query={$lib.inet.http.urlencode($text)}` ] }
+    $rule = $seen($node)
+
+    if ($tagPrefix != $lib.null and $q.tags) { $applyTags($rule, `{$tagPrefix}.query`, $q.tags) }
+    return($rule)
+}
+
+// Save a query in the Cortex as a local meta:rule. Returns the node.
+function localRule(text, name, desc=$lib.null) {
+    [ meta:rule=$localGuid($text) :type=svc.shodan.query.local. :text=$text ]
+    if (not :name) { [ :name=$name ] }
+    if ((not :desc) and $desc) { [ :desc=$desc ] }
+    if (not :created) { [ :created=now ] }
+    return($node)
+}
+
 // ---- Query executions ----
 
 // Create the it:exec:query for one run of a Shodan query. Every run is its own node.

@@ -83,7 +83,8 @@ need the normal node permissions for the nodes the commands create.
 | `slib.shodan.cve` | Model CVEDB details (CVSS, KEV, references, linked GHSA/EUVD IDs) on `risk:vuln`s. Accepts CVE, GHSA, and EUVD IDs. Search by `--cpe`/`--product` with `--kev`, `--epss`, `--start`, `--end`, `--count`. |
 | `slib.shodan.cpe` | Search CVEDB for a product's CPEs. |
 | `slib.shodan.trends` | Monthly historical breakdown of a query, with `--facets`. Takes the same inbound nodes as `search`, skipping any whose query uses filters Trends doesn't support. |
-| `slib.shodan.queries` | Browse/search the saved query directory and its tags. |
+| `slib.shodan.queries` | List saved queries: those stored in the Cortex (local and community) and Shodan's directory (`--source`). `--yield` copies directory queries in as community `meta:rule` nodes. |
+| `slib.shodan.query.save` | Save a query in the Cortex as a local `meta:rule` (never sent to Shodan). |
 | `slib.shodan.info` | Account, plan, remaining credits, and the service's public IP. |
 | `slib.shodan.ref` | Reference data: `ports`, `protocols`, `services`, `filters`, `facets`, `triggers`, `providers`, `httpheaders`. |
 | `slib.shodan.apikey` | Set/clear your own API key. |
@@ -153,6 +154,29 @@ it:exec:query:time +{ -(refs)> inet:asn=15169 }
 
 From Storm, `$shodan.search($query)` returns `({"query": <it:exec:query>, "ips": [...]})`, and
 `$shodan.count($query)` does the same (plus `size` and `full`) without using query credits.
+
+## Saved queries
+
+Saved Shodan queries are `meta:rule` nodes (`:text` is the query) of two kinds, which **never sync**:
+
+| | Community queries | Local queries |
+|---|---|---|
+| From | Shodan's query directory, copied with `slib.shodan.queries --yield` | Saved with `slib.shodan.query.save` |
+| `:type` | `svc.shodan.query.community.` | `svc.shodan.query.local.` (or the older `svc.shodan.query.`) |
+| `:name` | `[Community] <title>` (Synapse lower-cases `:name`, so ex. `[community] webcams`) | The name given |
+| Updates | A snapshot. Directory changes only arrive by copying again, and removed queries are never deleted. | Never sent to Shodan, its API can't save to the directory. |
+
+The same query text is a separate node for each kind. Re-copying keeps edits to `:name` and `:desc`.
+`slib.shodan.queries` lists both (stored ones first), and `--source local` or `--source shodan`
+picks one. Pipe any saved query to `slib.shodan.search`, `slib.shodan.count`, or `slib.shodan.stream`
+to run it:
+
+```
+slib.shodan.query.save "http.favicon.hash:-1166125415" --name "Favicon"
+slib.shodan.queries --source shodan --search webcam --yield
+slib.shodan.queries --source local
+meta:rule:type^=svc.shodan.query | slib.shodan.count
+```
 
 ## Host history timelines
 

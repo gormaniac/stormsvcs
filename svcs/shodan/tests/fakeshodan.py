@@ -272,6 +272,26 @@ def hostHistory(request) -> tuple[int, dict]:
     return 200, dict(HOST_HISTORY, data=[HISTORY_BANNERS[0], HISTORY_BANNERS[2]])
 
 
+# Saved queries from Shodan's directory, with the fields it returns (checked live 2026-11-03).
+DIRECTORY = [
+    {
+        "votes": 5,
+        "title": "Webcams",
+        "description": "Open webcams",
+        "timestamp": "2021-05-15T21:52:55.316000",
+        "tags": ["webcam", "iot"],
+        "query": "webcam",
+    },
+    {
+        "votes": 1,
+        "title": "",
+        "description": "",
+        "timestamp": "2020-01-01T00:00:00.000000",
+        "tags": [],
+        "query": 'port:8080 "Server: thing"',
+    },
+]
+
 SEARCH_PAGE = {
     "total": 2,
     "matches": [
@@ -424,14 +444,8 @@ ROUTES: dict[tuple[str, str], Any] = {
     ("GET", "/api/notifier/NOTIF1"): (200, {"id": "NOTIF1", "provider": "slack", "args": {}}),
     ("PUT", "/api/notifier/NOTIF1"): (200, {"success": True, "id": "NOTIF1"}),
     ("DELETE", "/api/notifier/NOTIF1"): (200, {"success": True}),
-    ("GET", "/api/shodan/query"): (
-        200,
-        {"total": 1, "matches": [{"votes": 5, "title": "Webcams", "query": "webcam"}]},
-    ),
-    ("GET", "/api/shodan/query/search"): (
-        200,
-        {"total": 1, "matches": [{"votes": 5, "title": "Webcams", "query": "webcam"}]},
-    ),
+    ("GET", "/api/shodan/query"): (200, {"total": 2, "matches": DIRECTORY}),
+    ("GET", "/api/shodan/query/search"): (200, {"total": 1, "matches": DIRECTORY[:1]}),
     ("GET", "/api/shodan/query/tags"): (
         200,
         {"total": 1, "matches": [{"value": "webcam", "count": 10}]},

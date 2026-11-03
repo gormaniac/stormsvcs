@@ -46,7 +46,7 @@ class TestShodanStormPkg(s_tests.SynTest):
         assert PKGDEFS[0]["version"] == __version__
 
     async def test_pkg(self):
-        assert len(CMDS) == 31
+        assert len(CMDS) == 32
 
         async with shodanSvc(self) as (core, svc, fake):
             msgs = await core.stormlist("service.list")
@@ -1160,6 +1160,124 @@ class TestShodanStormDedupe(s_tests.SynTest):
             assert fake.last("/api/shodan/scan")["form"]["ips"] == "8.8.8.8"
 
 
+class TestShodanStormSavedQueries(s_tests.SynTest):
+    """Community (Shodan's directory) and local saved queries, as meta:rule nodes."""
+
+    async def test_queries_community(self):
+        async with shodanSvc(self) as (core, svc, fake):
+            # Listing alone stores nothing.
+            msgs = await core.stormlist("slib.shodan.queries --source shodan")
+            self.stormHasNoErr(msgs)
+            self.stormIsInPrint("Total saved queries: 2", msgs)
+            self.stormNotInPrint("Stored saved queries", msgs)
+            assert not await core.nodes("meta:rule")
+
+            msgs = await core.stormlist("slib.shodan.queries --source shodan --yield")
+            self.stormHasNoErr(msgs)
+            rules = {n.get("text"): n for n in await core.nodes("meta:rule")}
+            assert len([m for m in msgs if m[0] == "node"]) == 2
+
+            webcam = rules["webcam"]
+            assert webcam.get("type") == "svc.shodan.query.community."
+            # Synapse lower-cases :name.
+            assert webcam.get("name") == "[community] webcams"
+            assert webcam.get("desc") == "Open webcams"
+            assert webcam.repr("created") == "2021/05/15 21:52:55.316"
+            assert webcam.get("url") == "https://www.shodan.io/search?query=webcam"
+            assert {"rep.shodan.query.webcam", "rep.shodan.query.iot"} <= set(webcam.tags)
+            assert len(await core.nodes(f"meta:rule:text=webcam <(seen)- meta:source={SVC_GUID}")) == 1
+
+            # Without a title, the name is the query.
+            other = rules['port:8080 "Server: thing"']
+            assert other.get("name") == '[community] port:8080 "server: thing"'
+            assert other.get("desc") is None
+
+            # Copying again keeps analyst edits, and the prefix isn't doubled.
+            await core.nodes('meta:rule:text=webcam [ :desc="our notes" ]')
+            msgs = await core.stormlist("slib.shodan.queries --source shodan --yield")
+            assert len(await core.nodes("meta:rule")) == 2
+            webcam = (await core.nodes("meta:rule:text=webcam"))[0]
+            assert (webcam.get("name"), webcam.get("desc")) == ("[community] webcams", "our notes")
+            self.stormIsInPrint("shodan (stored)", msgs)
+
+            # A title that already has the prefix keeps one.
+            await core.nodes(
+                '$model = $lib.import(slib.shodan.model) $model.communityRule(({"query": "x", "title": "[Community] X"}))'
+            )
+            assert (await core.nodes("meta:rule:text=x"))[0].get("name") == "[community] x"
+
+    async def test_queries_local(self):
+        async with shodanSvc(self) as (core, svc, fake):
+            before = len(fake.requests)
+            msgs = await core.stormlist('slib.shodan.query.save "webcam" --name "My webcams" --desc "mine" --yield')
+            self.stormHasNoErr(msgs)
+            self.stormIsInPrint("Saved my webcams (webcam)", msgs)
+            # Saving never contacts Shodan.
+            assert len(fake.requests) == before
+
+            nodes = [m[1] for m in msgs if m[0] == "node"]
+            assert len(nodes) == 1
+            local = (await core.nodes("meta:rule:type=svc.shodan.query.local."))[0]
+            assert (local.get("text"), local.get("name"), local.get("desc")) == ("webcam", "my webcams", "mine")
+            assert local.get("created") is not None
+
+            # Saving it again keeps the existing one.
+            msgs = await core.stormlist('slib.shodan.query.save "webcam" --name "Other"')
+            self.stormIsInWarn("webcam is already a local saved query (my webcams)", msgs)
+            assert len(await core.nodes("meta:rule")) == 1
+
+            msgs = await core.stormlist('slib.shodan.query.save " " --name "Empty"')
+            self.stormIsInErr("can't be empty", msgs)
+
+            # The community copy of the same text is a separate node.
+            await core.nodes("slib.shodan.queries --source shodan --yield")
+            assert len(await core.nodes("meta:rule:text=webcam")) == 2
+            assert len(await core.nodes("meta:rule")) == 3
+
+            # An older rule, with the parent type, counts as local.
+            await core.nodes('[ meta:rule=* :type=svc.shodan.query :name="Old" :text="port:22" ]')
+            await core.nodes('[ meta:rule=* :type=other :name="Not shodan" :text="port:23" ]')
+
+            msgs = await core.stormlist("slib.shodan.queries --source local --yield")
+            self.stormHasNoErr(msgs)
+            self.stormIsInPrint("Stored saved queries: 4", msgs)
+            assert {m[1][1]["props"]["name"] for m in msgs if m[0] == "node"} == {
+                "my webcams",
+                "[community] webcams",
+                '[community] port:8080 "server: thing"',
+                "old",
+            }
+
+            # Searching stored queries matches name/text/desc, ignoring case, and isn't a regex.
+            msgs = await core.stormlist('slib.shodan.queries --source local --search "WEBCAMS"')
+            self.stormIsInPrint("Stored saved queries: 2", msgs)
+            msgs = await core.stormlist('slib.shodan.queries --source local --search "\\"server:"')
+            self.stormIsInPrint("Stored saved queries: 1", msgs)
+            msgs = await core.stormlist('slib.shodan.queries --source local --search ".*"')
+            self.stormIsInPrint("Stored saved queries: 0", msgs)
+
+            # Both sources by default, stored queries first.
+            fake.requests.clear()
+            msgs = await core.stormlist("slib.shodan.queries")
+            self.stormIsInPrint("Stored saved queries: 4", msgs)
+            self.stormIsInPrint("Total saved queries: 2", msgs)
+            assert [r["path"] for r in fake.requests] == ["/api/shodan/query"]
+
+            msgs = await core.stormlist("slib.shodan.queries --source local --tags")
+            self.stormIsInWarn("--tags lists Shodan's directory tags", msgs)
+
+    async def test_run_saved_queries(self):
+        async with shodanSvc(self) as (core, svc, fake):
+            await core.nodes('slib.shodan.query.save "product:nginx" --name nginx')
+            await core.nodes('[ meta:rule=* :type=svc.shodan.query :text="port:8080" ]')
+            await core.nodes("slib.shodan.queries --source shodan --yield")
+
+            msgs = await core.stormlist("meta:rule:type^=svc.shodan.query | slib.shodan.search --count")
+            self.stormHasNoErr(msgs)
+            counted = sorted(r["query"]["query"] for r in fake.requests if r["path"] == "/api/shodan/host/count")
+            assert counted == sorted(["product:nginx", "port:8080", "webcam", 'port:8080 "Server: thing"'])
+
+
 class TestShodanStormDns(s_tests.SynTest):
     async def test_dns_domain(self):
         async with shodanSvc(self) as (core, svc, fake):
@@ -1348,7 +1466,7 @@ class TestShodanStormPrinting(s_tests.SynTest):
                     ("Total results: 10", "2026-09", "9.6"),
                 ),
                 ("slib.shodan.trends --filters", ("Filters: product", "Facets: version")),
-                ("slib.shodan.queries", ("Total saved queries: 1", "Webcams")),
+                ("slib.shodan.queries", ("Total saved queries: 2", "Webcams")),
                 ("slib.shodan.queries --search webcam", ("Webcams",)),
                 ("slib.shodan.queries --tags", ("webcam",)),
                 ("slib.shodan.ref ports", ("22, 80, 443",)),
