@@ -232,6 +232,7 @@ HISTORY_BANNERS = [
         "version": "8.9p1",
         "data": "SSH-2.0-OpenSSH_8.9p1",
         "hash": 111,
+        "tags": ["self-signed"],
         "_shodan": {"module": "ssh", "id": "hist-2", "crawler": "crawler-b"},
     },
     {

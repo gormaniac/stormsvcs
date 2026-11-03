@@ -215,11 +215,11 @@ function banner(b, tagPrefix=$lib.null) {
 // "ip": <inet:ipv4/6 or null>}), the nodes the banner itself describes, or null.
 // Queries and timelines link to only these nodes, everything else is one hop from them.
 // A historical banner (from a history lookup) is an old observation, so what it says about the
-// current state isn't modeled: its vulns, Shodan's tags, and the IP's ASN (which overwrites).
+// current state isn't modeled: its vulns, and the IP's ASN (which overwrites). Shodan's tags for
+// it go on its inet:banner, a snapshot of what was seen, instead of the current inet:server.
 function bannerNodes(b, tagPrefix=$lib.null, historical=(false)) {
     $srv = $serverNode($b.ip, $b.port, $b.transport, $b.timestamp)
     if ($srv = $lib.null) { return($lib.null) }
-    if (not $historical) { $applyTags($srv, $tagPrefix, $b.tags) }
 
     $ipnode = $ipNode($b.ip, $b.timestamp)
     if ((not $historical) and $b.asn and $ipnode) { $setAsn($ipnode, $b.asn, $b.org) }
@@ -232,6 +232,9 @@ function bannerNodes(b, tagPrefix=$lib.null, historical=(false)) {
             for $header in $b.http_headers { $httpHeaderNode($bannernode, $header, $b.timestamp) }
         }
     }
+
+    if (not $historical) { $applyTags($srv, $tagPrefix, $b.tags) }
+    elif $bannernode { $applyTags($bannernode, $tagPrefix, $b.tags) }
 
     if ($b.ssh and $b.ssh.pubkey) { $sshKeyNode($srv, $b.ssh.pubkey, $b.timestamp, $tagPrefix) }
 
@@ -252,8 +255,8 @@ function bannerNodes(b, tagPrefix=$lib.null, historical=(false)) {
 // Model the banners of a history lookup (/shodan/host/{ip}?history=true). Returns the IP node.
 //
 // Only the banners are modeled, as historical ones (see bannerNodes): a history lookup's host-level
-// fields (vulns, ports, tags, ...) are combined over its whole history, and old vulns, tags, and
-// ASNs aren't current. The current host comes from a plain lookup (see slib.shodan.lib.host). With
+// fields (vulns, ports, tags, ...) are combined over its whole history, and old vulns and ASNs
+// aren't current. Each banner's tags go on its inet:banner. The current host comes from a plain lookup (see slib.shodan.lib.host). With
 // timeline, each banner is added to the IP's timeline.
 function historyBanners(h, tagPrefix=$lib.null, timeline=(false)) {
     $ipnode = $ipNode($h.ip)

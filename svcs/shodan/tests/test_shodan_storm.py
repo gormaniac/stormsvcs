@@ -890,9 +890,16 @@ class TestShodanStormHistory(s_tests.SynTest):
             }
             assert not await core.nodes("it:sec:cve=cve-2011-3192")
 
-            # Nor the history's old ASN or Shodan tags.
+            # Nor the history's old ASN.
             assert (await core.nodes(f"inet:ipv4={HISTORY_IP}"))[0].get("asn") == 64496
             assert not await core.nodes("inet:asn=1111")
+
+            # A historical banner's Shodan tags go on its inet:banner, not the current server.
+            # Synapse tags use "_" for "-".
+            assert await nodeset(core, "#rep.shodan.self_signed") == {
+                ("inet:banner", (f"tcp://{HISTORY_IP}:22", "SSH-2.0-OpenSSH_8.9p1"))
+            }
+            # One without an inet:banner (its data was truncated) has nowhere to put them.
             assert not await core.nodes("#rep.shodan.honeypot")
 
             tls = await core.nodes("meta:timeline")

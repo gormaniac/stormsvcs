@@ -193,8 +193,10 @@ Shodan history:
 
 A `--history` lookup is a plain lookup for the IP's current data, then a history lookup (both free),
 since Shodan's history lags its newest data by about a day. The current host (vulns, tags, ports) is
-modeled from the plain lookup, and only the banners from the history, without their vulns: the
-history's host-level fields combine all 90 days, and old vulns aren't current.
+modeled from the plain lookup, and only the banners from the history, without their vulns or ASN:
+the history's host-level fields combine all 90 days, and old vulns aren't current. Shodan's tags for
+a historical banner (ex. `self-signed`) go on its `inet:banner`, a snapshot of what was seen, not
+the current `inet:server`.
 
 Shodan's history covers 90 days, at most the latest 1,000 banners. Re-run lookups (ex. on a
 schedule) to build a longer history. `--no-timeline` skips the timeline for a `--history` lookup.

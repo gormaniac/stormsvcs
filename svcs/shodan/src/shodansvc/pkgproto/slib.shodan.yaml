@@ -1,5 +1,5 @@
 name: slib.shodan
-version: 0.12.1
+version: 0.12.2
 guid: 0f6c1d0f1d8a4c3bb7a1e3d5c9b2a864
 
 synapse_minversion: [2, 137, 0]
@@ -78,8 +78,9 @@ commands:
 
       With --history, Shodan's history of the IP is looked up too, after a plain lookup for its
       current data (the history lags it by about a day). The current host (vulns, tags, ports, ...)
-      is modeled from the plain lookup, and only the banners from the history, without their vulns:
-      a history lookup's host-level fields combine its whole history, and old vulns aren't current.
+      is modeled from the plain lookup, and only the banners from the history, without their vulns
+      or ASN: a history lookup's host-level fields combine its whole history, and old vulns aren't
+      current. Shodan's tags for a historical banner go on its inet:banner, not the current server.
 
       With --history (or --timeline), the IP's banners are also added to its Shodan history: one
       meta:timeline per IP (:title "Shodan history: <ip>"), with one meta:event per banner. Each
