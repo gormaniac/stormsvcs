@@ -84,10 +84,10 @@ function hosts(valu, print=(false)) {
 
 // ---- Whois ----
 
-// Look up a domain's whois record (from RDAP, or whois text without it). Returns the
-// inet:whois:rec node, or null.
-function whois(domain, print=(false)) {
-    $retn = $priv.whoisDomain($domain)
+// Look up a domain's whois record (from RDAP, or whois text without it, or with rdap=(false)).
+// Returns the inet:whois:rec node, or null.
+function whois(domain, print=(false), rdap=(true)) {
+    $retn = $priv.whoisDomain($domain, rdap=$rdap)
     if $util.failed($retn, `Looking up the whois of {$domain}`) { return() }
     if $lib.debug {
         $lib.print(`slib.bgphe: The whois of {$retn.data.fqdn} is from {$retn.data.source}.`)
@@ -130,8 +130,8 @@ function prefixes(valu) {
 // ---- Generators, for divert ----
 
 // Emit the inet:whois:rec node of a domain's whois record (see whois()).
-function whoisNodes(domain, print=(false)) {
-    $rec = $whois($domain, print=$print)
+function whoisNodes(domain, print=(false), rdap=(true)) {
+    $rec = $whois($domain, print=$print, rdap=$rdap)
     if $rec { emit $rec }
 }
 

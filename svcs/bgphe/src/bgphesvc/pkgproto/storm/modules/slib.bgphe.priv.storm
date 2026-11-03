@@ -18,7 +18,7 @@ function hosts(valu) { return($svc.hosts($valu)) }
 
 // Whois
 
-function whoisDomain(domain) { return($svc.whoisDomain($domain)) }
+function whoisDomain(domain, rdap=(true)) { return($svc.whoisDomain($domain, useRdap=$rdap)) }
 function whoisAsn(asn) { return($svc.whoisAsn($asn)) }
 
 // BGP

@@ -71,7 +71,7 @@ Every node the service models is linked to the `slib.bgphe` `meta:source` with a
 
 The record comes from **RDAP** when bgp.he.net has it (`/rdap/dns/<domain>`): the TLD registry's RDAP record, plus the registrar's own RDAP record it links to, which usually has the registrant and other contacts. RDAP often has more than the whois text, ex. the registrant (or the privacy service standing in for it) that the text redacts. The registry is preferred for the domain's dates, status, and nameservers, the registrar for contacts.
 
-When bgp.he.net has no RDAP record for the domain (it returns HTTP 404, ex. for many ccTLDs like `.de` and `.co`), RDAP fails, or its response isn't a domain record, the whois **text** (`/whois/dns/<domain>`) is parsed instead. Either way, the same props are set.
+When bgp.he.net has no RDAP record for the domain (it returns HTTP 404, ex. for many ccTLDs like `.de` and `.co`), RDAP fails, or its response isn't a domain record, the whois **text** (`/whois/dns/<domain>`) is parsed instead. `--no-rdap` skips RDAP and always uses the text. Either way, the same props are set.
 
 The record's `:text` is the whois text, or with RDAP, the RDAP records as indented JSON. The Synapse model lowercases `:text`, its `slib:bgphe` node data has the original, plus the parsed record, the `source` (`rdap` or `whois`), the raw RDAP payload, and `rdaperr` (why RDAP wasn't used). `$lib.debug` prints which source was used.
 

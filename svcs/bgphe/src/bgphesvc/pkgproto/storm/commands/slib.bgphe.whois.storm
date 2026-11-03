@@ -1,13 +1,14 @@
 init {
     $bgphe = $lib.import(slib.bgphe.lib)
     $util = $lib.import(slib.bgphe.util)
+    $rdap = (not $cmdopts.no_rdap)
 }
 
 if $cmdopts.domains {
     // Values ignore inbound nodes.
     spin |
     for $domain in $cmdopts.domains {
-        for $n in $bgphe.whoisNodes($domain, print=$cmdopts.print) { yield $n }
+        for $n in $bgphe.whoisNodes($domain, print=$cmdopts.print, rdap=$rdap) { yield $n }
     }
 }
 else {
@@ -17,6 +18,6 @@ else {
         $lib.warn(`slib.bgphe.whois: Unable to look up {$node.form()} {$node.repr()}, it needs an inet:fqdn.`)
         if $cmdopts.yield { spin }
     } else {
-        divert $cmdopts.yield $util.nodes($bgphe.whoisNodes($node.repr(), print=$cmdopts.print))
+        divert $cmdopts.yield $util.nodes($bgphe.whoisNodes($node.repr(), print=$cmdopts.print, rdap=$rdap))
     }
 }

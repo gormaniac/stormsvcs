@@ -387,6 +387,27 @@ class TestBgpHeStormPkg(s_tests.SynTest):
             nodes = await core.nodes("slib.bgphe.whois bare.com")
             assert len(nodes) == 1 and nodes[0].get("asof") > s_time.parse("2026-01-01")
 
+            # --no-rdap only uses the whois text, even when there's RDAP.
+            fake.requests.clear()
+            msgs = await core.stormlist("$lib.debug = (true) [ inet:fqdn=example.org ] | slib.bgphe.whois --no-rdap --yield")
+            self.stormIsInPrint("slib.bgphe: The whois of example.org is from whois.", msgs)
+            self.stormNotInPrint("RDAP wasn't used", msgs)
+            assert fake.requests == ["/whois/dns/example.org"]
+            nodes = [m[1] for m in msgs if m[0] == "node"]
+            assert [n[0][0] for n in nodes] == ["inet:whois:rec"]
+            nodes = await core.nodes("inet:whois:rec:fqdn=example.org")
+            data = await nodes[0].getData("slib:bgphe")
+            assert data["source"] == "whois" and data["rdaperr"] is None
+
+            fake.requests.clear()
+            msgs = await core.stormlist("slib.bgphe.whois nope.com --no-rdap")
+            self.stormIsInWarn(
+                "slib.bgphe: Looking up the whois of nope.com failed: bgp.he.net returned HTTP 400 "
+                "for /whois/dns/nope.com: whois unavailable",
+                msgs,
+            )
+            assert fake.requests == ["/whois/dns/nope.com"]
+
             # Inbound nodes.
             nodes = await core.nodes("inet:fqdn=google.de | slib.bgphe.whois --yield")
             assert [n.form.name for n in nodes] == ["inet:whois:rec"]

@@ -207,8 +207,10 @@ class BgpHeSvc(s_cell.Cell):
 
     # ---- Whois ----
 
-    async def whoisDomain(self, domain: str) -> dict:
+    async def whoisDomain(self, domain: str, useRdap: bool = True) -> dict:
         """A domain's whois record, from RDAP if bgp.he.net has it, otherwise from whois text.
+
+        ``useRdap=False`` skips RDAP and only uses the whois text.
 
         Returns ``{"fqdn", "source", "text", "rec", "rdap", "rdaperr"}``:
 
@@ -217,7 +219,8 @@ class BgpHeSvc(s_cell.Cell):
           and ``rdap.parseDomain``). Its ``asof`` is when the registry answered, if the
           record says (bgp.he.net caches records).
         - ``text`` is the whois text, or for RDAP, the RDAP records as indented JSON.
-        - ``rdap`` is the raw RDAP payload (or None), ``rdaperr`` why RDAP wasn't used (or None).
+        - ``rdap`` is the raw RDAP payload (or None), ``rdaperr`` why RDAP wasn't used (or None,
+          also when it was skipped).
 
         RDAP is skipped for whois text when bgp.he.net has no RDAP record for the domain
         (ex. many ccTLDs), RDAP fails, or its response has no domain record. If the text
@@ -226,26 +229,31 @@ class BgpHeSvc(s_cell.Cell):
 
         domain = self._norm(norm.normDomain, domain)
 
-        try:
-            payload = await self.client.rdapDomain(domain)
-            rec = rdap.parseDomain(domain, payload)
-        except BgpHeApiError as err:
-            rdaperr = err.mesg
-        except rdap.BadRdap as err:
-            rdaperr = f"Unusable RDAP response for {domain}: {err}"
+        if not useRdap:
+            rdaperr = None
         else:
-            return {
-                "fqdn": domain,
-                "source": "rdap",
-                "text": json.dumps(payload, indent=1, ensure_ascii=False),
-                "rec": rec,
-                "rdap": payload,
-                "rdaperr": None,
-            }
+            try:
+                payload = await self.client.rdapDomain(domain)
+                rec = rdap.parseDomain(domain, payload)
+            except BgpHeApiError as err:
+                rdaperr = err.mesg
+            except rdap.BadRdap as err:
+                rdaperr = f"Unusable RDAP response for {domain}: {err}"
+            else:
+                return {
+                    "fqdn": domain,
+                    "source": "rdap",
+                    "text": json.dumps(payload, indent=1, ensure_ascii=False),
+                    "rec": rec,
+                    "rdap": payload,
+                    "rdaperr": None,
+                }
 
         try:
             text = whois.fixText(await self.client.whoisDomain(domain)).strip("\n")
         except BgpHeApiError as err:
+            if not useRdap:
+                raise
             raise BgpHeApiError(
                 f"No RDAP or whois record for {domain}. RDAP: {rdaperr} Whois: {err.mesg}",
                 code=err.code,

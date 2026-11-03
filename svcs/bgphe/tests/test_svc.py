@@ -118,6 +118,14 @@ class TestBgpHeSvc(s_tests.SynTest):
             assert json.loads(data["text"]) == data["rdap"]
             assert data["rec"]["registrant"] == "Microsoft Corporation"
 
+            fake.requests.clear()
+            data = await svc.whoisDomain("microsoft.com", useRdap=False)
+            assert data["source"] == "whois" and data["rdaperr"] is None
+            assert fake.requests == ["/whois/dns/microsoft.com"]
+            with self.raises(b_svc.BgpHeApiError) as exc:
+                await svc.whoisDomain("nope.com", useRdap=False)
+            assert "RDAP" not in exc.exception.mesg
+
             fake.state["rdapdns"].pop("microsoft.com")
             data = await svc.whoisDomain("microsoft.com")
             assert data["source"] == "whois" and data["rdap"] is None

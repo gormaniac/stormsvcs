@@ -158,7 +158,7 @@ commands:
       their nameservers, contacts, and emails.
 
       RDAP is used when bgp.he.net has it (most gTLDs and some ccTLDs), the whois text
-      otherwise. With RDAP, :text is the RDAP records as JSON.
+      otherwise (or always, with --no-rdap). With RDAP, :text is the RDAP records as JSON.
 
       bgp.he.net caches whois records. A record's :asof is when the registry answered the
       query if the record says, or the record's last update time, or now.
@@ -166,6 +166,8 @@ commands:
       Examples:
 
         slib.bgphe.whois vertex.link
+
+        slib.bgphe.whois vertex.link --no-rdap
 
         inet:fqdn=vertex.link | slib.bgphe.whois --yield
     cmdargs:
@@ -177,6 +179,10 @@ commands:
         - default: false
           action: store_true
           help: Print the raw whois text (or RDAP JSON).
+      - - --no-rdap
+        - default: false
+          action: store_true
+          help: Skip RDAP and only use the whois text.
       - - --yield
         - default: false
           action: store_true
