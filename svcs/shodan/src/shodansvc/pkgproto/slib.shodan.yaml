@@ -1,5 +1,5 @@
 name: slib.shodan
-version: 0.7.0
+version: 0.8.0
 guid: 0f6c1d0f1d8a4c3bb7a1e3d5c9b2a864
 
 synapse_minversion: [2, 137, 0]
@@ -76,6 +76,14 @@ commands:
       Uses the free InternetDB API when --internetdb is used, or automatically when
       no Shodan API key is available to the current user.
 
+      With --history (or --timeline), the IP's banners are also added to its Shodan history: one
+      meta:timeline per IP (:title "Shodan history: <ip>"), with one meta:event per banner. Each
+      event is when Shodan saw a service (:time), ex. "tcp/22 OpenSSH 8.9p1" (:title), and is linked
+      with -(refs)> edges to the inet:server, inet:banner, and IP it describes. Events are keyed by
+      Shodan's banner ID, so lookups only add banners that weren't seen before. Shodan's history
+      covers 90 days, at most the latest 1,000 banners, so re-run lookups to keep a longer one.
+      Minified and InternetDB lookups have no banners to add.
+
       Examples:
 
         // Look up some IPs already in the Cortex.
@@ -84,8 +92,9 @@ commands:
         // Look up a single IP and yield the inet:ipv4 node.
         slib.shodan.host --ip 8.8.8.8 --yield
 
-        // Include historical banners.
+        // Include historical banners, and walk the IP's timeline.
         inet:ipv4=1.2.3.4 | slib.shodan.host --history
+        meta:event:time +{ :timeline -> meta:timeline +:title="Shodan history: 1.2.3.4" }
 
         // Use the free (but less detailed) InternetDB API.
         inet:ipv4=1.2.3.4 | slib.shodan.host --internetdb
@@ -98,7 +107,15 @@ commands:
       - - --history
         - default: false
           action: store_true
-          help: Include historical banners.
+          help: Include historical banners, and add them to the IP's timeline (unless --no-timeline).
+      - - --timeline
+        - default: false
+          action: store_true
+          help: Add the banners to the IP's Shodan history timeline, without --history too.
+      - - --no-timeline
+        - default: false
+          action: store_true
+          help: Don't add the banners of a --history lookup to the IP's timeline.
       - - --minify
         - default: false
           action: store_true

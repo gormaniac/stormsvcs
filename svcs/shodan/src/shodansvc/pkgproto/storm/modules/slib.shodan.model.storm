@@ -245,6 +245,78 @@ function bannerNodes(b, tagPrefix=$lib.null) {
     return(({"server": $srv, "banner": $bannernode, "ip": $ipnode}))
 }
 
+// ---- Host history timelines ----
+//
+// Every Shodan banner is one observation of one service at one time, so each becomes a meta:event
+// in the IP's meta:timeline. Re-running a lookup adds only the banners not seen before.
+//
+// NOTE: :title and :summary are only set when they're unset, so analysts can edit them.
+
+// The meta:timeline of an IP's Shodan history (one per IP), linked -(refs)> to the IP.
+function timelineNode(ipnode) {
+    $repr = $ipnode.repr()
+    [ meta:timeline=$lib.guid(slib.shodan, history, $repr) :type=svc.shodan.host.history. ]
+    if (not :title) { [ :title=`Shodan history: {$repr}` ] }
+    if (not :summary) {
+        [ :summary=`Shodan banners observed for {$repr}, one meta:event per banner. Shodan's history covers 90 days and at most the latest 1,000 banners per lookup.` ]
+    }
+    [ +(refs)> $ipnode ]
+    return($seen($node))
+}
+
+// The guid of a banner's meta:event: Shodan's banner ID, or (without one) the fields that identify
+// a single crawl. timestamp has microseconds, so the fallback is unique per crawl.
+function eventGuid(b) {
+    if $b.id { return($lib.guid(slib.shodan, banner, $b.id)) }
+    return($lib.guid(slib.shodan, banner, $b.ip, $b.port, $b.transport, $b.timestamp, $b.hash))
+}
+
+// Ex. "tcp/22 OpenSSH 8.9p1", or "tcp/80 http" (the crawler's module) without a product.
+function eventTitle(b) {
+    $parts = ([`{$b.transport}/{$b.port}`])
+    if $b.product {
+        $parts.append($b.product)
+        if $b.version { $parts.append($b.version) }
+    } elif $b.module {
+        $parts.append($b.module)
+    }
+    return((" ").join($parts))
+}
+
+function eventSummary(b) {
+    $summary = $lib.null
+    if $b.scan { $summary = `On-demand scan {$b.scan}` }
+    elif $b.crawler { $summary = `Crawler {$b.crawler}` }
+    if $b.truncated {
+        $cut = `truncated: {(", ").join($b.truncated)}`
+        if $summary { $summary = `{$summary} ({$cut})` }
+        else { $summary = `({$cut})` }
+    }
+    return($summary)
+}
+
+// Add a banner to a timeline as a meta:event, linked -(refs)> to only the inet:server, inet:banner,
+// and IP the banner describes (res, from bannerNodes). Returns the meta:event.
+function eventNode(timeline, b, res) {
+    $title = $eventTitle($b)
+    $summary = $eventSummary($b)
+
+    [ meta:event=$eventGuid($b)
+        :timeline=$timeline
+        :time?=$b.timestamp
+        :type=svc.shodan.banner.
+    ]
+    if (not :title) { [ :title=$title ] }
+    if ((not :summary) and $summary) { [ :summary=$summary ] }
+
+    // No loop here, the node is in the pipeline (see the NOTE at the top).
+    if $res.server { [ +(refs)> $res.server ] }
+    if $res.banner { [ +(refs)> $res.banner ] }
+    if $res.ip { [ +(refs)> $res.ip ] }
+
+    return($seen($node))
+}
+
 // ---- Query executions ----
 
 // Create the it:exec:query for one run of a Shodan query. Every run is its own node.
@@ -285,7 +357,8 @@ function setOffset(query, offset) {
 }
 
 // Model a normalized host (from the Shodan host API or InternetDB). Returns the IP node.
-function host(h, tagPrefix=$lib.null) {
+// With timeline, each banner is also added to the IP's Shodan history timeline (see timelineNode).
+function host(h, tagPrefix=$lib.null, timeline=(false)) {
     $ipnode = $ipNode($h.ip, $h.last_update)
     if ($ipnode = $lib.null) { return($lib.null) }
 
@@ -304,7 +377,12 @@ function host(h, tagPrefix=$lib.null) {
     }
 
     if $h.banners {
-        for $b in $h.banners { $banner($b, $tagPrefix) }
+        $tl = $lib.null
+        if $timeline { $tl = $timelineNode($ipnode) }
+        for $b in $h.banners {
+            $res = $bannerNodes($b, $tagPrefix)
+            if ($tl and $res) { $eventNode($tl, $b, $res) }
+        }
     } else {
         // Minified host lookups and InternetDB only give us open ports.
         for $port in $h.ports { $serverNode($h.ip, $port, tcp, $h.last_update) }

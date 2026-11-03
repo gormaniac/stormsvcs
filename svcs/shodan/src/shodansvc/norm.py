@@ -399,9 +399,15 @@ def normBanner(banner: dict) -> dict:
     http = banner.get("http") or {}
     ssh = banner.get("ssh") or {}
 
-    # Never truncated, so the inet:banner:text is Shodan's exact data and bannerHash() of it
-    # matches Shodan's banner hash.
-    text = banner.get("data") or ""
+    shodanopts = shodan.get("options") or {}
+
+    # Large fields Shodan removed from the banner (ex. historical banners, minified searches).
+    truncated = [str(f) for f in _list((banner.get("metadata") or {}).get("truncated"))]
+
+    # Never truncated by us, so the inet:banner:text is Shodan's exact data and bannerHash() of it
+    # matches Shodan's banner hash. If Shodan truncated it, it's dropped: a partial text would be a
+    # different inet:banner, with a hash that doesn't match Shodan's.
+    text = "" if "data" in truncated else banner.get("data") or ""
 
     cpes = normCpes(banner.get("cpe23")) or normCpes(banner.get("cpe"))
 
@@ -413,6 +419,12 @@ def normBanner(banner: dict) -> dict:
         "module": shodan.get("module"),
         "crawler": shodan.get("crawler"),
         "id": shodan.get("id"),
+        # The ID of the on-demand scan that produced the banner, if any.
+        "scan": shodanopts.get("scan"),
+        # Shodan documents the crawler's region in both places.
+        "region": shodan.get("region") or shodanopts.get("region"),
+        "truncated": truncated,
+        "hash": banner.get("hash"),
         "product": banner.get("product"),
         "version": banner.get("version"),
         "info": banner.get("info"),

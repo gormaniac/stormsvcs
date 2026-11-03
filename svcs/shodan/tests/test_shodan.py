@@ -25,6 +25,7 @@ from .fakeshodan import (
     DNS_DOMAIN,
     EUVD_NO_CVE,
     GHSA_LOG4SHELL,
+    HISTORY_BANNERS,
     HOST_8888,
     FAVICON_B64,
     FAVICON_HASH,
@@ -395,6 +396,19 @@ class TestNorm(s_tests.SynTest):
 
         banner = norm.normBanner({"ip_str": "1.2.3.4", "port": 80, "data": text})
         assert banner["http_headers"] == norm.normHttpHeaders(text)
+
+    def test_norm_banner_history(self):
+        cut = norm.normBanner(HISTORY_BANNERS[3])
+        assert (cut["data"], cut["scan"], cut["truncated"], cut["hash"]) == ("", "SCAN1", ["data", "http.html"], 333)
+        assert cut["http_headers"] == []
+
+        ssh = norm.normBanner(HISTORY_BANNERS[0])
+        assert (ssh["id"], ssh["crawler"], ssh["scan"], ssh["truncated"]) == ("hist-1", "crawler-a", None, [])
+        assert ssh["data"] == "SSH-2.0-OpenSSH_8.9p1"
+
+        # Shodan documents the region in two places.
+        assert norm.normBanner({"_shodan": {"region": "eu"}})["region"] == "eu"
+        assert norm.normBanner({"_shodan": {"options": {"region": "na"}}})["region"] == "na"
 
     def test_norm_banner_not_truncated(self):
         # Long banners are kept whole, so a hash of the inet:banner:text matches Shodan's hash.

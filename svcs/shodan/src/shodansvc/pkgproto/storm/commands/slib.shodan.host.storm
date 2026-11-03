@@ -5,6 +5,8 @@ init {
         "history": $cmdopts.history,
         "minify": $cmdopts.minify,
         "internetdb": $cmdopts.internetdb,
+        // History lookups build the IP's timeline unless --no-timeline.
+        "timeline": (($cmdopts.timeline or $cmdopts.history) and not $cmdopts.no_timeline),
     })
 }
 
@@ -13,7 +15,7 @@ if $cmdopts.ip {
     spin |
     for $ip in $cmdopts.ip {
         $ipnode = $shodan.host($ip, history=$opts.history, minify=$opts.minify,
-                               internetdb=$opts.internetdb)
+                               internetdb=$opts.internetdb, timeline=$opts.timeline)
         if ($cmdopts.yield and $ipnode) { yield $ipnode }
     }
 }
@@ -27,5 +29,5 @@ else {
         }
     }
     divert $cmdopts.yield $model.nodes(($shodan.host($node.repr(), history=$opts.history, minify=$opts.minify,
-                                                     internetdb=$opts.internetdb),))
+                                                     internetdb=$opts.internetdb, timeline=$opts.timeline),))
 }

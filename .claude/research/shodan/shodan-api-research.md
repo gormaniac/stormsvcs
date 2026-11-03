@@ -587,6 +587,27 @@ What this settles:
 - **New:** `hostname` is not a facet; unknown facets are dropped silently rather than raising an error.
 - **New:** the facet-limit error text is exactly `Facet size too big for current subscription (limit: N)`.
 
+### Host history (2026-11-03)
+
+Two `GET /shodan/host/{ip}?history=true` calls and one plain lookup per IP, for 185.212.47.222,
+130.102.0.59 and 45.33.32.156 (scanme.nmap.org); 8.8.8.8 returned 404. Query credits stayed 100/100.
+
+| Check | Result |
+|---|---|
+| Banners returned | 1,000 / 1,000 / 229. The two busy hosts hit the 1,000 cap after only 1–2 days of history; scanme covered 2026-08-05..2026-11-01 (the 90-day window). |
+| `_shodan.id` stable across calls | **Yes**, the same IDs on both calls for all 2,229 banners. |
+| `_shodan.id` missing or null | **Never** (0 of 2,229). All were UUIDs. |
+| `metadata.truncated` | Lists top-level field names: `http`, `opts`, `location`, `ssl`, `html`. **`data` was never truncated.** |
+| Region location | `_shodan.region` (`na`/`eu`), never `_shodan.options.region`. `_shodan.options` held `hostname` and `scan`. |
+| Host-level fields with `history=true` | **Not current-only.** `ports` and `vulns` are the union over the history (scanme: ports `[22, 80, 123, 9929]` vs `[22, 80, 123]` now; 138 vulns vs 131). `last_update` is the newest *history* banner. `tags` and `hostnames` matched. |
+| History freshness | The history lags the current index: scanme's newest history banner was 2026-11-01T23:25, while the plain lookup had a 2026-11-02 banner for port 22. |
+
+What this settles:
+
+- **Could not verify 6:** host-level fields are history-wide aggregates with `history=true`.
+- **Could not verify 7:** `_shodan.id` is stable across calls and was always present.
+- **Could not verify 8:** the region is at `_shodan.region`.
+
 ## Could not verify
 
 Each item below is open because I couldn't confirm it without a key, or because Shodan's site

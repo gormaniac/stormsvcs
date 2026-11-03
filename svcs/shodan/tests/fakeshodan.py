@@ -207,6 +207,71 @@ EUVD_NO_CVE = {
     "ghsa": None,
 }
 
+# A host with history: 2 crawls of the same SSH banner, an HTTP banner without a _shodan.id, and
+# an on-demand scan result Shodan truncated the data of.
+HISTORY_IP = "203.0.113.7"
+HISTORY_BANNERS = [
+    {
+        "ip_str": HISTORY_IP,
+        "port": 22,
+        "transport": "tcp",
+        "timestamp": "2026-10-01T12:00:00.000000",
+        "product": "OpenSSH",
+        "version": "8.9p1",
+        "data": "SSH-2.0-OpenSSH_8.9p1",
+        "hash": 111,
+        "_shodan": {"module": "ssh", "id": "hist-1", "crawler": "crawler-a"},
+    },
+    {
+        "ip_str": HISTORY_IP,
+        "port": 22,
+        "transport": "tcp",
+        "timestamp": "2026-09-01T12:00:00.000000",
+        "product": "OpenSSH",
+        "version": "8.9p1",
+        "data": "SSH-2.0-OpenSSH_8.9p1",
+        "hash": 111,
+        "_shodan": {"module": "ssh", "id": "hist-2", "crawler": "crawler-b"},
+    },
+    {
+        "ip_str": HISTORY_IP,
+        "port": 80,
+        "transport": "tcp",
+        "timestamp": "2026-08-15T06:30:00.123456",
+        "data": "HTTP/1.1 200 OK\r\nServer: thing\r\n\r\n",
+        "hash": 222,
+        "_shodan": {"module": "http", "id": None, "crawler": "crawler-a"},
+    },
+    {
+        "ip_str": HISTORY_IP,
+        "port": 443,
+        "transport": "tcp",
+        "timestamp": "2026-08-01T00:00:00.000000",
+        "data": "HTTP/1.1 200 OK (cut)",
+        "hash": 333,
+        "metadata": {"truncated": ["data", "http.html"]},
+        "_shodan": {"module": "https", "id": "hist-4", "options": {"scan": "SCAN1"}},
+    },
+]
+HOST_HISTORY = {
+    "ip_str": HISTORY_IP,
+    "asn": "AS64496",
+    "org": "Example Org",
+    "last_update": "2026-10-01T12:00:00.000000",
+    "hostnames": [],
+    "ports": [22, 80],
+    "data": HISTORY_BANNERS,
+}
+
+
+def hostHistory(request) -> tuple[int, dict]:
+    """GET /shodan/host/203.0.113.7: every banner with history=true, else the latest per port."""
+
+    if request.query.get("history") == "true":
+        return 200, HOST_HISTORY
+    return 200, dict(HOST_HISTORY, data=[HISTORY_BANNERS[0], HISTORY_BANNERS[2]])
+
+
 SEARCH_PAGE = {
     "total": 2,
     "matches": [
@@ -295,6 +360,7 @@ ALERT = {
 ROUTES: dict[tuple[str, str], Any] = {
     ("GET", "/api/shodan/host/8.8.8.8"): (200, HOST_8888),
     ("GET", "/api/shodan/host/45.33.32.156"): (200, HOST_SSH),
+    ("GET", f"/api/shodan/host/{HISTORY_IP}"): hostHistory,
     ("GET", "/api/shodan/host/10.0.0.1"): (404, {"error": "No information available for that IP."}),
     ("GET", "/api/shodan/host/search"): (200, SEARCH_PAGE),
     ("GET", "/api/shodan/host/search/facets"): (200, ["country", "port"]),

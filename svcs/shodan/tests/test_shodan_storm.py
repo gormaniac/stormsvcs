@@ -14,6 +14,7 @@ from shodansvc.defs import PKGDEFS, SVC_GUID, SVC_NAME
 
 from .fakeshodan import (
     FAVICON_B64,
+    HISTORY_IP,
     FAVICON_HASH,
     HOST_SSH,
     SCANME_HTML,
@@ -851,6 +852,104 @@ class TestShodanStormCount(s_tests.SynTest):
         async with shodanSvc(self, apikey=None) as (core, svc, fake):
             msgs = await core.stormlist('slib.shodan.count "nginx"')
             self.stormIsInWarn("No Shodan API key is configured", msgs)
+
+
+class TestShodanStormHistory(s_tests.SynTest):
+    """slib.shodan.host --history builds the IP's meta:timeline, one meta:event per banner."""
+
+    async def events(self, core):
+        """Return {:title: [(:summary, {(form, repr) refs}), ...]} for the IP's timeline events."""
+
+        events = {}
+        for node in await core.nodes(f'meta:timeline:title="Shodan history: {HISTORY_IP}" -> meta:event'):
+            refs = await nodeset(core, f"meta:event={node.ndef[1]} -(refs)> *")
+            events.setdefault(node.get("title"), []).append((node.get("summary"), refs))
+        return events
+
+    async def test_history_timeline(self):
+        async with shodanSvc(self) as (core, svc, fake):
+            msgs = await core.stormlist(f"slib.shodan.host --ip {HISTORY_IP} --history")
+            self.stormHasNoErr(msgs)
+
+            tls = await core.nodes("meta:timeline")
+            assert len(tls) == 1
+            assert tls[0].get("title") == f"Shodan history: {HISTORY_IP}"
+            assert tls[0].get("type") == "svc.shodan.host.history."
+            assert "90 days" in tls[0].get("summary")
+            assert await nodeset(core, "meta:timeline -(refs)> *") == {("inet:ipv4", HISTORY_IP)}
+            assert len(await core.nodes(f"meta:timeline <(seen)- meta:source={SVC_GUID}")) == 1
+
+            evnodes = await core.nodes("meta:event")
+            assert len(evnodes) == 4
+            assert {n.get("type") for n in evnodes} == {"svc.shodan.banner."}
+            assert {n.get("timeline") for n in evnodes} == {tls[0].ndef[1]}
+            times = sorted(n.repr("time") for n in evnodes)
+            assert times == [
+                "2026/08/01 00:00:00.000",
+                "2026/08/15 06:30:00.123",
+                "2026/09/01 12:00:00.000",
+                "2026/10/01 12:00:00.000",
+            ]
+
+            ip = ("inet:ipv4", HISTORY_IP)
+            ssh = {("inet:server", f"tcp://{HISTORY_IP}:22"), ip}
+            sshbanner = await nodeset(core, f"inet:server=tcp://{HISTORY_IP}:22 -> inet:banner")
+            assert len(sshbanner) == 1
+
+            events = await self.events(core)
+            # Both crawls of the same SSH banner reference the same inet:banner.
+            assert sorted(events["tcp/22 OpenSSH 8.9p1"], key=str) == [
+                ("Crawler crawler-a", ssh | sshbanner),
+                ("Crawler crawler-b", ssh | sshbanner),
+            ]
+            # No _shodan.id, so it's keyed by the crawl's fields.
+            [(summary, refs)] = events["tcp/80 http"]
+            assert summary == "Crawler crawler-a"
+            assert {form for form, _ in refs} == {"inet:server", "inet:banner", "inet:ipv4"}
+            # Shodan truncated the data, so there's no inet:banner to reference.
+            assert events["tcp/443 https"] == [
+                (
+                    "On-demand scan SCAN1 (truncated: data, http.html)",
+                    {("inet:server", f"tcp://{HISTORY_IP}:443"), ip},
+                )
+            ]
+            assert not await core.nodes(f"inet:server=tcp://{HISTORY_IP}:443 -> inet:banner")
+
+            # Re-running adds nothing, and keeps analyst edits.
+            await core.nodes('meta:event:title="tcp/80 http" [ :title="web server" :summary="checked" ]')
+            before = await nodeset(core, ".created")
+            edges = len(await core.nodes("meta:event -(refs)> *"))
+            await core.nodes(f"slib.shodan.host --ip {HISTORY_IP} --history")
+            assert await nodeset(core, ".created") == before
+            assert len(await core.nodes("meta:event -(refs)> *")) == edges
+            assert len(await core.nodes('meta:event:title="web server" +:summary=checked')) == 1
+
+    async def test_history_timeline_options(self):
+        async with shodanSvc(self) as (core, svc, fake):
+            # Plain lookups don't build a timeline.
+            await core.nodes(f"slib.shodan.host --ip {HISTORY_IP}")
+            assert not await core.nodes("meta:timeline")
+
+            # Unless asked, and --no-timeline opts a history lookup out.
+            await core.nodes(f"slib.shodan.host --ip {HISTORY_IP} --history --no-timeline")
+            assert not await core.nodes("meta:timeline")
+
+            # The latest banners are added with --timeline, and history fills in the rest.
+            await core.nodes(f"[ inet:ipv4={HISTORY_IP} ] | slib.shodan.host --timeline")
+            assert len(await core.nodes("meta:event")) == 2
+            await core.nodes(f"slib.shodan.host --ip {HISTORY_IP} --history")
+            assert len(await core.nodes("meta:timeline")) == 1
+            assert len(await core.nodes("meta:event")) == 4
+
+            # Lookups without banners have nothing to add.
+            msgs = await core.stormlist("slib.shodan.host --ip 1.1.1.1 --internetdb --timeline")
+            self.stormIsInWarn("has no banners to add to a timeline", msgs)
+            assert len(await core.nodes("meta:timeline")) == 1
+
+            # From the library, timeline defaults to history.
+            q = f"$shodan = $lib.import(slib.shodan.lib) $shodan.host(8.8.8.8, history=(true))"
+            await core.nodes(q)
+            assert len(await core.nodes("meta:timeline")) == 2
 
 
 class TestShodanStormDns(s_tests.SynTest):

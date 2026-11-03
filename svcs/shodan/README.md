@@ -148,11 +148,34 @@ Each run is its own node. Failed searches and the print-only modes (`--count`, `
 crypto:x509:cert:sha1=e652c8bd1cafd04a44239fa8dab0c59deacb79ee | slib.shodan.search --yield-query | -(found)> inet:server
 
 // Every search ever run for a node, and when.
-inet:asn=15169 <(refs)- it:exec:query | sort :time
+it:exec:query:time +{ -(refs)> inet:asn=15169 }
 ```
 
 From Storm, `$shodan.search($query)` returns `({"query": <it:exec:query>, "ips": [...]})`, and
 `$shodan.count($query)` does the same (plus `size` and `full`) without using query credits.
+
+## Host history timelines
+
+`slib.shodan.host --history` (or `--timeline`, for a plain lookup) adds each banner to the IP's
+Shodan history:
+
+- One `meta:timeline` per IP: `:title` "Shodan history: <ip>", `:type` `svc.shodan.host.history.`,
+  and `-(refs)>` to the IP.
+- One `meta:event` per banner: `:time` is when Shodan saw it, `:title` ex. "tcp/22 OpenSSH 8.9p1",
+  `:summary` the crawler or on-demand scan that produced it, and `:type` `svc.shodan.banner.`.
+  Each event has `-(refs)>` edges to only the `inet:server`, `inet:banner`, and IP it describes.
+- Events are keyed by Shodan's banner ID, so re-running a lookup only adds new banners, and edits
+  to an event's `:title` or `:summary` are kept.
+
+Shodan's history covers 90 days, at most the latest 1,000 banners, and lags its newest data by about
+a day. Re-run lookups (ex. on a schedule) to build a longer history, and add `--timeline` lookups to
+include the newest banners. `--no-timeline` skips the timeline for a `--history` lookup.
+
+```
+inet:ipv4=45.33.32.156 | slib.shodan.host --history
+meta:event:time +{ :timeline -> meta:timeline +:title="Shodan history: 45.33.32.156" }
+meta:event:title^="tcp/22" -(refs)> inet:banner
+```
 
 ## Listing IPs without query credits
 

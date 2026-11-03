@@ -12,7 +12,13 @@ init {
 }
 
 // Look up an IP in Shodan (or InternetDB) and model it. Returns the IP node, or null.
-function host(ip, history=(false), minify=(false), internetdb=(false)) {
+//
+// With timeline, each banner is also added to the IP's Shodan history meta:timeline as a meta:event
+// (see slib.shodan.model.timelineNode). It defaults to history, since a history lookup returns every
+// banner Shodan has kept (90 days, at most 1,000). Lookups without banners (minify, InternetDB)
+// have nothing to add.
+function host(ip, history=(false), minify=(false), internetdb=(false), timeline=$lib.null) {
+    if ($timeline = $lib.null) { $timeline = $history }
     $ip = $lib.cast(str, $ip)
     $tagPrefix = $priv.tagPrefix()
 
@@ -30,7 +36,10 @@ function host(ip, history=(false), minify=(false), internetdb=(false)) {
     }
     if $util.failed($retn, $what) { return($lib.null) }
 
-    return($model.host($retn.data, $tagPrefix))
+    if ($timeline and ($internetdb or $minify)) {
+        $lib.warn("slib.shodan: {what} has no banners to add to a timeline.", what=$what)
+    }
+    return($model.host($retn.data, $tagPrefix, timeline=$timeline))
 }
 
 // The endpoint recorded as the :api:url of a search's it:exec:query.

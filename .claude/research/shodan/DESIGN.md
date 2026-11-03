@@ -46,7 +46,7 @@ This rework adds five capabilities to the existing `slib.shodan` service (`svcs/
    `slib.shodan.queries` lists both by default, and a `--source` flag picks one (§5.9).
 
 **Acceptance:** `inet:ipv4=1.2.3.4 | slib.shodan.host --history` gives a timeline you can lift with
-`meta:timeline:title="Shodan history: 1.2.3.4" -> meta:event | sort :time`. Each event pivots
+`meta:event:time +{ :timeline -> meta:timeline +:title="Shodan history: 1.2.3.4" }`. Each event pivots
 (`-(refs)>`) to the exact server, banner and IP that the crawl observed. Running the command twice
 creates no new nodes.
 
@@ -584,7 +584,7 @@ crypto:x509:cert:sha1=e652c8bd1cafd04a44239fa8dab0c59deacb79ee | slib.shodan.sea
 // History timeline, run twice: the second run adds nothing.
 inet:ipv4=1.2.3.4 | slib.shodan.host --history
 inet:ipv4=1.2.3.4 | slib.shodan.host --history
-meta:timeline:title="Shodan history: 1.2.3.4" -> meta:event | sort :time
+meta:event:time +{ :timeline -> meta:timeline +:title="Shodan history: 1.2.3.4" }
 meta:event:type=svc.shodan.banner. +:time@=(-30 days, now) -(refs)> inet:banner
 
 // Every IP matching a query, with no query credits, plus a printed country breakdown for context.
@@ -638,13 +638,21 @@ meta:rule:type^=svc.shodan.query. | slib.shodan.search --limit 200
    more calls, and it's only exact if no value list is itself full. Deferred until it's needed.
 4. **IPv6 values from the `ip` facet.** Confirm the format with a query that matches IPv6 hosts.
 5. **Query nodes for `host`, `dns`, `cve` and `cpe` lookups.** Currently no.
-6. **Can `metadata.truncated` include `data` on historical banners?** Settle with a live call. §5.4
-   handles it either way.
+6. **Can `metadata.truncated` include `data` on historical banners?** *Checked live 2026-11-03:* not
+   in 2,229 historical banners (only `http`, `opts`, `location`, `ssl`, `html` were). `normBanner`
+   still drops a truncated `data`, in case it happens.
 7. **`synapse_minversion`.** Confirm that `it:exec:query -(found)>` and `meta:event:type` exist at
    2.137.0, or bump the floor.
 8. **Store `_shodan` as event node data?** Not needed now.
-9. **Is `_shodan.id` stable across repeated calls?** If it isn't, re-runs would duplicate events.
-   Then the fallback key becomes the primary key, since it's built only from stable fields.
+9. **Is `_shodan.id` stable across repeated calls?** *Checked live 2026-11-03:* yes, identical across
+   calls for all 2,229 banners, and never missing. The fallback key stays for safety.
+12. **Host-level fields on history lookups.** *Found live 2026-11-03:* with `history=true`, `ports`
+    and `vulns` are the union over the history, and `last_update` is the newest history banner. So a
+    history lookup models historical vulns as `risk:vulnerable` on the IP, the same as before this
+    rework. Keep that, or model host-level vulns only from plain lookups?
+13. **History lags the current index** by about a day (found live). `--history` could also make a
+    plain lookup (one more free call) so the newest banners land in the timeline too. For now, run
+    `slib.shodan.host --timeline` (a plain lookup) as well to add them.
 10. **Directory result fields.** Confirm the field names in `/shodan/query` results (`title`,
     `description`, `query`, `timestamp`, `tags`, `votes`) with one live call, and confirm there's no
     stable directory ID. If there is one, the community guid should use it instead of the query text.
@@ -660,6 +668,6 @@ meta:rule:type^=svc.shodan.query. | slib.shodan.search --limit 200
 |---|---|---|---|
 | 1 | 0.6.0 | `bannerNodes()` refactor. `it:exec:query` on `search` and `stream`. `--yield-query`. | **Done.** Provenance tests; existing tests still pass. |
 | 2 | 0.7.0 | `slib.shodan.count` and `countIps`: credit-free IP lists, limit detection, the "full" warning, print-only `--facets`. | **Done.** Count tests; live check that count uses no credits. |
-| 3 | 0.8.0 | Host history timeline: `--timeline`, `--history`, fallback key, `normBanner` additions. | Idempotency tests; live check of Open questions 6 and 9. |
+| 3 | 0.8.0 | Host history timeline: `--timeline`, `--history`, fallback key, `normBanner` additions. | **Done.** Idempotency tests; Open questions 6 and 9 checked live. |
 | 4 | 0.9.0 | Inbound nodes for `host`, `trends` and `stream`. | Per-form tests. |
 | 5 | 0.10.0 | Saved queries: `queries --source/--yield`, `query.save`, the community/local `meta:rule` types, and `searchQuery()` accepting the whole `svc.shodan.query.` subtree. | Saved-query tests. |
