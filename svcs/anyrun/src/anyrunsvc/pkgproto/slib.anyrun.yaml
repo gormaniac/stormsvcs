@@ -1,0 +1,733 @@
+name: slib.anyrun
+version: 0.1.0
+guid: 34db9fb60f314c949f032ba2e2cbbc85
+
+synapse_version: ">=2.234.0,<3.0.0"
+
+genopts:
+    dotstorm: true
+
+author:
+  url: https://github.com/gormaniac
+  name: John Gorman
+
+desc: A Storm Service for the ANY.RUN Interactive Sandbox and Threat Intelligence - submit files and URLs, model task reports, download samples, PCAPs, and dropped files, and use TI Lookup, YARA Search, and the TI Feeds.
+
+docs:
+  - title: README
+    path: README.md
+
+perms:
+  - perm: [ slib, anyrun, user ]
+    gate: cortex
+    desc: Model ANY.RUN task reports, read reports and task statuses, download task files, and use TI Lookup, YARA Search, and the TI Feeds.
+  - perm: [ slib, anyrun, submit ]
+    gate: cortex
+    desc: Submit files and URLs to the ANY.RUN sandbox, rerun tasks, and add time to, stop, and delete tasks.
+  - perm: [ slib, anyrun, admin ]
+    gate: cortex
+    desc: Manage the service-wide API key, tag settings, and raw API requests.
+
+modules:
+  # Privileged modules - these are the only modules that talk to the service.
+  # They run asroot so users don't need the service.get permission, and so the
+  # service's stored API key is never readable from Storm.
+  - name: slib.anyrun.priv.user
+    asroot:perms:
+      - [ slib, anyrun, user ]
+  - name: slib.anyrun.priv.submit
+    asroot:perms:
+      - [ slib, anyrun, submit ]
+  - name: slib.anyrun.priv.admin
+    asroot:perms:
+      - [ slib, anyrun, admin ]
+
+  # Unprivileged modules - node edits here run as the calling user.
+  - name: slib.anyrun.lib
+    perms:
+      - [ slib, anyrun, user ]
+  - name: slib.anyrun.model
+    perms:
+      - [ slib, anyrun, user ]
+  - name: slib.anyrun.util
+
+commands:
+
+  # ---- User commands ----
+
+  - name: slib.anyrun.enrich
+    perms:
+      - [ slib, anyrun, user ]
+    descr: |
+      Model the newest ANY.RUN task report of files, hashes, and URLs, or of --task IDs.
+
+      A node's task is found in your task history, then (unless --no-lookup) with TI Lookup.
+      Models the sample (file:bytes, or inet:url for URL tasks) with ANY.RUN's tags and threat
+      names as tags, ANY.RUN's verdict (it:av:scan:result), the malware families
+      (risk:tool:software), ATT&CK techniques (-(uses)> it:mitre:attack:technique), mutexes
+      (-(refs)> it:dev:mutex), and extracted malware configs (it:sec:c2:config) with their C2
+      servers tagged. The task's processes (it:exec:proc), DNS and HTTP requests, network
+      connections (inet:flow), Suricata alerts (it:app:suricata:matched), and created files
+      (it:exec:file:add) are linked to the sample with :sandbox:file.
+
+      Examples:
+
+        // Model the newest tasks of some files.
+        file:bytes#my.tag | slib.anyrun.enrich
+
+        // Model a task and yield its sample's node.
+        slib.anyrun.enrich --task 0cf223f2-530e-4a50-b68f-563045268648 --yield
+    cmdargs:
+      - - --task
+        - type: str
+          action: append
+          default: []
+          help: A task UUID (or app.any.run link) to model instead of using the inbound nodes. May be used multiple times.
+      - - --no-lookup
+        - default: false
+          action: store_true
+          help: Only look for tasks in your task history, don't use TI Lookup.
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the sample nodes instead of the inbound nodes.
+    cmdinputs:
+      - form: file:bytes
+        help: Looked up by SHA256 (or SHA1/MD5).
+      - form: hash:md5
+      - form: hash:sha1
+      - form: hash:sha256
+      - form: inet:url
+        help: Looked up as a URL task of that exact URL.
+
+  - name: slib.anyrun.lookup
+    perms:
+      - [ slib, anyrun, user ]
+    descr: |
+      Look up IPs, FQDNs, URLs, files, and hashes with ANY.RUN's TI Lookup.
+
+      Tags each node with ANY.RUN's tags and threat names, models the threat names as
+      risk:tool:software, and records ANY.RUN's verdict as an it:av:scan:result (hash:* nodes
+      are modeled on their file:bytes node when ANY.RUN knows its SHA256). --related also
+      models the related IPs, domains, URLs (tagged with their threat names, and "c2" when they
+      came from a malware config), files, and mutexes. --tasks models the reports of the newest
+      tasks that saw the indicator.
+
+      With --query, prints the results of a TI Lookup query instead (see
+      https://any.run/api-documentation/ for the syntax, ex. threatName:"agenttesla").
+
+      Examples:
+
+        inet:fqdn=example.com | slib.anyrun.lookup --related
+
+        slib.anyrun.lookup --query 'threatName:"lumma" AND domainName:"*.shop"' --days 30
+    cmdargs:
+      - - --query
+        - type: str
+          default: null
+          help: A TI Lookup query to print the results of, instead of looking up the inbound nodes.
+      - - --days
+        - type: int
+          default: 180
+          help: Search the last this many days.
+      - - --start
+        - type: str
+          default: null
+          help: Search from this date (YYYY-MM-DD) instead.
+      - - --end
+        - type: str
+          default: null
+          help: Search until this date (YYYY-MM-DD).
+      - - --related
+        - default: false
+          action: store_true
+          help: Also model the related IPs, domains, URLs, files, and mutexes.
+      - - --tasks
+        - type: int
+          default: 0
+          help: Also model the reports of this many of the newest tasks that saw the indicator.
+      - - --json
+        - default: false
+          action: store_true
+          help: With --query, print the normalized results as JSON.
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the nodes the results were modeled on instead of the inbound nodes.
+    cmdinputs:
+      - form: inet:ipv4
+      - form: inet:ipv6
+      - form: inet:fqdn
+      - form: inet:url
+      - form: file:bytes
+      - form: hash:md5
+      - form: hash:sha1
+      - form: hash:sha256
+
+  - name: slib.anyrun.history
+    perms:
+      - [ slib, anyrun, user ]
+    descr: |
+      List your (or your team's) newest ANY.RUN tasks, or model them with --model/--yield.
+
+      Examples:
+
+        slib.anyrun.history --limit 50
+
+        slib.anyrun.history --team --limit 10 --yield
+    cmdargs:
+      - - --team
+        - default: false
+          action: store_true
+          help: List your team's tasks instead of yours.
+      - - --limit
+        - type: int
+          default: 25
+          help: The most tasks to list (up to 100).
+      - - --skip
+        - type: int
+          default: 0
+          help: Skip this many of the newest tasks.
+      - - --model
+        - default: false
+          action: store_true
+          help: Model each task's report.
+      - - --yield
+        - default: false
+          action: store_true
+          help: Model each task's report and yield the sample nodes.
+
+  - name: slib.anyrun.task.status
+    perms:
+      - [ slib, anyrun, user ]
+    descr: |
+      Print the status of tasks (or queued submissions), or --follow them until they finish.
+
+      Examples:
+
+        slib.anyrun.task.status 0cf223f2-530e-4a50-b68f-563045268648 --follow
+    cmdargs:
+      - - task
+        - type: str
+          nargs: "+"
+          help: Task UUIDs (or app.any.run links, or queue IDs).
+      - - --follow
+        - default: false
+          action: store_true
+          help: Print each status change until the task finishes.
+      - - --limit
+        - type: int
+          default: 100
+          help: With --follow, the most status changes to print per task.
+      - - --timeout
+        - type: int
+          default: 600
+          help: With --follow, the most seconds to follow each task.
+
+  - name: slib.anyrun.task.wait
+    perms:
+      - [ slib, anyrun, user ]
+    descr: |
+      Wait for tasks to finish, then optionally model their reports.
+
+      Examples:
+
+        slib.anyrun.task.wait 0cf223f2-530e-4a50-b68f-563045268648 --yield
+    cmdargs:
+      - - task
+        - type: str
+          nargs: "+"
+          help: Task UUIDs (or app.any.run links, or queue IDs).
+      - - --timeout
+        - type: int
+          default: 600
+          help: The most seconds to wait for each task.
+      - - --model
+        - default: false
+          action: store_true
+          help: Model each finished task's report.
+      - - --yield
+        - default: false
+          action: store_true
+          help: Model each finished task's report and yield the sample nodes.
+
+  - name: slib.anyrun.report
+    perms:
+      - [ slib, anyrun, user ]
+    descr: |
+      Print a summary of a task's report, its full report (--json), its IOCs (--iocs), its AI
+      summary (--ai), or another report format (--format).
+
+      Examples:
+
+        slib.anyrun.report 0cf223f2-530e-4a50-b68f-563045268648 --iocs --reputation 1
+
+        slib.anyrun.report 0cf223f2-530e-4a50-b68f-563045268648 --format misp
+    cmdargs:
+      - - task
+        - type: str
+          help: A task UUID (or app.any.run link).
+      - - --json
+        - default: false
+          action: store_true
+          help: Print the full JSON report.
+      - - --iocs
+        - default: false
+          action: store_true
+          help: Print the task's IOCs.
+      - - --reputation
+        - type: int
+          default: 0
+          choices: [0, 1, 2]
+          help: With --iocs, only print IOCs with at least this reputation (1 suspicious, 2 malicious).
+      - - --ai
+        - default: false
+          action: store_true
+          help: Print the task's AI summary and recommendations.
+      - - --format
+        - type: str
+          default: null
+          choices: [stix, misp, brief, tier1, json]
+          help: Print the report in another format.
+
+  - name: slib.anyrun.download
+    perms:
+      - [ slib, anyrun, user ]
+    descr: |
+      Download a task's sample, --pcap, or --dropped files into the Axon.
+
+      The inbound nodes' tasks are found like slib.anyrun.enrich does. Samples are unzipped
+      and checked against the task's SHA256.
+
+      Examples:
+
+        slib.anyrun.download --task 0cf223f2-530e-4a50-b68f-563045268648 --pcap --dropped --yield
+
+        hash:sha256=<sha256> | slib.anyrun.download --yield
+    cmdargs:
+      - - --task
+        - type: str
+          action: append
+          default: []
+          help: A task UUID (or app.any.run link) to download from instead of the inbound nodes' tasks. May be used multiple times.
+      - - --sample
+        - default: false
+          action: store_true
+          help: Download the sample (the default when no other download is chosen).
+      - - --pcap
+        - default: false
+          action: store_true
+          help: Download the network capture.
+      - - --dropped
+        - default: false
+          action: store_true
+          help: Download the files the task created or changed.
+      - - --no-lookup
+        - default: false
+          action: store_true
+          help: Only look for the inbound nodes' tasks in your task history, don't use TI Lookup.
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the downloaded files' file:bytes nodes instead of the inbound nodes.
+    cmdinputs:
+      - form: file:bytes
+      - form: hash:md5
+      - form: hash:sha1
+      - form: hash:sha256
+      - form: inet:url
+
+  - name: slib.anyrun.yara
+    perms:
+      - [ slib, anyrun, user ]
+    descr: |
+      Search ANY.RUN's samples with YARA rules and model the matches.
+
+      Models each matching file (file:bytes, tagged with ANY.RUN's tags for it) and an
+      it:app:yara:match for the rule. A --rule's text is modeled as an it:app:yara:rule.
+      Searches that take longer than --timeout can be finished later with --search.
+
+      Examples:
+
+        it:app:yara:rule:name=my_rule | slib.anyrun.yara --limit 500 --yield
+
+        slib.anyrun.yara --search a1b2c3d4-e5f6-7890-abcd-ef1234567890
+    cmdargs:
+      - - --rule
+        - type: str
+          default: null
+          help: A YARA rule's text to search with instead of the inbound nodes.
+      - - --search
+        - type: str
+          default: null
+          help: The ID of an earlier search to get the results of.
+      - - --timeout
+        - type: int
+          default: 600
+          help: The most seconds to wait for a search to finish.
+      - - --limit
+        - type: int
+          default: 100
+          help: The most matches to model, 0 for every match.
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the matching files instead of the inbound nodes.
+    cmdinputs:
+      - form: it:app:yara:rule
+        help: Searched with its :text.
+
+  - name: slib.anyrun.feed
+    perms:
+      - [ slib, anyrun, user ]
+    descr: |
+      Read ANY.RUN's TI Feeds (TAXII 2.1) and model their indicators.
+
+      Each indicator's IP, domain, URL, or hash is tagged "<prefix>.feed" (and with its
+      labels) for the time it's valid.
+
+      Examples:
+
+        // Model the last day of malicious domains.
+        slib.anyrun.feed --feed domain --days 1 --limit 0
+
+        slib.anyrun.feed --list
+    cmdargs:
+      - - --feed
+        - type: str
+          default: full
+          help: The feed (full, ip, domain, or url), or a TAXII collection ID.
+      - - --limit
+        - type: int
+          default: 1000
+          help: The most objects to read, 0 for every object.
+      - - --days
+        - type: int
+          default: 0
+          help: Only read objects added in the last this many days.
+      - - --added
+        - type: str
+          default: null
+          help: Only read objects added after this time (ISO 8601).
+      - - --modified
+        - type: str
+          default: null
+          help: Only read objects modified after this time (ISO 8601).
+      - - --print
+        - default: false
+          action: store_true
+          help: Print the indicators instead of modeling them.
+      - - --list
+        - default: false
+          action: store_true
+          help: List the feeds (TAXII collections) you can read.
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the modeled nodes.
+
+  - name: slib.anyrun.limits
+    perms:
+      - [ slib, anyrun, user ]
+    descr: Print the API key's request limits and parallel task slots.
+
+  - name: slib.anyrun.envs
+    perms:
+      - [ slib, anyrun, user ]
+    descr: List the sandbox's analysis environments.
+
+  - name: slib.anyrun.presets
+    perms:
+      - [ slib, anyrun, user ]
+    descr: List your saved analysis presets.
+    cmdargs:
+      - - --json
+        - default: false
+          action: store_true
+          help: Print the full presets as JSON.
+
+  - name: slib.anyrun.apikey
+    perms:
+      - [ slib, anyrun, user ]
+    descr: |
+      Set your own ANY.RUN API key, stored in a user scoped Synapse vault of type "anyrun".
+
+      Your key takes precedence over the service-wide key set by slib.anyrun.admin.apikey.
+
+      Examples:
+
+        slib.anyrun.apikey ABCDEFG
+
+        slib.anyrun.apikey --clear
+    cmdargs:
+      - - apikey
+        - type: str
+          nargs: "?"
+          default: null
+          help: Your ANY.RUN API key.
+      - - --clear
+        - default: false
+          action: store_true
+          help: Delete your stored API key.
+
+  # ---- Submit commands ----
+
+  - name: slib.anyrun.submit
+    perms:
+      - [ slib, anyrun, submit ]
+    descr: |
+      Submit file:bytes (from the Axon) and inet:url nodes, --url, --download URLs, or --rerun
+      tasks to the ANY.RUN sandbox.
+
+      Unset options use ANY.RUN's defaults (Windows 10 64 bit, 60 seconds, shared by link).
+      With --wait, waits for each task to finish and models it like slib.anyrun.enrich.
+
+      Examples:
+
+        file:bytes#my.tag | slib.anyrun.submit --os windows --version 11 --timeout 120 --wait 600 --yield
+
+        slib.anyrun.submit --url https://example.com --privacy owner --tag phish
+
+        slib.anyrun.submit --download https://example.com/a.exe --tor --tor-geo DE
+    cmdargs:
+      - - --url
+        - type: str
+          action: append
+          default: []
+          help: A URL to open in a browser instead of the inbound nodes. May be used multiple times.
+      - - --download
+        - type: str
+          action: append
+          default: []
+          help: A URL to download a file from and run, instead of the inbound nodes. May be used multiple times.
+      - - --rerun
+        - type: str
+          action: append
+          default: []
+          help: A task to run again (with any options changed), instead of the inbound nodes. May be used multiple times.
+      - - --name
+        - type: str
+          default: null
+          help: The file name to submit files as (defaults to the node's :name, then its SHA256).
+      - - --os
+        - type: str
+          default: null
+          choices: [windows, linux, android, macos]
+          help: The environment's OS.
+      - - --version
+        - type: str
+          default: null
+          help: The OS version (ex. 7, 10, 11, "server 2025", 22.04.2, 12.2, 14, 15).
+      - - --bitness
+        - type: int
+          default: null
+          choices: [32, 64]
+          help: The OS bitness (only Windows can be 32 bit).
+      - - --envtype
+        - type: str
+          default: null
+          choices: [complete, development]
+          help: The environment type.
+      - - --locale
+        - type: str
+          default: null
+          help: The OS locale (ex. en-US, de-DE).
+      - - --timeout
+        - type: int
+          default: null
+          help: How long, in seconds (10-1200), to run the task.
+      - - --privacy
+        - type: str
+          default: null
+          choices: [public, bylink, owner, byteam]
+          help: Who can see the task.
+      - - --autodelete
+        - type: str
+          default: null
+          choices: [day, week, 2 weeks, month]
+          help: Delete the task after this long.
+      - - --tag
+        - type: str
+          action: append
+          default: []
+          help: A tag (up to 16 letters, numbers, and dashes) for the task. May be used up to 8 times.
+      - - --offline
+        - default: false
+          action: store_true
+          help: Disconnect the sandbox from the internet.
+      - - --fakenet
+        - default: false
+          action: store_true
+          help: Answer the sample's network requests with FakeNet.
+      - - --tor
+        - default: false
+          action: store_true
+          help: Route the sandbox's traffic through TOR.
+      - - --tor-geo
+        - type: str
+          default: null
+          help: The TOR exit country (fastest, AU, BR, CH, DE, FR, GB, IT, KR, RU, or US).
+      - - --proxy
+        - default: false
+          action: store_true
+          help: Route the sandbox's traffic through a residential proxy.
+      - - --proxy-geo
+        - type: str
+          default: null
+          help: The residential proxy's country (fastest, or a two letter country code).
+      - - --mitm
+        - default: false
+          action: store_true
+          help: Decrypt HTTPS traffic with a MITM proxy.
+      - - --no-interactive
+        - default: false
+          action: store_true
+          help: Turn off ANY.RUN's automated interactivity.
+      - - --startfolder
+        - type: str
+          default: null
+          choices: [desktop, home, downloads, appdata, temp, windows, root]
+          help: The folder files are run from.
+      - - --cmd
+        - type: str
+          default: null
+          help: The command line to run files with.
+      - - --elevate
+        - default: false
+          action: store_true
+          help: Run Windows executables elevated.
+      - - --root
+        - default: false
+          action: store_true
+          help: Run files as root (Linux).
+      - - --browser
+        - type: str
+          default: null
+          choices: [Internet Explorer, Microsoft Edge, Google Chrome, Mozilla Firefox, Safari]
+          help: The browser to open URLs (and reruns of URL tasks) with.
+      - - --useragent
+        - type: str
+          default: null
+          help: The User-Agent to download --download URLs with.
+      - - --hide-source
+        - default: false
+          action: store_true
+          help: Hide the source URL of --download tasks.
+      - - --wait
+        - type: int
+          default: null
+          help: Wait up to this many seconds for each task to finish, then model it.
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the modeled sample nodes (requires --wait).
+    cmdinputs:
+      - form: file:bytes
+        help: Read from the Axon by its SHA256.
+      - form: inet:url
+        help: Opened in a browser.
+
+  - name: slib.anyrun.task.addtime
+    perms:
+      - [ slib, anyrun, submit ]
+    descr: Give running tasks 60 more seconds.
+    cmdargs:
+      - - task
+        - type: str
+          nargs: "+"
+          help: Task UUIDs (or app.any.run links).
+
+  - name: slib.anyrun.task.stop
+    perms:
+      - [ slib, anyrun, submit ]
+    descr: Stop running tasks.
+    cmdargs:
+      - - task
+        - type: str
+          nargs: "+"
+          help: Task UUIDs (or app.any.run links).
+
+  - name: slib.anyrun.task.delete
+    perms:
+      - [ slib, anyrun, submit ]
+    descr: Delete finished tasks from ANY.RUN.
+    cmdargs:
+      - - task
+        - type: str
+          nargs: "+"
+          help: Task UUIDs (or app.any.run links).
+
+  # ---- Admin commands ----
+
+  - name: slib.anyrun.admin.apikey
+    perms:
+      - [ slib, anyrun, admin ]
+    descr: |
+      Set, clear, or check the service-wide ANY.RUN API key.
+
+      It's used by any user that hasn't set their own key with slib.anyrun.apikey.
+
+      Examples:
+
+        slib.anyrun.admin.apikey ABCDEFG
+
+        slib.anyrun.admin.apikey --clear
+    cmdargs:
+      - - apikey
+        - type: str
+          nargs: "?"
+          default: null
+          help: The API key to set.
+      - - --clear
+        - default: false
+          action: store_true
+          help: Clear the stored API key.
+
+  - name: slib.anyrun.admin.tags
+    perms:
+      - [ slib, anyrun, admin ]
+    descr: |
+      Show or change how ANY.RUN's tags and threat names are applied as tags (rep.anyrun by default).
+
+      Examples:
+
+        slib.anyrun.admin.tags --prefix rep.any_run
+
+        slib.anyrun.admin.tags --disable
+    cmdargs:
+      - - --prefix
+        - type: str
+          default: null
+          help: The tag prefix.
+      - - --enable
+        - default: false
+          action: store_true
+          help: Apply tags.
+      - - --disable
+        - default: false
+          action: store_true
+          help: Don't apply tags.
+
+  - name: slib.anyrun.admin.request
+    perms:
+      - [ slib, anyrun, admin ]
+    descr: |
+      Send a raw request to the ANY.RUN API and print the JSON response.
+
+      Examples:
+
+        slib.anyrun.admin.request /v1/analysis --params ({"limit": 5})
+    cmdargs:
+      - - path
+        - type: str
+          help: The API path (ex. /v1/user, /report/<task>/ioc/json).
+      - - --method
+        - type: str
+          default: get
+          help: The HTTP method.
+      - - --params
+        - default: null
+          help: A dict of URL params.
+      - - --json
+        - default: null
+          help: The JSON body.

@@ -1,0 +1,26 @@
+init {
+    $priv = $lib.import(slib.anyrun.priv.user)
+    $util = $lib.import(slib.anyrun.util)
+
+    function show(status) {
+        $verdict = $status.verdict
+        if (not $verdict) { $verdict = "-" }
+        $lib.print("slib.anyrun.task.status: {id} is {state} ({pct}%, {left}s left, verdict: {verdict}) {text}",
+                   id=$status.uuid, state=$status.state, pct=$status.status, left=$status.remaining,
+                   verdict=$verdict, text=$status.message)
+    }
+}
+
+spin |
+for $task in $cmdopts.task {
+    if $cmdopts.follow {
+        for $retn in $priv.monitor($task, limit=$cmdopts.limit, timeout=$cmdopts.timeout) {
+            if $util.failed($retn, `Following task {$task}`) { break }
+            $show($retn.data)
+        }
+    }
+    else {
+        $retn = $priv.status($task)
+        if (not $util.failed($retn, `Getting the status of task {$task}`)) { $show($retn.data) }
+    }
+}

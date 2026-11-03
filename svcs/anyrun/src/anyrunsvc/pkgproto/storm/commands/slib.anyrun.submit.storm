@@ -1,0 +1,64 @@
+init {
+    $anyrun = $lib.import(slib.anyrun.lib)
+    $model = $lib.import(slib.anyrun.model)
+
+    // The service's submission options, unset (null) options are left to ANY.RUN's defaults.
+    $opts = ({
+        "os": $cmdopts.os,
+        "version": $cmdopts.version,
+        "bitness": $cmdopts.bitness,
+        "envtype": $cmdopts.envtype,
+        "locale": $cmdopts.locale,
+        "timeout": $cmdopts.timeout,
+        "geo": $cmdopts.tor_geo,
+        "residential_geo": $cmdopts.proxy_geo,
+        "privacy": $cmdopts.privacy,
+        "autodelete": $cmdopts.autodelete,
+        "startfolder": $cmdopts.startfolder,
+        "cmd": $cmdopts.cmd,
+        "browser": $cmdopts.browser,
+        "useragent": $cmdopts.useragent,
+        "tags": $cmdopts.tag,
+    })
+    if $cmdopts.offline { $opts.network = (false) }
+    if $cmdopts.fakenet { $opts.fakenet = (true) }
+    if $cmdopts.tor { $opts.tor = (true) }
+    if $cmdopts.mitm { $opts.mitm = (true) }
+    if $cmdopts.proxy { $opts.residential = (true) }
+    if $cmdopts.no_interactive { $opts.interactive = (false) }
+    if $cmdopts.elevate { $opts.elevate = (true) }
+    if $cmdopts.root { $opts.root = (true) }
+    if $cmdopts.hide_source { $opts.hidesource = (true) }
+
+    function asNode(valu) {
+        if ($lib.vars.type($valu) = "node") { return($valu) }
+        return($lib.null)
+    }
+}
+
+if ($cmdopts.url or $cmdopts.download or $cmdopts.rerun) {
+    // --url, --download, and --rerun ignore inbound nodes.
+    spin |
+    $nodes = ([])
+    for $url in $cmdopts.url { $nodes.append($asNode($anyrun.submitUrl($url, $opts, wait=$cmdopts.wait))) }
+    for $url in $cmdopts.download {
+        $nodes.append($asNode($anyrun.submitDownload($url, $opts, wait=$cmdopts.wait)))
+    }
+    for $task in $cmdopts.rerun { $nodes.append($asNode($anyrun.rerun($task, $opts, wait=$cmdopts.wait))) }
+    if $cmdopts.yield {
+        for $n in $nodes {
+            if $n { yield $n }
+        }
+    }
+}
+else {
+    switch $node.form() {
+        "file:bytes": { }
+        "inet:url": { }
+        *: {
+            $lib.warn("slib.anyrun.submit: The node form {form} is not supported.", form=$node.form())
+            spin
+        }
+    }
+    divert $cmdopts.yield $model.nodes(($asNode($anyrun.submitNode($node, $opts, wait=$cmdopts.wait, name=$cmdopts.name)),))
+}

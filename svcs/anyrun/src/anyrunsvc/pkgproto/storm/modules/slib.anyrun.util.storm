@@ -1,0 +1,98 @@
+// Unprivileged helpers shared by the slib.anyrun commands.
+
+// Warn about a failed service call. Returns true if the call failed.
+function failed(retn, what) {
+    if $retn.status { return((false)) }
+    $lib.warn("slib.anyrun: {what} failed: {err}", what=$what, err=$retn.mesg)
+    return((true))
+}
+
+// The type of a hex hash by its length (md5, sha1, sha256, sha512), or null.
+function hashType(valu) {
+    $valu = $lib.cast(str, $valu)
+    if (not $lib.regex.matches("^[0-9a-fA-F]+$", $valu)) { return($lib.null) }
+    switch $lib.len($valu) {
+        "32": { return(md5) }
+        "40": { return(sha1) }
+        "64": { return(sha256) }
+        "128": { return(sha512) }
+    }
+    return($lib.null)
+}
+
+// The hashes ANY.RUN can look a file:bytes/hash:* node up by (SHA256, SHA1, MD5), best first.
+function nodeHashes(node) {
+    $ret = ([])
+    switch $node.form() {
+        "file:bytes": {
+            for $prop in (sha256, sha1, md5) {
+                $valu = $node.props.$prop
+                if $valu { $ret.append($valu) }
+            }
+        }
+        "hash:md5": { $ret.append($node.repr()) }
+        "hash:sha1": { $ret.append($node.repr()) }
+        "hash:sha256": { $ret.append($node.repr()) }
+    }
+    return($ret)
+}
+
+// The indicator ANY.RUN's TI Lookup can look a node up by, or null.
+function nodeIndicator(node) {
+    switch $node.form() {
+        "inet:ipv4": { return($node.repr()) }
+        "inet:ipv6": { return($node.repr()) }
+        "inet:fqdn": { return($node.repr()) }
+        "inet:url": { return($node.repr()) }
+    }
+    $hashes = $nodeHashes($node)
+    if $hashes { return($hashes.index(0)) }
+    return($lib.null)
+}
+
+// Whether a dict of hashes ({md5, sha1, sha256}) has any of the given hashes.
+function hasHash(hashes, wanted) {
+    if (not $hashes) { return((false)) }
+    for ($name, $valu) in $hashes {
+        if ($valu and $wanted.has($valu.lower())) { return((true)) }
+    }
+    return((false))
+}
+
+// Print a table. columns is a list of (name, width) and rows is a list of lists.
+function table(columns, rows) {
+    $cols = ([])
+    for ($name, $width) in $columns {
+        // Widths in tuple literals are strings.
+        $cols.append(({"name": $name, "width": $lib.cast(int, $width)}))
+    }
+    $printer = $lib.tabular.printer(({"columns": $cols}))
+    $lib.print($printer.header())
+    for $row in $rows {
+        $lib.print($printer.row($row))
+    }
+}
+
+// Print any value as indented JSON.
+function printJson(valu) {
+    $lib.print($lib.json.save($valu, indent=(true)))
+}
+
+// Print a list of tasks (slib.anyrun.priv.user.history results).
+function printTasks(tasks) {
+    $rows = ([])
+    for $t in $tasks {
+        $rows.append(($t.uuid, $t.verdict, $t.name, $t.date))
+    }
+    $table((("task", 36), ("verdict", 20), ("name", 48), ("date", 24)), $rows)
+}
+
+// A human readable verdict for a verdict number.
+function verdictName(verdict) {
+    switch $verdict {
+        "10": { return(benign) }
+        "30": { return(suspicious) }
+        "40": { return(malicious) }
+    }
+    return(unknown)
+}

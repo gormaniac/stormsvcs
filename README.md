@@ -63,6 +63,8 @@ Each service must have the following:
   - The whole Hatching Triage Sandbox API: submit files and URLs, model analyses (configs, processes, network, dropped files), download samples/pcaps/dropped files, and manage profiles, Yara rules, and users.
 - `malpedia`
   - Keep Malpedia's library (`media:news`), threat actors (`risk:threat`), malware families (`risk:tool:software`), and YARA rules (`it:app:yara:rule`) in sync, with one bulk pull on registration and small daily updates from the public API.
+- `anyrun`
+  - The ANY.RUN Interactive Sandbox and Threat Intelligence APIs: submit files and URLs, model task reports (configs, processes, network, Suricata alerts, dropped files), download samples/PCAPs/dropped files, and use TI Lookup, YARA Search, and the TI Feeds.
 
 
 ## Services Wish List/Plan

@@ -1,0 +1,34 @@
+// Privileged (asroot) wrappers around the slib.anyrun service for slib.anyrun.admin.
+
+init {
+    $svc = $lib.service.get("slib.anyrun")
+}
+
+// Only reads the calling user's own vault, see slib.anyrun.priv.user.
+function userKey() {
+    $vault = $lib.vault.bytype(anyrun, scope=user)
+    if ($vault = $lib.null) { return($lib.null) }
+    $secrets = $vault.secrets
+    if ($secrets = $lib.null) { return($lib.null) }
+    return($secrets.apikey)
+}
+
+// API key and tag settings
+
+function setApiKey(apikey) { return($svc.setApiKey($apikey)) }
+function hasApiKey() { return($svc.hasApiKey()) }
+
+function tagSettings() {
+    return(({
+        "enabled": $lib.globals.get("slib:anyrun:tag:enabled"),
+        "prefix": $lib.globals.get("slib:anyrun:tag:prefix"),
+    }))
+}
+function setTagPrefix(prefix) { $lib.globals.set("slib:anyrun:tag:prefix", $prefix) }
+function setTagsEnabled(enabled) { $lib.globals.set("slib:anyrun:tag:enabled", $enabled) }
+
+// Raw requests
+
+function rawRequest(path, method=get, params=$lib.null, json=$lib.null) {
+    return($svc.rawRequest($method, $path, params=$params, json_data=$json, apikey=$userKey()))
+}

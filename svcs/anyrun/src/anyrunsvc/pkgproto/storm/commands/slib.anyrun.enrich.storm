@@ -1,0 +1,27 @@
+init {
+    $anyrun = $lib.import(slib.anyrun.lib)
+    $model = $lib.import(slib.anyrun.model)
+}
+
+if $cmdopts.task {
+    // --task ignores inbound nodes.
+    spin |
+    for $task in $cmdopts.task {
+        $n = $anyrun.model($task)
+        if ($cmdopts.yield and $n) { yield $n }
+    }
+}
+else {
+    switch $node.form() {
+        "file:bytes": { }
+        "hash:md5": { }
+        "hash:sha1": { }
+        "hash:sha256": { }
+        "inet:url": { }
+        *: {
+            $lib.warn("slib.anyrun.enrich: The node form {form} is not supported.", form=$node.form())
+            spin
+        }
+    }
+    divert $cmdopts.yield $model.nodes(($anyrun.enrich($node, lookup=(not $cmdopts.no_lookup)),))
+}

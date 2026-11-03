@@ -1,0 +1,47 @@
+init {
+    $priv = $lib.import(slib.anyrun.priv.user)
+    $util = $lib.import(slib.anyrun.util)
+    $task = $cmdopts.task
+
+    if $cmdopts.iocs {
+        $retn = $priv.iocs($task, reputation=$cmdopts.reputation)
+        if (not $util.failed($retn, `Getting the IOCs of task {$task}`)) {
+            $rows = ([])
+            for $ioc in $retn.data { $rows.append(($ioc.reputation, $ioc.category, $ioc.type, $ioc.ioc)) }
+            $util.table((("rep", 4), ("category", 14), ("type", 8), ("ioc", 72)), $rows)
+        }
+    }
+    elif $cmdopts.ai {
+        $retn = $priv.aiSummary($task)
+        if (not $util.failed($retn, `Getting the AI summary of task {$task}`)) { $util.printJson($retn.data) }
+    }
+    elif $cmdopts.format {
+        $retn = $priv.summary($task, fmt=$cmdopts.format)
+        if (not $util.failed($retn, `Getting the {$cmdopts.format} report of task {$task}`)) {
+            $util.printJson($retn.data)
+        }
+    }
+    elif $cmdopts.json {
+        $retn = $priv.report($task)
+        if (not $util.failed($retn, `Getting the report of task {$task}`)) { $util.printJson($retn.data) }
+    }
+    else {
+        $retn = $priv.normReport($task)
+        if (not $util.failed($retn, `Getting the report of task {$task}`)) {
+            $d = $retn.data
+            $target = $d.url
+            if $d.file { $target = $d.file.sha256 }
+            $lib.print("Task {id} ({link})", id=$d.uuid, link=$d.link)
+            $lib.print("  {kind}: {target}", kind=$d.kind, target=$target)
+            $lib.print("  verdict: {verdict} (score {score})", verdict=$d.threat, score=$d.score)
+            $lib.print("  environment: {env}", env=$d.env)
+            $lib.print("  families: {fams}", fams=(", ").join($d.families))
+            $lib.print("  tags: {tags}", tags=(", ").join($d.tags))
+            $lib.print("  techniques: {ttps}", ttps=(", ").join($d.ttps))
+            $lib.print("  malware configs: {count}", count=$lib.len($d.configs))
+            $lib.print("  processes: {procs}, DNS requests: {dns}, HTTP requests: {http}, connections: {flows}, Suricata alerts: {alerts}, files: {files}",
+                       procs=$lib.len($d.procs), dns=$lib.len($d.dns), http=$lib.len($d.http),
+                       flows=$lib.len($d.flows), alerts=$lib.len($d.alerts), files=$lib.len($d.files))
+        }
+    }
+}

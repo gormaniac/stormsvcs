@@ -1,0 +1,11 @@
+init {
+    $priv = $lib.import(slib.anyrun.priv.user)
+    $util = $lib.import(slib.anyrun.util)
+
+    $retn = $priv.environments()
+    if (not $util.failed($retn, "Listing the environments")) {
+        $rows = ([])
+        for $e in $retn.data { $rows.append(($e.os, $e.version, $e.bitness, $e.type, $e.variant, $e.build)) }
+        $util.table((("os", 8), ("version", 12), ("bits", 4), ("type", 12), ("variant", 14), ("build", 8)), $rows)
+    }
+}

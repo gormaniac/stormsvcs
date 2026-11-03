@@ -1,0 +1,12 @@
+init {
+    $psub = $lib.import(slib.anyrun.priv.submit)
+    $util = $lib.import(slib.anyrun.util)
+}
+
+spin |
+for $task in $cmdopts.task {
+    $retn = $psub.deleteTask($task)
+    if (not $util.failed($retn, `Deleting task {$task}`)) {
+        $lib.print("slib.anyrun.task.delete: {task}: {text}", task=$task, text=$retn.data)
+    }
+}

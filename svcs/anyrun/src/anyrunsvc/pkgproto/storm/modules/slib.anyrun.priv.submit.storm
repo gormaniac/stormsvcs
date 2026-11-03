@@ -1,0 +1,47 @@
+// Privileged (asroot) wrappers around the slib.anyrun service for slib.anyrun.submit.
+// These start, change, and delete ANY.RUN tasks.
+
+init {
+    $svc = $lib.service.get("slib.anyrun")
+}
+
+// Only reads the calling user's own vault, see slib.anyrun.priv.user.
+function userKey() {
+    $vault = $lib.vault.bytype(anyrun, scope=user)
+    if ($vault = $lib.null) { return($lib.null) }
+    $secrets = $vault.secrets
+    if ($secrets = $lib.null) { return($lib.null) }
+    return($secrets.apikey)
+}
+
+// Read a file from the Axon as a list of (up to 1MiB) chunks for the service.
+function _chunks(sha256, size) {
+    $retn = ([])
+    $offs = (0)
+    while ($offs < $size) {
+        $byts = $lib.axon.read($sha256, offs=$offs, size=(1048576))
+        if (not $byts) { break }
+        $retn.append($byts)
+        $offs = ($offs + $lib.len($byts))
+    }
+    return($retn)
+}
+
+function _fail(mesg) { return(({"status": (false), "mesg": $mesg, "data": $lib.null})) }
+
+// Submit a file from the Axon. opts are the service's submission options.
+function submitFile(sha256, size, name, opts) {
+    if (not $lib.axon.has($sha256)) { return($_fail(`The Axon doesn't have {$sha256}.`)) }
+    if ($size = $lib.null) { return($_fail("The file's size is unknown.")) }
+    $max = $svc.maxSize().data
+    if ($size > $max) { return($_fail(`The file is {$size} bytes, larger than the max of {$max}.`)) }
+    return($svc.submitFile($_chunks($sha256, $size), $name, opts=$opts, apikey=$userKey()))
+}
+
+function submitUrl(url, opts) { return($svc.submitUrl($url, opts=$opts, apikey=$userKey())) }
+function submitDownload(url, opts) { return($svc.submitDownload($url, opts=$opts, apikey=$userKey())) }
+function rerun(task, opts) { return($svc.rerun($task, opts=$opts, apikey=$userKey())) }
+
+function addTime(task) { return($svc.addTime($task, apikey=$userKey())) }
+function stopTask(task) { return($svc.stopTask($task, apikey=$userKey())) }
+function deleteTask(task) { return($svc.deleteTask($task, apikey=$userKey())) }

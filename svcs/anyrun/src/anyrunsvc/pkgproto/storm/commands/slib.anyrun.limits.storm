@@ -1,0 +1,9 @@
+init {
+    $priv = $lib.import(slib.anyrun.priv.user)
+    $util = $lib.import(slib.anyrun.util)
+
+    $retn = $priv.limits()
+    if (not $util.failed($retn, "Getting the API limits")) {
+        $util.printJson($retn.data)
+    }
+}

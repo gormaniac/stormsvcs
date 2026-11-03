@@ -1,0 +1,12 @@
+init {
+    $psub = $lib.import(slib.anyrun.priv.submit)
+    $util = $lib.import(slib.anyrun.util)
+}
+
+spin |
+for $task in $cmdopts.task {
+    $retn = $psub.stopTask($task)
+    if (not $util.failed($retn, `Stopping task {$task}`)) {
+        $lib.print("slib.anyrun.task.stop: {task}: {text}", task=$task, text=$retn.data)
+    }
+}

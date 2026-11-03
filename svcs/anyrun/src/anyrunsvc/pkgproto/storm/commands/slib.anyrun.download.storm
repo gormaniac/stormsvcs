@@ -1,0 +1,44 @@
+init {
+    $anyrun = $lib.import(slib.anyrun.lib)
+    $model = $lib.import(slib.anyrun.model)
+
+    // Download everything the options ask for from a task. Returns a list of file:bytes nodes.
+    function download(task) {
+        $nodes = ([])
+        if $cmdopts.pcap { $nodes.append($anyrun.downloadPcap($task)) }
+        if $cmdopts.dropped { $nodes.extend($anyrun.downloadDropped($task)) }
+        if ($cmdopts.sample or not ($cmdopts.pcap or $cmdopts.dropped)) {
+            $nodes.append($anyrun.downloadSample($task))
+        }
+        return($nodes)
+    }
+}
+
+if $cmdopts.task {
+    // --task ignores inbound nodes.
+    spin |
+    for $task in $cmdopts.task {
+        for $n in $download($task) {
+            if ($cmdopts.yield and $n) { yield $n }
+        }
+    }
+}
+else {
+    switch $node.form() {
+        "file:bytes": { }
+        "hash:md5": { }
+        "hash:sha1": { }
+        "hash:sha256": { }
+        "inet:url": { }
+        *: {
+            $lib.warn("slib.anyrun.download: The node form {form} is not supported.", form=$node.form())
+            spin
+        }
+    }
+    $task = $anyrun.findTask($node, lookup=(not $cmdopts.no_lookup))
+    if ($task = $lib.null) {
+        $lib.warn("slib.anyrun.download: ANY.RUN has no task for {repr}.", repr=$node.repr())
+        spin
+    }
+    divert $cmdopts.yield $model.nodes($download($task))
+}

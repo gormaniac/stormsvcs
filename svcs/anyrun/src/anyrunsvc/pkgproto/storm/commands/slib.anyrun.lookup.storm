@@ -1,0 +1,53 @@
+init {
+    $anyrun = $lib.import(slib.anyrun.lib)
+    $priv = $lib.import(slib.anyrun.priv.user)
+    $model = $lib.import(slib.anyrun.model)
+    $util = $lib.import(slib.anyrun.util)
+
+    $opts = ({
+        "start": $cmdopts.start,
+        "end": $cmdopts.end,
+        "days": $cmdopts.days,
+        "related": $cmdopts.related,
+        "tasks": $cmdopts.tasks,
+    })
+}
+
+if $cmdopts.query {
+    // --query ignores inbound nodes and prints the results.
+    spin |
+    $retn = $priv.normLookup($cmdopts.query, start=$cmdopts.start, end=$cmdopts.end, days=$cmdopts.days)
+    if (not $util.failed($retn, `Looking up {$cmdopts.query}`)) {
+        $data = $retn.data
+        if $cmdopts.json { $util.printJson($data) }
+        else {
+            $lib.print("slib.anyrun.lookup: {query} is {verdict}.", query=$cmdopts.query,
+                       verdict=$util.verdictName($data.verdict))
+            $lib.print("  threats: {threats}", threats=(", ").join($data.threats))
+            $lib.print("  tags: {tags}", tags=(", ").join($data.tags))
+            $lib.print("  related: {ips} IPs, {fqdns} domains, {urls} URLs, {files} files, {tasks} tasks",
+                       ips=$lib.len($data.ips), fqdns=$lib.len($data.fqdns), urls=$lib.len($data.urls),
+                       files=$lib.len($data.files), tasks=$lib.len($data.tasks))
+            $rows = ([])
+            for $t in $data.tasks { $rows.append(($t.uuid, $util.verdictName($t.verdict), $t.kind, $t.name)) }
+            if $rows { $util.table((("task", 36), ("verdict", 10), ("kind", 8), ("name", 48)), $rows) }
+        }
+    }
+}
+else {
+    switch $node.form() {
+        "inet:ipv4": { }
+        "inet:ipv6": { }
+        "inet:fqdn": { }
+        "inet:url": { }
+        "file:bytes": { }
+        "hash:md5": { }
+        "hash:sha1": { }
+        "hash:sha256": { }
+        *: {
+            $lib.warn("slib.anyrun.lookup: The node form {form} is not supported.", form=$node.form())
+            spin
+        }
+    }
+    divert $cmdopts.yield $model.nodes(($anyrun.lookup($node, opts=$opts),))
+}

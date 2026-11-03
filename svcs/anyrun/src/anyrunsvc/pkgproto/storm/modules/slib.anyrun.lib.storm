@@ -1,0 +1,272 @@
+// The slib.anyrun user API. Functions query ANY.RUN, model the results, and return the
+// resulting node(s). Errors are reported as warnings.
+//
+// Usable directly from Storm, ex:
+//     $anyrun = $lib.import(slib.anyrun.lib)
+//     $file = $anyrun.model("0cf223f2-530e-4a50-b68f-563045268648")
+
+init {
+    $priv = $lib.import(slib.anyrun.priv.user)
+    $amodel = $lib.import(slib.anyrun.model)
+    $util = $lib.import(slib.anyrun.util)
+}
+
+// ---- Tasks ----
+
+// Model a task's report (by UUID or app.any.run link). Returns the sample's node, or null.
+function model(task) {
+    $retn = $priv.normReport($task)
+    if $util.failed($retn, `Modeling task {$task}`) { return($lib.null) }
+    $data = $retn.data
+    for $err in $data.errors { $lib.warn("slib.anyrun: {err}", err=$err) }
+
+    $snode = $amodel.report($data, prefix=$priv.tagPrefix())
+    if ($snode = $lib.null) {
+        $lib.warn("slib.anyrun: Task {id} has no file hash or URL to model it by.", id=$data.uuid)
+        return($lib.null)
+    }
+
+    $fams = $lib.null
+    if $data.families { $fams = (",").join($data.families) }
+    $lib.print("slib.anyrun: Modeled task {id} ({verdict}, families={fams}, processes={procs}).",
+               id=$data.uuid, verdict=$data.threat, fams=$fams, procs=$lib.len($data.procs))
+    return($snode)
+}
+
+// Whether a task (from history or TI Lookup) analyzed a node: a file by one of its hashes,
+// or a URL by its value.
+function _matches(node, name, hashes) {
+    if ($node.form() = "inet:url") { return(($name = $node.repr())) }
+    $wanted = ([])
+    for $h in $util.nodeHashes($node) { $wanted.append($h.lower()) }
+    return($util.hasHash($hashes, $wanted))
+}
+
+// The newest task that analyzed a file:bytes, hash:*, or inet:url node: from your task history
+// first, then (with lookup) from ANY.RUN's TI Lookup. Returns its UUID, or null.
+function findTask(node, lookup=(true)) {
+    $retn = $priv.history(limit=(100))
+    if (not $util.failed($retn, "Getting your task history")) {
+        for $task in $retn.data {
+            if $_matches($node, $task.name, $task.hashes) { return($task.uuid) }
+        }
+    }
+    if (not $lookup) { return($lib.null) }
+
+    $valu = $util.nodeIndicator($node)
+    if ($valu = $lib.null) { return($lib.null) }
+    $retn = $priv.lookupIndicator($valu)
+    if $util.failed($retn, `Looking up {$valu}`) { return($lib.null) }
+    for $task in $retn.data.tasks {
+        if $_matches($node, $task.name, $task.hashes) { return($task.uuid) }
+    }
+    return($lib.null)
+}
+
+// Find the newest task of a file:bytes, hash:*, or inet:url node and model it.
+// Returns the sample's node, or null.
+function enrich(node, lookup=(true)) {
+    if ($node.form() != "inet:url" and not $util.nodeHashes($node)) {
+        $lib.warn("slib.anyrun: {form} {repr} has no hash or URL to look up.", form=$node.form(),
+                  repr=$node.repr())
+        return($lib.null)
+    }
+    $task = $findTask($node, lookup=$lookup)
+    if ($task = $lib.null) {
+        $lib.warn("slib.anyrun: ANY.RUN has no task for {repr}.", repr=$node.repr())
+        return($lib.null)
+    }
+    return($model($task))
+}
+
+// ---- TI Lookup ----
+
+// The node to model a TI Lookup of a node on: the node, or for hash:* nodes, the file:bytes
+// node of the file (when ANY.RUN knows its SHA256).
+function _lookupTarget(node, data) {
+    if (not $node.form().startswith("hash:")) { return($node) }
+    $wanted = ([$node.repr().lower()])
+    for $file in $data.files {
+        if $util.hasHash(({"md5": $file.md5, "sha1": $file.sha1, "sha256": $file.sha256}), $wanted) {
+            return($amodel.fileNode($file))
+        }
+    }
+    if ($node.form() = "hash:sha256") { return($amodel.fileNode(({"sha256": $node.repr()}))) }
+    return($node)
+}
+
+// TI Lookup a node (an IP, FQDN, URL, file:bytes, or hash:*) and model the results on it.
+// opts: start, end, days (the date range), related (also model related observables), and
+// tasks (model the reports of that many of the newest source tasks).
+// Returns the node the results were modeled on, or null.
+function lookup(node, opts=$lib.null) {
+    if ($opts = $lib.null) { $opts = ({}) }
+    $valu = $util.nodeIndicator($node)
+    if ($valu = $lib.null) {
+        $lib.warn("slib.anyrun: {form} {repr} can't be looked up.", form=$node.form(), repr=$node.repr())
+        return($lib.null)
+    }
+    $days = $opts.days
+    if ($days = $lib.null) { $days = (180) }
+    $retn = $priv.lookupIndicator($valu, start=$opts.start, end=$opts.end, days=$days)
+    if $util.failed($retn, `Looking up {$valu}`) { return($lib.null) }
+    $data = $retn.data
+    if $data.empty {
+        $lib.print("slib.anyrun: ANY.RUN has no intelligence on {valu}.", valu=$valu)
+        return($lib.null)
+    }
+
+    $n = $_lookupTarget($node, $data)
+    $amodel.lookup($n, $data, prefix=$priv.tagPrefix(), related=$opts.related)
+    $lib.print("slib.anyrun: {valu} is {verdict} (threats={threats}, tasks={tasks}).", valu=$valu,
+               verdict=$util.verdictName($data.verdict), threats=(",").join($data.threats),
+               tasks=$lib.len($data.tasks))
+
+    if $opts.tasks {
+        for $task in $data.tasks.slice(0, $opts.tasks) { $model($task.uuid) }
+    }
+    return($n)
+}
+
+// ---- Downloads ----
+
+// Save a download result ({status, mesg, data: {sha256, size}}) as a file:bytes node. Returns it, or null.
+function _saved(retn, what, name=$lib.null) {
+    if $util.failed($retn, `Downloading {$what}`) { return($lib.null) }
+    $info = $retn.data
+    $lib.print("slib.anyrun: Saved {what} ({size} bytes, {sha}) to the Axon.", what=$what, size=$info.size,
+               sha=$info.sha256)
+    return($amodel.axonFile($info.sha256, size=$info.size, name=$name))
+}
+
+// Download a task's sample into the Axon. Returns the file:bytes node, or null.
+function downloadSample(task) {
+    return($_saved($priv.downloadSample($task), `the sample of task {$task}`))
+}
+
+// Download a task's network capture into the Axon. Returns the file:bytes node, or null.
+function downloadPcap(task) {
+    return($_saved($priv.downloadPcap($task), `the PCAP of task {$task}`, name=`{$task}.pcap`))
+}
+
+// Download the files a task created or changed into the Axon. Returns a list of nodes.
+function downloadDropped(task) {
+    $retn = $priv.droppedFiles($task)
+    if $util.failed($retn, `Listing the files of task {$task}`) { return(([])) }
+    $nodes = ([])
+    for $file in $retn.data {
+        $n = $_saved($priv.downloadDropped($task, $file.sha256), `{$task}/{$file.name}`, name=$file.name)
+        if $n { $nodes.append($n) }
+    }
+    return($nodes)
+}
+
+// ---- YARA Search ----
+
+// Run a YARA search for a rule (an it:app:yara:rule node, or a rule's text) and model the
+// matching files with it:app:yara:match nodes. Returns a list of the file nodes.
+function yara(rule, timeout=(600), limit=(100)) {
+    if ($lib.vars.type($rule) = "node") { $text = $rule.props.text }
+    else { $text = $rule $rule = $lib.null }
+    if (not $text) {
+        $lib.warn("slib.anyrun: The YARA rule has no text.")
+        return(([]))
+    }
+    $retn = $priv.yaraRun($text, timeout=$timeout, limit=$limit)
+    if $util.failed($retn, "The YARA search") { return(([])) }
+    return($_yaraModel($retn.data, $rule))
+}
+
+// Get the results of an earlier YARA search (waiting up to timeout seconds) and model them.
+function yaraSearch(search, timeout=(0), limit=(100)) {
+    $retn = $priv.yaraGet($search, timeout=$timeout, limit=$limit)
+    if $util.failed($retn, `Getting YARA search {$search}`) { return(([])) }
+    return($_yaraModel($retn.data, $lib.null))
+}
+
+// Model a YARA search's results (slib.anyrun.priv.user.yaraGet). Returns a list of file nodes.
+function _yaraModel(res, rule) {
+    if (not $res.done) {
+        $lib.warn("slib.anyrun: YARA search {id} is {status}, get it later with slib.anyrun.yara --search {id}.",
+                  id=$res.search, status=$res.status)
+        return(([]))
+    }
+    if ($rule = $lib.null and $res.text) { $rule = $amodel.yaraRule($res.rule, $res.text) }
+    $prefix = $priv.tagPrefix()
+    $nodes = ([])
+    for $match in $res.matches {
+        $n = $amodel.yaraMatch($rule, $match, $prefix)
+        if $n { $nodes.append($n) }
+    }
+    $lib.print("slib.anyrun: YARA search {id} found {found} files, modeled {count}.", id=$res.search,
+               found=$res.found, count=$lib.len($nodes))
+    return($nodes)
+}
+
+// ---- Submissions (require slib.anyrun.submit) ----
+
+// Handle a submission result: print the new task, and with wait (seconds), wait for it to
+// finish and model it. Returns the sample's node when it was modeled, otherwise the submission.
+function _submitted(retn, what, wait=$lib.null) {
+    if $util.failed($retn, `Submitting {$what}`) { return($lib.null) }
+    $sub = $retn.data
+    if $sub.queued {
+        $lib.print("slib.anyrun: Submitted {what}, it's queued as {id}.", what=$what, id=$sub.queue)
+        $task = $sub.queue
+    } else {
+        $lib.print("slib.anyrun: Submitted {what} as task {id} ({link}).", what=$what, id=$sub.task,
+                   link=$sub.link)
+        $task = $sub.task
+    }
+    if (not $wait) { return($sub) }
+
+    $retn = $priv.wait($task, timeout=$wait)
+    if $util.failed($retn, `Waiting for task {$task}`) { return($sub) }
+    $status = $retn.data
+    if ($status.state != "completed") {
+        $lib.warn("slib.anyrun: Task {id} is {state} after {secs}s, model it later with slib.anyrun.enrich --task {id}.",
+                  id=$status.uuid, state=$status.state, secs=$wait)
+        return($sub)
+    }
+    return($model($status.uuid))
+}
+
+// Submit a file:bytes (from the Axon) or inet:url node. opts are the service's submission
+// options, wait is how long to wait for the task to finish (and model it).
+// Returns the sample's node (with wait), the submission, or null.
+function submitNode(node, opts, wait=$lib.null, name=$lib.null) {
+    $psub = $lib.import(slib.anyrun.priv.submit)
+    switch $node.form() {
+        "inet:url": { return($submitUrl($node.repr(), $opts, wait=$wait)) }
+        "file:bytes": {
+            $sha256 = $node.props.sha256
+            if ($sha256 = $lib.null) {
+                $lib.warn("slib.anyrun: {repr} has no SHA256, so it can't be read from the Axon.", repr=$node.repr())
+                return($lib.null)
+            }
+            if (not $name) { $name = $node.props.name }
+            if (not $name) { $name = $sha256 }
+            return($_submitted($psub.submitFile($sha256, $node.props.size, $name, $opts), $sha256, wait=$wait))
+        }
+    }
+    $lib.warn("slib.anyrun: The node form {form} can't be submitted.", form=$node.form())
+    return($lib.null)
+}
+
+// Submit a URL to open in a browser.
+function submitUrl(url, opts, wait=$lib.null) {
+    $psub = $lib.import(slib.anyrun.priv.submit)
+    return($_submitted($psub.submitUrl($url, $opts), $url, wait=$wait))
+}
+
+// Submit a URL to download a file from and run it.
+function submitDownload(url, opts, wait=$lib.null) {
+    $psub = $lib.import(slib.anyrun.priv.submit)
+    return($_submitted($psub.submitDownload($url, $opts), `the download of {$url}`, wait=$wait))
+}
+
+// Run a task again, with any options changed.
+function rerun(task, opts, wait=$lib.null) {
+    $psub = $lib.import(slib.anyrun.priv.submit)
+    return($_submitted($psub.rerun($task, $opts), `a rerun of {$task}`, wait=$wait))
+}

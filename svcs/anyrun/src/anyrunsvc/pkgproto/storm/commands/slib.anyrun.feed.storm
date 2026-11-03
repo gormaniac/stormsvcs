@@ -1,0 +1,42 @@
+init {
+    $priv = $lib.import(slib.anyrun.priv.user)
+    $model = $lib.import(slib.anyrun.model)
+    $util = $lib.import(slib.anyrun.util)
+
+    $added = $cmdopts.added
+    if ($cmdopts.days and not $added) {
+        $added = $lib.time.format(($lib.time.now() - ($cmdopts.days * 86400000)), "%Y-%m-%dT%H:%M:%SZ")
+    }
+}
+
+spin |
+
+if $cmdopts.list {
+    $retn = $priv.feeds()
+    if (not $util.failed($retn, "Listing the TI feeds")) {
+        $rows = ([])
+        for $c in $retn.data { $rows.append(($c.id, $c.title, $c.description)) }
+        $util.table((("id", 36), ("title", 24), ("description", 60)), $rows)
+    }
+}
+else {
+    $prefix = $priv.tagPrefix()
+    $count = (0)
+    $rows = ([])
+    for $retn in $priv.feedObjects(feed=$cmdopts.feed, added=$added, modified=$cmdopts.modified,
+                                   limit=$cmdopts.limit) {
+        if $util.failed($retn, `Reading the {$cmdopts.feed} feed`) { break }
+        $item = $retn.data
+        $count = ($count + 1)
+        if $cmdopts.print {
+            for $obs in $item.observables { $rows.append(($obs.kind, $obs.value, (",").join($item.labels))) }
+        }
+        else {
+            for $n in $model.feedObject($item, $prefix) {
+                if $cmdopts.yield { yield $n }
+            }
+        }
+    }
+    if $cmdopts.print { $util.table((("kind", 8), ("value", 64), ("labels", 32)), $rows) }
+    $lib.print("slib.anyrun.feed: Read {count} objects from the {feed} feed.", count=$count, feed=$cmdopts.feed)
+}

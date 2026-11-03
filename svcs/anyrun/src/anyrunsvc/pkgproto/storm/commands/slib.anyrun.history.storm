@@ -1,0 +1,21 @@
+init {
+    $priv = $lib.import(slib.anyrun.priv.user)
+    $anyrun = $lib.import(slib.anyrun.lib)
+    $util = $lib.import(slib.anyrun.util)
+}
+
+spin |
+
+$retn = $priv.history(team=$cmdopts.team, skip=$cmdopts.skip, limit=$cmdopts.limit)
+if (not $util.failed($retn, "Getting the task history")) {
+    if ($cmdopts.model or $cmdopts.yield) {
+        for $task in $retn.data {
+            $n = $anyrun.model($task.uuid)
+            if ($cmdopts.yield and $n) { yield $n }
+        }
+    }
+    else {
+        $lib.print("slib.anyrun.history: {count} tasks.", count=$lib.len($retn.data))
+        $util.printTasks($retn.data)
+    }
+}

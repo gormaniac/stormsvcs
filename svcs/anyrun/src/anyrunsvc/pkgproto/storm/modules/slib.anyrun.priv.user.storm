@@ -1,0 +1,116 @@
+// Privileged (asroot) wrappers around the slib.anyrun service for slib.anyrun.user.
+// Every function returns the service's {status, mesg, data} dict, or emits them for generators.
+//
+// The calling user's own API key (a user scoped "anyrun" vault) is passed to the service,
+// otherwise the service falls back to its stored/configured key. Only the user scope is
+// read so this module never exposes another user's or role's secrets.
+
+init {
+    $svc = $lib.service.get("slib.anyrun")
+}
+
+function userKey() {
+    $vault = $lib.vault.bytype(anyrun, scope=user)
+    if ($vault = $lib.null) { return($lib.null) }
+    $secrets = $vault.secrets
+    if ($secrets = $lib.null) { return($lib.null) }
+    return($secrets.apikey)
+}
+
+function hasKey() {
+    if $userKey() { return((true)) }
+    return($svc.hasApiKey().data)
+}
+
+// Whether the service-wide API key (slib.anyrun.admin.apikey) is set.
+function hasSvcKey() { return($svc.hasApiKey().data) }
+
+function tagPrefix() {
+    if $lib.globals.get("slib:anyrun:tag:enabled") {
+        return($lib.globals.get("slib:anyrun:tag:prefix"))
+    }
+    return($lib.null)
+}
+
+// Account
+
+function limits() { return($svc.limits(apikey=$userKey())) }
+function environments() { return($svc.environments(apikey=$userKey())) }
+function presets() { return($svc.presets(apikey=$userKey())) }
+
+// Tasks
+
+function history(team=(false), skip=(0), limit=(25)) {
+    return($svc.history(team=$team, skip=$skip, limit=$limit, apikey=$userKey()))
+}
+function report(task) { return($svc.report($task, apikey=$userKey())) }
+function normReport(task) { return($svc.normReport($task, apikey=$userKey())) }
+function iocs(task, reputation=(0)) { return($svc.iocs($task, reputation=$reputation, apikey=$userKey())) }
+function aiSummary(task) { return($svc.aiSummary($task, apikey=$userKey())) }
+function summary(task, fmt=brief) { return($svc.summary($task, fmt=$fmt, apikey=$userKey())) }
+function status(task) { return($svc.status($task, apikey=$userKey())) }
+function wait(task, timeout=(600)) { return($svc.wait($task, timeout=$timeout, apikey=$userKey())) }
+function droppedFiles(task) { return($svc.droppedFiles($task, apikey=$userKey())) }
+
+function monitor(task, limit=(100), timeout=(600)) {
+    for $retn in $svc.monitor($task, limit=$limit, timeout=$timeout, apikey=$userKey()) {
+        emit $retn
+    }
+}
+
+// TI Lookup
+
+function lookup(query, start=$lib.null, end=$lib.null, days=(180)) {
+    return($svc.lookup($query, start=$start, end=$end, days=$days, apikey=$userKey()))
+}
+function normLookup(query, start=$lib.null, end=$lib.null, days=(180)) {
+    return($svc.normLookup($query, start=$start, end=$end, days=$days, apikey=$userKey()))
+}
+function lookupIndicator(valu, start=$lib.null, end=$lib.null, days=(180)) {
+    return($svc.lookupIndicator($valu, start=$start, end=$end, days=$days, apikey=$userKey()))
+}
+
+// YARA Search
+
+function yaraRun(rule, timeout=(600), limit=(100)) {
+    return($svc.yaraRun($rule, timeout=$timeout, limit=$limit, apikey=$userKey()))
+}
+function yaraGet(search, timeout=(0), limit=(100)) {
+    return($svc.yaraGet($search, timeout=$timeout, limit=$limit, apikey=$userKey()))
+}
+function yaraStatus(search) { return($svc.yaraStatus($search, apikey=$userKey())) }
+function yaraStop(search) { return($svc.yaraStop($search, apikey=$userKey())) }
+
+// TI Feeds
+
+function feeds() { return($svc.feeds(apikey=$userKey())) }
+function feedObjects(feed=full, added=$lib.null, modified=$lib.null, limit=(1000), types=indicator) {
+    for $retn in $svc.feedObjects(feed=$feed, added=$added, modified=$modified, limit=$limit,
+                                  types=$types, apikey=$userKey()) {
+        emit $retn
+    }
+}
+
+// Downloads into the Axon. Each returns {"status", "mesg", "data": {"sha256", "size"}}.
+
+function _bytes(genr) {
+    for $retn in $genr {
+        if (not $retn.status) { $lib.raise(AnyRunError, $retn.mesg) }
+        emit $retn.data
+    }
+}
+
+function _upload(genr) {
+    try {
+        ($size, $sha256) = $lib.axon.upload($_bytes($genr))
+    } catch AnyRunError as err {
+        return(({"status": (false), "mesg": $err.mesg, "data": $lib.null}))
+    }
+    return(({"status": (true), "mesg": "", "data": ({"sha256": $sha256, "size": $size})}))
+}
+
+function downloadSample(task) { return($_upload($svc.downloadSample($task, apikey=$userKey()))) }
+function downloadPcap(task) { return($_upload($svc.downloadPcap($task, apikey=$userKey()))) }
+function downloadDropped(task, sha256) {
+    return($_upload($svc.downloadDropped($task, $sha256, apikey=$userKey())))
+}
