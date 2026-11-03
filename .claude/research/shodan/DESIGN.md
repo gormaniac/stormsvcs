@@ -669,5 +669,5 @@ meta:rule:type^=svc.shodan.query. | slib.shodan.search --limit 200
 | 1 | 0.6.0 | `bannerNodes()` refactor. `it:exec:query` on `search` and `stream`. `--yield-query`. | **Done.** Provenance tests; existing tests still pass. |
 | 2 | 0.7.0 | `slib.shodan.count` and `countIps`: credit-free IP lists, limit detection, the "full" warning, print-only `--facets`. | **Done.** Count tests; live check that count uses no credits. |
 | 3 | 0.8.0 | Host history timeline: `--timeline`, `--history`, fallback key, `normBanner` additions. | **Done.** Idempotency tests; Open questions 6 and 9 checked live. |
-| 4 | 0.9.0 | Inbound nodes for `host`, `trends` and `stream`. | Per-form tests. |
+| 4 | 0.9.0 | Inbound nodes for `host`, `trends` and `stream`. | **Done.** Per-form tests. |
 | 5 | 0.10.0 | Saved queries: `queries --source/--yield`, `query.save`, the community/local `meta:rule` types, and `searchQuery()` accepting the whole `svc.shodan.query.` subtree. | Saved-query tests. |

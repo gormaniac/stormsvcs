@@ -952,6 +952,95 @@ class TestShodanStormHistory(s_tests.SynTest):
             assert len(await core.nodes("meta:timeline")) == 2
 
 
+class TestShodanStormInputs(s_tests.SynTest):
+    """The inbound nodes slib.shodan.host, slib.shodan.trends, and slib.shodan.stream take."""
+
+    async def test_host_inputs(self):
+        async with shodanSvc(self) as (core, svc, fake):
+            await core.nodes(
+                "[ inet:server=tcp://8.8.8.8:443 inet:dns:a=(dns.google, 8.8.8.8)"
+                ' inet:banner=(tcp://45.33.32.156:22, "SSH-2.0-test")'
+                " inet:dns:aaaa=(v6.vertex.link, 2001:db8::1) ]"
+            )
+            msgs = await core.stormlist(
+                "inet:server=tcp://8.8.8.8:443 inet:dns:a=(dns.google, 8.8.8.8)"
+                ' inet:banner=(tcp://45.33.32.156:22, "SSH-2.0-test") inet:dns:aaaa=(v6.vertex.link, 2001:db8::1)'
+                " | slib.shodan.host --yield"
+            )
+            lookups = [r["path"] for r in fake.requests if r["path"].startswith("/api/shodan/host/")]
+            # The server and A record are for the same IP, so it's looked up once.
+            assert lookups == [
+                "/api/shodan/host/8.8.8.8",
+                "/api/shodan/host/45.33.32.156",
+                "/api/shodan/host/2001:db8::1",
+            ]
+            # The fake has no data for the AAAA record's IP.
+            self.stormIsInWarn("Host lookup of 2001:db8::1 failed", msgs)
+            nodes = [m[1][0] for m in msgs if m[0] == "node"]
+            assert nodes == [("inet:ipv4", 134744072), ("inet:ipv4", 134744072), ("inet:ipv4", 757145756)]
+
+            # Without --yield the inbound nodes pass through.
+            msgs = await core.stormlist("inet:server=tcp://8.8.8.8:443 | slib.shodan.host")
+            assert [m[1][0][0] for m in msgs if m[0] == "node"] == ["inet:server"]
+
+            msgs = await core.stormlist("[ inet:email=visi@vertex.link ] | slib.shodan.host")
+            self.stormIsInWarn("The node form inet:email is not supported", msgs)
+
+    async def test_trends_inputs(self):
+        async with shodanSvc(self) as (core, svc, fake):
+            await core.nodes('[ inet:asn=15169 it:dev:str="apache" it:dev:str="ssh.hassh:abc port:22" ]')
+            msgs = await core.stormlist('inet:asn=15169 it:dev:str | slib.shodan.trends "country:US"')
+            self.stormHasNoErr(msgs)
+
+            queries = sorted(r["query"]["query"] for r in fake.requests if r["path"] == "/trends/api/v1/search")
+            assert queries == ["apache country:US", "asn:AS15169 country:US"]
+            self.stormIsInWarn("Trends doesn't support the ssh.hassh filter", msgs)
+            self.stormIsInPrint("Total results: 10 (asn:AS15169 country:US)", msgs)
+
+            # Inbound nodes are passed through, except the skipped one.
+            assert len([m for m in msgs if m[0] == "node"]) == 2
+
+            msgs = await core.stormlist("slib.shodan.trends")
+            self.stormIsInErr("requires a query, inbound nodes, or --filters", msgs)
+
+    async def test_stream_inputs(self):
+        async with shodanSvc(self) as (core, svc, fake):
+            await core.nodes("[ inet:asn=15169 inet:asn=13335 it:sec:cve=cve-2021-44228 ]")
+            msgs = await core.stormlist(
+                "inet:asn=15169 inet:asn=13335 it:sec:cve | slib.shodan.stream --value 3303 --limit 0 --timeout 5"
+            )
+            self.stormHasNoErr(msgs)
+            self.stormIsInWarn("Skipping it:sec:cve cve-2021-44228, it's for a vulns stream, not asn", msgs)
+            streams = [r["path"] for r in fake.requests if r["path"].startswith("/stream/")]
+            assert streams == ["/stream/shodan/asn/15169,13335,3303"]
+            # The IPs are yielded, not the inbound nodes.
+            assert [m[1][0] for m in msgs if m[0] == "node"] == [("inet:ipv4", 134744072)]
+            assert (await core.nodes("it:exec:query"))[0].get("text") == "asn:15169,13335,3303"
+
+            await core.nodes("[ risk:vuln=* :cve=cve-2021-44228 ]")
+            await core.nodes("risk:vuln | slib.shodan.stream --timeout 5")
+            assert fake.last()["path"] == "/stream/shodan/vulns/CVE-2021-44228"
+
+            await core.nodes("[ pol:country=* :iso2=us ]")
+            await core.nodes("pol:country | slib.shodan.stream --timeout 5")
+            assert fake.last()["path"] == "/stream/shodan/countries/US"
+
+            await core.nodes('[ meta:rule=* :type=svc.shodan.query :text="port:22" ]')
+            await core.nodes('[ meta:rule=* :type=svc.shodan.query :text="port:80" ]')
+            msgs = await core.stormlist("meta:rule | slib.shodan.stream --timeout 5")
+            self.stormIsInWarn("A custom stream takes one query", msgs)
+            assert fake.last()["path"] == "/stream/shodan/custom"
+            assert fake.last()["query"]["query"] in ("port:22", "port:80")
+
+            # A type given decides the stream.
+            msgs = await core.stormlist("inet:asn=15169 | slib.shodan.stream ports --value 443 --timeout 5")
+            self.stormIsInWarn("it's for a asn stream, not ports", msgs)
+            assert fake.last()["path"] == "/stream/shodan/ports/443"
+
+            msgs = await core.stormlist("[ inet:email=visi@vertex.link ] | slib.shodan.stream")
+            self.stormIsInWarn("The node form inet:email is not supported", msgs)
+
+
 class TestShodanStormDns(s_tests.SynTest):
     async def test_dns_domain(self):
         async with shodanSvc(self) as (core, svc, fake):

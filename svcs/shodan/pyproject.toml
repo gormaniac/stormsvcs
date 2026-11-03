@@ -1,6 +1,6 @@
 [project]
 name = "shodansvc"
-version = "0.8.0"
+version = "0.9.0"
 description = "A Shodan Storm Service"
 readme = "README.md"
 license-files = ["LICENSE"]

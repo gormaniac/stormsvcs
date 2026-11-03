@@ -445,6 +445,108 @@ function searchQuery(n, filehash=$lib.null) {
     return($lib.null)
 }
 
+// The IP to look up in Shodan for a node, as a string. Returns null (with a warning) for
+// unsupported nodes or nodes missing the needed props.
+//
+//     inet:ipv4/inet:ipv6         The IP.
+//     inet:server                 :ipv4 or :ipv6
+//     inet:banner                 :server:ipv4 or :server:ipv6
+//     inet:dns:a/inet:dns:aaaa    :ipv4 / :ipv6
+function hostIp(n) {
+    $props = $n.props
+    $ipv4 = $lib.null
+    $ipv6 = $lib.null
+    switch $n.form() {
+        "inet:ipv4": { return($n.repr()) }
+        "inet:ipv6": { return($n.repr()) }
+        "inet:server": {
+            $ipv4 = $props.ipv4
+            $ipv6 = $props.ipv6
+        }
+        "inet:banner": {
+            $ipv4 = $props."server:ipv4"
+            $ipv6 = $props."server:ipv6"
+        }
+        "inet:dns:a": { $ipv4 = $props.ipv4 }
+        "inet:dns:aaaa": { $ipv6 = $props.ipv6 }
+        *: {
+            $lib.warn("slib.shodan: The node form {form} is not supported.", form=$n.form())
+            return($lib.null)
+        }
+    }
+    if ($ipv4 != $lib.null) { return($lib.repr(inet:ipv4, $ipv4)) }
+    if $ipv6 { return($ipv6) }
+    $lib.warn("slib.shodan: {form} {repr} has no IP to look up.", form=$n.form(), repr=$n.repr())
+    return($lib.null)
+}
+
+// The search filters the Trends API supports (https://developer.shodan.io/api/trends).
+// Trends only supports a subset of Shodan's search filters.
+function trendsFilters() {
+    return((
+        all, asn, city, country, cpe, has_ipv6, has_screenshot, has_ssl, has_vuln, hash, hostname,
+        http.component, http.component_category, http.favicon.hash, http.html_hash,
+        http.robots_hash, http.securitytxt, http.status, http.title, http.waf, ip, isp, net, org,
+        os, port, product, region, screenshot.label, ssh.fingerprint, ssl, ssl.alpn,
+        ssl.cert.fingerprint, ssl.cert.issuer.cn, ssl.cert.serial, ssl.cert.subject.cn, ssl.ja3s,
+        ssl.jarm, ssl.version, state, tag, title, version, vuln,
+    ))
+}
+
+// The Trends query for a node: the searchQuery() for it, if Trends supports all of its filters.
+// Returns null (with a warning) otherwise.
+function trendsQuery(n, filehash=$lib.null) {
+    $query = $searchQuery($n, filehash=$filehash)
+    if ($query = $lib.null) { return($lib.null) }
+
+    $supported = $trendsFilters()
+    // Filters are "name:value", optionally negated with "-" or "!".
+    for $name in $lib.regex.findall("(?:^|\\s)[-!]?([A-Za-z0-9_.]+):", $query) {
+        if (not $supported.has($name.lower())) {
+            $lib.warn("slib.shodan: Trends doesn't support the {name} filter, skipping {form} {repr}.",
+                      name=$name, form=$n.form(), repr=$n.repr())
+            return($lib.null)
+        }
+    }
+    return($query)
+}
+
+// What a node adds to a stream: ({"kind": <stream type>, "value": <str>}), or null (with a
+// warning) for unsupported nodes or nodes missing the needed props.
+//
+//     inet:asn                 asn         The ASN, without an "AS" prefix.
+//     risk:vuln/it:sec:cve     vulns       :cve / the CVE.
+//     pol:country              countries   :iso2
+//     meta:rule                custom      :text, for rules with :type svc.shodan.query.
+function streamTarget(n) {
+    $props = $n.props
+    switch $n.form() {
+        "inet:asn": { return(({"kind": "asn", "value": $n.repr()})) }
+        "it:sec:cve": { return(({"kind": "vulns", "value": $n.repr().upper()})) }
+        "risk:vuln": {
+            if $props.cve { return(({"kind": "vulns", "value": $props.cve.upper()})) }
+        }
+        "pol:country": {
+            if $props.iso2 { return(({"kind": "countries", "value": $props.iso2.upper()})) }
+        }
+        "meta:rule": {
+            if ($props.type != "svc.shodan.query.") {
+                $lib.warn("slib.shodan: meta:rule {rule} isn't a Shodan query, its :type must be svc.shodan.query.",
+                          rule=$n.repr())
+                return($lib.null)
+            }
+            if $props.text { return(({"kind": "custom", "value": $props.text})) }
+        }
+        *: {
+            $lib.warn("slib.shodan: The node form {form} is not supported.", form=$n.form())
+            return($lib.null)
+        }
+    }
+    $lib.warn("slib.shodan: {form} {repr} is missing the props needed to stream it.",
+              form=$n.form(), repr=$n.repr())
+    return($lib.null)
+}
+
 // Enrich any supported node with the best matching Shodan API. Returns a list of the resulting nodes.
 function enrich(node) {
     switch $node.form() {

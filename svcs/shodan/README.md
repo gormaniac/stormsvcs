@@ -72,17 +72,17 @@ need the normal node permissions for the nodes the commands create.
 
 | Command | Description |
 |---|---|
-| `slib.shodan.host` | Look up IPs and model everything Shodan knows (ASN, location, hostnames, tags, vulns, every banner). `--history`, `--minify`, `--internetdb`. |
+| `slib.shodan.host` | Look up IPs and model everything Shodan knows (ASN, location, hostnames, tags, vulns, every banner). Takes IPs, or the IPs of `inet:server`, `inet:banner`, and `inet:dns:a`/`aaaa` nodes (each IP is looked up once). `--history`, `--timeline`, `--minify`, `--internetdb`. |
 | `slib.shodan.enrich` | Enrich any supported node with the best API: IPs → host, `inet:fqdn` → DNS, `risk:vuln`/`it:sec:cve` → CVEDB, `it:sec:cpe` → CVEs. |
 | `slib.shodan.search` | Search Shodan, model each banner, and yield the IPs. `--count` and `--facets` are free, `--tokens` explains a query, `--filters` lists filters/facets. Inbound nodes are searched for with a query built for their form (see below), AND'd with any query. |
 | `slib.shodan.count` | List the IPs matching a query with the free count API (no query credits), model them, and yield them. One request per query, up to your plan's facet limit in IPs. `--facets` prints extra facets for context. Takes the same inbound nodes as `search`. |
-| `slib.shodan.stream` | Read banners from the Streaming API (`banners`, `asn`, `countries`, `ports`, `tags`, `vulns`, `custom`, `alert`) for `--limit` banners or `--timeout` seconds. |
+| `slib.shodan.stream` | Read banners from the Streaming API (`banners`, `asn`, `countries`, `ports`, `tags`, `vulns`, `custom`, `alert`) for `--limit` banners or `--timeout` seconds. Inbound `inet:asn`, `risk:vuln`/`it:sec:cve`, `pol:country`, and `meta:rule` nodes are streamed together (one subscription). |
 | `slib.shodan.hash` | Print Shodan's hash filter for `inet:banner` nodes or `--text` (`hash:<n>`), and favicon or HTML `file:bytes` (`http.favicon.hash:<n>`, `http.html_hash:<n>`). Local only, no API calls. |
 | `slib.shodan.dns.domain` | Model every DNS record and subdomain Shodan knows for a domain. |
 | `slib.shodan.dns.lookup` | Resolve `inet:fqdn`s and reverse-resolve IPs. |
 | `slib.shodan.cve` | Model CVEDB details (CVSS, KEV, references, linked GHSA/EUVD IDs) on `risk:vuln`s. Accepts CVE, GHSA, and EUVD IDs. Search by `--cpe`/`--product` with `--kev`, `--epss`, `--start`, `--end`, `--count`. |
 | `slib.shodan.cpe` | Search CVEDB for a product's CPEs. |
-| `slib.shodan.trends` | Monthly historical breakdown of a query, with `--facets`. |
+| `slib.shodan.trends` | Monthly historical breakdown of a query, with `--facets`. Takes the same inbound nodes as `search`, skipping any whose query uses filters Trends doesn't support. |
 | `slib.shodan.queries` | Browse/search the saved query directory and its tags. |
 | `slib.shodan.info` | Account, plan, remaining credits, and the service's public IP. |
 | `slib.shodan.ref` | Reference data: `ports`, `protocols`, `services`, `filters`, `facets`, `triggers`, `providers`, `httpheaders`. |
