@@ -1,0 +1,22 @@
+init {
+    $bgphe = $lib.import(slib.bgphe.lib)
+    $util = $lib.import(slib.bgphe.util)
+}
+
+if $cmdopts.asns {
+    // Values ignore inbound nodes.
+    spin |
+    for $asn in $cmdopts.asns {
+        for $n in $bgphe.prefixes($asn) { yield $n }
+    }
+}
+else {
+    // Statements after an if block still run for a node that leaves it, so the work is in the else.
+    // Unsupported nodes are passed through (or dropped, with --yield).
+    if ($node.form() != "inet:asn") {
+        $lib.warn(`slib.bgphe.asn.prefixes: Unable to look up {$node.form()} {$node.repr()}, it needs an inet:asn.`)
+        if $cmdopts.yield { spin }
+    } else {
+        divert $cmdopts.yield $util.nodes($bgphe.prefixes($node.repr()))
+    }
+}

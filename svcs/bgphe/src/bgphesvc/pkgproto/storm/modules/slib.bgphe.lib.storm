@@ -1,0 +1,147 @@
+// The slib.bgphe user API. Each function queries bgp.he.net, models the results, and emits
+// (or returns) the resulting node(s). Errors are reported as warnings.
+//
+// Usable directly from Storm, ex:
+//     $bgphe = $lib.import(slib.bgphe.lib)
+//     for $cert in $bgphe.certs(vertex.link, valid=(true)) { $lib.print($cert) }
+//
+// NOTE: Functions that emit must end early with stop, return() raises in an emitter.
+
+init {
+    $priv = $lib.import(slib.bgphe.priv)
+    $model = $lib.import(slib.bgphe.model)
+    $util = $lib.import(slib.bgphe.util)
+}
+
+// ---- Certificates ----
+
+// Look up the certificates for a domain (not its subdomains). Emits crypto:x509:cert nodes.
+function certs(domain, limit=(200), valid=(false), precerts=(true)) {
+    for $retn in $priv.certs($domain, limit=$limit, valid=$valid, precerts=$precerts) {
+        if $util.failed($retn, `Looking up the certificates of {$domain}`) { break }
+        $item = $retn.data
+        if ($item.type = "cert") {
+            emit $model.cert($item.cert)
+        } else {
+            if $lib.debug {
+                $lib.print(`slib.bgphe: {$item.domain}: {$item.returned} certificates ({$item.skipped} filtered) from {$item.pages} pages, of {$item.total} in bgp.he.net.`)
+            }
+            if (not $item.returned) {
+                $lib.warn(`slib.bgphe: bgp.he.net has no matching certificates for {$item.domain}.`)
+            } elif $item.more {
+                $lib.print(`slib.bgphe: Modeled {$item.returned} of the {$item.total} certificates for {$item.domain}, raise --limit for more.`)
+            }
+        }
+    }
+}
+
+// Find a domain's subdomains with certificates. Emits the inet:fqdn nodes, the most
+// certificates first.
+function subdomains(domain, print=(false)) {
+    $retn = $priv.subdomains($domain)
+    if $util.failed($retn, `Looking up the subdomains of {$domain}`) { stop }
+    $data = $retn.data
+
+    if (not $data.domains) {
+        $lib.warn(`slib.bgphe: bgp.he.net has no certificates for {$data.domain} or its subdomains.`)
+        stop
+    }
+    if $data.truncated {
+        $lib.warn(`slib.bgphe: bgp.he.net truncated the subdomains of {$data.domain}, some may be missing.`)
+    }
+    if $print {
+        $lib.print(`{$data.domains.size()} domains with {$data.certs} certificates under {$data.domain}:`)
+        $rows = ([])
+        for $row in $data.domains { $rows.append(($row.fqdn, $row.certs)) }
+        $util.table(((domain, (60)), (certs, (8))), $rows)
+    }
+    for $row in $data.domains { emit $model.fqdn($row.fqdn) }
+}
+
+// Find the hostnames, from certificates, that resolve to an IP or the IPs in a CIDR.
+// Emits the inet:dns:a/aaaa nodes.
+function hosts(valu, print=(false)) {
+    $retn = $priv.hosts($valu)
+    if $util.failed($retn, `Looking up the certificate hostnames on {$valu}`) { stop }
+    $data = $retn.data
+
+    if (not $data.entries) {
+        $lib.warn(`slib.bgphe: bgp.he.net has no certificate hostnames on {$data.prefix}.`)
+        stop
+    }
+    if $data.truncated {
+        $lib.warn(`slib.bgphe: bgp.he.net only returned a sample of the {$data.hostnames} certificate hostnames on {$data.prefix}.`)
+    }
+    if $print {
+        for $entry in $data.entries {
+            $lib.print(`{$entry.ip}: {(", ").join($entry.fqdns)}`)
+        }
+    }
+    for $entry in $data.entries {
+        for $fqdn in $entry.fqdns { emit $model.dns($entry.ip, $entry.version, $fqdn) }
+    }
+}
+
+// ---- Whois ----
+
+// Look up a domain's whois record (from RDAP, or whois text without it, or with rdap=(false)).
+// Returns the inet:whois:rec node, or null.
+function whois(domain, print=(false), rdap=(true)) {
+    $retn = $priv.whoisDomain($domain, rdap=$rdap)
+    if $util.failed($retn, `Looking up the whois of {$domain}`) { return() }
+    if $lib.debug {
+        $lib.print(`slib.bgphe: The whois of {$retn.data.fqdn} is from {$retn.data.source}.`)
+        if $retn.data.rdaperr { $lib.print(`slib.bgphe: RDAP wasn't used: {$retn.data.rdaperr}`) }
+    }
+    if $print { $lib.print($retn.data.text) }
+    return($model.whois($retn.data))
+}
+
+// Look up an ASN's whois record.
+// Returns ({"asn": <inet:asn node>, "org": <ou:org node or null>}), or null.
+function asn(valu, print=(false)) {
+    $retn = $priv.whoisAsn($valu)
+    if $util.failed($retn, `Looking up the whois of ASN {$valu}`) { return() }
+    $r = $retn.data.rec
+    if $print {
+        $lib.print(`AS{$retn.data.asn} {$util.str($r.name)}: {$util.str($r.orgname)} ({$util.str($r.country)}), {$util.str($r.registry)}, registered {$util.date($r.created)}, updated {$util.date($r.updated)}`)
+        for $c in $r.contacts {
+            $lib.print(`    {$c.type}: {$util.str($c.handle)} {$util.str($c.name)} {$util.str($c.email)} {$util.str($c.phone)}`)
+        }
+    }
+    return($model.asn($retn.data))
+}
+
+// ---- BGP ----
+
+// Look up the prefixes an ASN originates. Emits the inet:asnet4/inet:asnet6 nodes.
+function prefixes(valu) {
+    $retn = $priv.prefixes($valu)
+    if $util.failed($retn, `Looking up the prefixes of ASN {$valu}`) { stop }
+    $data = $retn.data
+    if (not $data.prefixes) {
+        $lib.warn(`slib.bgphe: AS{$data.asn} doesn't originate any prefixes.`)
+        stop
+    }
+    $lib.print(`slib.bgphe: AS{$data.asn} originates {$data.v4} IPv4 and {$data.v6} IPv6 prefixes.`)
+    for $p in $data.prefixes { emit $model.asnet($data.asn, $p) }
+}
+
+// ---- Generators, for divert ----
+
+// Emit the inet:whois:rec node of a domain's whois record (see whois()).
+function whoisNodes(domain, print=(false), rdap=(true)) {
+    $rec = $whois($domain, print=$print, rdap=$rdap)
+    if $rec { emit $rec }
+}
+
+// Emit the inet:asn node of an ASN's whois record, or with org, its ou:org node (see asn()).
+function asnNodes(valu, print=(false), org=(false)) {
+    $res = $asn($valu, print=$print)
+    if (not $res) { stop }
+    if $org {
+        if $res.org { emit $res.org }
+    } else {
+        emit $res.asn
+    }
+}

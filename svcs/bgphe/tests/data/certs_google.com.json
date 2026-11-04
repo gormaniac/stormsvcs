@@ -1,0 +1,2376 @@
+{
+ "certificates": [
+  {
+   "certificate_der": "MIIHkjCCBzegAwIBAgIRAKNba7BW76hrEPyYtBP27+kwCgYIKoZIzj0EAwIwOzELMAkGA1UEBhMCVVMxHjAcBgNVBAoTFUdvb2dsZSBUcnVzdCBTZXJ2aWNlczEMMAoGA1UEAxMDV0UyMB4XDTI2MDkyODE4MzgzM1oXDTI2MTIyMTE4MzgzMlowFzEVMBMGA1UEAwwMKi5nb29nbGUuY29tMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE3ixMZA6N6hjSpb96OXGuocqcZ9nx3S63pa6iOHdeK+HhOHQMNpJd0PM71dMG9WQjclkegenKgoxh1AGYsPO9eaOCBj4wggY6MA4GA1UdDwEB/wQEAwIHgDATBgNVHSUEDDAKBggrBgEFBQcDATAMBgNVHRMBAf8EAjAAMB0GA1UdDgQWBBT6UhYabGE180j4/HuUQOpd53ZR/zAfBgNVHSMEGDAWgBR1vsR3ron2RDd9z7FoHx0a69w0WTA1BggrBgEFBQcBAQQpMCcwJQYIKwYBBQUHMAKGGWh0dHA6Ly9pLnBraS5nb29nL3dlMi5jcnQwggQ4BgNVHREEggQvMIIEK4IMKi5nb29nbGUuY29tghYqLmFwcGVuZ2luZS5nb29nbGUuY29tggkqLmJkbi5kZXaCFSoub3JpZ2luLXRlc3QuYmRuLmRldoISKi5jbG91ZC5nb29nbGUuY29tghgqLmNyb3dkc291cmNlLmdvb2dsZS5jb22CGCouZGF0YWNvbXB1dGUuZ29vZ2xlLmNvbYILKi5nb29nbGUuY2GCCyouZ29vZ2xlLmNsgg4qLmdvb2dsZS5jby5pboIOKi5nb29nbGUuY28uanCCDiouZ29vZ2xlLmNvLnVrgg8qLmdvb2dsZS5jb20uYXKCDyouZ29vZ2xlLmNvbS5hdYIPKi5nb29nbGUuY29tLmJygg8qLmdvb2dsZS5jb20uY2+CDyouZ29vZ2xlLmNvbS5teIIPKi5nb29nbGUuY29tLnRygg8qLmdvb2dsZS5jb20udm6CCyouZ29vZ2xlLmRlggsqLmdvb2dsZS5lc4ILKi5nb29nbGUuZnKCCyouZ29vZ2xlLmh1ggsqLmdvb2dsZS5pdIILKi5nb29nbGUubmyCCyouZ29vZ2xlLnBsggsqLmdvb2dsZS5wdIIZKi5nZW1pbmkuY2xvdWQuZ29vZ2xlLmNvbYINKi5nc3RhdGljLmNvbYIUKi5tZXRyaWMuZ3N0YXRpYy5jb22CCiouZ3Z0MS5jb22CESouZ2NwY2RuLmd2dDEuY29tggoqLmd2dDIuY29tgg4qLmdjcC5ndnQyLmNvbYIQKi51cmwuZ29vZ2xlLmNvbYIWKi55b3V0dWJlLW5vY29va2llLmNvbYILKi55dGltZy5jb22CCmFpLmFuZHJvaWSCC2FuZHJvaWQuY29tgg0qLmFuZHJvaWQuY29tghMqLmZsYXNoLmFuZHJvaWQuY29tggRnLmNvggYqLmcuY2+CBmdvby5nbIIKd3d3Lmdvby5nbIIUZ29vZ2xlLWFuYWx5dGljcy5jb22CFiouZ29vZ2xlLWFuYWx5dGljcy5jb22CCmdvb2dsZS5jb22CEmdvb2dsZWNvbW1lcmNlLmNvbYIUKi5nb29nbGVjb21tZXJjZS5jb22CCnVyY2hpbi5jb22CDCoudXJjaGluLmNvbYIIeW91dHUuYmWCC3lvdXR1YmUuY29tgg0qLnlvdXR1YmUuY29tghFtdXNpYy55b3V0dWJlLmNvbYITKi5tdXNpYy55b3V0dWJlLmNvbYIUeW91dHViZWVkdWNhdGlvbi5jb22CFioueW91dHViZWVkdWNhdGlvbi5jb22CD3lvdXR1YmVraWRzLmNvbYIRKi55b3V0dWJla2lkcy5jb22CBXl0LmJlggcqLnl0LmJlghphbmRyb2lkLmNsaWVudHMuZ29vZ2xlLmNvbYIVKi5haXN0dWRpby5nb29nbGUuY29tMBMGA1UdIAQMMAowCAYGZ4EMAQIBMDYGA1UdHwQvMC0wK6ApoCeGJWh0dHA6Ly9jLnBraS5nb29nL3dlMi94dXp0M1BVOUZfdy5jcmwwggEDBgorBgEEAdZ5AgQCBIH0BIHxAO8AdQDXbX0Q0af1d8LH6V/XAL/5gskzWmXh0LMBcxfAyMVpdwAAAaDphrvGAAAEAwBGMEQCIHWulV3A063f1lULA6WMmyO7hu/4Mp9/Rf7GRhogUR2AAiBOaNncpzXoyP9i4WLUjc5x9vnzUMYqrV7qGRUtDexNYwB2AMIxfldFGaNF7n843rKQQevHwiFaIr9/1bWtdprZDlLNAAABoOmGu+QAAAQDAEcwRQIhAKlIst6mO0N8aRye7xaa/VWtgPCm+iPYSq02Zf78e6N5AiAcaaqj+rUED36zJP1sTogMJ5obl95ytc+cd7jpSsmB5DAKBggqhkjOPQQDAgNJADBGAiEA0LRDq0cBL+4aoZsTHC1r6NYjGaXwpDHpvUczt7nt8QQCIQDwlgtgp/yEjCxIapVCq+4hoTJvNVu+QkNjwAGz6INDsg==",
+   "domain": "",
+   "id": 2692077741,
+   "issuer": "C=US, O=Google Trust Services, CN=WE2",
+   "notafter": "Dec 21 18:38:32 2026 +00:00",
+   "notbefore": "Sep 28 18:38:33 2026 +00:00",
+   "pre_cert": false,
+   "serial": "00:a3:5b:6b:b0:56:ef:a8:6b:10:fc:98:b4:13:f6:ef:e9",
+   "shard": "tiger2026h2",
+   "shard_id": 113,
+   "shards": [
+    "tiger2026h2",
+    "wyvern2026h2",
+    "sycamore2027h1"
+   ],
+   "subject": "CN=*.google.com",
+   "subject_alternative_names": [
+    {
+     "type": "DNS",
+     "value": "*.google.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.appengine.google.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.bdn.dev"
+    },
+    {
+     "type": "DNS",
+     "value": "*.origin-test.bdn.dev"
+    },
+    {
+     "type": "DNS",
+     "value": "*.cloud.google.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.crowdsource.google.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.datacompute.google.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.ca"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.cl"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.co.in"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.co.jp"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.co.uk"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.ar"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.au"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.br"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.co"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.mx"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.tr"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.vn"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.de"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.es"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.fr"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.hu"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.it"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.nl"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.pl"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.pt"
+    },
+    {
+     "type": "DNS",
+     "value": "*.gemini.cloud.google.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.gstatic.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.metric.gstatic.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.gvt1.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.gcpcdn.gvt1.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.gvt2.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.gcp.gvt2.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.url.google.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.youtube-nocookie.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.ytimg.com"
+    },
+    {
+     "type": "DNS",
+     "value": "ai.android"
+    },
+    {
+     "type": "DNS",
+     "value": "android.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.android.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.flash.android.com"
+    },
+    {
+     "type": "DNS",
+     "value": "g.co"
+    },
+    {
+     "type": "DNS",
+     "value": "*.g.co"
+    },
+    {
+     "type": "DNS",
+     "value": "goo.gl"
+    },
+    {
+     "type": "DNS",
+     "value": "www.goo.gl"
+    },
+    {
+     "type": "DNS",
+     "value": "google-analytics.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google-analytics.com"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com"
+    },
+    {
+     "type": "DNS",
+     "value": "googlecommerce.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.googlecommerce.com"
+    },
+    {
+     "type": "DNS",
+     "value": "urchin.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.urchin.com"
+    },
+    {
+     "type": "DNS",
+     "value": "youtu.be"
+    },
+    {
+     "type": "DNS",
+     "value": "youtube.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.youtube.com"
+    },
+    {
+     "type": "DNS",
+     "value": "music.youtube.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.music.youtube.com"
+    },
+    {
+     "type": "DNS",
+     "value": "youtubeeducation.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.youtubeeducation.com"
+    },
+    {
+     "type": "DNS",
+     "value": "youtubekids.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.youtubekids.com"
+    },
+    {
+     "type": "DNS",
+     "value": "yt.be"
+    },
+    {
+     "type": "DNS",
+     "value": "*.yt.be"
+    },
+    {
+     "type": "DNS",
+     "value": "android.clients.google.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.aistudio.google.com"
+    }
+   ],
+   "timestamp": 1793665921469
+  },
+  {
+   "certificate_der": "MIIfVaADAgECAhEA8Wdz0Jl59ykJVJoQuQJ/8TAKBggqhkjOPQQDAjA7MQswCQYDVQQGEwJVUzEeMBwGA1UEChMVR29vZ2xlIFRydXN0IFNlcnZpY2VzMQwwCgYDVQQDEwNXRTIwHhcNMjYxMTAyMDgzOTM2WhcNMjcwMTI1MDgzOTM1WjAVMRMwEQYDVQQDEwpnb29nbGUuY29tMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAzzDSAejqy41XmpGbyeCWsfiylW8Xi/5nj9LAjEtglW6qPKYgS3hiNv4YQ33ozRt/sv9dQdSw0rUySMWNeBJY7HY31znj7CY7p8J3t60tKwtKNGqMd3fMy9KPaskTjm7VZ1AfIp7aHJG0BXtl21uo7WS/rtLxLwaF97wO2d4gdAjrWYF8cfBnNPCWj86r6CF22sAZdyuApV7j1G4ykjJca5E4pTcpwKieEwK7DPN5RJS+b8nebalWyN53yZKSLxLnj9xI05KzvVeeWtqeR3c0g8F3oIEQVoSnjyK6Tee5UfHuRmo8GkBqRqnoh0Pkgh4uukeR8BmJh4fSdSg9vArDWwIDAQABo4IdkzCCHY8wDgYDVR0PAQH/BAQDAgWgMBMGA1UdJQQMMAoGCCsGAQUFBwMBMAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFAZgD7nAWNn8O0Z5mNDb6tslysdZMB8GA1UdIwQYMBaAFHW+xHeuifZEN33PsWgfHRrr3DRZMDUGCCsGAQUFBwEBBCkwJzAlBggrBgEFBQcwAoYZaHR0cDovL2kucGtpLmdvb2cvd2UyLmNydDCCHJQGA1UdEQSCHIswghyHggpnb29nbGUuY29tghYqLmFwcGVuZ2luZS5nb29nbGUuY29tggkqLmJkbi5kZXaCFSoub3JpZ2luLXRlc3QuYmRuLmRldoISKi5jbG91ZC5nb29nbGUuY29tghgqLmNyb3dkc291cmNlLmdvb2dsZS5jb22CGCouZGF0YWNvbXB1dGUuZ29vZ2xlLmNvbYILKi5nb29nbGUuY2GCCyouZ29vZ2xlLmNsgg4qLmdvb2dsZS5jby5pboIOKi5nb29nbGUuY28uanCCDiouZ29vZ2xlLmNvLnVrgg8qLmdvb2dsZS5jb20uYXKCDyouZ29vZ2xlLmNvbS5hdYIPKi5nb29nbGUuY29tLmJygg8qLmdvb2dsZS5jb20uY2+CDyouZ29vZ2xlLmNvbS5teIIPKi5nb29nbGUuY29tLnRygg8qLmdvb2dsZS5jb20udm6CCyouZ29vZ2xlLmRlggsqLmdvb2dsZS5lc4ILKi5nb29nbGUuZnKCCyouZ29vZ2xlLmh1ggsqLmdvb2dsZS5pdIILKi5nb29nbGUubmyCCyouZ29vZ2xlLnBsggsqLmdvb2dsZS5wdIIZKi5nZW1pbmkuY2xvdWQuZ29vZ2xlLmNvbYINKi5nc3RhdGljLmNvbYIUKi5tZXRyaWMuZ3N0YXRpYy5jb22CCiouZ3Z0MS5jb22CESouZ2NwY2RuLmd2dDEuY29tggoqLmd2dDIuY29tgg4qLmdjcC5ndnQyLmNvbYIQKi51cmwuZ29vZ2xlLmNvbYIWKi55b3V0dWJlLW5vY29va2llLmNvbYILKi55dGltZy5jb22CCmFpLmFuZHJvaWSCC2FuZHJvaWQuY29tgg0qLmFuZHJvaWQuY29tghMqLmZsYXNoLmFuZHJvaWQuY29tggRnLmNvggYqLmcuY2+CBmdvby5nbIIKd3d3Lmdvby5nbIIUZ29vZ2xlLWFuYWx5dGljcy5jb22CFiouZ29vZ2xlLWFuYWx5dGljcy5jb22CDCouZ29vZ2xlLmNvbYISZ29vZ2xlY29tbWVyY2UuY29tghQqLmdvb2dsZWNvbW1lcmNlLmNvbYIKdXJjaGluLmNvbYIMKi51cmNoaW4uY29tggh5b3V0dS5iZYILeW91dHViZS5jb22CDSoueW91dHViZS5jb22CEW11c2ljLnlvdXR1YmUuY29tghMqLm11c2ljLnlvdXR1YmUuY29tghR5b3V0dWJlZWR1Y2F0aW9uLmNvbYIWKi55b3V0dWJlZWR1Y2F0aW9uLmNvbYIPeW91dHViZWtpZHMuY29tghEqLnlvdXR1YmVraWRzLmNvbYIFeXQuYmWCByoueXQuYmWCGmFuZHJvaWQuY2xpZW50cy5nb29nbGUuY29tghUqLmFpc3R1ZGlvLmdvb2dsZS5jb22CCWdvb2dsZS5hY4ILKi5nb29nbGUuYWOCCWdvb2dsZS5hZIILKi5nb29nbGUuYWSCCWdvb2dsZS5hZYILKi5nb29nbGUuYWWCCWdvb2dsZS5hZoILKi5nb29nbGUuYWaCCWdvb2dsZS5hZ4ILKi5nb29nbGUuYWeCCWdvb2dsZS5hbIILKi5nb29nbGUuYWyCCWdvb2dsZS5hbYILKi5nb29nbGUuYW2CCWdvb2dsZS5hc4ILKi5nb29nbGUuYXOCCWdvb2dsZS5hdIILKi5nb29nbGUuYXSCCWdvb2dsZS5heoILKi5nb29nbGUuYXqCCWdvb2dsZS5iYYILKi5nb29nbGUuYmGCCWdvb2dsZS5iZYILKi5nb29nbGUuYmWCCWdvb2dsZS5iZoILKi5nb29nbGUuYmaCCWdvb2dsZS5iZ4ILKi5nb29nbGUuYmeCCWdvb2dsZS5iaYILKi5nb29nbGUuYmmCCWdvb2dsZS5iaoILKi5nb29nbGUuYmqCCWdvb2dsZS5ic4ILKi5nb29nbGUuYnOCCWdvb2dsZS5idIILKi5nb29nbGUuYnSCCWdvb2dsZS5ieYILKi5nb29nbGUuYnmCCmdvb2dsZS5iemiCDCouZ29vZ2xlLmJ6aIIJZ29vZ2xlLmNhggpnb29nbGUuY2F0ggwqLmdvb2dsZS5jYXSCCWdvb2dsZS5jY4ILKi5nb29nbGUuY2OCCWdvb2dsZS5jZIILKi5nb29nbGUuY2SCCWdvb2dsZS5jZoILKi5nb29nbGUuY2aCCWdvb2dsZS5jZ4ILKi5nb29nbGUuY2eCCWdvb2dsZS5jaIILKi5nb29nbGUuY2iCCWdvb2dsZS5jaYILKi5nb29nbGUuY2mCCWdvb2dsZS5jbIIJZ29vZ2xlLmNtggsqLmdvb2dsZS5jbYIJZ29vZ2xlLmNuggsqLmdvb2dsZS5jboIMZ29vZ2xlLmNvLmFvgg4qLmdvb2dsZS5jby5hb4IMZ29vZ2xlLmNvLmJ3gg4qLmdvb2dsZS5jby5id4IMZ29vZ2xlLmNvLmNrgg4qLmdvb2dsZS5jby5ja4IMZ29vZ2xlLmNvLmNygg4qLmdvb2dsZS5jby5jcoIMZ29vZ2xlLmNvLmh1gg4qLmdvb2dsZS5jby5odYIMZ29vZ2xlLmNvLmlkgg4qLmdvb2dsZS5jby5pZIIMZ29vZ2xlLmNvLmlsgg4qLmdvb2dsZS5jby5pbIIMZ29vZ2xlLmNvLmltgg4qLmdvb2dsZS5jby5pbYIMZ29vZ2xlLmNvLmluggxnb29nbGUuY28uamWCDiouZ29vZ2xlLmNvLmplggxnb29nbGUuY28uanCCDGdvb2dsZS5jby5rZYIOKi5nb29nbGUuY28ua2WCDGdvb2dsZS5jby5rcoIOKi5nb29nbGUuY28ua3KCDGdvb2dsZS5jby5sc4IOKi5nb29nbGUuY28ubHOCDGdvb2dsZS5jby5tYYIOKi5nb29nbGUuY28ubWGCDGdvb2dsZS5jby5teoIOKi5nb29nbGUuY28ubXqCDGdvb2dsZS5jby5ueoIOKi5nb29nbGUuY28ubnqCDGdvb2dsZS5jby50aIIOKi5nb29nbGUuY28udGiCDGdvb2dsZS5jby50eoIOKi5nb29nbGUuY28udHqCDGdvb2dsZS5jby51Z4IOKi5nb29nbGUuY28udWeCDGdvb2dsZS5jby51a4IMZ29vZ2xlLmNvLnV6gg4qLmdvb2dsZS5jby51eoIMZ29vZ2xlLmNvLnZlgg4qLmdvb2dsZS5jby52ZYIMZ29vZ2xlLmNvLnZpgg4qLmdvb2dsZS5jby52aYIMZ29vZ2xlLmNvLnphgg4qLmdvb2dsZS5jby56YYIMZ29vZ2xlLmNvLnptgg4qLmdvb2dsZS5jby56bYIMZ29vZ2xlLmNvLnp3gg4qLmdvb2dsZS5jby56d4INZ29vZ2xlLmNvbS5hZoIPKi5nb29nbGUuY29tLmFmgg1nb29nbGUuY29tLmFngg8qLmdvb2dsZS5jb20uYWeCDWdvb2dsZS5jb20uYWmCDyouZ29vZ2xlLmNvbS5haYINZ29vZ2xlLmNvbS5hcoINZ29vZ2xlLmNvbS5hdYINZ29vZ2xlLmNvbS5iZIIPKi5nb29nbGUuY29tLmJkgg1nb29nbGUuY29tLmJogg8qLmdvb2dsZS5jb20uYmiCDWdvb2dsZS5jb20uYm6CDyouZ29vZ2xlLmNvbS5iboINZ29vZ2xlLmNvbS5ib4IPKi5nb29nbGUuY29tLmJvgg1nb29nbGUuY29tLmJygg1nb29nbGUuY29tLmJ5gg8qLmdvb2dsZS5jb20uYnmCDWdvb2dsZS5jb20uYnqCDyouZ29vZ2xlLmNvbS5ieoINZ29vZ2xlLmNvbS5jb4INZ29vZ2xlLmNvbS5jdYIPKi5nb29nbGUuY29tLmN1gg1nb29nbGUuY29tLmN5gg8qLmdvb2dsZS5jb20uY3mCDWdvb2dsZS5jb20uZG+CDyouZ29vZ2xlLmNvbS5kb4INZ29vZ2xlLmNvbS5lY4IPKi5nb29nbGUuY29tLmVjgg1nb29nbGUuY29tLmVngg8qLmdvb2dsZS5jb20uZWeCDWdvb2dsZS5jb20uZXSCDyouZ29vZ2xlLmNvbS5ldIINZ29vZ2xlLmNvbS5maoIPKi5nb29nbGUuY29tLmZqgg1nb29nbGUuY29tLmdlgg8qLmdvb2dsZS5jb20uZ2WCDWdvb2dsZS5jb20uZ2iCDyouZ29vZ2xlLmNvbS5naIINZ29vZ2xlLmNvbS5naYIPKi5nb29nbGUuY29tLmdpgg1nb29nbGUuY29tLmdygg8qLmdvb2dsZS5jb20uZ3KCDWdvb2dsZS5jb20uZ3SCDyouZ29vZ2xlLmNvbS5ndIINZ29vZ2xlLmNvbS5oa4IPKi5nb29nbGUuY29tLmhrgg1nb29nbGUuY29tLmlxgg8qLmdvb2dsZS5jb20uaXGCDWdvb2dsZS5jb20uam2CDyouZ29vZ2xlLmNvbS5qbYINZ29vZ2xlLmNvbS5qb4IPKi5nb29nbGUuY29tLmpvgg1nb29nbGUuY29tLmtogg8qLmdvb2dsZS5jb20ua2iCDWdvb2dsZS5jb20ua3eCDyouZ29vZ2xlLmNvbS5rd4INZ29vZ2xlLmNvbS5sYoIPKi5nb29nbGUuY29tLmxigg1nb29nbGUuY29tLmx5gg8qLmdvb2dsZS5jb20ubHmCDWdvb2dsZS5jb20ubW2CDyouZ29vZ2xlLmNvbS5tbYINZ29vZ2xlLmNvbS5tdIIPKi5nb29nbGUuY29tLm10gg1nb29nbGUuY29tLm14gg1nb29nbGUuY29tLm15gg8qLmdvb2dsZS5jb20ubXmCDWdvb2dsZS5jb20ubmGCDyouZ29vZ2xlLmNvbS5uYYINZ29vZ2xlLmNvbS5uZoIPKi5nb29nbGUuY29tLm5mgg1nb29nbGUuY29tLm5ngg8qLmdvb2dsZS5jb20ubmeCDWdvb2dsZS5jb20ubmmCDyouZ29vZ2xlLmNvbS5uaYINZ29vZ2xlLmNvbS5ucIIPKi5nb29nbGUuY29tLm5wgg1nb29nbGUuY29tLm5ygg8qLmdvb2dsZS5jb20ubnKCDWdvb2dsZS5jb20ub22CDyouZ29vZ2xlLmNvbS5vbYINZ29vZ2xlLmNvbS5wYYIPKi5nb29nbGUuY29tLnBhgg1nb29nbGUuY29tLnBlgg8qLmdvb2dsZS5jb20ucGWCDWdvb2dsZS5jb20ucGeCDyouZ29vZ2xlLmNvbS5wZ4INZ29vZ2xlLmNvbS5waIIPKi5nb29nbGUuY29tLnBogg1nb29nbGUuY29tLnBrgg8qLmdvb2dsZS5jb20ucGuCDWdvb2dsZS5jb20ucGyCDyouZ29vZ2xlLmNvbS5wbIINZ29vZ2xlLmNvbS5wcoIPKi5nb29nbGUuY29tLnBygg1nb29nbGUuY29tLnB5gg8qLmdvb2dsZS5jb20ucHmCDWdvb2dsZS5jb20ucWGCDyouZ29vZ2xlLmNvbS5xYYINZ29vZ2xlLmNvbS5ydYIPKi5nb29nbGUuY29tLnJ1gg1nb29nbGUuY29tLnNhgg8qLmdvb2dsZS5jb20uc2GCDWdvb2dsZS5jb20uc2KCDyouZ29vZ2xlLmNvbS5zYoINZ29vZ2xlLmNvbS5zZ4IPKi5nb29nbGUuY29tLnNngg1nb29nbGUuY29tLnNsgg8qLmdvb2dsZS5jb20uc2yCDWdvb2dsZS5jb20uc3aCDyouZ29vZ2xlLmNvbS5zdoINZ29vZ2xlLmNvbS50aoIPKi5nb29nbGUuY29tLnRqgg1nb29nbGUuY29tLnRugg8qLmdvb2dsZS5jb20udG6CDWdvb2dsZS5jb20udHKCDWdvb2dsZS5jb20udHeCDyouZ29vZ2xlLmNvbS50d4INZ29vZ2xlLmNvbS51YYIPKi5nb29nbGUuY29tLnVhgg1nb29nbGUuY29tLnV5gg8qLmdvb2dsZS5jb20udXmCDWdvb2dsZS5jb20udmOCDyouZ29vZ2xlLmNvbS52Y4INZ29vZ2xlLmNvbS52ZYIPKi5nb29nbGUuY29tLnZlgg1nb29nbGUuY29tLnZugglnb29nbGUuY3aCCyouZ29vZ2xlLmN2gglnb29nbGUuY3qCCyouZ29vZ2xlLmN6gglnb29nbGUuZGWCCWdvb2dsZS5kaoILKi5nb29nbGUuZGqCCWdvb2dsZS5ka4ILKi5nb29nbGUuZGuCCWdvb2dsZS5kbYILKi5nb29nbGUuZG2CCWdvb2dsZS5keoILKi5nb29nbGUuZHqCCWdvb2dsZS5lZYILKi5nb29nbGUuZWWCCWdvb2dsZS5lc4IKZ29vZ2xlLmV1c4IMKi5nb29nbGUuZXVzgglnb29nbGUuZmmCCyouZ29vZ2xlLmZpgglnb29nbGUuZm2CCyouZ29vZ2xlLmZtgglnb29nbGUuZnKCCmdvb2dsZS5mcmyCDCouZ29vZ2xlLmZybIIJZ29vZ2xlLmdhggsqLmdvb2dsZS5nYYIKZ29vZ2xlLmdhbIIMKi5nb29nbGUuZ2Fsgglnb29nbGUuZ2WCCyouZ29vZ2xlLmdlgglnb29nbGUuZ2eCCyouZ29vZ2xlLmdngglnb29nbGUuZ2yCCyouZ29vZ2xlLmdsgglnb29nbGUuZ22CCyouZ29vZ2xlLmdtgglnb29nbGUuZ3CCCyouZ29vZ2xlLmdwgglnb29nbGUuZ3KCCyouZ29vZ2xlLmdygglnb29nbGUuZ3mCCyouZ29vZ2xlLmd5gglnb29nbGUuaGuCCyouZ29vZ2xlLmhrgglnb29nbGUuaG6CCyouZ29vZ2xlLmhugglnb29nbGUuaHKCCyouZ29vZ2xlLmhygglnb29nbGUuaHSCCyouZ29vZ2xlLmh0gglnb29nbGUuaHWCCWdvb2dsZS5pZYILKi5nb29nbGUuaWWCCWdvb2dsZS5pbYILKi5nb29nbGUuaW2CCWdvb2dsZS5pboILKi5nb29nbGUuaW6CC2dvb2dsZS5pbmZvgg0qLmdvb2dsZS5pbmZvgglnb29nbGUuaXGCCyouZ29vZ2xlLmlxgglnb29nbGUuaXKCCyouZ29vZ2xlLmlygglnb29nbGUuaXOCCyouZ29vZ2xlLmlzgglnb29nbGUuaXSCDGdvb2dsZS5pdC5hb4IOKi5nb29nbGUuaXQuYW+CCWdvb2dsZS5qZYILKi5nb29nbGUuamWCCWdvb2dsZS5qb4ILKi5nb29nbGUuam+CC2dvb2dsZS5qb2Jzgg0qLmdvb2dsZS5qb2Jzgglnb29nbGUuanCCCyouZ29vZ2xlLmpwgglnb29nbGUua2eCCyouZ29vZ2xlLmtngglnb29nbGUua2mCCyouZ29vZ2xlLmtpgglnb29nbGUua3qCCyouZ29vZ2xlLmt6gglnb29nbGUubGGCCyouZ29vZ2xlLmxhgglnb29nbGUubGmCCyouZ29vZ2xlLmxpgglnb29nbGUubGuCCyouZ29vZ2xlLmxrgglnb29nbGUubHSCCyouZ29vZ2xlLmx0gglnb29nbGUubHWCCyouZ29vZ2xlLmx1gglnb29nbGUubHaCCyouZ29vZ2xlLmx2gglnb29nbGUubWSCCyouZ29vZ2xlLm1kgglnb29nbGUubWWCCyouZ29vZ2xlLm1lgglnb29nbGUubWeCCyouZ29vZ2xlLm1ngglnb29nbGUubWuCCyouZ29vZ2xlLm1rgglnb29nbGUubWyCCyouZ29vZ2xlLm1sgglnb29nbGUubW6CCyouZ29vZ2xlLm1ugglnb29nbGUubXOCCyouZ29vZ2xlLm1zgglnb29nbGUubXWCCyouZ29vZ2xlLm11gglnb29nbGUubXaCCyouZ29vZ2xlLm12gglnb29nbGUubXeCCyouZ29vZ2xlLm13gglnb29nbGUubmWCCyouZ29vZ2xlLm5lggxnb29nbGUubmUuanCCDiouZ29vZ2xlLm5lLmpwggpnb29nbGUubmV0ggwqLmdvb2dsZS5uZXSCCWdvb2dsZS5uZ4ILKi5nb29nbGUubmeCCWdvb2dsZS5ubIIJZ29vZ2xlLm5vggsqLmdvb2dsZS5ub4IJZ29vZ2xlLm5yggsqLmdvb2dsZS5ucoIJZ29vZ2xlLm51ggsqLmdvb2dsZS5udYINZ29vZ2xlLm9mZi5haYIPKi5nb29nbGUub2ZmLmFpgglnb29nbGUucGuCCyouZ29vZ2xlLnBrgglnb29nbGUucGyCCWdvb2dsZS5wboILKi5nb29nbGUucG6CCWdvb2dsZS5wc4ILKi5nb29nbGUucHOCCWdvb2dsZS5wdIIJZ29vZ2xlLnJvggsqLmdvb2dsZS5yb4IJZ29vZ2xlLnJzggsqLmdvb2dsZS5yc4IJZ29vZ2xlLnJ1ggsqLmdvb2dsZS5ydYIJZ29vZ2xlLnJ3ggsqLmdvb2dsZS5yd4IJZ29vZ2xlLnNjggsqLmdvb2dsZS5zY4IJZ29vZ2xlLnNlggsqLmdvb2dsZS5zZYIJZ29vZ2xlLnNoggsqLmdvb2dsZS5zaIIJZ29vZ2xlLnNpggsqLmdvb2dsZS5zaYIJZ29vZ2xlLnNrggsqLmdvb2dsZS5za4IJZ29vZ2xlLnNtggsqLmdvb2dsZS5zbYIJZ29vZ2xlLnNuggsqLmdvb2dsZS5zboIJZ29vZ2xlLnNvggsqLmdvb2dsZS5zb4IJZ29vZ2xlLnNyggsqLmdvb2dsZS5zcoIJZ29vZ2xlLnN0ggsqLmdvb2dsZS5zdIIJZ29vZ2xlLnRkggsqLmdvb2dsZS50ZIIKZ29vZ2xlLnRlbIIMKi5nb29nbGUudGVsgglnb29nbGUudGeCCyouZ29vZ2xlLnRngglnb29nbGUudGuCCyouZ29vZ2xlLnRrgglnb29nbGUudGyCCyouZ29vZ2xlLnRsgglnb29nbGUudG2CCyouZ29vZ2xlLnRtgglnb29nbGUudG6CCyouZ29vZ2xlLnRugglnb29nbGUudG+CCyouZ29vZ2xlLnRvgglnb29nbGUudHSCCyouZ29vZ2xlLnR0gglnb29nbGUudXOCCyouZ29vZ2xlLnVzgglnb29nbGUudXqCCyouZ29vZ2xlLnV6gglnb29nbGUudmeCCyouZ29vZ2xlLnZngglnb29nbGUudnWCCyouZ29vZ2xlLnZ1gglnb29nbGUud3OCCyouZ29vZ2xlLndzggtnc3RhdGljLmNvbYIKKi4ybWRuLm5ldIIUKi5hdS5kb3VibGVjbGljay5uZXSCCyouY2MtZHQuY29tghQqLmRlLmRvdWJsZWNsaWNrLm5ldIIPZG91YmxlY2xpY2suY29tghEqLmRvdWJsZWNsaWNrLmNvbYIVKi5mbHMuZG91YmxlY2xpY2submV0ghQqLmZyLmRvdWJsZWNsaWNrLm5ldIIUKi5qcC5kb3VibGVjbGljay5uZXSCFCoudWsuZG91YmxlY2xpY2submV0ghVhZC5tby5kb3VibGVjbGljay5uZXSCD2RvdWJsZWNsaWNrLm5ldIIRKi5kb3VibGVjbGljay5uZXSCFSouZ29vZ2xlYWRzc2VydmluZy5jboIJZ29vZ2xlLnVhggsqLmdvb2dsZS51YTATBgNVHSAEDDAKMAgGBmeBDAECATA2BgNVHR8ELzAtMCugKaAnhiVodHRwOi8vYy5wa2kuZ29vZy93ZTIveUs1blBodEhLUXMuY3Js",
+   "domain": "",
+   "id": 901163448,
+   "issuer": "C=US, O=Google Trust Services, CN=WE2",
+   "notafter": "Jan 25 08:39:35 2027 +00:00",
+   "notbefore": "Nov  2 08:39:36 2026 +00:00",
+   "pre_cert": true,
+   "serial": "00:f1:67:73:d0:99:79:f7:29:09:54:9a:10:b9:02:7f:f1",
+   "shard": "sycamore2027h1",
+   "shard_id": 133,
+   "shards": [
+    "sycamore2027h1"
+   ],
+   "subject": "CN=google.com",
+   "subject_alternative_names": [
+    {
+     "type": "DNS",
+     "value": "google.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.appengine.google.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.bdn.dev"
+    },
+    {
+     "type": "DNS",
+     "value": "*.origin-test.bdn.dev"
+    },
+    {
+     "type": "DNS",
+     "value": "*.cloud.google.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.crowdsource.google.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.datacompute.google.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.ca"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.cl"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.co.in"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.co.jp"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.co.uk"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.ar"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.au"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.br"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.co"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.mx"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.tr"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.vn"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.de"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.es"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.fr"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.hu"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.it"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.nl"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.pl"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.pt"
+    },
+    {
+     "type": "DNS",
+     "value": "*.gemini.cloud.google.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.gstatic.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.metric.gstatic.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.gvt1.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.gcpcdn.gvt1.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.gvt2.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.gcp.gvt2.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.url.google.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.youtube-nocookie.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.ytimg.com"
+    },
+    {
+     "type": "DNS",
+     "value": "ai.android"
+    },
+    {
+     "type": "DNS",
+     "value": "android.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.android.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.flash.android.com"
+    },
+    {
+     "type": "DNS",
+     "value": "g.co"
+    },
+    {
+     "type": "DNS",
+     "value": "*.g.co"
+    },
+    {
+     "type": "DNS",
+     "value": "goo.gl"
+    },
+    {
+     "type": "DNS",
+     "value": "www.goo.gl"
+    },
+    {
+     "type": "DNS",
+     "value": "google-analytics.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google-analytics.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com"
+    },
+    {
+     "type": "DNS",
+     "value": "googlecommerce.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.googlecommerce.com"
+    },
+    {
+     "type": "DNS",
+     "value": "urchin.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.urchin.com"
+    },
+    {
+     "type": "DNS",
+     "value": "youtu.be"
+    },
+    {
+     "type": "DNS",
+     "value": "youtube.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.youtube.com"
+    },
+    {
+     "type": "DNS",
+     "value": "music.youtube.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.music.youtube.com"
+    },
+    {
+     "type": "DNS",
+     "value": "youtubeeducation.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.youtubeeducation.com"
+    },
+    {
+     "type": "DNS",
+     "value": "youtubekids.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.youtubekids.com"
+    },
+    {
+     "type": "DNS",
+     "value": "yt.be"
+    },
+    {
+     "type": "DNS",
+     "value": "*.yt.be"
+    },
+    {
+     "type": "DNS",
+     "value": "android.clients.google.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.aistudio.google.com"
+    },
+    {
+     "type": "DNS",
+     "value": "google.ac"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.ac"
+    },
+    {
+     "type": "DNS",
+     "value": "google.ad"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.ad"
+    },
+    {
+     "type": "DNS",
+     "value": "google.ae"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.ae"
+    },
+    {
+     "type": "DNS",
+     "value": "google.af"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.af"
+    },
+    {
+     "type": "DNS",
+     "value": "google.ag"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.ag"
+    },
+    {
+     "type": "DNS",
+     "value": "google.al"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.al"
+    },
+    {
+     "type": "DNS",
+     "value": "google.am"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.am"
+    },
+    {
+     "type": "DNS",
+     "value": "google.as"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.as"
+    },
+    {
+     "type": "DNS",
+     "value": "google.at"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.at"
+    },
+    {
+     "type": "DNS",
+     "value": "google.az"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.az"
+    },
+    {
+     "type": "DNS",
+     "value": "google.ba"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.ba"
+    },
+    {
+     "type": "DNS",
+     "value": "google.be"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.be"
+    },
+    {
+     "type": "DNS",
+     "value": "google.bf"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.bf"
+    },
+    {
+     "type": "DNS",
+     "value": "google.bg"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.bg"
+    },
+    {
+     "type": "DNS",
+     "value": "google.bi"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.bi"
+    },
+    {
+     "type": "DNS",
+     "value": "google.bj"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.bj"
+    },
+    {
+     "type": "DNS",
+     "value": "google.bs"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.bs"
+    },
+    {
+     "type": "DNS",
+     "value": "google.bt"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.bt"
+    },
+    {
+     "type": "DNS",
+     "value": "google.by"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.by"
+    },
+    {
+     "type": "DNS",
+     "value": "google.bzh"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.bzh"
+    },
+    {
+     "type": "DNS",
+     "value": "google.ca"
+    },
+    {
+     "type": "DNS",
+     "value": "google.cat"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.cat"
+    },
+    {
+     "type": "DNS",
+     "value": "google.cc"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.cc"
+    },
+    {
+     "type": "DNS",
+     "value": "google.cd"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.cd"
+    },
+    {
+     "type": "DNS",
+     "value": "google.cf"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.cf"
+    },
+    {
+     "type": "DNS",
+     "value": "google.cg"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.cg"
+    },
+    {
+     "type": "DNS",
+     "value": "google.ch"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.ch"
+    },
+    {
+     "type": "DNS",
+     "value": "google.ci"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.ci"
+    },
+    {
+     "type": "DNS",
+     "value": "google.cl"
+    },
+    {
+     "type": "DNS",
+     "value": "google.cm"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.cm"
+    },
+    {
+     "type": "DNS",
+     "value": "google.cn"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.cn"
+    },
+    {
+     "type": "DNS",
+     "value": "google.co.ao"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.co.ao"
+    },
+    {
+     "type": "DNS",
+     "value": "google.co.bw"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.co.bw"
+    },
+    {
+     "type": "DNS",
+     "value": "google.co.ck"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.co.ck"
+    },
+    {
+     "type": "DNS",
+     "value": "google.co.cr"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.co.cr"
+    },
+    {
+     "type": "DNS",
+     "value": "google.co.hu"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.co.hu"
+    },
+    {
+     "type": "DNS",
+     "value": "google.co.id"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.co.id"
+    },
+    {
+     "type": "DNS",
+     "value": "google.co.il"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.co.il"
+    },
+    {
+     "type": "DNS",
+     "value": "google.co.im"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.co.im"
+    },
+    {
+     "type": "DNS",
+     "value": "google.co.in"
+    },
+    {
+     "type": "DNS",
+     "value": "google.co.je"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.co.je"
+    },
+    {
+     "type": "DNS",
+     "value": "google.co.jp"
+    },
+    {
+     "type": "DNS",
+     "value": "google.co.ke"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.co.ke"
+    },
+    {
+     "type": "DNS",
+     "value": "google.co.kr"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.co.kr"
+    },
+    {
+     "type": "DNS",
+     "value": "google.co.ls"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.co.ls"
+    },
+    {
+     "type": "DNS",
+     "value": "google.co.ma"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.co.ma"
+    },
+    {
+     "type": "DNS",
+     "value": "google.co.mz"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.co.mz"
+    },
+    {
+     "type": "DNS",
+     "value": "google.co.nz"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.co.nz"
+    },
+    {
+     "type": "DNS",
+     "value": "google.co.th"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.co.th"
+    },
+    {
+     "type": "DNS",
+     "value": "google.co.tz"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.co.tz"
+    },
+    {
+     "type": "DNS",
+     "value": "google.co.ug"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.co.ug"
+    },
+    {
+     "type": "DNS",
+     "value": "google.co.uk"
+    },
+    {
+     "type": "DNS",
+     "value": "google.co.uz"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.co.uz"
+    },
+    {
+     "type": "DNS",
+     "value": "google.co.ve"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.co.ve"
+    },
+    {
+     "type": "DNS",
+     "value": "google.co.vi"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.co.vi"
+    },
+    {
+     "type": "DNS",
+     "value": "google.co.za"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.co.za"
+    },
+    {
+     "type": "DNS",
+     "value": "google.co.zm"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.co.zm"
+    },
+    {
+     "type": "DNS",
+     "value": "google.co.zw"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.co.zw"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.af"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.af"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.ag"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.ag"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.ai"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.ai"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.ar"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.au"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.bd"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.bd"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.bh"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.bh"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.bn"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.bn"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.bo"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.bo"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.br"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.by"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.by"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.bz"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.bz"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.co"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.cu"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.cu"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.cy"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.cy"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.do"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.do"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.ec"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.ec"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.eg"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.eg"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.et"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.et"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.fj"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.fj"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.ge"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.ge"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.gh"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.gh"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.gi"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.gi"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.gr"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.gr"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.gt"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.gt"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.hk"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.hk"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.iq"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.iq"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.jm"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.jm"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.jo"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.jo"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.kh"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.kh"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.kw"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.kw"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.lb"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.lb"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.ly"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.ly"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.mm"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.mm"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.mt"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.mt"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.mx"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.my"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.my"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.na"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.na"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.nf"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.nf"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.ng"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.ng"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.ni"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.ni"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.np"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.np"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.nr"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.nr"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.om"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.om"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.pa"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.pa"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.pe"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.pe"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.pg"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.pg"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.ph"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.ph"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.pk"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.pk"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.pl"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.pl"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.pr"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.pr"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.py"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.py"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.qa"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.qa"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.ru"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.ru"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.sa"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.sa"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.sb"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.sb"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.sg"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.sg"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.sl"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.sl"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.sv"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.sv"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.tj"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.tj"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.tn"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.tn"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.tr"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.tw"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.tw"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.ua"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.ua"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.uy"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.uy"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.vc"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.vc"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.ve"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.com.ve"
+    },
+    {
+     "type": "DNS",
+     "value": "google.com.vn"
+    },
+    {
+     "type": "DNS",
+     "value": "google.cv"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.cv"
+    },
+    {
+     "type": "DNS",
+     "value": "google.cz"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.cz"
+    },
+    {
+     "type": "DNS",
+     "value": "google.de"
+    },
+    {
+     "type": "DNS",
+     "value": "google.dj"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.dj"
+    },
+    {
+     "type": "DNS",
+     "value": "google.dk"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.dk"
+    },
+    {
+     "type": "DNS",
+     "value": "google.dm"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.dm"
+    },
+    {
+     "type": "DNS",
+     "value": "google.dz"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.dz"
+    },
+    {
+     "type": "DNS",
+     "value": "google.ee"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.ee"
+    },
+    {
+     "type": "DNS",
+     "value": "google.es"
+    },
+    {
+     "type": "DNS",
+     "value": "google.eus"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.eus"
+    },
+    {
+     "type": "DNS",
+     "value": "google.fi"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.fi"
+    },
+    {
+     "type": "DNS",
+     "value": "google.fm"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.fm"
+    },
+    {
+     "type": "DNS",
+     "value": "google.fr"
+    },
+    {
+     "type": "DNS",
+     "value": "google.frl"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.frl"
+    },
+    {
+     "type": "DNS",
+     "value": "google.ga"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.ga"
+    },
+    {
+     "type": "DNS",
+     "value": "google.gal"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.gal"
+    },
+    {
+     "type": "DNS",
+     "value": "google.ge"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.ge"
+    },
+    {
+     "type": "DNS",
+     "value": "google.gg"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.gg"
+    },
+    {
+     "type": "DNS",
+     "value": "google.gl"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.gl"
+    },
+    {
+     "type": "DNS",
+     "value": "google.gm"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.gm"
+    },
+    {
+     "type": "DNS",
+     "value": "google.gp"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.gp"
+    },
+    {
+     "type": "DNS",
+     "value": "google.gr"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.gr"
+    },
+    {
+     "type": "DNS",
+     "value": "google.gy"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.gy"
+    },
+    {
+     "type": "DNS",
+     "value": "google.hk"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.hk"
+    },
+    {
+     "type": "DNS",
+     "value": "google.hn"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.hn"
+    },
+    {
+     "type": "DNS",
+     "value": "google.hr"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.hr"
+    },
+    {
+     "type": "DNS",
+     "value": "google.ht"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.ht"
+    },
+    {
+     "type": "DNS",
+     "value": "google.hu"
+    },
+    {
+     "type": "DNS",
+     "value": "google.ie"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.ie"
+    },
+    {
+     "type": "DNS",
+     "value": "google.im"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.im"
+    },
+    {
+     "type": "DNS",
+     "value": "google.in"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.in"
+    },
+    {
+     "type": "DNS",
+     "value": "google.info"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.info"
+    },
+    {
+     "type": "DNS",
+     "value": "google.iq"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.iq"
+    },
+    {
+     "type": "DNS",
+     "value": "google.ir"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.ir"
+    },
+    {
+     "type": "DNS",
+     "value": "google.is"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.is"
+    },
+    {
+     "type": "DNS",
+     "value": "google.it"
+    },
+    {
+     "type": "DNS",
+     "value": "google.it.ao"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.it.ao"
+    },
+    {
+     "type": "DNS",
+     "value": "google.je"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.je"
+    },
+    {
+     "type": "DNS",
+     "value": "google.jo"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.jo"
+    },
+    {
+     "type": "DNS",
+     "value": "google.jobs"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.jobs"
+    },
+    {
+     "type": "DNS",
+     "value": "google.jp"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.jp"
+    },
+    {
+     "type": "DNS",
+     "value": "google.kg"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.kg"
+    },
+    {
+     "type": "DNS",
+     "value": "google.ki"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.ki"
+    },
+    {
+     "type": "DNS",
+     "value": "google.kz"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.kz"
+    },
+    {
+     "type": "DNS",
+     "value": "google.la"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.la"
+    },
+    {
+     "type": "DNS",
+     "value": "google.li"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.li"
+    },
+    {
+     "type": "DNS",
+     "value": "google.lk"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.lk"
+    },
+    {
+     "type": "DNS",
+     "value": "google.lt"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.lt"
+    },
+    {
+     "type": "DNS",
+     "value": "google.lu"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.lu"
+    },
+    {
+     "type": "DNS",
+     "value": "google.lv"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.lv"
+    },
+    {
+     "type": "DNS",
+     "value": "google.md"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.md"
+    },
+    {
+     "type": "DNS",
+     "value": "google.me"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.me"
+    },
+    {
+     "type": "DNS",
+     "value": "google.mg"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.mg"
+    },
+    {
+     "type": "DNS",
+     "value": "google.mk"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.mk"
+    },
+    {
+     "type": "DNS",
+     "value": "google.ml"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.ml"
+    },
+    {
+     "type": "DNS",
+     "value": "google.mn"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.mn"
+    },
+    {
+     "type": "DNS",
+     "value": "google.ms"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.ms"
+    },
+    {
+     "type": "DNS",
+     "value": "google.mu"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.mu"
+    },
+    {
+     "type": "DNS",
+     "value": "google.mv"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.mv"
+    },
+    {
+     "type": "DNS",
+     "value": "google.mw"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.mw"
+    },
+    {
+     "type": "DNS",
+     "value": "google.ne"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.ne"
+    },
+    {
+     "type": "DNS",
+     "value": "google.ne.jp"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.ne.jp"
+    },
+    {
+     "type": "DNS",
+     "value": "google.net"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.net"
+    },
+    {
+     "type": "DNS",
+     "value": "google.ng"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.ng"
+    },
+    {
+     "type": "DNS",
+     "value": "google.nl"
+    },
+    {
+     "type": "DNS",
+     "value": "google.no"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.no"
+    },
+    {
+     "type": "DNS",
+     "value": "google.nr"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.nr"
+    },
+    {
+     "type": "DNS",
+     "value": "google.nu"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.nu"
+    },
+    {
+     "type": "DNS",
+     "value": "google.off.ai"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.off.ai"
+    },
+    {
+     "type": "DNS",
+     "value": "google.pk"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.pk"
+    },
+    {
+     "type": "DNS",
+     "value": "google.pl"
+    },
+    {
+     "type": "DNS",
+     "value": "google.pn"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.pn"
+    },
+    {
+     "type": "DNS",
+     "value": "google.ps"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.ps"
+    },
+    {
+     "type": "DNS",
+     "value": "google.pt"
+    },
+    {
+     "type": "DNS",
+     "value": "google.ro"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.ro"
+    },
+    {
+     "type": "DNS",
+     "value": "google.rs"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.rs"
+    },
+    {
+     "type": "DNS",
+     "value": "google.ru"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.ru"
+    },
+    {
+     "type": "DNS",
+     "value": "google.rw"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.rw"
+    },
+    {
+     "type": "DNS",
+     "value": "google.sc"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.sc"
+    },
+    {
+     "type": "DNS",
+     "value": "google.se"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.se"
+    },
+    {
+     "type": "DNS",
+     "value": "google.sh"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.sh"
+    },
+    {
+     "type": "DNS",
+     "value": "google.si"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.si"
+    },
+    {
+     "type": "DNS",
+     "value": "google.sk"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.sk"
+    },
+    {
+     "type": "DNS",
+     "value": "google.sm"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.sm"
+    },
+    {
+     "type": "DNS",
+     "value": "google.sn"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.sn"
+    },
+    {
+     "type": "DNS",
+     "value": "google.so"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.so"
+    },
+    {
+     "type": "DNS",
+     "value": "google.sr"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.sr"
+    },
+    {
+     "type": "DNS",
+     "value": "google.st"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.st"
+    },
+    {
+     "type": "DNS",
+     "value": "google.td"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.td"
+    },
+    {
+     "type": "DNS",
+     "value": "google.tel"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.tel"
+    },
+    {
+     "type": "DNS",
+     "value": "google.tg"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.tg"
+    },
+    {
+     "type": "DNS",
+     "value": "google.tk"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.tk"
+    },
+    {
+     "type": "DNS",
+     "value": "google.tl"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.tl"
+    },
+    {
+     "type": "DNS",
+     "value": "google.tm"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.tm"
+    },
+    {
+     "type": "DNS",
+     "value": "google.tn"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.tn"
+    },
+    {
+     "type": "DNS",
+     "value": "google.to"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.to"
+    },
+    {
+     "type": "DNS",
+     "value": "google.tt"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.tt"
+    },
+    {
+     "type": "DNS",
+     "value": "google.us"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.us"
+    },
+    {
+     "type": "DNS",
+     "value": "google.uz"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.uz"
+    },
+    {
+     "type": "DNS",
+     "value": "google.vg"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.vg"
+    },
+    {
+     "type": "DNS",
+     "value": "google.vu"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.vu"
+    },
+    {
+     "type": "DNS",
+     "value": "google.ws"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.ws"
+    },
+    {
+     "type": "DNS",
+     "value": "gstatic.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.2mdn.net"
+    },
+    {
+     "type": "DNS",
+     "value": "*.au.doubleclick.net"
+    },
+    {
+     "type": "DNS",
+     "value": "*.cc-dt.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.de.doubleclick.net"
+    },
+    {
+     "type": "DNS",
+     "value": "doubleclick.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.doubleclick.com"
+    },
+    {
+     "type": "DNS",
+     "value": "*.fls.doubleclick.net"
+    },
+    {
+     "type": "DNS",
+     "value": "*.fr.doubleclick.net"
+    },
+    {
+     "type": "DNS",
+     "value": "*.jp.doubleclick.net"
+    },
+    {
+     "type": "DNS",
+     "value": "*.uk.doubleclick.net"
+    },
+    {
+     "type": "DNS",
+     "value": "ad.mo.doubleclick.net"
+    },
+    {
+     "type": "DNS",
+     "value": "doubleclick.net"
+    },
+    {
+     "type": "DNS",
+     "value": "*.doubleclick.net"
+    },
+    {
+     "type": "DNS",
+     "value": "*.googleadsserving.cn"
+    },
+    {
+     "type": "DNS",
+     "value": "google.ua"
+    },
+    {
+     "type": "DNS",
+     "value": "*.google.ua"
+    }
+   ],
+   "timestamp": 1793612387148
+  }
+ ]
+}

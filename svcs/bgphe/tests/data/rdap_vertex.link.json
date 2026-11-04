@@ -1,0 +1,697 @@
+[
+ {
+  "rdapConformance": [
+   "rdap_level_0",
+   "icann_rdap_response_profile_1",
+   "icann_rdap_technical_implementation_guide_1",
+   "redacted"
+  ],
+  "notices": [
+   {
+    "title": "Terms of Service",
+    "description": [
+     "The WHOIS information provided in this page has been redacted",
+     "in compliance with ICANN's Temporary Specification for gTLD",
+     "Registration Data.",
+     "",
+     "The data in this record is provided by Tucows Registry for informational",
+     "purposes only, and it does not guarantee its accuracy. Tucows Registry is",
+     "authoritative for whois information in top-level domains it operates",
+     "under contract with the Internet Corporation for Assigned Names and",
+     "Numbers. Whois information from other top-level domains is provided by",
+     "a third-party under license to Tucows Registry.",
+     "",
+     "This service is intended only for query-based access. By using this",
+     "service, you agree that you will use any data presented only for lawful",
+     "purposes and that, under no circumstances will you use (a) data",
+     "acquired for the purpose of allowing, enabling, or otherwise supporting",
+     "the transmission by e-mail, telephone, facsimile or other",
+     "communications mechanism of mass  unsolicited, commercial advertising",
+     "or solicitations to entities other than your existing  customers; or",
+     "(b) this service to enable high volume, automated, electronic processes",
+     "that send queries or data to the systems of any Registrar or any",
+     "Registry except as reasonably necessary to register domain names or",
+     "modify existing domain name registrations.",
+     "",
+     "Tucows Registry reserves the right to modify these terms at any time. By",
+     "submitting this query, you agree to abide by this policy. All rights",
+     "reserved."
+    ],
+    "links": [
+     {
+      "value": "https://rdap.uniregistry.net/rdap/domain/vertex.link",
+      "rel": "terms-of-service",
+      "href": "https://rdap.uniregistry.net/",
+      "type": "text/html"
+     }
+    ]
+   },
+   {
+    "title": "Status Codes",
+    "description": [
+     "For more information on domain status codes, please visit https://icann.org/epp"
+    ],
+    "links": [
+     {
+      "value": "https://rdap.uniregistry.net/rdap/domain/vertex.link",
+      "rel": "glossary",
+      "href": "https://icann.org/epp",
+      "type": "text/html"
+     }
+    ]
+   },
+   {
+    "title": "RDDS Inaccuracy Complaint Form",
+    "description": [
+     "URL of the ICANN RDDS Inaccuracy Complaint Form: https://icann.org/wicf"
+    ],
+    "links": [
+     {
+      "value": "https://rdap.uniregistry.net/rdap/domain/vertex.link",
+      "rel": "help",
+      "href": "https://icann.org/wicf",
+      "type": "text/html"
+     }
+    ]
+   }
+  ],
+  "redacted": [
+   {
+    "name": {
+     "type": "Registrant Contact"
+    },
+    "prePath": "$.entities[?(@.roles[0]=='registrant')]",
+    "pathLang": "jsonpath",
+    "method": "removal"
+   }
+  ],
+  "objectClassName": "domain",
+  "handle": "DO_04a969917b3f7361097e306b8ff46eed-UR",
+  "ldhName": "vertex.link",
+  "unicodeName": "vertex.link",
+  "nameservers": [
+   {
+    "objectClassName": "nameserver",
+    "handle": "HO_eb40c45d781a1e15ca250016f4b33941-UR",
+    "ldhName": "pdns1.registrar-servers.com",
+    "unicodeName": "pdns1.registrar-servers.com",
+    "status": [
+     "associated"
+    ],
+    "events": [
+     {
+      "eventAction": "last update of RDAP database",
+      "eventDate": "2026-11-03T15:14:17.338Z"
+     }
+    ]
+   },
+   {
+    "objectClassName": "nameserver",
+    "handle": "HO_4bb4e4bb40327d4dd5b1f70f77413f87-UR",
+    "ldhName": "pdns2.registrar-servers.com",
+    "unicodeName": "pdns2.registrar-servers.com",
+    "status": [
+     "associated"
+    ],
+    "events": [
+     {
+      "eventAction": "last update of RDAP database",
+      "eventDate": "2026-11-03T15:14:17.338Z"
+     }
+    ]
+   }
+  ],
+  "secureDNS": {
+   "delegationSigned": true,
+   "dsData": [
+    {
+     "keyTag": 59942,
+     "algorithm": 13,
+     "digest": "05B9535F48EBC853B9960D6FA839FC967639F46C877C0BCE55FE317B2EFA7F53",
+     "digestType": 2
+    }
+   ]
+  },
+  "entities": [
+   {
+    "objectClassName": "entity",
+    "handle": "1068",
+    "vcardArray": [
+     "vcard",
+     [
+      [
+       "version",
+       [],
+       "text",
+       "4.0"
+      ],
+      [
+       "fn",
+       [],
+       "text",
+       "NAMECHEAP"
+      ],
+      [
+       "adr",
+       {
+        "cc": "US"
+       },
+       "text",
+       [
+        "",
+        "",
+        "4600 East Washington Street, SUITE 305",
+        "Phoenix",
+        "AZ",
+        "85034",
+        ""
+       ]
+      ],
+      [
+       "tel",
+       {
+        "type": "voice"
+       },
+       "uri",
+       "tel:+1.3102593259"
+      ],
+      [
+       "tel",
+       {
+        "type": "fax"
+       },
+       "uri",
+       "tel:+1.3102593259"
+      ],
+      [
+       "email",
+       [],
+       "text",
+       "support@namecheap.com"
+      ]
+     ]
+    ],
+    "roles": [
+     "registrar"
+    ],
+    "publicIds": [
+     {
+      "type": "IANA Registrar ID",
+      "identifier": "1068"
+     }
+    ],
+    "entities": [
+     {
+      "objectClassName": "entity",
+      "handle": "CO_ce0006c16f4836a9e67f94323d32f88a-UR",
+      "vcardArray": [
+       "vcard",
+       [
+        [
+         "version",
+         [],
+         "text",
+         "4.0"
+        ],
+        [
+         "fn",
+         [],
+         "text",
+         "Jennifer Suarez"
+        ],
+        [
+         "adr",
+         {
+          "cc": "US"
+         },
+         "text",
+         [
+          "",
+          "",
+          [
+           "4600 EAST WASHINGTON STREET, SUITE 305, PHOENIX, AZ, 85034, US",
+           "",
+           ""
+          ],
+          "Phoenix",
+          "",
+          "",
+          ""
+         ]
+        ],
+        [
+         "tel",
+         {
+          "type": "voice"
+         },
+         "uri",
+         "tel:+1.6613102107"
+        ],
+        [
+         "tel",
+         {
+          "type": "fax"
+         },
+         "uri",
+         "tel:+1.6613102107"
+        ],
+        [
+         "email",
+         [],
+         "text",
+         "abuse@namecheap.com"
+        ]
+       ]
+      ],
+      "roles": [
+       "abuse"
+      ],
+      "events": [
+       {
+        "eventAction": "last update of RDAP database",
+        "eventDate": "2026-11-03T15:14:17.338Z"
+       }
+      ]
+     }
+    ],
+    "links": [
+     {
+      "value": "https://rdap.namecheap.com/",
+      "rel": "about",
+      "href": "https://rdap.uniregistry.net/rdap/entity/1068",
+      "type": "application/rdap+json"
+     }
+    ],
+    "events": [
+     {
+      "eventAction": "last update of RDAP database",
+      "eventDate": "2026-11-03T15:14:17.338Z"
+     }
+    ]
+   }
+  ],
+  "status": [
+   "client transfer prohibited"
+  ],
+  "links": [
+   {
+    "value": "https://rdap.uniregistry.net/rdap/domain/vertex.link",
+    "rel": "related",
+    "href": "https://rdap.namecheap.com/domain/vertex.link",
+    "type": "application/rdap+json"
+   },
+   {
+    "value": "https://rdap.uniregistry.net/rdap/domain/vertex.link",
+    "rel": "self",
+    "href": "https://rdap.uniregistry.net/rdap/domain/vertex.link",
+    "type": "application/rdap+json"
+   }
+  ],
+  "events": [
+   {
+    "eventAction": "registration",
+    "eventActor": "enom",
+    "eventDate": "2014-08-15T23:07:48.961Z"
+   },
+   {
+    "eventAction": "expiration",
+    "eventDate": "2027-08-15T23:07:48.961Z"
+   },
+   {
+    "eventAction": "last changed",
+    "eventDate": "2026-09-01T03:37:59.507Z"
+   },
+   {
+    "eventAction": "transfer",
+    "eventDate": "2021-07-16T08:14:11.252Z"
+   },
+   {
+    "eventAction": "last update of RDAP database",
+    "eventDate": "2026-11-03T15:14:17.338Z"
+   }
+  ]
+ },
+ [
+  {
+   "rdapConformance": [
+    "rdap_level_0",
+    "icann_rdap_response_profile_1",
+    "icann_rdap_technical_implementation_guide_1",
+    "redacted"
+   ],
+   "notices": [
+    {
+     "title": "RDAP Terms of Service",
+     "description": [
+      "By querying Namecheap’s  RDAP Domain Database, you agree to comply with Namecheap’s RDAP Terms of Service, including but not limited to the terms herein,  and you acknowledge and agree that your information will be used in accordance with Namecheap Privacy Policy (https://www.namecheap.com/legal/general/privacy-policy/), including that Namecheap may retain certain details about queries to our RDAP Domain Database for the purposes of detecting and preventing misuse.  If you do not agree to any of these terms, do not access or use ,the RDAP Domain Database.",
+      "Although Namecheap believes the data to be reliable, you agree and acknowledge that any information provided is 'as is' without any guarantee of accuracy.",
+      "You further agree that you will:",
+      "1) Not misuse the RDAP Domain Database. It is intended solely for query-based access and should not be used for or relied upon for any other purpose.",
+      "2) Not use the RDAP Domain Database to allow, enable, or otherwise support the transmission of unsolicited, commercial advertising or solicitations.",
+      "3) Not access the RDAP Domain Database through the use of high volume, automated electronic processes that send queries or data to the systems of Namecheap, any other ICANN-accredited registrar, or any registry operator.",
+      "4) Not compile, repackage, disseminate, or otherwise use the information contained in the RDAP Domain Database in its entirety, or in any substantial portion, without our prior written permission.",
+      "5) You will only use the information contained in the RDAP Domain Database for lawful purposes.",
+      "We reserve the right to restrict or deny your access to the RDAP Domain Database if we suspect that you have failed to comply with these terms.",
+      "We reserve the right to modify this agreement at any time."
+     ],
+     "links": [
+      {
+       "href": "https://www.namecheap.com/legal/domains/rdap-tos/",
+       "rel": "terms-of-service",
+       "type": "text/html",
+       "value": "https://rdap.namecheap.com/domain/vertex.link"
+      }
+     ]
+    },
+    {
+     "title": "Status Codes",
+     "description": [
+      "For more information on domain status codes, please visit https://icann.org/epp"
+     ],
+     "links": [
+      {
+       "href": "https://icann.org/epp",
+       "rel": "glossary",
+       "type": "text/html",
+       "value": "https://rdap.namecheap.com/domain/vertex.link"
+      }
+     ]
+    },
+    {
+     "title": "RDDS Inaccuracy Complaint Form",
+     "description": [
+      "URL of the ICANN RDDS Inaccuracy Complaint Form: https://icann.org/wicf"
+     ],
+     "links": [
+      {
+       "href": "https://icann.org/wicf",
+       "rel": "help",
+       "type": "text/html",
+       "value": "https://rdap.namecheap.com/domain/vertex.link"
+      }
+     ]
+    }
+   ],
+   "objectClassName": "domain",
+   "lang": "en",
+   "links": [
+    {
+     "href": "https://rdap.namecheap.com/domain/vertex.link",
+     "rel": "self",
+     "type": "application/rdap+json",
+     "value": "https://rdap.namecheap.com/domain/vertex.link"
+    }
+   ],
+   "ldhName": "vertex.link",
+   "unicodeName": "vertex.link",
+   "events": [
+    {
+     "eventAction": "last update of RDAP database",
+     "eventDate": "2026-11-03T15:14:17Z"
+    },
+    {
+     "eventAction": "registration",
+     "eventDate": "2014-08-15T23:07:48Z"
+    },
+    {
+     "eventAction": "registrar expiration",
+     "eventDate": "2027-08-15T23:07:48Z"
+    },
+    {
+     "eventAction": "last changed",
+     "eventDate": "2026-07-16T10:38:28Z"
+    }
+   ],
+   "status": [
+    "client transfer prohibited"
+   ],
+   "secureDNS": {
+    "delegationSigned": true,
+    "zoneSigned": true,
+    "dsData": [
+     {
+      "keyTag": 59942,
+      "algorithm": 13,
+      "digest": "05B9535F48EBC853B9960D6FA839FC967639F46C877C0BCE55FE317B2EFA7F53",
+      "digestType": 2
+     }
+    ]
+   },
+   "port43": "whois.namecheap.com",
+   "entities": [
+    {
+     "publicIds": [
+      {
+       "type": "IANA Registrar ID",
+       "identifier": "1068"
+      }
+     ],
+     "entities": [
+      {
+       "objectClassName": "entity",
+       "vcardArray": [
+        "vcard",
+        [
+         [
+          "version",
+          [],
+          "text",
+          "4.0"
+         ],
+         [
+          "fn",
+          [],
+          "text",
+          "NAMECHEAP INC"
+         ],
+         [
+          "tel",
+          {
+           "type": [
+            "voice"
+           ]
+          },
+          "uri",
+          "tel:+1.9854014545"
+         ],
+         [
+          "email",
+          [],
+          "text",
+          "abuse@namecheap.com"
+         ]
+        ]
+       ],
+       "roles": [
+        "abuse"
+       ]
+      }
+     ],
+     "objectClassName": "entity",
+     "handle": "1068",
+     "vcardArray": [
+      "vcard",
+      [
+       [
+        "version",
+        [],
+        "text",
+        "4.0"
+       ],
+       [
+        "fn",
+        [],
+        "text",
+        "NAMECHEAP INC"
+       ],
+       [
+        "tel",
+        {
+         "type": [
+          "voice"
+         ]
+        },
+        "uri",
+        "tel:+1.6613102107"
+       ],
+       [
+        "email",
+        [],
+        "text",
+        "support@namecheap.com"
+       ]
+      ]
+     ],
+     "roles": [
+      "registrar"
+     ],
+     "links": [
+      {
+       "href": "https://www.namecheap.com/",
+       "rel": "about",
+       "value": "https://rdap.namecheap.com/"
+      }
+     ]
+    },
+    {
+     "objectClassName": "entity",
+     "handle": "038b463ab70e46320afa08d947a7cf73-Namech",
+     "vcardArray": [
+      "vcard",
+      [
+       [
+        "version",
+        [],
+        "text",
+        "4.0"
+       ],
+       [
+        "fn",
+        [],
+        "text",
+        ""
+       ],
+       [
+        "org",
+        [],
+        "text",
+        "Privacy service provided by WITHHELD FOR PRIVACY LLC"
+       ],
+       [
+        "adr",
+        {
+         "cc": "US"
+        },
+        "text",
+        [
+         "",
+         "",
+         "16192 Coastal Highway",
+         "Lewes",
+         "Delaware",
+         "19958",
+         ""
+        ]
+       ],
+       [
+        "tel",
+        {
+         "type": [
+          "voice"
+         ]
+        },
+        "uri",
+        "tel:+1.3022061391"
+       ],
+       [
+        "email",
+        [],
+        "text",
+        "00d744aaa7624ad582f405c538d7b603.protect@withheldforprivacy.com"
+       ]
+      ]
+     ],
+     "roles": [
+      "registrant"
+     ]
+    },
+    {
+     "objectClassName": "entity",
+     "handle": "1e27576b46844ca867d208d947ae0e9d-Namech",
+     "vcardArray": [
+      "vcard",
+      [
+       [
+        "version",
+        [],
+        "text",
+        "4.0"
+       ],
+       [
+        "fn",
+        [],
+        "text",
+        ""
+       ],
+       [
+        "org",
+        [],
+        "text",
+        "Privacy service provided by WITHHELD FOR PRIVACY LLC"
+       ],
+       [
+        "adr",
+        {
+         "cc": "US"
+        },
+        "text",
+        [
+         "",
+         "",
+         "16192 Coastal Highway",
+         "Lewes",
+         "Delaware",
+         "19958",
+         ""
+        ]
+       ],
+       [
+        "tel",
+        {
+         "type": [
+          "voice"
+         ]
+        },
+        "uri",
+        "tel:+1.3022061391"
+       ],
+       [
+        "email",
+        [],
+        "text",
+        "00d744aaa7624ad582f405c538d7b603.protect@withheldforprivacy.com"
+       ]
+      ]
+     ],
+     "roles": [
+      "technical"
+     ]
+    }
+   ],
+   "nameservers": [
+    {
+     "objectClassName": "nameserver",
+     "ldhName": "pdns1.registrar-servers.com",
+     "unicodeName": "pdns1.registrar-servers.com"
+    },
+    {
+     "objectClassName": "nameserver",
+     "ldhName": "pdns2.registrar-servers.com",
+     "unicodeName": "pdns2.registrar-servers.com"
+    }
+   ],
+   "redacted": [
+    {
+     "name": {
+      "type": "Registry Domain ID"
+     },
+     "method": "removal"
+    },
+    {
+     "name": {
+      "type": "Registrant Name"
+     },
+     "postPath": "$.entities[?(@.roles[0]=='registrant')].vcardArray[1][?(@[0]=='fn')][3]",
+     "method": "emptyValue"
+    },
+    {
+     "name": {
+      "type": "Tech Name"
+     },
+     "postPath": "$.entities[?(@.roles[0]=='technical')].vcardArray[1][?(@[0]=='fn')][3]",
+     "method": "emptyValue"
+    }
+   ]
+  }
+ ]
+]

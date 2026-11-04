@@ -1,0 +1,31 @@
+{
+ "duration": "9.93073ms",
+ "entries": [
+  {
+   "ip": "8.8.8.8",
+   "hostnames": [
+    "arvenliano.top",
+    "1w3.cc",
+    "cpcalendars.veja.top",
+    "rkk.guitar2.top",
+    "jasonswords.ie",
+    "*.wild.example.com",
+    "not a host",
+    "8.8.8.8.nip.io"
+   ]
+  },
+  {
+   "ip": "8.8.8.4",
+   "hostnames": [
+    "sabievtimbers.co.za",
+    "test.radium.red"
+   ]
+  }
+ ],
+ "has_more": true,
+ "next_page": 1.2358404545658237e+19,
+ "prefix": "8.8.8.0/24",
+ "success": true,
+ "total_hostnames": 73882,
+ "total_ips": 2
+}

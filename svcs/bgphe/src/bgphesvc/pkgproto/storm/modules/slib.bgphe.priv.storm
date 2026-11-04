@@ -1,0 +1,26 @@
+// Privileged (asroot) wrappers around the slib.bgphe service for slib.bgphe.user.
+// Every function returns the service's {status, mesg, data} dict, or emits them for generators.
+
+init {
+    $svc = $lib.service.get("slib.bgphe")
+}
+
+// Certificates
+
+function certs(domain, limit=(200), valid=(false), precerts=(true)) {
+    for $retn in $svc.certs($domain, limit=$limit, valid=$valid, precerts=$precerts) {
+        emit $retn
+    }
+}
+
+function subdomains(domain) { return($svc.subdomains($domain)) }
+function hosts(valu) { return($svc.hosts($valu)) }
+
+// Whois
+
+function whoisDomain(domain, rdap=(true)) { return($svc.whoisDomain($domain, useRdap=$rdap)) }
+function whoisAsn(asn) { return($svc.whoisAsn($asn)) }
+
+// BGP
+
+function prefixes(asn) { return($svc.prefixes($asn)) }

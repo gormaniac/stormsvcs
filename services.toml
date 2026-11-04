@@ -43,6 +43,11 @@ name = "Malpedia"
 src = "svcs/malpedia/"
 workflow = ".github/workflows/malpedia.yml"
 
+[stormsvcs.bgphe]
+name = "Hurricane Electric BGP Toolkit"
+src = "svcs/bgphe/"
+workflow = ".github/workflows/bgphe.yml"
+
 # [stormsvcs.report-ingest]
 # name = "Report Ingest"
 # src = "svcs/report-ingest/"

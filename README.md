@@ -63,6 +63,8 @@ Each service must have the following:
   - The whole Hatching Triage Sandbox API: submit files and URLs, model analyses (configs, processes, network, dropped files), download samples/pcaps/dropped files, and manage profiles, Yara rules, and users.
 - `malpedia`
   - Keep Malpedia's library (`media:news`), threat actors (`risk:threat`), malware families (`risk:tool:software`), and YARA rules (`it:app:yara:rule`) in sync, with one bulk pull on registration and small daily updates from the public API.
+- `bgphe`
+  - Hurricane Electric's BGP Toolkit (bgp.he.net): CT log certificates by domain, subdomain, or IP, domain whois (RDAP, or whois text) and ASN whois (the org behind an ASN), and the prefixes an ASN originates.
 
 
 ## Services Wish List/Plan
