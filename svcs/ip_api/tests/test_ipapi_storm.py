@@ -1,12 +1,16 @@
 """Pytests for the slib.ipapi Storm package (commands, modules, and perms)."""
 
+import pathlib
+import tomllib
 from unittest import mock
 
 import synapse.tests.utils as s_tests
 
 from ipapi import __version__
-from ipapi.svc import IpApiSvc
-from ipapi.defs import PKGDEFS, SVC_NAME
+from ipapi.svc import IpApiSvc, shapeData
+from ipapi.defs import PKGDEFS, SVC_GUID, SVC_NAME
+
+SVC_DIR = pathlib.Path(__file__).parent.parent
 
 
 CMDS = (
@@ -20,9 +24,8 @@ MODS = (
     f"{SVC_NAME}.admin",
 )
 
-# A canned successful ip-api.com result, already shaped the way IpApiSvc._query()
-# returns it (i.e. with the "as" key already renamed to "as_").
-SUCCESS_DATA = {
+# A canned successful ip-api.com result, as ip-api.com returns it.
+RAW_DATA = {
     "query": "8.8.8.8",
     "status": "success",
     "country": "United States",
@@ -30,22 +33,46 @@ SUCCESS_DATA = {
     "region": "VA",
     "regionName": "Virginia",
     "city": "Ashburn",
-    "zip": "20149",
     "lat": 39.03,
     "lon": -77.5,
-    "timezone": "America/New_York",
     "isp": "Google LLC",
     "org": "Google Public DNS",
-    "as_": "AS15169 Google LLC",
+    "as": "AS15169 Google LLC",
     "asname": "GOOGLE",
+    "reverse": "dns.google",
     "mobile": False,
     "proxy": False,
     "hosting": True,
 }
 
 
+def shaped(**kwargs) -> dict:
+    """RAW_DATA, updated with kwargs, shaped the way IpApiSvc._query() returns it
+    (i.e. with the "as" key renamed to "as_" and parsed into asnum/asorg)."""
+    return shapeData({**RAW_DATA, **kwargs})
+
+
+SUCCESS_DATA = shaped()
+
+
 class TestIpApiStorm(s_tests.SynTest):
     """Test suite for the slib.ipapi Storm package's commands and modules."""
+
+    def test_versions_match(self):
+        # The version lives in pyproject.toml (the image tag), __init__.py, the package yaml,
+        # and the service's own uv.lock entry.
+        with (SVC_DIR / "pyproject.toml").open("rb") as fd:
+            assert tomllib.load(fd)["project"]["version"] == __version__
+        assert PKGDEFS[0]["version"] == __version__
+
+        with (SVC_DIR / "uv.lock").open("rb") as fd:
+            pkgs = {p["name"]: p for p in tomllib.load(fd)["package"]}
+        assert pkgs["ipapi"]["version"] == __version__
+
+    def test_lib_source_guid(self):
+        # slib.ipapi.lib hardcodes the service's meta:source guid for its -(seen)> edges.
+        lib = SVC_DIR / "src/ipapi/pkgproto/storm/modules/slib.ipapi.lib.storm"
+        assert f'$srcGuid = "{SVC_GUID}"' in lib.read_text()
 
     async def test_svc_starts(self):
         async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
@@ -178,7 +205,7 @@ class TestIpApiStorm(s_tests.SynTest):
             with mock.patch.object(svc, "_query", fake_query):
                 msgs = await core.stormlist(f"inet:fqdn=example.com | {SVC_NAME}.query")
                 self.stormHasNoErr(msgs)
-                self.stormIsInWarn("is not supported", msgs)
+                self.stormIsInWarn("is not supported by the slib.ipapi.query command", msgs)
 
     async def test_cmd_query_mixed_supported_unsupported_forms(self):
         async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
@@ -192,7 +219,7 @@ class TestIpApiStorm(s_tests.SynTest):
                     f"inet:ipv4=8.8.8.8 inet:fqdn=example.com | {SVC_NAME}.query"
                 )
                 self.stormHasNoErr(msgs)
-                self.stormIsInWarn("is not supported", msgs)
+                self.stormIsInWarn("is not supported by the slib.ipapi.query command", msgs)
 
             nodes = await core.nodes("inet:ipv4=8.8.8.8")
             assert nodes[0].get("asn") is not None
@@ -349,8 +376,7 @@ class TestIpApiStorm(s_tests.SynTest):
 
     async def test_cmd_query_malformed_asn_does_not_error(self):
         async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
-            data = dict(SUCCESS_DATA)
-            data["as_"] = "not-a-valid-asn-format"
+            data = shaped(**{"as": "not-a-valid-asn-format"})
 
             async def fake_query(ipaddr):
                 return data, {}
@@ -361,6 +387,8 @@ class TestIpApiStorm(s_tests.SynTest):
 
             nodes = await core.nodes("inet:ipv4=8.8.8.8")
             assert len(nodes) == 1
+            assert nodes[0].get("asn") is None
+            assert len(await core.nodes("inet:asn")) == 0
 
     async def test_cmd_query_applies_default_tags(self):
         async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
@@ -505,3 +533,367 @@ class TestIpApiStormPerms(s_tests.SynTest):
 
             msgs = await core.stormlist('$lib.print($lib.globals.get("slib:ipapi:tag:prefix"))')
             self.stormNotInPrint("someprefix", msgs)
+
+
+def fakeQuery(data: dict):
+    """A fake IpApiSvc._query that always returns a copy of data, recording each IP."""
+
+    calls = []
+
+    async def fake_query(ipaddr):
+        calls.append(ipaddr)
+        return dict(data), {}
+
+    fake_query.calls = calls
+    return fake_query
+
+
+class TestIpApiStormModel(s_tests.SynTest):
+    """Test suite for how slib.ipapi.lib models ip-api.com results."""
+
+    async def test_no_asn(self):
+        """IPs with no ASN ("as", "asname", and "isp" are all "") must still be modeled."""
+
+        async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
+            data = shaped(**{"as": "", "asname": "", "isp": "", "org": ""})
+            assert data["asnum"] is None
+
+            with mock.patch.object(svc, "_query", fakeQuery(data)):
+                msgs = await core.stormlist(f"{SVC_NAME}.query --query 8.8.8.8 --yield")
+                self.stormHasNoErr(msgs)
+                self.stormHasNoWarnErr(msgs)
+
+            nodes = await core.nodes("inet:ipv4=8.8.8.8")
+            assert len(nodes) == 1
+            assert nodes[0].get("asn") is None
+            assert nodes[0].get("latlong") == (39.03, -77.5)
+            assert len(await core.nodes("inet:asn")) == 0
+            assert len(await core.nodes("ou:org")) == 0
+            assert len(await core.nodes("geo:telem")) == 1
+
+    async def test_asn_and_orgs(self):
+        async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
+            with mock.patch.object(svc, "_query", fakeQuery(SUCCESS_DATA)):
+                msgs = await core.stormlist(f"{SVC_NAME}.query --query 8.8.8.8")
+                self.stormHasNoWarnErr(msgs)
+
+            asns = await core.nodes("inet:asn")
+            assert len(asns) == 1
+            assert asns[0].ndef == ("inet:asn", 15169)
+            assert asns[0].get("name") == "google"
+
+            # The AS's org, from the name after the AS number. It's also the ISP.
+            owners = await core.nodes("inet:asn=15169 -> ou:org")
+            assert len(owners) == 1
+            assert owners[0].get("name") == "google llc"
+            assert owners[0].get("names") == ("google",)
+            assert owners[0].get("orgtype") == "company.isp."
+
+            # The IP's WHOIS org owns the IP.
+            whois = await core.nodes("inet:ipv4=8.8.8.8 <(owns)- ou:org")
+            assert len(whois) == 1
+            assert whois[0].get("name") == "google public dns"
+            assert whois[0].get("orgtype") is None
+
+            nodes = await core.nodes("inet:ipv4=8.8.8.8")
+            assert nodes[0].get("asn") == 15169
+            assert nodes[0].get("dns:rev") == "dns.google"
+
+    async def test_asn_owner_falls_back_to_isp(self):
+        async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
+            data = shaped(**{"as": "AS64512", "asname": "", "org": "", "reverse": ""})
+
+            with mock.patch.object(svc, "_query", fakeQuery(data)):
+                msgs = await core.stormlist(f"{SVC_NAME}.query --query 8.8.8.8")
+                self.stormHasNoWarnErr(msgs)
+
+            asns = await core.nodes("inet:asn=64512")
+            assert len(asns) == 1
+            assert asns[0].get("name") is None
+
+            owners = await core.nodes("inet:asn=64512 -> ou:org")
+            assert owners[0].get("name") == "google llc"
+            assert owners[0].get("names") is None
+            assert len(await core.nodes("inet:ipv4=8.8.8.8 <(owns)- ou:org")) == 0
+            assert (await core.nodes("inet:ipv4=8.8.8.8"))[0].get("dns:rev") is None
+
+    async def test_asn_owner_not_isp(self):
+        async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
+            data = shaped(isp="Some Reseller")
+
+            with mock.patch.object(svc, "_query", fakeQuery(data)):
+                msgs = await core.stormlist(f"{SVC_NAME}.query --query 8.8.8.8")
+                self.stormHasNoWarnErr(msgs)
+
+            owners = await core.nodes("inet:asn=15169 -> ou:org")
+            assert owners[0].get("name") == "google llc"
+            assert owners[0].get("orgtype") is None
+
+    async def test_place_and_telem(self):
+        async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
+            # An existing pol:country is reused, not duplicated.
+            await core.nodes("[ pol:country=* :iso2=us :name='united states' ]")
+
+            with mock.patch.object(svc, "_query", fakeQuery(SUCCESS_DATA)):
+                msgs = await core.stormlist(f"{SVC_NAME}.query --query 8.8.8.8")
+                self.stormHasNoWarnErr(msgs)
+
+            places = await core.nodes("geo:place")
+            assert len(places) == 1
+            assert places[0].get("loc") == "us.va.ashburn"
+
+            telems = await core.nodes("geo:telem")
+            assert len(telems) == 1
+            telem = telems[0]
+            assert telem.get("node") == ("inet:ipv4", 134744072)
+            assert telem.get("place") == places[0].ndef[1]
+            assert telem.get("place:loc") == "us.va.ashburn"
+            assert telem.get("place:country:code") == "us"
+            first = telem.get("time")
+            assert first is not None
+
+            countries = await core.nodes("pol:country")
+            assert len(countries) == 1
+            assert telem.get("place:country") == countries[0].ndef[1]
+
+            # Re-querying the same IP at the same place reuses the telem and keeps its :time.
+            with mock.patch.object(svc, "_query", fakeQuery(SUCCESS_DATA)):
+                msgs = await core.stormlist(f"{SVC_NAME}.query --query 8.8.8.8")
+                self.stormHasNoWarnErr(msgs)
+
+            telems = await core.nodes("geo:telem")
+            assert len(telems) == 1
+            assert telems[0].get("time") == first
+
+    async def test_telem_new_country(self):
+        async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
+            with mock.patch.object(svc, "_query", fakeQuery(SUCCESS_DATA)):
+                msgs = await core.stormlist(f"{SVC_NAME}.query --query 8.8.8.8")
+                self.stormHasNoWarnErr(msgs)
+
+            countries = await core.nodes("pol:country")
+            assert len(countries) == 1
+            assert countries[0].get("iso2") == "us"
+
+    async def test_telem_bad_country_code(self):
+        async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
+            data = shaped(countryCode="USA")
+
+            with mock.patch.object(svc, "_query", fakeQuery(data)):
+                msgs = await core.stormlist(f"{SVC_NAME}.query --query 8.8.8.8")
+                self.stormHasNoWarnErr(msgs)
+
+            telems = await core.nodes("geo:telem")
+            assert len(telems) == 1
+            assert telems[0].get("place:country") is None
+            assert telems[0].get("place:country:code") is None
+            assert len(await core.nodes("pol:country")) == 0
+
+    async def test_source_edges(self):
+        async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
+            with mock.patch.object(svc, "_query", fakeQuery(SUCCESS_DATA)):
+                msgs = await core.stormlist(f"{SVC_NAME}.query --query 8.8.8.8")
+                self.stormHasNoWarnErr(msgs)
+
+            seen = await core.nodes(f"meta:source={SVC_GUID} -(seen)> *")
+            forms = sorted(n.ndef[0] for n in seen)
+            assert forms == ["geo:telem", "inet:asn", "inet:ipv4"]
+
+    async def test_all_tags(self):
+        async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
+            data = shaped(hosting=False, proxy=True, mobile=True)
+
+            with mock.patch.object(svc, "_query", fakeQuery(data)):
+                msgs = await core.stormlist(f"{SVC_NAME}.query --query 8.8.8.8")
+                self.stormHasNoWarnErr(msgs)
+
+            nodes = await core.nodes("inet:ipv4=8.8.8.8")
+            assert "rep.ipapi.infra.proxy" in nodes[0].tags
+            assert "rep.ipapi.infra.mobile" in nodes[0].tags
+            assert "rep.ipapi.infra.hosting" not in nodes[0].tags
+
+    async def test_modelresult_invalid_ip(self):
+        async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
+            q = f"$lib.import({SVC_NAME}.lib).modelResult(({{'query': 'nope'}}), (null))"
+            msgs = await core.stormlist(f"yield {q}")
+            self.stormIsInWarn("ip-api.com returned an invalid IP address: nope", msgs)
+            assert len(await core.nodes("inet:ipv4")) == 0
+
+
+class TestIpApiStormQuery(s_tests.SynTest):
+    """Test suite for slib.ipapi.query's --query validation and batching of inbound nodes."""
+
+    async def test_query_invalid_ip(self):
+        async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
+            fake = fakeQuery(SUCCESS_DATA)
+
+            with mock.patch.object(svc, "_query", fake):
+                msgs = await core.stormlist(f"{SVC_NAME}.query --query not-an-ip --yield")
+                self.stormHasNoErr(msgs)
+                self.stormIsInWarn("was given an invalid IP address: not-an-ip", msgs)
+
+            assert fake.calls == []
+            assert len([m for m in msgs if m[0] == "node"]) == 0
+
+    async def test_query_ignores_inbound_nodes(self):
+        async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
+            await core.nodes("[ inet:ipv4=1.1.1.1 inet:ipv4=2.2.2.2 ]")
+            fake = fakeQuery(SUCCESS_DATA)
+
+            with mock.patch.object(svc, "_query", fake):
+                msgs = await core.stormlist(f"inet:ipv4 | {SVC_NAME}.query --query 8.8.8.8")
+                self.stormHasNoWarnErr(msgs)
+
+            assert fake.calls == ["8.8.8.8"]
+            assert len([m for m in msgs if m[0] == "node"]) == 0
+
+    async def test_batch_inbound_nodes(self):
+        async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
+            ips = ["1.1.1.1", "2.2.2.2", "3.3.3.3"]
+            await core.nodes("[ inet:ipv4=1.1.1.1 inet:ipv4=2.2.2.2 inet:ipv4=3.3.3.3 ]")
+            calls = []
+
+            async def fake_batch(ipaddrs):
+                calls.append(list(ipaddrs))
+                results = []
+                for ip in ipaddrs:
+                    if ip == "2.2.2.2":
+                        results.append({"status": "fail", "message": "reserved range"})
+                    else:
+                        results.append(shaped(query=ip))
+                return results, {}
+
+            fake = fakeQuery(SUCCESS_DATA)
+            with (
+                mock.patch.object(svc, "_queryBatch", fake_batch),
+                mock.patch.object(svc, "_query", fake),
+            ):
+                msgs = await core.stormlist(f"inet:ipv4 | {SVC_NAME}.query")
+                self.stormHasNoErr(msgs)
+                self.stormIsInWarn("error querying the IPAPI service for '2.2.2.2'", msgs)
+
+            assert fake.calls == []
+            assert len(calls) == 1
+            assert sorted(calls[0]) == ips
+
+            # Every inbound node comes back out, including the failed one.
+            nodeMsgs = [m for m in msgs if m[0] == "node"]
+            assert sorted(m[1][0][1] for m in nodeMsgs) == [16843009, 33686018, 50529027]
+
+            assert len(await core.nodes("inet:ipv4=1.1.1.1 +:asn")) == 1
+            assert len(await core.nodes("inet:ipv4=3.3.3.3 +:asn")) == 1
+            assert len(await core.nodes("inet:ipv4=2.2.2.2 +:asn")) == 0
+
+    async def test_batch_chunks(self):
+        async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
+            await core.nodes("for $i in $lib.range(150) { [ inet:ipv4=`10.0.0.{$i}` ] }")
+            sizes = []
+
+            async def fake_batch(ipaddrs):
+                sizes.append(len(ipaddrs))
+                return [shaped(query=ip) for ip in ipaddrs], {}
+
+            with mock.patch.object(svc, "_queryBatch", fake_batch):
+                msgs = await core.stormlist(f"inet:ipv4 | {SVC_NAME}.query")
+                self.stormHasNoWarnErr(msgs)
+
+            assert sizes == [100, 50]
+            assert len([m for m in msgs if m[0] == "node"]) == 150
+
+    async def test_batch_through_lib(self):
+        async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
+
+            async def fake_batch(ipaddrs):
+                return [shaped(query=ip) for ip in ipaddrs], {}
+
+            with mock.patch.object(svc, "_queryBatch", fake_batch):
+                msgs = await core.stormlist(
+                    f"$retn = $lib.import({SVC_NAME}.lib).queryBatch((1.1.1.1, 2.2.2.2)) "
+                    "$lib.print(`{$retn.status} {$retn.data.1.data.query}`)"
+                )
+                self.stormIsInPrint("true 2.2.2.2", msgs)
+
+    async def test_batch_service_error(self):
+        """A status=False batch retn fails each node instead of erroring the command."""
+
+        async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
+            await core.nodes("[ inet:ipv4=1.1.1.1 inet:ipv4=2.2.2.2 ]")
+
+            async def fake_queryips(ipaddrs):
+                return {"status": False, "mesg": "batch broke", "data": None}
+
+            with mock.patch.object(svc, "queryIps", fake_queryips):
+                msgs = await core.stormlist(f"inet:ipv4 | {SVC_NAME}.query")
+                self.stormHasNoErr(msgs)
+                self.stormIsInWarn("batch broke", msgs)
+
+            assert len([m for m in msgs if m[0] == "node"]) == 2
+
+
+class TestIpApiStormTags(s_tests.SynTest):
+    """Test suite for the slib.ipapi tag settings and their validation."""
+
+    async def test_settag_invalid(self):
+        async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
+            msgs = await core.stormlist(f'{SVC_NAME}.admin.settag "not a..tag"')
+            self.stormIsInErr("requires a valid tag prefix", msgs)
+
+            msgs = await core.stormlist('$lib.print($lib.globals.get("slib:ipapi:tag:prefix"))')
+            self.stormIsInPrint("rep.ipapi.infra", msgs)
+
+    async def test_settag_normalizes(self):
+        async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
+            msgs = await core.stormlist(f"{SVC_NAME}.admin.settag Rep.MyOrg")
+            self.stormHasNoErr(msgs)
+            self.stormIsInPrint("#rep.myorg.hosting", msgs)
+
+            msgs = await core.stormlist('$lib.print($lib.globals.get("slib:ipapi:tag:prefix"))')
+            self.stormIsInPrint("rep.myorg", msgs)
+
+    async def test_enabletag_without_prefix_warns(self):
+        async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
+            await core.nodes('$lib.globals.pop("slib:ipapi:tag:prefix")')
+
+            msgs = await core.stormlist(f"{SVC_NAME}.admin.enabletag")
+            self.stormHasNoErr(msgs)
+            self.stormIsInWarn("no tag prefix is set", msgs)
+
+            msgs = await core.stormlist(f"{SVC_NAME}.admin.settag rep.ipapi")
+            msgs = await core.stormlist(f"{SVC_NAME}.admin.enabletag")
+            self.stormHasNoWarnErr(msgs)
+
+    async def test_getipapitag(self):
+        async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
+            q = f"$lib.print($lib.import({SVC_NAME}.privsep).getIpApiTag())"
+
+            msgs = await core.stormlist(q)
+            self.stormIsInPrint("rep.ipapi.infra", msgs)
+
+            await core.nodes(f"{SVC_NAME}.admin.disabletag")
+            msgs = await core.stormlist(q)
+            self.stormIsInPrint("$lib.null", msgs)
+
+            await core.nodes(f"{SVC_NAME}.admin.enabletag")
+            await core.nodes('$lib.globals.pop("slib:ipapi:tag:prefix")')
+            msgs = await core.stormlist(q)
+            self.stormIsInErr("tag prefix is not set", msgs)
+
+            await core.nodes('$lib.globals.set("slib:ipapi:tag:prefix", "bad..tag")')
+            msgs = await core.stormlist(q)
+            self.stormIsInErr('tag prefix "bad..tag" is not a valid tag', msgs)
+
+    async def test_query_bad_tag_config_warns(self):
+        """A bad tag setting only means untagged results, the query still runs."""
+
+        async with self.getTestCoreProxSvc(IpApiSvc) as (core, prox, svc):
+            await core.nodes('$lib.globals.pop("slib:ipapi:tag:prefix")')
+
+            with mock.patch.object(svc, "_query", fakeQuery(SUCCESS_DATA)):
+                msgs = await core.stormlist(f"{SVC_NAME}.query --query 8.8.8.8 --yield")
+                self.stormHasNoErr(msgs)
+                self.stormIsInWarn("Querying without tags", msgs)
+
+            nodes = await core.nodes("inet:ipv4=8.8.8.8")
+            assert len(nodes) == 1
+            assert nodes[0].get("asn") == 15169
+            assert len(nodes[0].tags) == 0

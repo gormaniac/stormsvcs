@@ -10,9 +10,9 @@ COPY README.md /opt/stormsvcs/ip_api/README.md
 RUN cp /opt/stormsvcs/LICENSE /opt/stormsvcs/ip_api/LICENSE
 
 # Install deps with uv
-RUN uv sync --no-dev --locked --directory /opt/stormsvcs/ip_api 
+RUN uv sync --no-dev --locked --directory /opt/stormsvcs/ip_api
 
-# Move the entrypoint script and make it executable. 
+# Move the entrypoint script and make it executable.
 COPY docker/prod/entrypoint.sh /opt/stormsvcs/ip_api/entrypoint.sh
 RUN chmod +x /opt/stormsvcs/ip_api/entrypoint.sh
 

@@ -1,12 +1,23 @@
+// Privileged (asroot) reads of the slib.ipapi settings, for slib.ipapi.user users.
+//
+// NOTE: $lib.globals.get/set are the only global var APIs in Synapse 2.x, this package
+// requires Synapse <3.0.0 (see synapse_version), so R005 is ignored here.
+
+// The tag prefix to use for ip-api.com's hosting/mobile/proxy results, or (null) if tags
+// are disabled. Raises BadConfValu if tags are enabled but the prefix is unset or invalid.
 function getIpApiTag() {
-    $tagPrefix = $lib.globals.get("slib:ipapi:tag:prefix")
-    $tagEnabled = $lib.globals.get("slib:ipapi:tag:enabled")
-    if ($tagPrefix and $tagEnabled) {
-        return($tagPrefix)
-    }
-    elif ($tagEnabled and $tagPrefix = (null)) {
+    $tagEnabled = $lib.globals.get("slib:ipapi:tag:enabled")  // noqa: R005
+    if (not $tagEnabled) { return() }
+
+    $tagPrefix = $lib.globals.get("slib:ipapi:tag:prefix")  // noqa: R005
+    if ($tagPrefix = null) {
         $lib.raise(BadConfValu, "The slib.ipapi tag prefix is not set. Please set it with the slib.ipapi.admin.settag command.")
     }
 
-    return((null))
+    ($ok, $norm) = $lib.trycast(syn:tag, $tagPrefix)
+    if (not $ok) {
+        $lib.raise(BadConfValu, `The slib.ipapi tag prefix "{$tagPrefix}" is not a valid tag. Please set it with the slib.ipapi.admin.settag command.`)
+    }
+
+    return($norm)
 }

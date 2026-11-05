@@ -6,8 +6,8 @@ from . import __version__
 
 SVC_NAME = "slib.ipapi"
 SVC_VER = __version__
+# The guid of the service's meta:source node. slib.ipapi.lib's $srcGuid must match it.
 SVC_GUID = "c177b2a9c0eff5c2984946d439de23ea"
-SVC_SYN_MIN_VER = (2, 145, 0)
 
 # The tag globals are only set when missing, so re-adding the service never
 # wipes out custom settings made with the slib.ipapi.admin.* commands.
