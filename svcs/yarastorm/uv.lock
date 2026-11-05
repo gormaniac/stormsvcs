@@ -1112,10 +1112,9 @@ wheels = [
 
 [[package]]
 name = "yarastorm"
-version = "0.5.1"
+version = "0.6.0"
 source = { editable = "." }
 dependencies = [
-    { name = "pyyaml" },
     { name = "stormlibpp" },
     { name = "yara-x" },
 ]
@@ -1128,7 +1127,6 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "pyyaml", specifier = ">=6.0" },
     { name = "stormlibpp", specifier = ">=0.12.1" },
     { name = "yara-x", specifier = ">=1.19.0" },
 ]

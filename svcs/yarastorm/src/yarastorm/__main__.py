@@ -1,3 +1,5 @@
+"""Run the yarastorm service, ex. ``python -m yarastorm /vertex/storage``."""
+
 import asyncio
 import sys
 

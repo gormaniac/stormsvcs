@@ -46,7 +46,7 @@ Each service must have the following:
 # Services
 
 - `yarastorm`
-  - Support for matching `it:prod:yara:rule` nodes to `file:bytes` nodes.
+  - Support for matching `it:app:yara:rule` nodes to `file:bytes` nodes.
 - `ip_api`
   - Enrich IPs from ip-api.com.
 - `crtsh`
