@@ -6,17 +6,20 @@ Shodan's data as-is (or normalized, for the ``norm*`` variants) and raise
 ``TelepathRetn`` convention for Storm.
 """
 
+import hashlib
 import json
+import re
+import time
 from collections.abc import AsyncIterator
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 import aiohttp
 import synapse.lib.cell as s_cell
 
 from . import norm
 from .api import ShodanCellApi
-from .client import ShodanApiError, ShodanClient
+from .client import BASE_URLS, ShodanApiError, ShodanClient
 
 # Streaming API endpoints and whether they take a comma separated list of values.
 STREAM_KINDS = {
@@ -32,6 +35,46 @@ STREAM_KINDS = {
 
 # The default number of results Shodan returns per search page.
 SEARCH_PAGE_SIZE = 100
+
+# The ip facet size countIps() asks for before it knows the plan's limit: the most facet values
+# Shodan has published it returns (https://book.shodan.io/changelog/2025-11-06/). A plan with a
+# lower limit gets FACET_LIMIT_RE's error, and the request is retried with that limit.
+COUNT_IP_SIZE = 131072
+
+# How long a key's learned facet limit is trusted, in seconds, so a plan change is picked up.
+FACET_LIMIT_TTL = 86400
+
+# Shodan's error for a facet size over the plan's limit, ex.
+# "Facet size too big for current subscription (limit: 1000)".
+FACET_LIMIT_RE = re.compile(r"Facet size too big.*\(limit: (\d+)\)")
+
+
+def _streamPath(
+    kind: str, values=None, query: str | None = None, aid: str | None = None
+) -> tuple[str, dict]:
+    """Build the path and params of a Streaming API endpoint (without the API key)."""
+
+    if kind not in STREAM_KINDS:
+        raise ShodanApiError(
+            f"Unknown stream type {kind}, expected one of: {', '.join(STREAM_KINDS)}"
+        )
+
+    params = {}
+    path = f"/shodan/{kind}"
+    if STREAM_KINDS[kind]:
+        if not values:
+            raise ShodanApiError(f"The {kind} stream requires at least one value.")
+        if isinstance(values, (list, tuple)):
+            values = ",".join(str(v) for v in values)
+        path = f"{path}/{quote(str(values), safe=',')}"
+    elif kind == "custom":
+        if not query:
+            raise ShodanApiError("The custom stream requires a query.")
+        params["query"] = query
+    elif kind == "alert" and aid:
+        path = f"{path}/{_seg(aid)}"
+
+    return path, params
 
 
 def _seg(valu: Any) -> str:
@@ -81,6 +124,10 @@ class ShodanSvc(s_cell.Cell):
 
         self.session = aiohttp.ClientSession(trust_env=True)
         self.onfini(self.session.close)
+
+        # The facet size limit of each API key's plan, and when it was learned, keyed by the
+        # SHA-256 of the key. Only ever kept in memory, and never holds a key itself. See countIps().
+        self.facetlimits: dict[str, tuple[int, float]] = {}
 
         self.client = ShodanClient(
             self.session,
@@ -165,6 +212,76 @@ class ShodanSvc(s_cell.Cell):
         return await self._api(
             "get", "/shodan/host/count", apikey, params={"query": query, "facets": facets}
         )
+
+    async def countIps(self, query: str, size: int | None = None, facets=None, apikey=None) -> dict:
+        """List the IPs matching a query with the free count API's ``ip`` facet (no query credits).
+
+        ``size`` is the number of IPs to ask for, defaulting to the most the key's plan allows. The
+        plan's limit is learned from Shodan's error when a key asks for too many, then cached in
+        memory for ``FACET_LIMIT_TTL`` seconds, so later calls with that key need a single request.
+        A ``size`` over the cached limit is still asked for, in case the plan changed.
+
+        ``facets`` are extra facets (a comma separated str or a list) returned for printing only.
+
+        Returns ``{"ips": [str, ...], "size": int, "limit": int | None, "full": bool,
+        "lowered": bool, "facets": {...}}``. ``limit`` is the plan's limit, if known. ``full`` is
+        true when the IPs fill the size asked for, so the query likely matches more IPs than were
+        returned. ``lowered`` is true when ``size`` was over the plan's limit and was lowered to
+        it. The ``ip`` facet's counts are dropped.
+        """
+
+        if size is not None and size < 1:
+            raise ShodanApiError(f"The number of IPs to count must be at least 1, not {size}.")
+
+        key = self.getApiKey(apikey)
+        keyhash = hashlib.sha256(key.encode()).hexdigest() if key else None
+        limit = None
+        cached = self.facetlimits.get(keyhash)
+        if cached is not None and time.monotonic() - cached[1] < FACET_LIMIT_TTL:
+            limit = cached[0]
+
+        asked = size or limit or COUNT_IP_SIZE
+        lowered = False
+
+        if isinstance(facets, str):
+            facets = facets.split(",")
+        # Any ip facet given is replaced by the sized one.
+        extra = [f.strip() for f in facets or () if f.strip() and f.strip().split(":")[0] != "ip"]
+
+        def facetstr(n: int) -> str:
+            return ",".join([f"ip:{n}", *extra])
+
+        try:
+            data = await self.count(query, facets=facetstr(asked), apikey=apikey)
+        except ShodanApiError as err:
+            match = FACET_LIMIT_RE.search(err.mesg)
+            # A limit at or over the size asked for means another facet was too big.
+            if match is None or int(match.group(1)) >= asked:
+                raise
+            limit = int(match.group(1))
+            self.facetlimits[keyhash] = (limit, time.monotonic())
+            lowered = size is not None
+            asked = limit
+            data = await self.count(query, facets=facetstr(asked), apikey=apikey)
+        else:
+            # A size over the cached limit worked, so the plan changed: forget the old limit.
+            if limit is not None and asked > limit:
+                self.facetlimits.pop(keyhash, None)
+                limit = None
+
+        facetdata = dict((data or {}).get("facets") or {})
+        ips = [
+            str(v["value"]) for v in facetdata.pop("ip", None) or () if v.get("value") is not None
+        ]
+
+        return {
+            "ips": ips,
+            "size": asked,
+            "limit": limit,
+            "full": len(ips) >= asked,
+            "lowered": lowered,
+            "facets": facetdata,
+        }
 
     async def search(
         self, query: str, page: int = 1, facets=None, minify: bool = True, fields=None, apikey=None
@@ -252,12 +369,35 @@ class ShodanSvc(s_cell.Cell):
         )
 
     async def scans(self, page: int = 1, apikey=None) -> dict:
-        """GET /shodan/scans"""
-        return await self._api("get", "/shodan/scans", apikey, params={"page": page})
+        """GET /shodan/scans
+
+        Shodan includes the ``api_key`` that submitted each scan, which is removed so a key (ex. the
+        service-wide one) is never readable from Storm.
+        """
+        data = await self._api("get", "/shodan/scans", apikey, params={"page": page})
+        for scan in (data or {}).get("matches") or ():
+            if isinstance(scan, dict):
+                scan.pop("api_key", None)
+        if isinstance(data, dict):
+            data.pop("api_key", None)
+        return data
 
     async def scanStatus(self, scanid: str, apikey=None) -> dict:
-        """GET /shodan/scan/{id}"""
-        return await self._api("get", f"/shodan/scan/{_seg(scanid)}", apikey)
+        """GET /shodan/scan/{id} (without any ``api_key``, see scans())"""
+        data = await self._api("get", f"/shodan/scan/{_seg(scanid)}", apikey)
+        if isinstance(data, dict):
+            data.pop("api_key", None)
+        return data
+
+    async def apiUrl(self, path: str, base: str = "api") -> str:
+        """The public URL of a Shodan API endpoint, without the API key.
+
+        Recorded as the ``:api:url`` of an ``it:exec:query``. Like streamUrl(), it always uses
+        Shodan's public base URL, even when ``shodan:urls`` overrides it.
+        """
+        if base not in BASE_URLS:
+            raise ShodanApiError(f"Unknown Shodan API: {base}")
+        return BASE_URLS[base] + path
 
     # ---- Network alerts ----
 
@@ -605,6 +745,21 @@ class ShodanSvc(s_cell.Cell):
 
     # ---- Streaming ----
 
+    async def streamUrl(
+        self, kind: str = "banners", values=None, query: str | None = None, aid: str | None = None
+    ) -> str:
+        """The public URL of a Streaming API endpoint, without the API key.
+
+        Recorded as the ``:api:url`` of the stream's ``it:exec:query``. It always uses Shodan's
+        public base URL, even when ``shodan:urls`` overrides it, so internal hosts aren't recorded.
+        """
+
+        path, params = _streamPath(kind, values=values, query=query, aid=aid)
+        url = BASE_URLS["stream"] + path
+        if params:
+            url = f"{url}?{urlencode(params)}"
+        return url
+
     async def stream(
         self,
         kind: str = "banners",
@@ -622,26 +777,7 @@ class ShodanSvc(s_cell.Cell):
         and ``aid`` optionally narrows the alert stream to a single alert.
         """
 
-        if kind not in STREAM_KINDS:
-            raise ShodanApiError(
-                f"Unknown stream type {kind}, expected one of: {', '.join(STREAM_KINDS)}"
-            )
-
-        params = {}
-        path = f"/shodan/{kind}"
-        if STREAM_KINDS[kind]:
-            if not values:
-                raise ShodanApiError(f"The {kind} stream requires at least one value.")
-            if isinstance(values, (list, tuple)):
-                values = ",".join(str(v) for v in values)
-            path = f"{path}/{quote(str(values), safe=',')}"
-        elif kind == "custom":
-            if not query:
-                raise ShodanApiError("The custom stream requires a query.")
-            params["query"] = query
-        elif kind == "alert" and aid:
-            path = f"{path}/{_seg(aid)}"
-
+        path, params = _streamPath(kind, values=values, query=query, aid=aid)
         async for banner in self.client.stream(
             path, apikey=self.getApiKey(apikey), params=params, limit=limit, timeout=timeout
         ):

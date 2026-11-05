@@ -1,18 +1,85 @@
 init {
+    $shodan = $lib.import(slib.shodan.lib)
     $priv = $lib.import(slib.shodan.priv.user)
-    $model = $lib.import(slib.shodan.model)
     $util = $lib.import(slib.shodan.util)
-    $tagPrefix = $priv.tagPrefix()
+
+    // What inbound nodes add to the stream (see slib.shodan.lib.streamTarget). The type is the
+    // type given, or the first inbound node's, when no type is given (the default, banners).
+    $state = ({"kind": $lib.null, "values": ([]), "query": $lib.null, "nodes": (false)})
+    if ($cmdopts.type != "banners") { $state.kind = $cmdopts.type }
+}
+
+// Inbound nodes are collected, then streamed together once (one subscription).
+if $node {
+    $state.nodes = (true)
+    $target = $shodan.streamTarget($node)
+    if $target {
+        if ($state.kind = $lib.null) { $state.kind = $target.kind }
+
+        if ($target.kind != $state.kind) {
+            $lib.warn("slib.shodan.stream: Skipping {form} {repr}, it's for a {kind} stream, not {stream}.",
+                      form=$node.form(), repr=$node.repr(), kind=$target.kind, stream=$state.kind)
+        } elif ($target.kind = "custom") {
+            // A custom stream takes a single query.
+            if (($state.query = $lib.null) and ($cmdopts.query = $lib.null)) { $state.query = $target.value }
+            else {
+                $lib.warn("slib.shodan.stream: A custom stream takes one query, skipping {form} {repr}.",
+                          form=$node.form(), repr=$node.repr())
+            }
+        } elif (not $state.values.has($target.value)) {
+            $state.values.append($target.value)
+        }
+    }
 }
 
 spin |
 
-for $retn in $priv.stream(kind=$cmdopts.type, values=$cmdopts.value, query=$cmdopts.query, aid=$cmdopts.alert,
-                          limit=$cmdopts.limit, timeout=$cmdopts.timeout) {
-    if $util.failed($retn, "Stream") { break }
-    $model.banner($retn.data, $tagPrefix)
-    $ipnode = $model.ipNode($retn.data.ip)
-    if $ipnode { yield $ipnode }
+// Inbound nodes that couldn't be streamed (all warned about) mean nothing to stream, not the
+// unfiltered banners stream.
+if ($state.nodes and $state.kind = $lib.null) {
+    $lib.warn("slib.shodan.stream: None of the inbound nodes could be streamed.")
+    stop
+}
+
+$kind = $state.kind
+if ($kind = $lib.null) { $kind = banners }
+
+$values = $state.values
+for $valu in $cmdopts.value {
+    if (not $values.has($valu)) { $values.append($valu) }
+}
+
+$query = $cmdopts.query
+if ($query = $lib.null) { $query = $state.query }
+
+// The it:exec:query :text, ex. "ports:443,53", the custom query, or "alert:<id>".
+if ($kind = "custom") { $text = $query }
+elif $values { $text = `{$kind}:{(",").join($values)}` }
+elif $cmdopts.alert { $text = `{$kind}:{$cmdopts.alert}` }
+else { $text = $kind }
+
+$apiurl = $lib.null
+$retn = $priv.streamUrl(kind=$kind, values=$values, query=$query, aid=$cmdopts.alert)
+if $retn.status { $apiurl = $retn.data }
+
+// Recorded on the stream's it:exec:query, never include the API key.
+$opts = ({
+    "command": "slib.shodan.stream",
+    "kind": $kind,
+    "values": $values,
+    "alert": $cmdopts.alert,
+    "limit": $cmdopts.limit,
+    "timeout": $cmdopts.timeout,
+})
+
+$genr = $priv.stream(kind=$kind, values=$values, query=$query, aid=$cmdopts.alert,
+                     limit=$cmdopts.limit, timeout=$cmdopts.timeout)
+for $res in $shodan.ingest($genr, "Stream", $text, $apiurl, $opts) {
+    if $cmdopts.yield_query {
+        if $res.done { yield $res.query }
+    } elif $res.ip {
+        yield $res.ip
+    }
 }
 
 | uniq

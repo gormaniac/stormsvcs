@@ -1,16 +1,54 @@
 init {
     $shodan = $lib.import(slib.shodan.lib)
     $model = $lib.import(slib.shodan.model)
+
+    // The inbound nodes, once all of them are read (without --stream-inbound).
+    $pending = ([])
+}
+
+function supported(n) {
+    return(($n.form() = "inet:fqdn" or $n.form() = "inet:ipv4" or $n.form() = "inet:ipv6"))
+}
+
+// Resolve an inet:fqdn, or reverse resolve an IP. Returns a list of the resulting nodes.
+function lookup(n) {
+    switch $n.form() {
+        "inet:fqdn": { return(($shodan.resolve($n.repr()),)) }
+        "inet:ipv4": { return($shodan.reverse($n.repr())) }
+        "inet:ipv6": { return($shodan.reverse($n.repr())) }
+    }
+    return(([]))
 }
 
 switch $node.form() {
-    "inet:fqdn": { $results = ($shodan.resolve($node.repr()),) }
-    "inet:ipv4": { $results = $shodan.reverse($node.repr()) }
-    "inet:ipv6": { $results = $shodan.reverse($node.repr()) }
+    "inet:fqdn": { }
+    "inet:ipv4": { }
+    "inet:ipv6": { }
     *: {
-        $results = ([])
         $lib.warn("slib.shodan.dns.lookup: The node form {form} is not supported.", form=$node.form())
+        // Without --yield, unsupported nodes pass through.
+        if $cmdopts.yield { spin }
     }
 }
 
-divert $cmdopts.yield $model.nodes($results)
+// By default, every inbound node is read before any lookup runs, so the nodes a lookup creates
+// can't come back in from a lift that's still running (ex. "inet:fqdn inet:ipv4 | slib.shodan.dns.lookup"
+// would also look up the IPs and hostnames it found). --stream-inbound looks up each node as it
+// arrives instead, for inbound sets too large to hold in memory.
+if (not $supported($node)) { }
+elif $cmdopts.stream_inbound {
+    divert $cmdopts.yield $model.nodes($lookup($node))
+} else {
+    $pending.append($node)
+    spin
+}
+
+| if $pending {
+    for $n in $pending {
+        if $cmdopts.yield { yield $model.nodes($lookup($n)) }
+        else {
+            $lookup($n)
+            yield $n
+        }
+    }
+}

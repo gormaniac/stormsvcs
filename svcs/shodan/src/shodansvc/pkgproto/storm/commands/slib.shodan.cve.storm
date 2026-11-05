@@ -2,13 +2,24 @@ init {
     $shodan = $lib.import(slib.shodan.lib)
     $model = $lib.import(slib.shodan.model)
     $search = ($cmdopts.cpe or $cmdopts.product)
+
+    // The risk:vuln of each CVE already looked up, so CVEs with several inbound nodes (ex. a
+    // risk:vuln and its it:sec:cve) only use one lookup.
+    $done = ({})
+}
+
+// Look up a CVE once, returning its risk:vuln (or null).
+function lookup(cveid) {
+    $cveid = $cveid.upper()
+    if ($done.$cveid = $lib.null) { $done.$cveid = ({"node": $shodan.cve($cveid, cpes=$cmdopts.cpes)}) }
+    return($done.$cveid.node)
 }
 
 if ($cmdopts.cve or $search) {
     // --cve/--cpe/--product ignore inbound nodes.
     spin |
     for $cveid in $cmdopts.cve {
-        $vuln = $shodan.cve($cveid, cpes=$cmdopts.cpes)
+        $vuln = $lookup($cveid)
         if ($cmdopts.yield and $vuln) { yield $vuln }
     }
     if ($search and $cmdopts.count) {
@@ -27,10 +38,10 @@ if ($cmdopts.cve or $search) {
 else {
     switch $node.form() {
         "risk:vuln": {
-            if :cve { $results = ($shodan.cve(:cve, cpes=$cmdopts.cpes),) }
+            if :cve { $results = ($lookup(:cve),) }
             else { $results = ([]) }
         }
-        "it:sec:cve": { $results = ($shodan.cve($node.repr(), cpes=$cmdopts.cpes),) }
+        "it:sec:cve": { $results = ($lookup($node.repr()),) }
         "it:sec:cpe": {
             $results = $shodan.cves(cpe23=$node.repr(), kev=$cmdopts.kev, epss=$cmdopts.epss,
                                     limit=$cmdopts.limit, start=$cmdopts.start, end=$cmdopts.end,

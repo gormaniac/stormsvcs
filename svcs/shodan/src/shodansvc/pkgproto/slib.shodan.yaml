@@ -1,5 +1,5 @@
 name: slib.shodan
-version: 0.5.0
+version: 0.12.2
 guid: 0f6c1d0f1d8a4c3bb7a1e3d5c9b2a864
 
 synapse_minversion: [2, 137, 0]
@@ -76,16 +76,36 @@ commands:
       Uses the free InternetDB API when --internetdb is used, or automatically when
       no Shodan API key is available to the current user.
 
+      With --history, Shodan's history of the IP is looked up too, after a plain lookup for its
+      current data (the history lags it by about a day). The current host (vulns, tags, ports, ...)
+      is modeled from the plain lookup, and only the banners from the history, without their vulns
+      or ASN: a history lookup's host-level fields combine its whole history, and old vulns aren't
+      current. Shodan's tags for a historical banner go on its inet:banner, not the current server.
+
+      With --history (or --timeline), the IP's banners are also added to its Shodan history: one
+      meta:timeline per IP (:title "Shodan history: <ip>"), with one meta:event per banner. Each
+      event is when Shodan saw a service (:time), ex. "tcp/22 OpenSSH 8.9p1" (:title), and is linked
+      with -(refs)> edges to the inet:server, inet:banner, and IP it describes. Events are keyed by
+      Shodan's banner ID, so lookups only add banners that weren't seen before. Shodan's history
+      covers 90 days, at most the latest 1,000 banners, so re-run lookups to keep a longer one.
+      A --history lookup is 2 requests (neither uses query credits).
+      Minified and InternetDB lookups have no banners to add.
+
       Examples:
 
         // Look up some IPs already in the Cortex.
         inet:ipv4#my.tag | slib.shodan.host
 
+        // Look up the IPs of some servers, banners, or DNS records. Each IP is looked up once.
+        inet:server:port=22 | slib.shodan.host
+        inet:fqdn=vertex.link -> inet:dns:a | slib.shodan.host --yield
+
         // Look up a single IP and yield the inet:ipv4 node.
         slib.shodan.host --ip 8.8.8.8 --yield
 
-        // Include historical banners.
+        // Include historical banners, and walk the IP's timeline.
         inet:ipv4=1.2.3.4 | slib.shodan.host --history
+        meta:event:time +{ :timeline -> meta:timeline +:title="Shodan history: 1.2.3.4" }
 
         // Use the free (but less detailed) InternetDB API.
         inet:ipv4=1.2.3.4 | slib.shodan.host --internetdb
@@ -98,7 +118,17 @@ commands:
       - - --history
         - default: false
           action: store_true
-          help: Include historical banners.
+          help: |
+            Also look up the IP's history (without its vulns), and add every banner to the IP's
+            timeline (unless --no-timeline).
+      - - --timeline
+        - default: false
+          action: store_true
+          help: Add the banners to the IP's Shodan history timeline, without --history too.
+      - - --no-timeline
+        - default: false
+          action: store_true
+          help: Don't add the banners of a --history lookup to the IP's timeline.
       - - --minify
         - default: false
           action: store_true
@@ -116,6 +146,14 @@ commands:
         help: IPs to look up in Shodan (or InternetDB).
       - form: inet:ipv6
         help: IPs to look up in Shodan (or InternetDB).
+      - form: inet:server
+        help: Their :ipv4 or :ipv6 is looked up.
+      - form: inet:banner
+        help: Their :server:ipv4 or :server:ipv6 is looked up.
+      - form: inet:dns:a
+        help: Their :ipv4 is looked up.
+      - form: inet:dns:aaaa
+        help: Their :ipv6 is looked up.
 
   - name: slib.shodan.enrich
     perms:
@@ -127,6 +165,11 @@ commands:
         inet:fqdn             -> Shodan DNS domain records and subdomains
         risk:vuln/it:sec:cve  -> CVEDB CVE details
         it:sec:cpe            -> CVEDB CVEs that affect the CPE
+
+      Every inbound node is read before any are run, so the nodes this command creates can't come
+      back in from a lift that's still running (ex. "inet:fqdn | slib.shodan.enrich" would otherwise
+      also run on the nodes it creates, using more query credits). --stream-inbound runs each inbound node as it
+      arrives instead, for inbound sets too large to hold in memory, with that risk.
 
       Examples:
 
@@ -140,6 +183,13 @@ commands:
         - default: false
           action: store_true
           help: Yield the enriched/created nodes instead of the inbound nodes.
+      - - --stream-inbound
+        - default: false
+          action: store_true
+          help: |
+            Run each inbound node as it arrives, instead of reading them all first. Only for inbound
+            sets too large to hold in memory: a lift of a form this command creates (inet:fqdn, inet:ipv4, risk:vuln, ...)
+            also returns the nodes it creates while it runs, which are then run too, using more query credits.
     cmdinputs:
       - form: inet:ipv4
         help: Enriched with a host lookup.
@@ -159,6 +209,12 @@ commands:
       - [ slib, shodan, user ]
     descr: |
       Search Shodan and model every matching banner. Yields the matching inet:ipv4/inet:ipv6 nodes.
+
+      Each search run is recorded as an it:exec:query (:text is the query sent to Shodan), linked
+      with -(found)> edges to the inet:server, inet:banner, and inet:ipv4/inet:ipv6 nodes of every
+      banner it returned, and with a -(refs)> edge to the inbound node the query was built from.
+      Use --yield-query to yield the it:exec:query nodes instead of the IPs. The --count, --tokens,
+      and --filters modes only print, and record nothing.
 
       Inbound nodes are each searched for with the query below, AND'd with any query given,
       ex. "country:US". Unsupported nodes, and nodes missing the props a query needs, are
@@ -194,10 +250,17 @@ commands:
       application/xhtml+xml. Use --file-hash for files without one of those :mime values.
       The bytes are read from the Axon (up to 16 MiB), which needs axon.has and axon.get.
 
-      Shodan doesn't support OR between filters, so each node is its own search.
+      Shodan doesn't support OR between filters, so each node is its own search. Nodes that build
+      the same query as an earlier one (ex. inet:banner nodes with the same text) don't search it
+      again, the earlier search's it:exec:query refs them too.
 
       Each page of 100 results consumes one Shodan query credit. Use --count to get
       the total (and any --facets) for free without ingesting anything.
+
+      Every inbound node is read before any are run, so the nodes this command creates can't come
+      back in from a lift that's still running (ex. "inet:banner | slib.shodan.search" would otherwise
+      also run on the nodes it creates, using more query credits). --stream-inbound runs each inbound node as it
+      arrives instead, for inbound sets too large to hold in memory, with that risk.
 
       Examples:
 
@@ -221,7 +284,10 @@ commands:
         file:bytes:mime=image/x-icon | slib.shodan.search --count
 
         // Run saved Shodan queries.
-        meta:rule:type=svc.shodan.query | slib.shodan.search --limit 200
+        meta:rule:type^=svc.shodan.query | slib.shodan.search --limit 200
+
+        // Every server found by searches run for a certificate.
+        crypto:x509:cert:sha1=e652c8bd1cafd04a44239fa8dab0c59deacb79ee | slib.shodan.search --yield-query | -(found)> inet:server
     cmdargs:
       - - query
         - type: str
@@ -261,6 +327,17 @@ commands:
           default: null
           choices: [favicon, html]
           help: Search for inbound file:bytes as a favicon or HTML page, instead of going by their :mime.
+      - - --yield-query
+        - default: false
+          action: store_true
+          help: Yield the it:exec:query node of each search instead of the IP nodes.
+      - - --stream-inbound
+        - default: false
+          action: store_true
+          help: |
+            Run each inbound node as it arrives, instead of reading them all first. Only for inbound
+            sets too large to hold in memory: a lift of a form this command creates (inet:banner, inet:server, crypto:x509:cert, ...)
+            also returns the nodes it creates while it runs, which are then run too, using more query credits.
     cmdinputs:
       - form: inet:banner
         help: Searched for by their Shodan banner hash.
@@ -299,7 +376,108 @@ commands:
       - form: it:dev:str
         help: Searched for as-is, a bare query.
       - form: meta:rule
-        help: Rules with :type svc.shodan.query, their :text is the query.
+        help: Saved queries (:type svc.shodan.query or under it), their :text is the query.
+
+  - name: slib.shodan.count
+    perms:
+      - [ slib, shodan, user ]
+    descr: |
+      List the IPs matching a Shodan query, without using query credits, and model them.
+      Yields the inet:ipv4/inet:ipv6 nodes.
+
+      Uses the free count API's "ip" facet, so a query is a single request, and only the IPs are
+      modeled. Nothing else about the results (banners, ports, orgs, ...) or the counts is stored,
+      use slib.shodan.search for the banners, or other APIs for context about the IPs.
+
+      One count returns at most as many IPs as your Shodan plan allows per facet (ex. 1,000 for a
+      Membership, 5,120 for a Freelancer). By default it asks for that many: the limit is learned
+      from Shodan the first time your API key asks for too many, costing one extra (free) request.
+      When the IPs fill the limit, the query likely matches more, and a warning says so. Narrow the
+      query (ex. add country: or asn:) to get the rest. IPs are returned busiest first, by the
+      number of matching banners.
+
+      Each count is recorded as an it:exec:query (:text is the query sent to Shodan), linked with
+      -(found)> edges to every IP, and with a -(refs)> edge to the inbound node the query was built
+      from. Use --yield-query to yield the it:exec:query nodes instead of the IPs.
+
+      Inbound nodes are each counted with the query slib.shodan.search builds for their form (see
+      its help), AND'd with any query given.
+
+      Examples:
+
+        // Every IP presenting a favicon.
+        slib.shodan.count "http.favicon.hash:-1166125415"
+
+        // The first 100 US IPs, printing their top orgs for context.
+        slib.shodan.count "product:nginx country:US" --size 100 --facets org:10
+
+        // The IPs behind saved queries, or presenting a certificate.
+        meta:rule:type^=svc.shodan.query | slib.shodan.count
+        crypto:x509:cert:sha1=e652c8bd1cafd04a44239fa8dab0c59deacb79ee | slib.shodan.count
+    cmdargs:
+      - - query
+        - type: str
+          nargs: "?"
+          default: ""
+          help: The Shodan search query. AND'd with the query built for each inbound node.
+      - - --size
+        - type: int
+          default: null
+          help: The number of IPs to ask for. Defaults to the most your Shodan plan allows.
+      - - --facets
+        - type: str
+          default: null
+          help: |
+            Comma separated facets to print for context (ex. "country,org:10"). Printed as tables,
+            never modeled.
+      - - --file-hash
+        - type: str
+          default: null
+          choices: [favicon, html]
+          help: Count inbound file:bytes as a favicon or HTML page, instead of going by their :mime.
+      - - --yield-query
+        - default: false
+          action: store_true
+          help: Yield the it:exec:query node of each count instead of the IP nodes.
+    cmdinputs:
+      - form: inet:banner
+        help: Counted by their Shodan banner hash.
+      - form: file:bytes
+        help: Counted by their favicon or HTML hash.
+      - form: crypto:x509:cert
+        help: Counted by their SHA-1 fingerprint (or serial).
+      - form: inet:tls:servercert
+        help: Counted by their certificate.
+      - form: it:sec:cpe
+        help: Counted by the CPE's product and version.
+      - form: it:prod:softver
+        help: Counted by their CPE, or product name and version.
+      - form: it:sec:cve
+        help: Counted by vuln.
+      - form: risk:vuln
+        help: Counted by their CVE.
+      - form: inet:ssl:jarmhash
+        help: Counted by JARM.
+      - form: inet:tls:ja3s:sample
+        help: Counted by JA3S.
+      - form: inet:asn
+        help: Counted by ASN.
+      - form: inet:cidr4
+        help: Counted by network.
+      - form: inet:cidr6
+        help: Counted by network.
+      - form: inet:fqdn
+        help: Counted by hostname.
+      - form: inet:server
+        help: Counted by IP and port.
+      - form: ou:org
+        help: Counted by org name.
+      - form: ou:name
+        help: Counted by org name.
+      - form: it:dev:str
+        help: Counted as-is, a bare query.
+      - form: meta:rule
+        help: Saved queries (:type svc.shodan.query or under it), their :text is the query.
 
   - name: slib.shodan.hash
     perms:
@@ -352,6 +530,11 @@ commands:
 
       Models inet:dns:a/aaaa/cname/mx/ns/txt/soa records and the subdomains' inet:fqdn nodes.
 
+      Every inbound node is read before any are run, so the nodes this command creates can't come
+      back in from a lift that's still running (ex. "inet:fqdn | slib.shodan.dns.domain" would otherwise
+      also run on the nodes it creates, using a query credit each). --stream-inbound runs each inbound node as it
+      arrives instead, for inbound sets too large to hold in memory, with that risk.
+
       Examples:
 
         inet:fqdn=vertex.link | slib.shodan.dns.domain
@@ -380,6 +563,13 @@ commands:
         - default: false
           action: store_true
           help: Yield the subdomain inet:fqdn nodes instead of the inbound nodes.
+      - - --stream-inbound
+        - default: false
+          action: store_true
+          help: |
+            Run each inbound node as it arrives, instead of reading them all first. Only for inbound
+            sets too large to hold in memory: a lift of a form this command creates (inet:fqdn subdomains)
+            also returns the nodes it creates while it runs, which are then run too, using a query credit each.
     cmdinputs:
       - form: inet:fqdn
         help: Domains to model DNS records and subdomains for.
@@ -389,6 +579,11 @@ commands:
       - [ slib, shodan, user ]
     descr: |
       Resolve inet:fqdn nodes to IPs, and reverse resolve inet:ipv4/inet:ipv6 nodes to hostnames, using Shodan's DNS API.
+
+      Every inbound node is read before any are run, so the nodes this command creates can't come
+      back in from a lift that's still running (ex. "inet:fqdn inet:ipv4 | slib.shodan.dns.lookup" would otherwise
+      also run on the nodes it creates). --stream-inbound runs each inbound node as it
+      arrives instead, for inbound sets too large to hold in memory, with that risk.
 
       Examples:
 
@@ -400,6 +595,13 @@ commands:
         - default: false
           action: store_true
           help: Yield the resolved IP/hostname nodes instead of the inbound nodes.
+      - - --stream-inbound
+        - default: false
+          action: store_true
+          help: |
+            Run each inbound node as it arrives, instead of reading them all first. Only for inbound
+            sets too large to hold in memory: a lift of a form this command creates (inet:fqdn, inet:ipv4/6)
+            also returns the nodes it creates while it runs, which are then run too.
     cmdinputs:
       - form: inet:fqdn
         help: Hostnames to resolve.
@@ -519,9 +721,17 @@ commands:
     descr: |
       Search Shodan's historical Trends database, printing a monthly breakdown.
 
+      Inbound nodes are each searched for with the query slib.shodan.search builds for their form
+      (see its help), AND'd with any query given. Trends only supports some of Shodan's search
+      filters (see --filters), so nodes whose query uses others are warned about and skipped.
+      Inbound nodes are passed through, nothing is modeled.
+
       Examples:
 
         slib.shodan.trends "product:openssh" --facets version:5
+
+        // How long has this certificate been seen, and where?
+        crypto:x509:cert:sha1=e652c8bd1cafd04a44239fa8dab0c59deacb79ee | slib.shodan.trends --facets country:5
 
         slib.shodan.trends --filters
     cmdargs:
@@ -529,7 +739,7 @@ commands:
         - type: str
           nargs: "?"
           default: ""
-          help: The Shodan search query.
+          help: The Shodan search query. AND'd with the query built for each inbound node.
       - - --facets
         - type: str
           default: null
@@ -538,48 +748,160 @@ commands:
         - default: false
           action: store_true
           help: Print the available Trends filters and facets and stop.
+      - - --file-hash
+        - type: str
+          default: null
+          choices: [favicon, html]
+          help: Search for inbound file:bytes as a favicon or HTML page, instead of going by their :mime.
+    cmdinputs:
+      - form: inet:banner
+        help: Searched for by their Shodan banner hash.
+      - form: file:bytes
+        help: Searched for by their favicon or HTML hash.
+      - form: crypto:x509:cert
+        help: Searched for by their SHA-1 fingerprint (or serial).
+      - form: inet:tls:servercert
+        help: Searched for by their certificate.
+      - form: it:sec:cpe
+        help: Searched for by the CPE's product and version.
+      - form: it:prod:softver
+        help: Searched for by their CPE, or product name and version.
+      - form: it:sec:cve
+        help: Searched for by vuln.
+      - form: risk:vuln
+        help: Searched for by their CVE.
+      - form: inet:ssl:jarmhash
+        help: Searched for by JARM.
+      - form: inet:tls:ja3s:sample
+        help: Searched for by JA3S.
+      - form: inet:asn
+        help: Searched for by ASN.
+      - form: inet:cidr4
+        help: Searched for by network.
+      - form: inet:cidr6
+        help: Searched for by network.
+      - form: inet:fqdn
+        help: Searched for by hostname.
+      - form: inet:server
+        help: Searched for by IP and port.
+      - form: ou:org
+        help: Searched for by org name.
+      - form: ou:name
+        help: Searched for by org name.
+      - form: it:dev:str
+        help: Searched for as-is, a bare query.
+      - form: meta:rule
+        help: Saved queries (:type svc.shodan.query or under it), their :text is the query.
 
   - name: slib.shodan.queries
     perms:
       - [ slib, shodan, user ]
     descr: |
-      Browse the directory of saved Shodan search queries.
+      List saved Shodan queries: the ones stored in the Cortex, and Shodan's query directory.
+
+      Saved queries are meta:rule nodes (:text is the query) of two kinds, which never sync:
+
+        - Community queries are copied from Shodan's directory with --yield. Their :type is
+          svc.shodan.query.community. and their :name starts with "[Community] " (Synapse
+          lower-cases :name, so it reads ex. "[community] webcams"). They're a
+          snapshot: later changes in the directory only arrive by copying them again (edits to
+          :name or :desc are kept), and queries removed from it are never deleted here.
+        - Local queries are saved with slib.shodan.query.save. Their :type is
+          svc.shodan.query.local. (or the older svc.shodan.query.). They're never sent to Shodan,
+          its API can't save queries to the directory (share them on shodan.io).
+
+      The same query text is a separate node for each kind. --source picks which to list (both,
+      by default). Stored queries print first, with a "local" or "community" source. Directory
+      queries already copied into the Cortex print as "shodan (stored)".
+
+      Any saved query can be run by piping it to slib.shodan.search, slib.shodan.count, or
+      slib.shodan.stream.
 
       Examples:
 
-        // The most recently shared queries.
+        // Everything, or only what's in the Cortex.
         slib.shodan.queries
+        slib.shodan.queries --source local
 
-        // Search the directory, and list the popular tags.
-        slib.shodan.queries --search webcam
+        // Copy the directory's webcam queries into the Cortex, and count their IPs for free.
+        slib.shodan.queries --source shodan --search webcam --yield | slib.shodan.count
+
+        // Run every saved query.
+        meta:rule:type^=svc.shodan.query | slib.shodan.search --limit 200
+
+        // List the directory's popular tags.
         slib.shodan.queries --tags
     cmdargs:
+      - - --source
+        - type: str
+          default: all
+          choices: [ all, local, shodan ]
+          help: Which saved queries to list, the ones stored in the Cortex (local), Shodan's directory, or both.
       - - --search
         - type: str
           default: null
-          help: Search the saved queries for this text.
+          help: |
+            Only list saved queries with this text. Stored queries match it in their :name, :text,
+            or :desc (ignoring case), Shodan's directory searches for it.
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the meta:rule nodes, storing directory queries as community meta:rules.
       - - --tags
         - default: false
           action: store_true
-          help: List the most popular tags for saved queries.
+          help: List the most popular tags in Shodan's directory.
       - - --page
         - type: int
           default: 1
-          help: The page of results.
+          help: The page of Shodan's directory.
       - - --sort
         - type: str
           default: timestamp
           choices: [ timestamp, votes ]
-          help: How to sort the directory listing.
+          help: How to sort Shodan's directory.
       - - --order
         - type: str
           default: desc
           choices: [ asc, desc ]
-          help: The sort order of the directory listing.
+          help: The sort order of Shodan's directory.
       - - --size
         - type: int
           default: 10
           help: The number of tags to list with --tags.
+
+  - name: slib.shodan.query.save
+    perms:
+      - [ slib, shodan, user ]
+    descr: |
+      Save a Shodan query in the Cortex, as a local meta:rule (:type svc.shodan.query.local.).
+
+      Local queries are never sent to Shodan, and never sync with its query directory (see
+      slib.shodan.queries). Saving a query that's already saved locally warns and keeps the existing
+      one. A local query is a separate node from a community query with the same text.
+
+      Examples:
+
+        slib.shodan.query.save "ssl.jarm:2ad2ad0002ad2ad00042d42d00000069d641f34fe76acdc05c40262f8815e5" --name "CS JARM"
+
+        // Save a query and count its IPs right away.
+        slib.shodan.query.save "http.favicon.hash:-1166125415" --name "Favicon" --yield | slib.shodan.count
+    cmdargs:
+      - - query
+        - type: str
+          help: The Shodan search query.
+      - - --name
+        - type: str
+          required: true
+          help: A name for the saved query.
+      - - --desc
+        - type: str
+          default: null
+          help: A description of the saved query.
+      - - --yield
+        - default: false
+          action: store_true
+          help: Yield the meta:rule node.
 
   - name: slib.shodan.info
     perms:
@@ -620,6 +942,23 @@ commands:
 
       Streams never end on their own, so this stops after --limit banners or --timeout seconds.
 
+      Inbound nodes are added to the stream, all in one stream (one subscription):
+
+        inet:asn             asn        The ASN.
+        risk:vuln            vulns      :cve
+        it:sec:cve           vulns      The CVE.
+        pol:country          countries  :iso2
+        meta:rule            custom     :text (only rules with :type svc.shodan.query). A custom
+                                        stream takes one query, so only the first rule is used.
+
+      The stream type comes from the first inbound node (or the type given), and nodes for other
+      types are warned about and skipped. Any --value is added to the inbound nodes' values.
+      Inbound nodes aren't yielded, the IPs are.
+
+      The run is recorded as an it:exec:query (:text is ex. "ports:443,53", or the custom query),
+      linked with -(found)> edges to the inet:server, inet:banner, and inet:ipv4/inet:ipv6 nodes of
+      every banner read. Use --yield-query to yield the it:exec:query instead of the IPs.
+
       Examples:
 
         // Banners for 2 ASNs.
@@ -630,6 +969,10 @@ commands:
 
         // Banners from your network alerts.
         slib.shodan.stream alert --alert ABCDEFG
+
+        // Banners from some ASNs, or for some vulns.
+        inet:asn=15169 inet:asn=13335 | slib.shodan.stream --limit 50
+        risk:vuln:cve^=cve-2024 | slib.shodan.stream --timeout 30
     cmdargs:
       - - type
         - type: str
@@ -658,6 +1001,21 @@ commands:
         - type: int
           default: 60
           help: Stop after this many seconds (0 for no timeout).
+      - - --yield-query
+        - default: false
+          action: store_true
+          help: Yield the it:exec:query node instead of the IP nodes.
+    cmdinputs:
+      - form: inet:asn
+        help: Streams banners from the ASN.
+      - form: risk:vuln
+        help: Streams banners vulnerable to its :cve.
+      - form: it:sec:cve
+        help: Streams banners vulnerable to the CVE.
+      - form: pol:country
+        help: Streams banners from its :iso2 country.
+      - form: meta:rule
+        help: Saved queries (:type svc.shodan.query or under it), a custom stream of their :text.
 
   - name: slib.shodan.apikey
     perms:

@@ -18,6 +18,7 @@ RETN_METHS = (
     "host",
     "normHost",
     "count",
+    "countIps",
     "search",
     "searchFacets",
     "searchFilters",
@@ -87,6 +88,9 @@ RETN_METHS = (
     "normVuln",
     "cves",
     "cpes",
+    # Query provenance
+    "apiUrl",
+    "streamUrl",
 )
 
 

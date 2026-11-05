@@ -39,6 +39,10 @@ function count(query, facets=$lib.null) {
     return($svc.count($query, facets=$facets, apikey=$userKey()))
 }
 
+function countIps(query, size=$lib.null, facets=$lib.null) {
+    return($svc.countIps($query, size=$size, facets=$facets, apikey=$userKey()))
+}
+
 function search(query, page=(1), facets=$lib.null, minify=(false)) {
     return($svc.search($query, page=$page, facets=$facets, minify=$minify, apikey=$userKey()))
 }
@@ -115,6 +119,13 @@ function cpes(product, limit=(100), count=(false)) {
 }
 
 // Streaming
+
+// These don't need an API key, the URLs never include one.
+function apiUrl(path, base=api) { return($svc.apiUrl($path, base=$base).data) }
+
+function streamUrl(kind=banners, values=$lib.null, query=$lib.null, aid=$lib.null) {
+    return($svc.streamUrl(kind=$kind, values=$values, query=$query, aid=$aid))
+}
 
 function stream(kind=banners, values=$lib.null, query=$lib.null, aid=$lib.null, limit=(100), timeout=(60)) {
     for $retn in $svc.stream(kind=$kind, values=$values, query=$query, aid=$aid,

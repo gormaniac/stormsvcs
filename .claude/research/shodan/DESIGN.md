@@ -1,0 +1,672 @@
+# slib.shodan rework: query provenance, credit-free IP lists, saved queries, inbound nodes, and host history timelines
+
+**Status:** DESIGN. No code yet. This document is the implementation plan.
+**Date:** 2026-11-02
+**Targets:** Shodan REST/Streaming/Trends APIs as documented on 2026-11-02 · Synapse ≥ 2.137.0
+(the package's current `synapse_minversion`, see Open question 7) · stormsvcs conventions ·
+starting from `slib.shodan` **0.5.0**
+**Research appendices (same directory):**
+- `shodan-api-research.md`: the Shodan API, with citations and a "Could not verify" list.
+- `synapse-model-research.md`: the Synapse model, verified against a live `getModelDict()` dump of
+  synapse 2.256.0.
+
+Every form, property and edge named below is in that dump unless it is marked as a workaround.
+Every Shodan field appears in the API appendix.
+
+---
+
+## 1. Overview
+
+### 1.1 Goal
+
+This rework adds five capabilities to the existing `slib.shodan` service (`svcs/shodan/`):
+
+1. **Query provenance.** Each Shodan query the service runs (search, stream, count) becomes an
+   `it:exec:query` node. It records what was asked, by whom and when, and `-(found)>` edges link it
+   to the `inet:server`, `inet:banner` and `inet:ipv4`/`inet:ipv6` nodes the query returned.
+2. **Credit-free IP lists (`slib.shodan.count`).** The aim is to run as many Shodan queries as you
+   like while spending as few query credits as possible. The most valuable thing Shodan returns is
+   the list of IPs that match a query, and the free `/shodan/host/count` endpoint returns it as the
+   `ip` facet. The command makes **one** count call with `ip:<plan max>` in the facets and models each
+   IP. It spends no query credits and costs one request per query. It doesn't try to attribute other
+   data to the IPs; whois and port context come from other APIs. The counts themselves are never
+   stored, and `slib.shodan.search --count` is still the way to print them.
+3. **More inbound forms** for `slib.shodan.host`, `slib.shodan.trends`, `slib.shodan.stream` and the new
+   count command.
+4. **Host history timelines.** `slib.shodan.host --history` builds one `meta:timeline` per IP and one
+   `meta:event` per historical banner. Each event links to the `inet:server`, `inet:banner` and IP
+   node created from that banner. Re-runs are idempotent.
+5. **Saved queries in Synapse.** Saved Shodan queries are `meta:rule` nodes, and they come from two
+   separate sources that **never sync**:
+   - **Community queries** are copied from Shodan's public query directory. Their `:name` starts with
+     `[Community] `.
+   - **Local queries** are saved in the Cortex by analysts with a new `slib.shodan.query.save`
+     command.
+
+   `slib.shodan.queries` lists both by default, and a `--source` flag picks one (§5.9).
+
+**Acceptance:** `inet:ipv4=1.2.3.4 | slib.shodan.host --history` gives a timeline you can lift with
+`meta:event:time +{ :timeline -> meta:timeline +:title="Shodan history: 1.2.3.4" }`. Each event pivots
+(`-(refs)>`) to the exact server, banner and IP that the crawl observed. Running the command twice
+creates no new nodes.
+
+### 1.2 Non-goals for this rework
+
+- **Modeling counts.** Facet counts and totals are not stored anywhere, including props, node data
+  and tags. They are relative to a 30-day window and change constantly. `search --count` prints them.
+- **Full Shodan history.** The API only returns 90 days, capped at the most recent 1,000 banners,
+  with no paging (API appendix §1.3). Longer history accumulates only by running the command again
+  over time.
+- **Grouping routine crawls into "scans".** Shodan has no grouping ID for routine crawls. Each one
+  is a single IP:port probe (API appendix §2, gotcha 4). One event per banner is the most accurate
+  unit available.
+- **Linking queries and events to every derived node.** `-(found)>` and `-(refs)>` go only to
+  `inet:server`, `inet:banner` and `inet:ipv4/6`. Everything else (certs, softvers, vulns, headers,
+  DNS) is one hop from those nodes already. This was the maintainer's decision.
+- **New Shodan endpoints**, except reading `_shodan.options.scan` (§5.4).
+
+### 1.3 Why this is hard
+
+1. **`model.banner()` returns only the `inet:server`.** Both `-(found)>` and `-(refs)>` need the
+   banner and IP nodes that each banner produced. The model functions have to change shape without
+   breaking the documented `$lib.import(slib.shodan.lib)` API.
+2. **The facet size limit depends on the plan and isn't published.** The default size is 5, so
+   `ip` alone returns only 5 IPs. The command has to ask for `ip:<N>`, find the plan's limit, and say
+   clearly when a query matches more IPs than one call can return (§5.5).
+3. **Facet values come back untyped** (API appendix §4.2). The `ip` value has been confirmed as a
+   dotted string (§5.5), but every value still goes through `$lib.trycast` before it's modeled.
+4. **`_shodan.id` is not guaranteed to exist** (API appendix §1.6). The idempotency key needs a
+   deterministic fallback.
+
+---
+
+## 2. Background (condensed)
+
+**Shodan.** Shodan's unit of data is the *banner*: one observation of one IP:port at one time. Each
+banner has a `timestamp` (ISO 8601, UTC, no timezone) and a `_shodan` block with `id` (per-banner,
+usually a UUID), `crawler`, `module`, `ptr` and `options.{hostname, referrer, scan}`. Search, count
+and host lookups cover the last 30 days. `?history=true` covers 90 days, up to 1,000 banners. Count
+is free and returns `{total, facets: {name: [{count, value}]}}`, with a default facet size of 5 and a
+plan-dependent maximum. Search costs 1 query credit per page when the query has a filter or the page
+is ≥ 2. The REST API is limited to 1 request per second, with HTTP 429 above that. Details and
+citations are in `shodan-api-research.md`.
+
+**Synapse model anchors** (verified, `synapse-model-research.md`):
+
+- `it:exec:query` has `:text (it:query)`, `:language`, `:opts (data)`, `:api:url`, `:offset`,
+  `:time`, `:synuser`. `:service:instance` is deprecated, so don't use it.
+- `it:exec:query -(found)> *` is declared: "The target node was returned as a result of running the query."
+- `* -(refs)> *` is declared generically.
+- `meta:timeline` has `:title`, `:summary`, `:type (meta:timeline:taxonomy)`.
+  `meta:event` has `:timeline` (**single-valued**), `:time`, `:title`, `:summary`, `:index`,
+  `:duration`, `:type (meta:event:taxonomy)`.
+- `meta:source -(seen)> *` is the service's existing provenance convention (`slib.shodan.model`
+  `seen()`), and it applies to every new node.
+- `inet:ssh:hassh` does **not** exist.
+- `svcs/ip_api` is the precedent for choosing `inet:ipv4` vs `inet:ipv6` from an untyped IP string
+  (`$lib.trycast(inet:ipv4, …)` first).
+
+---
+
+## 3. Naming & repo integration
+
+This is an existing service, so nothing about its layout changes.
+
+| Item | Value |
+|---|---|
+| Service folder / package | `svcs/shodan/` / `shodansvc` (unchanged) |
+| Storm package | `slib.shodan` (unchanged) |
+| New commands | `slib.shodan.count`, `slib.shodan.query.save` |
+| New taxonomies | `meta:timeline:type=svc.shodan.host.history.` and `meta:event:type=svc.shodan.banner.`, under the same `svc.shodan.` root as the existing `meta:rule:type=svc.shodan.query.`. New `meta:rule:type` children: `svc.shodan.query.community.` and `svc.shodan.query.local.` (§5.9). |
+| New globals | None. The plan's facet limit is cached in the service's memory, not in globals (§4.2). |
+| Versions | Each roadmap phase is one **minor** bump: 0.6.0 → 0.10.0 (§16). The version is set in `pyproject.toml`, `__init__.py`, `slib.shodan.yaml` and `uv.lock` (edit the lock entry directly, then `uv lock --check`), per `CLAUDE.md`. |
+| Dependencies | None new |
+
+---
+
+## 4. Service architecture
+
+### 4.1 Files touched
+
+```
+svcs/shodan/src/shodansvc/
+├── norm.py          # normBanner keeps _shodan.options.scan and metadata.truncated
+├── svc.py           # + countIps(): one count call with the ip facet, finds the plan's facet limit
+├── api.py           # + "countIps" in RETN_METHS
+└── pkgproto/
+    ├── slib.shodan.yaml                       # new commands, cmdinputs, options
+    └── storm/
+        ├── modules/slib.shodan.model.storm    # banner() result dict, query(), timeline(), event()
+        ├── modules/slib.shodan.lib.storm      # host() timeline support, count(), streamValues()
+        ├── modules/slib.shodan.priv.user.storm# + countIps() wrapper
+        ├── commands/slib.shodan.count.storm   # new
+        ├── commands/slib.shodan.query.save.storm # new
+        └── commands/{search,stream,host,trends}.storm  # query nodes, inbound nodes
+```
+
+### 4.2 Python changes
+
+- **`ShodanSvc.countIps(query, size=None, facets=None, apikey=None)`** returns
+  `{"ips": [<str>, ...], "size": <n>, "full": <bool>, "facets": {...}}`:
+  1. Call `count(query, facets=f"ip:{size}" + extra facets)`. When no `size` is given, use the
+     limit cached for this key, or `svc.COUNT_IP_SIZE` (131,072, the largest published value).
+  2. If Shodan answers `Facet size too big for current subscription (limit: N)` (the exact text,
+     verified on the Membership plan), parse `N`, cache it in memory under the SHA-256 of the API key,
+     and retry once with `ip:N`. That costs one extra free call the first time each key is used. The
+     cache is never written to disk or globals, and it never holds the key itself.
+  3. Return only the IP values, with the counts dropped so Storm never sees them. `full` is true
+     when the number of IPs returned equals the size asked for, which means the query probably
+     matches more IPs than one call can return. (`total` counts banners, not IPs, so it can't be
+     used for this check.)
+  4. `facets` holds any extra facets the caller asked for, with their counts, **for printing only**
+     (§5.5).
+
+  It goes through the existing `RateLimiter` (1 rps) and 429 retry in `client.py`.
+- **`normBanner`** also keeps:
+  - `scan`: `_shodan.options.scan`.
+  - `region`: `_shodan.region` or `_shodan.options.region`, whichever is set (gotcha 3).
+  - `truncated`: `metadata.truncated`.
+  - `hash`: the banner `hash`, used in the fallback event key.
+- No new Telepath surface beyond `countIps`. The API key handling is unchanged: the user vault takes
+  precedence over the service key, and the key is never readable from Storm.
+
+---
+
+## 5. Data model mapping
+
+### 5.1 Identity, provenance and guid seeds
+
+| Node | Identity | Why |
+|---|---|---|
+| `it:exec:query` | `$lib.guid()` (random, **one per execution**) | An execution is a fact with its own time and results. Re-running a search is a new execution. Deterministic seeds would merge distinct runs and blur their `-(found)>` sets. |
+| `meta:timeline` (host history) | `$lib.guid(slib.shodan, history, <ip repr>)` | One per IP, stable across runs and users. |
+| `meta:event` (one banner) | `$lib.guid(slib.shodan, banner, <_shodan.id>)`. If there's no id: `$lib.guid(slib.shodan, banner, <ip>, <port>, <transport>, <timestamp>, <hash>)` | Idempotent re-runs (API appendix §1.6, gotcha 2). `timestamp` has microsecond resolution, so the fallback is unique per crawl. |
+| `meta:timeline:taxonomy` / `meta:event:taxonomy` | taxon values above | Created with `[ ... ?= ]`. |
+
+Every new node gets `<(seen)+ { meta:source=<slib.shodan guid> }` through `model.seen()`. Props set
+on existing nodes use `?=`, so analyst edits survive re-runs. The exceptions are `:time` and
+`:timeline` on events, which are deterministic for a given guid.
+
+### 5.2 Model refactor: banner results
+
+`model.banner(b, tagPrefix)` currently returns the `inet:server`. It changes to:
+
+- **`model.bannerNodes(b, tagPrefix)`** (new) returns
+  `({"server": <inet:server>, "banner": <inet:banner or null>, "ip": <inet:ipv4/6>})`.
+- **`model.banner()`** stays as a wrapper that returns `bannerNodes(...).server`. The public
+  return value doesn't change.
+- **`model.host(h, tagPrefix, timeline=$lib.null)`** passes each banner's result dict to `event()`
+  when it's given a timeline.
+
+All the existing derived modeling (certs, softvers, vulns, headers, SSH keys, DNS) stays exactly as
+it is.
+
+### 5.3 `it:exec:query`, one per Shodan query execution
+
+| Prop | Value |
+|---|---|
+| `:text` | The query exactly as sent to Shodan, including the AND'd query built for an inbound node. For streams: `<kind>:<values joined by ','>`, or the custom query. |
+| `:language` | `shodan` |
+| `:time` | `$lib.time.now()` when the first request is sent |
+| `:synuser` | `$lib.user.iden` |
+| `:api:url` | Endpoint without the key, ex. `https://api.shodan.io/shodan/host/search`, `https://api.shodan.io/shodan/host/count`, `https://stream.shodan.io/shodan/asn/3303,15169` |
+| `:offset` | The number of results consumed: banners for search/stream, IPs for count |
+| `:opts` | `{"command": "slib.shodan.search", "limit", "page", "minify"}`, `{"kind", "values", "limit", "timeout"}` for streams, or `{"size", "facets", "full"}` for count. **Never the key.** |
+
+Edges:
+
+- `it:exec:query -(found)> inet:server`, `inet:banner` and `inet:ipv4`/`inet:ipv6`. Only these
+  three classes, as decided.
+- `it:exec:query -(refs)> <inbound node>`, when the query was built from an inbound node (cert,
+  JARM, `meta:rule`, ASN, …). This makes "searches run for this node" one pivot:
+  `crypto:x509:cert=… <(refs)- it:exec:query -(found)> inet:server`.
+
+Which commands create query nodes:
+
+| Command | Creates `it:exec:query`? |
+|---|---|
+| `search` (ingest mode) | Yes. One per query executed: per inbound node, or once for a bare query. |
+| `search --count/--tokens/--filters` | **No.** These are print-only modes and model nothing. |
+| `stream` | Yes, one per run. |
+| `count` | Yes. One per count call, i.e. per query (per inbound node, or once for a bare query). |
+| `trends` | No. It prints aggregates and models nothing. |
+| `host`, `dns.*`, `cve`, `cpe` | No. These are lookups, not queries (Open question 5). |
+
+Library API: `$shodan.search(query, ...)` returns `({"query": <it:exec:query>, "ips": [...]})`
+(new function). The existing functions are unchanged.
+
+### 5.4 Host history timeline
+
+Built by `slib.shodan.host --history`, and also by `slib.shodan.host --timeline` for non-history
+lookups, which add the latest banner per port to the same timeline.
+
+**`meta:timeline`**
+
+| Prop | Value |
+|---|---|
+| `:title` | `?= "Shodan history: <ip>"` |
+| `:summary` | `?= "Shodan banners observed for <ip>, one meta:event per banner. Shodan's history covers 90 days and at most the latest 1,000 banners per lookup."` |
+| `:type` | `svc.shodan.host.history.` |
+| edges | `meta:timeline -(refs)> inet:ipv4/6` (the subject IP) |
+
+**`meta:event`**, one per banner in `data`:
+
+| Prop | Shodan field |
+|---|---|
+| `:timeline` | the IP's timeline |
+| `:time` | `timestamp` (UTC) |
+| `:title` | `?= "<transport>/<port> <product> <version>"`, ex. `tcp/22 OpenSSH 8.9p1`. Without a product: `<transport>/<port> <_shodan.module>`. |
+| `:summary` | `?=`. If `_shodan.options.scan` is set: `"On-demand scan <scan id>"`; otherwise `"Crawler <_shodan.crawler>"`. If `metadata.truncated` is set, add `" (truncated: <fields>)"`. |
+| `:type` | `svc.shodan.banner.` |
+| edges | `-(refs)> inet:server`, `-(refs)> inet:banner` (when the banner has `data`), `-(refs)> inet:ipv4/6`. Nothing else. |
+
+Rules:
+
+- Host-level fields (`vulns`, `tags`, `hostnames`, `ports`, `last_update`) probably describe only
+  the current 30-day view (API appendix §1.7, unverified). They are modeled as they are today and are
+  **not** attached to events.
+- `meta:event:timeline` is single-valued. That's fine here: a banner belongs to exactly one IP.
+- Historical banners may have large fields removed. If `metadata.truncated` ever lists `data`, skip
+  the `inet:banner` and the `refs` edge to it. A truncated text would create a different
+  `inet:banner` whose banner hash doesn't match (Open question 6). The event still references the
+  server and IP.
+- A host with 1,000 historical banners creates 1,000 events. That's acceptable, and the timeline
+  makes it browsable. Re-runs are free because the events are idempotent.
+
+### 5.5 Credit-free IP lists (`slib.shodan.count`)
+
+**Goal:** get the list of IPs that match a query without spending query credits, so you can run as
+many queries as you like. Context such as whois and ports comes from other APIs.
+
+**What it does, per query:**
+
+1. One call to `/shodan/host/count` with `facets=ip:<size>` (§4.2). No query credits. It can't
+   return more IPs than the plan's facet limit.
+2. Each `ip` value becomes `inet:ipv4` or `inet:ipv6` (decided by `$lib.trycast`, the same way
+   `svcs/ip_api` does it), gets the usual `meta:source -(seen)>`, and is linked with
+   `it:exec:query -(found)>`.
+3. Nothing else is modeled. The counts and the other facets aren't stored in props, node data or
+   tags.
+
+**Verified behaviour** (live calls on 2026-11-02 with a Membership-plan key; count calls used no
+query credits, `api-info` still showed 100/100):
+
+| Request (`facets=`) | Result |
+|---|---|
+| `ip` | 5 IPs, the default size |
+| `ip:100` | 100 IPs |
+| `ip:1000` | 1,000 IPs |
+| `ip:10000` | `Facet size too big for current subscription (limit: 1000)` |
+| `ip:1000,port:50` | 1,000 IPs plus a separate list of 50 ports. Facets are independent top lists over the whole query, so the ports can't be tied to IPs. |
+
+`ip` values are dotted strings (`"185.212.47.222"`). Other formats seen: `asn` is lower-case with a
+prefix (`"as39378"`), `port` is an integer, and `hostname` isn't a facet (Shodan silently drops it).
+Known limits: **Membership 1,000** (verified) and **Freelancer 5,120** (reported by the maintainer). Shodan doesn't publish the others (Open question 2).
+
+**When there are more IPs than one call returns:** if `full` is true, the command warns:
+`slib.shodan.count: <query> returned <size> IPs, the most your plan allows in one call. It likely
+matches more; narrow the query (ex. add country: or asn:) to get the rest.` Automatic splitting is
+Open question 3.
+
+**Extra facets (`--facets`):** optional and **print-only**. They're shown as tables after the IPs
+are modeled, the same way `search --count --facets` prints them, as context for the run. They
+aren't attributed to IPs and aren't stored. Whether to request any by default is Open question 1.
+
+**Order of results:** Shodan orders facet values by banner count, so with `full` true you get the
+IPs with the most matching banners, not a random sample.
+
+### 5.7 Tags & taxonomies
+
+| Item | Value |
+|---|---|
+| `meta:timeline:type` | `svc.shodan.host.history.` |
+| `meta:event:type` | `svc.shodan.banner.` |
+| `meta:rule:type` | `svc.shodan.query.` (parent, existing), `svc.shodan.query.community.`, `svc.shodan.query.local.` |
+| Shodan tags | unchanged: `<prefix>.<shodan tag>` via `applyTags()` when tagging is enabled |
+
+### 5.8 Lossless fallback
+
+The raw `_shodan` block is not stored. Every field that matters is mapped: `id` into the guid,
+`options.scan`, `crawler` and `truncated` into the summary, and `module` into the title fallback.
+Open question 8 covers whether to also store `_shodan` as node data on the event.
+
+### 5.9 Saved queries: community vs. local
+
+There are two kinds of saved query. Both are `meta:rule` nodes that `slib.shodan.search` can run,
+but they come from different places and **never sync with each other or with Shodan**.
+
+| | Community queries | Local queries |
+|---|---|---|
+| Where they come from | Shodan's public query directory (`GET /shodan/query`, `/shodan/query/search`), copied into the Cortex by `slib.shodan.queries --yield` | Saved by an analyst with `slib.shodan.query.save` (or created by hand) |
+| `:type` | `svc.shodan.query.community.` | `svc.shodan.query.local.`. Existing rules with the bare `svc.shodan.query.` type also count as local. |
+| `:name` | `"[Community] " + title` (falls back to the query text when there's no title). The prefix is only added once. | Whatever the analyst gives it, no prefix |
+| guid | `$lib.guid(slib.shodan, query, community, <query text>)` | `$lib.guid(slib.shodan, query, local, <query text>)` |
+| Updates | A snapshot. Later changes in Shodan's directory reach the Cortex only if someone runs `--yield` again. Entries removed from the directory are never deleted locally. | Never sent to Shodan. Shodan's API has no endpoint to save a directory query (only the three read endpoints exist), and sharing to the directory is done on shodan.io. |
+
+**What doesn't sync, stated plainly:**
+
+- Saving a local query does not publish it to Shodan.
+- Editing a community query in the Cortex does not change it on Shodan.
+- New or changed directory entries don't show up in the Cortex until they're ingested again.
+- A local query and a community query with the same text are **two separate nodes**, because their
+  guids use different seeds. Saving your own copy of a community query never merges it with the
+  community copy.
+
+**Community `meta:rule` props**, from the directory result fields (`title`, `description`, `query`,
+`timestamp`, `tags`, `votes`; Open question 10):
+
+| Prop | Value |
+|---|---|
+| `:name` | `?= "[Community] <title>"` |
+| `:text` | `query` (it's in the guid, so it never changes for a given node) |
+| `:desc` | `?= description` |
+| `:created` | `?= timestamp` |
+| `:url` | `?= https://www.shodan.io/search?query=<url-encoded query>` |
+| tags | the directory `tags` as `<prefix>.query.<tag>`, only when tagging is enabled |
+
+- `votes` is not stored, since it's a count (§1.2).
+- `?=` means re-ingesting never overwrites an analyst's edits to the name or description.
+
+**Local `meta:rule` props:** `:name`, `:text`, `:desc` (optional), `:created=now`, and
+`:author` is left unset. `slib.shodan.query.save` warns, without failing, if the same text already
+exists as a local query, and returns the existing node.
+
+**Running saved queries.** `searchQuery()` currently requires `:type` to equal `svc.shodan.query.`.
+It changes to accept any type at or under `svc.shodan.query.`. Lifting every saved query is then
+`meta:rule:type^=svc.shodan.query.`, and lifting one source is
+`meta:rule:type=svc.shodan.query.community.`. Each run's `it:exec:query -(refs)> meta:rule` (§5.3)
+gives every saved query its run history.
+
+---
+
+## 6. Sync & orchestration
+
+There are no scheduled syncs. Every run is an on-demand command.
+
+- **History:** each `host --history` run adds new events and is a no-op for events already seen.
+  Running it on a schedule (cron) extends a timeline beyond the 90-day API window. That's the only
+  way to keep longer history.
+- **Count:** one request per query (two the first time a key is used, to find its facet limit).
+  With inbound nodes, each node is one request at 1 request per second, and no query credits.
+
+---
+
+## 7. Storm package surface
+
+### 7.1 Permissions
+
+| Perm | Covers |
+|---|---|
+| `slib.shodan.user` | `count` and `query.save` (new), and the existing user commands |
+
+### 7.2 Commands
+
+**`slib.shodan.count`** (new)
+
+- `query` (positional, AND'd with the query built for each inbound node)
+- `--size <n>`: the number of IPs to ask for. Defaults to the plan's limit (§4.2). A size above the
+  limit is lowered to the limit with a warning.
+- `--facets <csv>`: extra facets to print for context; never modeled
+- `--yield-query`: yield the `it:exec:query` nodes instead of the IPs. By default it yields the IPs,
+  matching `search`.
+- cmdinputs: every `search` form, through `$shodan.searchQuery()`
+
+**`slib.shodan.search`**
+
+- Ingest mode creates `it:exec:query` nodes.
+- New `--yield-query` option: yield the query nodes instead of the IPs.
+
+**`slib.shodan.stream`**
+
+- Creates one `it:exec:query` per run.
+- New cmdinputs, all collected into one stream like `scan` does (one subscription, not one per node):
+  - `inet:asn` → `asn`, no `AS` prefix (gotcha 12)
+  - `risk:vuln` (`:cve`) / `it:sec:cve` → `vulns`
+  - `pol:country` (`:iso2`) → `countries`
+  - `meta:rule` with `:type=svc.shodan.query.` → `custom` (case-sensitive, gotcha 13)
+- If the inbound nodes mix kinds, warn and use the first kind.
+
+**`slib.shodan.host`**
+
+- New option: `--timeline`.
+- `--history` implies `--timeline`; `--no-timeline` opts out.
+- New cmdinputs:
+  - `inet:server` → `:ipv4`/`:ipv6`
+  - `inet:banner` → `:server:ipv4`/`:server:ipv6`
+  - `inet:dns:a` / `inet:dns:aaaa` → `:ipv4`/`:ipv6`
+- `inet:fqdn` is deferred (§14).
+
+**`slib.shodan.trends`**
+
+- Accepts inbound nodes through `searchQuery()`.
+- It rejects inbound forms whose filter Trends doesn't support. The supported list is in API
+  appendix §7; `hash` and `ssl.cert.fingerprint` *are* supported, `hostname` is supported, `scan` is
+  not. Check the filter prefix of the built query against a `TRENDS_FILTERS` constant in
+  `slib.shodan.lib`.
+
+**`slib.shodan.queries`**
+
+Lists both kinds of saved query (§5.9).
+
+- **`--source all|local|shodan`**, default `all`:
+  - `local`: only `meta:rule` nodes stored in the Cortex. That includes local queries and any
+    community queries ingested earlier, which show their `[Community]` name.
+  - `shodan`: only the live Shodan directory.
+  - `all`: both. Local results print first.
+- The printed table gets a `source` column: stored rows are `local` or `community`, and directory
+  rows are `shodan`, or `shodan (stored)` when their community rule already exists in the Cortex.
+- `--search <text>`:
+  - On Shodan it uses `/shodan/query/search`.
+  - Locally it's a case-insensitive substring match on `:name`, `:text` and `:desc`. The match is
+    done in Storm, not as a regex, so the search text is never treated as a pattern.
+- `--yield`:
+  - Shodan results are stored as community `meta:rule` nodes, then yielded.
+  - Local results are lifted and yielded.
+  - Without `--yield`, the command only prints and creates nothing.
+- `--tags`, `--page`, `--sort` and `--order` apply to the Shodan side only. If they're used with
+  `--source local`, the command warns.
+
+**`slib.shodan.query.save`** (new)
+
+- `query` (positional), `--name <str>` (required), `--desc <str>`, `--yield`.
+- Creates a local `meta:rule` (§5.9). It never contacts Shodan.
+- Requires the `slib.shodan.user` perm and node-add permission for `meta:rule`.
+
+### 7.3 Docs
+
+Update `README.md` and each command's `descr` with the new behavior. Add examples of pivoting from a
+query to its results and walking a timeline.
+
+---
+
+## 8. Python implementation notes
+
+- Never put the API key in `:opts` or `:api:url`. Build `:api:url` from `client.BASE_URLS` plus the
+  path, without params.
+- Parse the facet-limit error with a strict regex (`\(limit: (\d+)\)`). If the message doesn't
+  match, return the error as it is and don't retry.
+
+---
+
+## 9. Testing strategy
+
+**`fakeshodan.py`**
+
+- Host fixtures with `history=true`:
+  - repeated banners for the same port with different timestamps
+  - one banner with `_shodan.id: null`
+  - one with `_shodan.options.scan`
+  - one with `metadata.truncated`
+- `/shodan/host/count` that honors `ip:<N>` and returns the verified limit error above a
+  configured limit. Its `ip` values include IPv4, IPv6 and one junk value.
+
+**Python unit tests**
+
+- `countIps`:
+  - drops the counts
+  - finds the limit from the error and retries once
+  - caches the limit per key hash
+  - sets `full` correctly
+  - doesn't retry on an unrecognized error
+
+**StormPkgTest**
+
+- **Query provenance:**
+  - one `it:exec:query` per inbound node
+  - `-(found)>` only to the three forms
+  - `-(refs)>` to the inbound node
+  - no key anywhere in the node
+  - print-only modes create no query nodes
+- **History:**
+  - one timeline per IP and N events
+  - run twice → node count unchanged (idempotency)
+  - the fallback key is used when `id` is null
+  - events reference only server, banner and IP
+- **Count:**
+  - one query node per inbound node, with `-(found)>` to each IP
+  - IPv4 and IPv6 values model as the right form, and the junk value is skipped with a warning
+  - no counts or extra facets stored anywhere
+  - the "full" warning appears when expected
+- **Inbound:** each new cmdinput form on host, trends and stream.
+- **Saved queries:**
+  - `--source local`, `--source shodan` and `--source all` each list the right rows.
+  - Community rules get exactly one `[Community] ` prefix, including after re-ingest.
+  - A local and a community rule with the same text are two separate nodes.
+  - Re-ingest keeps analyst edits to `:name` and `:desc`.
+  - `query.save` makes no Shodan request (the fake server asserts no calls).
+  - Local search text containing regex characters is matched literally.
+  - `search` runs community, local and legacy `svc.shodan.query.` rules.
+- **Model existence:** `it:exec:query -(found)>`, `meta:timeline` and `meta:event` exist on the
+  pinned synapse (Open question 7).
+- **Versions:** `test_versions_match` is updated each phase.
+
+**Live tests (gated)**
+
+- One keyed `host?history=true` call that records whether host-level fields are current-only and
+  whether `_shodan.id` is stable across two calls (Open questions 6 and 9).
+- One count call with `ip:1000` that checks the values are dotted strings and the call used no query
+  credits (`api-info` before and after).
+
+---
+
+## 10. Docker & deployment
+
+Unchanged.
+
+---
+
+## 11. Performance & scale budget
+
+| Dimension | Target | Mechanism |
+|---|---|---|
+| History events per host | ≤ 1,000 per lookup | API cap. Idempotent guids keep re-runs a no-op. |
+| Count | Up to the plan's facet limit in IPs (1,000 on Membership, 5,120 on Freelancer) per request, 0 query credits | One call per query; limit cached per key |
+| Query nodes | 1 per execution | `-(found)>` only to 3 forms, so edge count ≤ 3 × results |
+
+---
+
+## 12. Security considerations
+
+- The key is never stored on graph nodes. Strip `api_key` from any `/shodan/scans` data (gotcha 6).
+- The facet-limit cache is keyed by a hash of the key and kept only in memory.
+- Facet values and banner fields are attacker-controlled. Everything goes through
+  `$lib.trycast`/`?=`, and `:title`/`:summary` are built from typed fields only.
+
+---
+
+## 13. Worked example / acceptance narrative
+
+```
+// Query provenance.
+crypto:x509:cert:sha1=e652c8bd1cafd04a44239fa8dab0c59deacb79ee | slib.shodan.search --yield-query
+-> it:exec:query -(found)> inet:server
+
+// History timeline, run twice: the second run adds nothing.
+inet:ipv4=1.2.3.4 | slib.shodan.host --history
+inet:ipv4=1.2.3.4 | slib.shodan.host --history
+meta:event:time +{ :timeline -> meta:timeline +:title="Shodan history: 1.2.3.4" }
+meta:event:type=svc.shodan.banner. +:time@=(-30 days, now) -(refs)> inet:banner
+
+// Every IP matching a query, with no query credits, plus a printed country breakdown for context.
+slib.shodan.count "http.favicon.hash:-1166125415" --facets country:10
+
+// The same for saved queries, then take only the IPs.
+meta:rule:type^=svc.shodan.query. | slib.shodan.count
+it:exec:query:api:url=https://api.shodan.io/shodan/host/count -(found)> inet:ipv4
+
+// Inbound nodes on the commands that gained them.
+inet:server:port=22 | slib.shodan.host
+inet:asn=15169 | slib.shodan.stream asn --limit 50
+
+// Saved queries: copy matching community queries in, save a local one, then run both.
+slib.shodan.queries --source shodan --search "cobalt strike" --yield
+slib.shodan.query.save "ssl.jarm:2ad2ad0002ad2ad00042d42d00000069d641f34fe76acdc05c40262f8815e5" --name "CS JARM"
+slib.shodan.queries --source local
+meta:rule:type^=svc.shodan.query. | slib.shodan.search --limit 200
+```
+
+**Acceptance criteria:**
+
+1. The idempotency tests pass: a second history run creates no nodes or edges.
+2. `-(found)>` and event `-(refs)>` reach only `inet:server`, `inet:banner` and `inet:ipv4/6`.
+3. No count value appears in props, node data or tags.
+4. No API key appears in any node.
+
+---
+
+## 14. Deferred / later candidates
+
+- **`inet:fqdn` input on `host` with `--resolve`.** It overlaps `enrich`, which already does DNS
+  for fqdns.
+- **Using `scan:<id>` with `scan --wait`.** This would ingest exactly the on-demand scan's banners
+  and link them to a `meta:event`. The search costs credits, but it's free through count.
+- **Search and stream banners landing in the IP's timeline**, behind a global toggle.
+- **`it:exec:query:service:platform`** pointing at an `inet:service:platform` for Shodan.
+- **Automatic splitting for large results** (Open question 3).
+
+---
+
+## 15. Open questions
+
+1. **Default context facets for `count`.** Should it print any by default (for example `country`,
+   `org`, `port`), or only when `--facets` is given? Either way they're print-only.
+2. **Facet limits on other plans.** Known so far: Membership 1,000 (verified) and Freelancer 5,120
+   (reported by the maintainer). Small Business, Corporate and Enterprise are unknown. The design
+   doesn't depend on these numbers, because the limit is read from Shodan's error at run time.
+3. **Automatic splitting when `full` is true.** Should `count --split country,asn` re-run the query
+   once per value of a facet (`<query> country:US`, …) and merge the IPs? It stays free but uses
+   more calls, and it's only exact if no value list is itself full. Deferred until it's needed.
+4. **IPv6 values from the `ip` facet.** Confirm the format with a query that matches IPv6 hosts.
+5. **Query nodes for `host`, `dns`, `cve` and `cpe` lookups.** Currently no.
+6. **Can `metadata.truncated` include `data` on historical banners?** *Checked live 2026-11-03:* not
+   in 2,229 historical banners (only `http`, `opts`, `location`, `ssl`, `html` were). `normBanner`
+   still drops a truncated `data`, in case it happens.
+7. **`synapse_minversion`.** Confirm that `it:exec:query -(found)>` and `meta:event:type` exist at
+   2.137.0, or bump the floor.
+8. **Store `_shodan` as event node data?** Not needed now.
+9. **Is `_shodan.id` stable across repeated calls?** *Checked live 2026-11-03:* yes, identical across
+   calls for all 2,229 banners, and never missing. The fallback key stays for safety.
+12. **Host-level fields on history lookups.** *Found live 2026-11-03:* with `history=true`, `ports`
+    and `vulns` are the union over the history, and `last_update` is the newest history banner.
+    *Decided (0.12.0):* no old vulns. The current host is modeled from a plain lookup, and a history
+    lookup only models its banners, without their vulns (`model.historyBanners`).
+13. **History lags the current index** by about a day (found live). *Decided (0.12.0):* `--history`
+    makes a plain lookup first (one more free call), so the newest banners land in the timeline too.
+14. **`meta:rule:name` is lower-cased by Synapse** (`lower: True, onespace: True`), so community names
+    read `[community] <title>`. The original-case title isn't kept anywhere; `:desc` holds the
+    directory description.
+
+---
+
+## 16. Phased roadmap
+
+| Phase | Version | Scope | Exit criteria |
+|---|---|---|---|
+| 1 | 0.6.0 | `bannerNodes()` refactor. `it:exec:query` on `search` and `stream`. `--yield-query`. | **Done.** Provenance tests; existing tests still pass. |
+| 2 | 0.7.0 | `slib.shodan.count` and `countIps`: credit-free IP lists, limit detection, the "full" warning, print-only `--facets`. | **Done.** Count tests; live check that count uses no credits. |
+| 3 | 0.8.0 | Host history timeline: `--timeline`, `--history`, fallback key, `normBanner` additions. | **Done.** Idempotency tests; Open questions 6 and 9 checked live. |
+| 4 | 0.9.0 | Inbound nodes for `host`, `trends` and `stream`. | **Done.** Per-form tests. |
+| 4b | 0.9.1, 0.10.0 | Each request made once per run (0.9.1). `search`, `enrich`, `dns.domain` and `dns.lookup` read all inbound nodes before running, so a lift of a form they create can't feed them their own results; `--stream-inbound` keeps the old streaming behavior (0.10.0). | **Done.** Dedupe and feedback tests. |
+| 5 | 0.11.0 | **Done.** Saved queries: `queries --source/--yield`, `query.save`, the community/local `meta:rule` types, and `searchQuery()` accepting the whole `svc.shodan.query.` subtree. | Saved-query tests. |
+| 5b | 0.12.0 | **Done.** `--history` also does a plain lookup for the current data; no vulns from the history (Open questions 12, 13). | History tests. |
+| 6 | 0.12.1 | **Done.** Review fixes: history banners don't overwrite the ASN or add old tags; `stream` doesn't fall back to the unfiltered stream; the facet-limit cache expires and re-checks a bigger `--size`; scan data never includes `api_key` (§12); `trendsQuery` ignores quoted text; `query.save` finds older local rules; `queries --source local` warns about directory-only options (§7.2). | Review regression tests. |

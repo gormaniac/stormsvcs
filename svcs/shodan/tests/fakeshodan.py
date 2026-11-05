@@ -207,6 +207,101 @@ EUVD_NO_CVE = {
     "ghsa": None,
 }
 
+# A host with history: 2 crawls of the same SSH banner, an HTTP banner without a _shodan.id, and
+# an on-demand scan result Shodan truncated the data of.
+HISTORY_IP = "203.0.113.7"
+HISTORY_BANNERS = [
+    {
+        "ip_str": HISTORY_IP,
+        "port": 22,
+        "transport": "tcp",
+        "timestamp": "2026-10-01T12:00:00.000000",
+        "product": "OpenSSH",
+        "version": "8.9p1",
+        "data": "SSH-2.0-OpenSSH_8.9p1",
+        "hash": 111,
+        "vulns": {"CVE-2023-48795": {"cvss": 5.9, "verified": False, "summary": "Terrapin"}},
+        "_shodan": {"module": "ssh", "id": "hist-1", "crawler": "crawler-a"},
+    },
+    {
+        "ip_str": HISTORY_IP,
+        "port": 22,
+        "transport": "tcp",
+        "timestamp": "2026-09-01T12:00:00.000000",
+        "product": "OpenSSH",
+        "version": "8.9p1",
+        "data": "SSH-2.0-OpenSSH_8.9p1",
+        "hash": 111,
+        "tags": ["self-signed"],
+        "_shodan": {"module": "ssh", "id": "hist-2", "crawler": "crawler-b"},
+    },
+    {
+        "ip_str": HISTORY_IP,
+        "port": 80,
+        "transport": "tcp",
+        "timestamp": "2026-08-15T06:30:00.123456",
+        "data": "HTTP/1.1 200 OK\r\nServer: thing\r\n\r\n",
+        "hash": 222,
+        "_shodan": {"module": "http", "id": None, "crawler": "crawler-a"},
+    },
+    {
+        "ip_str": HISTORY_IP,
+        "port": 443,
+        "transport": "tcp",
+        "timestamp": "2026-08-01T00:00:00.000000",
+        "data": "HTTP/1.1 200 OK (cut)",
+        "hash": 333,
+        "metadata": {"truncated": ["data", "http.html"]},
+        # A vuln of a service that's gone, only in the history, from when the IP was in another ASN.
+        "vulns": {"CVE-2011-3192": {"cvss": 7.8, "verified": False, "summary": "Apache Killer"}},
+        "asn": "AS1111",
+        "org": "Old Org",
+        "tags": ["honeypot"],
+        "_shodan": {"module": "https", "id": "hist-4", "options": {"scan": "SCAN1"}},
+    },
+]
+HOST_HISTORY = {
+    "ip_str": HISTORY_IP,
+    "asn": "AS64496",
+    "org": "Example Org",
+    "last_update": "2026-10-01T12:00:00.000000",
+    "hostnames": [],
+    # With history=true, Shodan combines the host-level fields over the whole history.
+    "ports": [22, 80, 443],
+    "vulns": ["CVE-2023-48795", "CVE-2011-3192"],
+    "data": HISTORY_BANNERS,
+}
+
+
+def hostHistory(request) -> tuple[int, dict]:
+    """GET /shodan/host/203.0.113.7: every banner with history=true, else the latest per port."""
+
+    if request.query.get("history") == "true":
+        return 200, HOST_HISTORY
+    current = [HISTORY_BANNERS[0], HISTORY_BANNERS[2]]
+    return 200, dict(HOST_HISTORY, ports=[22, 80], vulns=["CVE-2023-48795"], data=current)
+
+
+# Saved queries from Shodan's directory, with the fields it returns (checked live 2026-11-03).
+DIRECTORY = [
+    {
+        "votes": 5,
+        "title": "Webcams",
+        "description": "Open webcams",
+        "timestamp": "2021-05-15T21:52:55.316000",
+        "tags": ["webcam", "iot"],
+        "query": "webcam",
+    },
+    {
+        "votes": 1,
+        "title": "",
+        "description": "",
+        "timestamp": "2020-01-01T00:00:00.000000",
+        "tags": [],
+        "query": 'port:8080 "Server: thing"',
+    },
+]
+
 SEARCH_PAGE = {
     "total": 2,
     "matches": [
@@ -295,11 +390,8 @@ ALERT = {
 ROUTES: dict[tuple[str, str], Any] = {
     ("GET", "/api/shodan/host/8.8.8.8"): (200, HOST_8888),
     ("GET", "/api/shodan/host/45.33.32.156"): (200, HOST_SSH),
+    ("GET", f"/api/shodan/host/{HISTORY_IP}"): hostHistory,
     ("GET", "/api/shodan/host/10.0.0.1"): (404, {"error": "No information available for that IP."}),
-    ("GET", "/api/shodan/host/count"): (
-        200,
-        {"total": 1234, "facets": {"port": [{"value": 443, "count": 1000}]}},
-    ),
     ("GET", "/api/shodan/host/search"): (200, SEARCH_PAGE),
     ("GET", "/api/shodan/host/search/facets"): (200, ["country", "port"]),
     ("GET", "/api/shodan/host/search/filters"): (200, ["port", "product"]),
@@ -362,14 +454,8 @@ ROUTES: dict[tuple[str, str], Any] = {
     ("GET", "/api/notifier/NOTIF1"): (200, {"id": "NOTIF1", "provider": "slack", "args": {}}),
     ("PUT", "/api/notifier/NOTIF1"): (200, {"success": True, "id": "NOTIF1"}),
     ("DELETE", "/api/notifier/NOTIF1"): (200, {"success": True}),
-    ("GET", "/api/shodan/query"): (
-        200,
-        {"total": 1, "matches": [{"votes": 5, "title": "Webcams", "query": "webcam"}]},
-    ),
-    ("GET", "/api/shodan/query/search"): (
-        200,
-        {"total": 1, "matches": [{"votes": 5, "title": "Webcams", "query": "webcam"}]},
-    ),
+    ("GET", "/api/shodan/query"): (200, {"total": 2, "matches": DIRECTORY}),
+    ("GET", "/api/shodan/query/search"): (200, {"total": 1, "matches": DIRECTORY[:1]}),
     ("GET", "/api/shodan/query/tags"): (
         200,
         {"total": 1, "matches": [{"value": "webcam", "count": 10}]},
@@ -424,6 +510,15 @@ ROUTES: dict[tuple[str, str], Any] = {
 
 STREAM_BANNERS = [HOST_8888["data"][0], HOST_8888["data"][1]]
 
+# The ip facet values the fake count API returns, busiest first. The last isn't an IP.
+COUNT_IPS = ["8.8.8.8", "2001:4860:4860::8888", "1.2.3.4", "notanip"]
+
+# The values of the other facets the fake count API returns.
+COUNT_FACETS = {
+    "port": [{"value": 443, "count": 1000}],
+    "country": [{"value": "US", "count": 900}, {"value": "DE", "count": 100}],
+}
+
 
 # Endpoints that only read their arguments from a form body, and the argument they require.
 FORM_ROUTES = {
@@ -439,7 +534,33 @@ class FakeShodan:
     def __init__(self):
         self.requests: list[dict] = []
         self.routes = dict(ROUTES)
+        self.routes[("GET", "/api/shodan/host/count")] = self._count
         self.urls: dict[str, str] = {}
+        # The most values a facet may ask for, like a Shodan plan's limit.
+        self.facetlimit = 1000
+
+    def _count(self, request: web.Request) -> tuple[int, dict]:
+        """GET /shodan/host/count, honoring facet sizes ("name:N", default 5) and the plan limit."""
+
+        facets = {}
+        for facet in (request.query.get("facets") or "").split(","):
+            if not facet:
+                continue
+            name, _, size = facet.partition(":")
+            size = int(size) if size else 5
+            if size > self.facetlimit:
+                mesg = f"Facet size too big for current subscription (limit: {self.facetlimit})"
+                return 400, {"error": mesg}
+            if name == "ip":
+                vals = [{"value": ip, "count": 10 - i} for i, ip in enumerate(COUNT_IPS)]
+            else:
+                vals = COUNT_FACETS.get(name)
+                # Like Shodan, an unknown facet is left out of the response.
+                if vals is None:
+                    continue
+            facets[name] = vals[:size]
+
+        return 200, {"total": 1234, "facets": facets}
 
     async def _handle(self, request: web.Request) -> web.StreamResponse:
         body = None

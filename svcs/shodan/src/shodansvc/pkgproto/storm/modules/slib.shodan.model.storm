@@ -206,13 +206,25 @@ function dnsRecordNode(rec) {
 
 // Model a normalized banner. Returns the inet:server node.
 function banner(b, tagPrefix=$lib.null) {
+    $res = $bannerNodes($b, $tagPrefix)
+    if ($res = $lib.null) { return($lib.null) }
+    return($res.server)
+}
+
+// Model a normalized banner. Returns ({"server": <inet:server>, "banner": <inet:banner or null>,
+// "ip": <inet:ipv4/6 or null>}), the nodes the banner itself describes, or null.
+// Queries and timelines link to only these nodes, everything else is one hop from them.
+// A historical banner (from a history lookup) is an old observation, so what it says about the
+// current state isn't modeled: its vulns, and the IP's ASN (which overwrites). Shodan's tags for
+// it go on its inet:banner, a snapshot of what was seen, instead of the current inet:server.
+function bannerNodes(b, tagPrefix=$lib.null, historical=(false)) {
     $srv = $serverNode($b.ip, $b.port, $b.transport, $b.timestamp)
     if ($srv = $lib.null) { return($lib.null) }
-    $applyTags($srv, $tagPrefix, $b.tags)
 
     $ipnode = $ipNode($b.ip, $b.timestamp)
-    if ($b.asn and $ipnode) { $setAsn($ipnode, $b.asn, $b.org) }
+    if ((not $historical) and $b.asn and $ipnode) { $setAsn($ipnode, $b.asn, $b.org) }
 
+    $bannernode = $lib.null
     if $b.data {
         $bannernode = $bannerNode($srv.repr(), $b.data, $b.timestamp)
         // Date headers aren't included, see shodansvc.norm.normHttpHeaders.
@@ -221,22 +233,216 @@ function banner(b, tagPrefix=$lib.null) {
         }
     }
 
+    if (not $historical) { $applyTags($srv, $tagPrefix, $b.tags) }
+    elif $bannernode { $applyTags($bannernode, $tagPrefix, $b.tags) }
+
     if ($b.ssh and $b.ssh.pubkey) { $sshKeyNode($srv, $b.ssh.pubkey, $b.timestamp, $tagPrefix) }
 
     // See shodansvc.norm.normSoftvers for how CPEs are paired with the product/version.
     for $sv in $b.softvers { $softverNode($srv, $sv.cpe, $sv.product, $sv.version) }
 
-    for $vuln in $b.vulns { $vulnerableNode($srv, $vuln, $b.timestamp) }
+    if (not $historical) {
+        for $vuln in $b.vulns { $vulnerableNode($srv, $vuln, $b.timestamp) }
+    }
 
     if $b.cert { $certNode($srv.repr(), $b.cert, $b.timestamp) }
 
     for $hostname in $b.hostnames { $dnsNode($hostname, $b.ip, $b.timestamp) }
 
-    return($srv)
+    return(({"server": $srv, "banner": $bannernode, "ip": $ipnode}))
+}
+
+// Model the banners of a history lookup (/shodan/host/{ip}?history=true). Returns the IP node.
+//
+// Only the banners are modeled, as historical ones (see bannerNodes): a history lookup's host-level
+// fields (vulns, ports, tags, ...) are combined over its whole history, and old vulns and ASNs
+// aren't current. Each banner's tags go on its inet:banner. The current host comes from a plain lookup (see slib.shodan.lib.host). With
+// timeline, each banner is added to the IP's timeline.
+function historyBanners(h, tagPrefix=$lib.null, timeline=(false)) {
+    $ipnode = $ipNode($h.ip)
+    if ($ipnode = $lib.null) { return($lib.null) }
+
+    $tl = $lib.null
+    if ($timeline and $h.banners) { $tl = $timelineNode($ipnode) }
+    for $b in $h.banners {
+        $res = $bannerNodes($b, $tagPrefix, historical=(true))
+        if ($tl and $res) { $eventNode($tl, $b, $res) }
+    }
+    return($ipnode)
+}
+
+// ---- Host history timelines ----
+//
+// Every Shodan banner is one observation of one service at one time, so each becomes a meta:event
+// in the IP's meta:timeline. Re-running a lookup adds only the banners not seen before.
+//
+// NOTE: :title and :summary are only set when they're unset, so analysts can edit them.
+
+// The meta:timeline of an IP's Shodan history (one per IP), linked -(refs)> to the IP.
+function timelineNode(ipnode) {
+    $repr = $ipnode.repr()
+    [ meta:timeline=$lib.guid(slib.shodan, history, $repr) :type=svc.shodan.host.history. ]
+    if (not :title) { [ :title=`Shodan history: {$repr}` ] }
+    if (not :summary) {
+        [ :summary=`Shodan banners observed for {$repr}, one meta:event per banner. Shodan's history covers 90 days and at most the latest 1,000 banners per lookup.` ]
+    }
+    [ +(refs)> $ipnode ]
+    return($seen($node))
+}
+
+// The guid of a banner's meta:event: Shodan's banner ID, or (without one) the fields that identify
+// a single crawl. timestamp has microseconds, so the fallback is unique per crawl.
+function eventGuid(b) {
+    if $b.id { return($lib.guid(slib.shodan, banner, $b.id)) }
+    return($lib.guid(slib.shodan, banner, $b.ip, $b.port, $b.transport, $b.timestamp, $b.hash))
+}
+
+// Ex. "tcp/22 OpenSSH 8.9p1", or "tcp/80 http" (the crawler's module) without a product.
+function eventTitle(b) {
+    $parts = ([`{$b.transport}/{$b.port}`])
+    if $b.product {
+        $parts.append($b.product)
+        if $b.version { $parts.append($b.version) }
+    } elif $b.module {
+        $parts.append($b.module)
+    }
+    return((" ").join($parts))
+}
+
+function eventSummary(b) {
+    $summary = $lib.null
+    if $b.scan { $summary = `On-demand scan {$b.scan}` }
+    elif $b.crawler { $summary = `Crawler {$b.crawler}` }
+    if $b.truncated {
+        $cut = `truncated: {(", ").join($b.truncated)}`
+        if $summary { $summary = `{$summary} ({$cut})` }
+        else { $summary = `({$cut})` }
+    }
+    return($summary)
+}
+
+// Add a banner to a timeline as a meta:event, linked -(refs)> to only the inet:server, inet:banner,
+// and IP the banner describes (res, from bannerNodes). Returns the meta:event.
+function eventNode(timeline, b, res) {
+    $title = $eventTitle($b)
+    $summary = $eventSummary($b)
+
+    [ meta:event=$eventGuid($b)
+        :timeline=$timeline
+        :time?=$b.timestamp
+        :type=svc.shodan.banner.
+    ]
+    if (not :title) { [ :title=$title ] }
+    if ((not :summary) and $summary) { [ :summary=$summary ] }
+
+    // No loop here, the node is in the pipeline (see the NOTE at the top).
+    if $res.server { [ +(refs)> $res.server ] }
+    if $res.banner { [ +(refs)> $res.banner ] }
+    if $res.ip { [ +(refs)> $res.ip ] }
+
+    return($seen($node))
+}
+
+// ---- Saved queries ----
+//
+// Saved Shodan queries are meta:rule nodes (:text is the query) of two kinds, which never sync:
+//
+//   - Community queries, copied from Shodan's query directory: :type svc.shodan.query.community.,
+//     with a :name that starts with "[Community] " (Synapse lower-cases :name, so "[community] ").
+//   - Local queries, saved in the Cortex: :type svc.shodan.query.local. (or the older
+//     svc.shodan.query.). They're never sent to Shodan.
+//
+// The same query text is a different node for each kind. :name, :desc, and :created are only set
+// when they're unset, so analysts can edit them.
+
+function communityPrefix() { return("[Community] ") }
+
+function communityGuid(text) { return($lib.guid(slib.shodan, query, community, $text)) }
+function localGuid(text) { return($lib.guid(slib.shodan, query, local, $text)) }
+
+// Lift a meta:rule by guid. Returns the node, or null.
+function liftRule(guid) {
+    meta:rule=$guid
+    return($node)
+}
+
+// Model a saved query from Shodan's directory as a community meta:rule. Returns the node.
+function communityRule(q, tagPrefix=$lib.null) {
+    $text = $lib.cast(str, $q.query)
+    $name = $q.title
+    if (not $name) { $name = $text }
+    // :name is lower-cased, so the prefix is checked ignoring case.
+    if (not $name.lower().startswith($communityPrefix().lower())) { $name = `{$communityPrefix()}{$name}` }
+
+    [ meta:rule=$communityGuid($text) :type=svc.shodan.query.community. :text=$text ]
+    if (not :name) { [ :name=$name ] }
+    if ((not :desc) and $q.description) { [ :desc=$q.description ] }
+    if (not :created) { [ :created?=$q.timestamp ] }
+    if (not :url) { [ :url?=`https://www.shodan.io/search?query={$lib.inet.http.urlencode($text)}` ] }
+    $rule = $seen($node)
+
+    if ($tagPrefix != $lib.null and $q.tags) { $applyTags($rule, `{$tagPrefix}.query`, $q.tags) }
+    return($rule)
+}
+
+// Save a query in the Cortex as a local meta:rule. Returns the node.
+function localRule(text, name, desc=$lib.null) {
+    [ meta:rule=$localGuid($text) :type=svc.shodan.query.local. :text=$text ]
+    if (not :name) { [ :name=$name ] }
+    if ((not :desc) and $desc) { [ :desc=$desc ] }
+    if (not :created) { [ :created=now ] }
+    return($node)
+}
+
+// ---- Query executions ----
+
+// Create the it:exec:query for one run of a Shodan query. Every run is its own node.
+// ref is the inbound node the query was built from, if any (it:exec:query -(refs)> ref).
+// opts must never hold an API key.
+function queryNode(text, apiurl, opts, ref=$lib.null) {
+    [ it:exec:query=*
+        :text=$text
+        :language=shodan
+        :time=now
+        :synuser=$lib.user.iden
+        :api:url?=$apiurl
+        :opts=$opts
+    ]
+    if $ref { [ +(refs)> $ref ] }
+    return($seen($node))
+}
+
+// Link a node to another it references (n -(refs)> target).
+function linkRefs(n, target) {
+    yield $n
+    [ +(refs)> $target ]
+    return($n)
+}
+
+// Link a query to the nodes it returned (it:exec:query -(found)> n), skipping nulls.
+function found(query, nodes) {
+    // No node in this function's pipeline, so looping is safe (see the NOTE at the top).
+    for $n in $nodes {
+        if $n { $linkFound($query, $n) }
+    }
+}
+
+function linkFound(query, n) {
+    yield $n
+    [ <(found)+ $query ]
+    return($n)
+}
+
+// Record how many results a query consumed.
+function setOffset(query, offset) {
+    yield $query
+    [ :offset=$offset ]
+    return($query)
 }
 
 // Model a normalized host (from the Shodan host API or InternetDB). Returns the IP node.
-function host(h, tagPrefix=$lib.null) {
+// With timeline, each banner is also added to the IP's Shodan history timeline (see timelineNode).
+function host(h, tagPrefix=$lib.null, timeline=(false)) {
     $ipnode = $ipNode($h.ip, $h.last_update)
     if ($ipnode = $lib.null) { return($lib.null) }
 
@@ -255,7 +461,12 @@ function host(h, tagPrefix=$lib.null) {
     }
 
     if $h.banners {
-        for $b in $h.banners { $banner($b, $tagPrefix) }
+        $tl = $lib.null
+        if $timeline { $tl = $timelineNode($ipnode) }
+        for $b in $h.banners {
+            $res = $bannerNodes($b, $tagPrefix)
+            if ($tl and $res) { $eventNode($tl, $b, $res) }
+        }
     } else {
         // Minified host lookups and InternetDB only give us open ports.
         for $port in $h.ports { $serverNode($h.ip, $port, tcp, $h.last_update) }
