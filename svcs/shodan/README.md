@@ -72,17 +72,19 @@ need the normal node permissions for the nodes the commands create.
 
 | Command | Description |
 |---|---|
-| `slib.shodan.host` | Look up IPs and model everything Shodan knows (ASN, location, hostnames, tags, vulns, every banner). `--history`, `--minify`, `--internetdb`. |
+| `slib.shodan.host` | Look up IPs and model everything Shodan knows (ASN, location, hostnames, tags, vulns, every banner). Takes IPs, or the IPs of `inet:server`, `inet:banner`, and `inet:dns:a`/`aaaa` nodes (each IP is looked up once). `--history`, `--timeline`, `--minify`, `--internetdb`. |
 | `slib.shodan.enrich` | Enrich any supported node with the best API: IPs → host, `inet:fqdn` → DNS, `risk:vuln`/`it:sec:cve` → CVEDB, `it:sec:cpe` → CVEs. |
 | `slib.shodan.search` | Search Shodan, model each banner, and yield the IPs. `--count` and `--facets` are free, `--tokens` explains a query, `--filters` lists filters/facets. Inbound nodes are searched for with a query built for their form (see below), AND'd with any query. |
-| `slib.shodan.stream` | Read banners from the Streaming API (`banners`, `asn`, `countries`, `ports`, `tags`, `vulns`, `custom`, `alert`) for `--limit` banners or `--timeout` seconds. |
+| `slib.shodan.count` | List the IPs matching a query with the free count API (no query credits), model them, and yield them. One request per query, up to your plan's facet limit in IPs. `--facets` prints extra facets for context. Takes the same inbound nodes as `search`. |
+| `slib.shodan.stream` | Read banners from the Streaming API (`banners`, `asn`, `countries`, `ports`, `tags`, `vulns`, `custom`, `alert`) for `--limit` banners or `--timeout` seconds. Inbound `inet:asn`, `risk:vuln`/`it:sec:cve`, `pol:country`, and `meta:rule` nodes are streamed together (one subscription). |
 | `slib.shodan.hash` | Print Shodan's hash filter for `inet:banner` nodes or `--text` (`hash:<n>`), and favicon or HTML `file:bytes` (`http.favicon.hash:<n>`, `http.html_hash:<n>`). Local only, no API calls. |
 | `slib.shodan.dns.domain` | Model every DNS record and subdomain Shodan knows for a domain. |
 | `slib.shodan.dns.lookup` | Resolve `inet:fqdn`s and reverse-resolve IPs. |
 | `slib.shodan.cve` | Model CVEDB details (CVSS, KEV, references, linked GHSA/EUVD IDs) on `risk:vuln`s. Accepts CVE, GHSA, and EUVD IDs. Search by `--cpe`/`--product` with `--kev`, `--epss`, `--start`, `--end`, `--count`. |
 | `slib.shodan.cpe` | Search CVEDB for a product's CPEs. |
-| `slib.shodan.trends` | Monthly historical breakdown of a query, with `--facets`. |
-| `slib.shodan.queries` | Browse/search the saved query directory and its tags. |
+| `slib.shodan.trends` | Monthly historical breakdown of a query, with `--facets`. Takes the same inbound nodes as `search`, skipping any whose query uses filters Trends doesn't support. |
+| `slib.shodan.queries` | List saved queries: those stored in the Cortex (local and community) and Shodan's directory (`--source`). `--yield` copies directory queries in as community `meta:rule` nodes. |
+| `slib.shodan.query.save` | Save a query in the Cortex as a local `meta:rule` (never sent to Shodan). |
 | `slib.shodan.info` | Account, plan, remaining credits, and the service's public IP. |
 | `slib.shodan.ref` | Reference data: `ports`, `protocols`, `services`, `filters`, `facets`, `triggers`, `providers`, `httpheaders`. |
 | `slib.shodan.apikey` | Set/clear your own API key. |
@@ -126,11 +128,118 @@ $ipnode = $shodan.host(8.8.8.8, history=(true))
 $vulns = $shodan.cves(product=log4j, kev=(true))
 ```
 
+## Query runs
+
+Every `slib.shodan.search`, `slib.shodan.count`, and `slib.shodan.stream` run is recorded as an
+`it:exec:query`:
+
+- `:text` is the query sent to Shodan (ex. `ports:443,53` for a stream).
+- `:language` is `shodan`, plus `:time`, `:synuser`, `:api:url` (never with the API key),
+  `:offset` (the number of banners or IPs read), and `:opts` (the command's options).
+- `-(found)>` edges link it to the `inet:server`, `inet:banner`, and `inet:ipv4`/`inet:ipv6` of
+  every banner it returned (only the IPs, for counts). Everything else from a banner (certs, software, vulns, headers) is one
+  hop from those.
+- A `-(refs)>` edge links it to the inbound node the query was built from.
+
+Each run is its own node. Failed searches and the print-only modes (`--count`, `--tokens`,
+`--filters`) record nothing. `--yield-query` yields the `it:exec:query` nodes instead of the IPs:
+
+```
+// What did the searches for this cert find?
+crypto:x509:cert:sha1=e652c8bd1cafd04a44239fa8dab0c59deacb79ee | slib.shodan.search --yield-query | -(found)> inet:server
+
+// Every search ever run for a node, and when.
+it:exec:query:time +{ -(refs)> inet:asn=15169 }
+```
+
+From Storm, `$shodan.search($query)` returns `({"query": <it:exec:query>, "ips": [...]})`, and
+`$shodan.count($query)` does the same (plus `size` and `full`) without using query credits.
+
+## Saved queries
+
+Saved Shodan queries are `meta:rule` nodes (`:text` is the query) of two kinds, which **never sync**:
+
+| | Community queries | Local queries |
+|---|---|---|
+| From | Shodan's query directory, copied with `slib.shodan.queries --yield` | Saved with `slib.shodan.query.save` |
+| `:type` | `svc.shodan.query.community.` | `svc.shodan.query.local.` (or the older `svc.shodan.query.`) |
+| `:name` | `[Community] <title>` (Synapse lower-cases `:name`, so ex. `[community] webcams`) | The name given |
+| Updates | A snapshot. Directory changes only arrive by copying again, and removed queries are never deleted. | Never sent to Shodan, its API can't save to the directory. |
+
+The same query text is a separate node for each kind. Re-copying keeps edits to `:name` and `:desc`.
+`slib.shodan.queries` lists both (stored ones first), and `--source local` or `--source shodan`
+picks one. Pipe any saved query to `slib.shodan.search`, `slib.shodan.count`, or `slib.shodan.stream`
+to run it:
+
+```
+slib.shodan.query.save "http.favicon.hash:-1166125415" --name "Favicon"
+slib.shodan.queries --source shodan --search webcam --yield
+slib.shodan.queries --source local
+meta:rule:type^=svc.shodan.query | slib.shodan.count
+```
+
+## Host history timelines
+
+`slib.shodan.host --history` (or `--timeline`, for a plain lookup) adds each banner to the IP's
+Shodan history:
+
+- One `meta:timeline` per IP: `:title` "Shodan history: <ip>", `:type` `svc.shodan.host.history.`,
+  and `-(refs)>` to the IP.
+- One `meta:event` per banner: `:time` is when Shodan saw it, `:title` ex. "tcp/22 OpenSSH 8.9p1",
+  `:summary` the crawler or on-demand scan that produced it, and `:type` `svc.shodan.banner.`.
+  Each event has `-(refs)>` edges to only the `inet:server`, `inet:banner`, and IP it describes.
+- Events are keyed by Shodan's banner ID, so re-running a lookup only adds new banners, and edits
+  to an event's `:title` or `:summary` are kept.
+
+A `--history` lookup is a plain lookup for the IP's current data, then a history lookup (both free),
+since Shodan's history lags its newest data by about a day. The current host (vulns, tags, ports) is
+modeled from the plain lookup, and only the banners from the history, without their vulns or ASN:
+the history's host-level fields combine all 90 days, and old vulns aren't current. Shodan's tags for
+a historical banner (ex. `self-signed`) go on its `inet:banner`, a snapshot of what was seen, not
+the current `inet:server`.
+
+Shodan's history covers 90 days, at most the latest 1,000 banners. Re-run lookups (ex. on a
+schedule) to build a longer history. `--no-timeline` skips the timeline for a `--history` lookup.
+
+```
+inet:ipv4=45.33.32.156 | slib.shodan.host --history
+meta:event:time +{ :timeline -> meta:timeline +:title="Shodan history: 45.33.32.156" }
+meta:event:title^="tcp/22" -(refs)> inet:banner
+```
+
+## Listing IPs without query credits
+
+`slib.shodan.count` gets the IPs matching a query from the free count API's `ip` facet. It makes
+one request per query and models only the IPs: no banners, ports, or counts. Use it to run as many
+queries as you like, then `slib.shodan.search` (which uses credits) or other APIs for details.
+
+- One count returns at most your plan's facet limit in IPs (ex. 1,000 for a Membership, 5,120 for a
+  Freelancer). It asks for that many by default. The service learns the limit from Shodan the first
+  time a key asks for too many (one extra free request), and remembers it in memory.
+- When the IPs fill the limit, the query likely matches more, and a warning says so. Narrow the
+  query (ex. add `country:` or `asn:`) to get the rest. IPs come back busiest first.
+
+```
+slib.shodan.count "http.favicon.hash:-1166125415"
+meta:rule:type^=svc.shodan.query | slib.shodan.count --facets country:10
+```
+
 ## Searching from nodes
 
 Nodes piped to `slib.shodan.search` are each searched for with a query built for their form,
 AND'd with any query given (ex. `crypto:x509:cert | slib.shodan.search "country:US" --count`).
-`$shodan.searchQuery($node)` returns the query for a node. See `slib.shodan.search --help` for
+Nodes that build the same query (ex. `inet:banner` nodes with the same text, servers presenting the
+same cert, a `risk:vuln` and its `it:sec:cve`) only run it once per command, and that run's
+`it:exec:query` refs each of them. `slib.shodan.count` and `slib.shodan.trends` do the same, and
+`slib.shodan.host`, `slib.shodan.cve`, and `slib.shodan.enrich` make each IP or CVE lookup once.
+`$shodan.searchQuery($node)` returns the query for a node.
+
+`slib.shodan.search`, `slib.shodan.enrich`, `slib.shodan.dns.domain`, and `slib.shodan.dns.lookup`
+read every inbound node before running any. A Storm lift is still running while a command processes
+its nodes, so a lift of a form the command creates (ex. `inet:banner | slib.shodan.search`, or
+`inet:fqdn:zone=vertex.link | slib.shodan.dns.domain`) would otherwise also return the nodes the
+command creates, and run on them too, using more query credits. `--stream-inbound` runs each
+inbound node as it arrives instead, for inbound sets too large to hold in memory, with that risk. See `slib.shodan.search --help` for
 the full list:
 
 | Form | Query |
@@ -173,7 +282,7 @@ the service (`$lib.service.get(slib.shodan)`, for those with `service.get`).
 | Endpoint | Storm |
 |---|---|
 | `GET /shodan/host/{ip}` | `slib.shodan.host`, `slib.shodan.enrich` |
-| `GET /shodan/host/count` | `slib.shodan.search --count/--facets` |
+| `GET /shodan/host/count` | `slib.shodan.count`, `slib.shodan.search --count/--facets` |
 | `GET /shodan/host/search` | `slib.shodan.search` |
 | `GET /shodan/host/search/facets`, `/filters` | `slib.shodan.search --filters`, `slib.shodan.ref facets/filters` |
 | `GET /shodan/host/search/tokens` | `slib.shodan.search --tokens` |

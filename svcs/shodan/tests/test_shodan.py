@@ -25,6 +25,7 @@ from .fakeshodan import (
     DNS_DOMAIN,
     EUVD_NO_CVE,
     GHSA_LOG4SHELL,
+    HISTORY_BANNERS,
     HOST_8888,
     FAVICON_B64,
     FAVICON_HASH,
@@ -396,6 +397,19 @@ class TestNorm(s_tests.SynTest):
         banner = norm.normBanner({"ip_str": "1.2.3.4", "port": 80, "data": text})
         assert banner["http_headers"] == norm.normHttpHeaders(text)
 
+    def test_norm_banner_history(self):
+        cut = norm.normBanner(HISTORY_BANNERS[3])
+        assert (cut["data"], cut["scan"], cut["truncated"], cut["hash"]) == ("", "SCAN1", ["data", "http.html"], 333)
+        assert cut["http_headers"] == []
+
+        ssh = norm.normBanner(HISTORY_BANNERS[0])
+        assert (ssh["id"], ssh["crawler"], ssh["scan"], ssh["truncated"]) == ("hist-1", "crawler-a", None, [])
+        assert ssh["data"] == "SSH-2.0-OpenSSH_8.9p1"
+
+        # Shodan documents the region in two places.
+        assert norm.normBanner({"_shodan": {"region": "eu"}})["region"] == "eu"
+        assert norm.normBanner({"_shodan": {"options": {"region": "na"}}})["region"] == "na"
+
     def test_norm_banner_not_truncated(self):
         # Long banners are kept whole, so a hash of the inet:banner:text matches Shodan's hash.
         text = "x" * 100_000 + "\r\n"
@@ -656,6 +670,85 @@ class TestShodanSvc(s_tests.SynTest):
             assert fake.last("/api/shodan/alert/ALERT1", "POST")["json"] == {
                 "filters": {"ip": ["1.2.3.0/24"]}
             }
+
+    async def test_count_ips(self):
+        async with shodanSvc(self) as (core, svc, fake):
+            counts = lambda: [r for r in fake.requests if r["path"] == "/api/shodan/host/count"]
+
+            # The first call asks for the published max, learns the plan's limit, and retries.
+            retn = await svc.countIps("product:nginx")
+            assert retn == {
+                "ips": ["8.8.8.8", "2001:4860:4860::8888", "1.2.3.4", "notanip"],
+                "size": 1000,
+                "limit": 1000,
+                "full": False,
+                "lowered": False,
+                "facets": {},
+            }
+            assert [r["query"]["facets"] for r in counts()] == ["ip:131072", "ip:1000"]
+
+            # The limit is cached for the key (by its hash), so later calls need one request.
+            assert [limit for limit, _ in svc.facetlimits.values()] == [1000]
+            assert "testkey" not in repr(svc.facetlimits)
+            await svc.countIps("product:nginx")
+            assert counts()[-1]["query"]["facets"] == "ip:1000"
+            assert len(counts()) == 3
+
+            # A size over the known limit is still asked for (the plan may have changed), then lowered.
+            retn = await svc.countIps("product:nginx", size=5000)
+            assert (retn["size"], retn["limit"], retn["lowered"]) == (1000, 1000, True)
+            assert [r["query"]["facets"] for r in counts()[3:]] == ["ip:5000", "ip:1000"]
+
+            # After a plan upgrade, a bigger size works and the old limit is forgotten.
+            fake.facetlimit = 5120
+            retn = await svc.countIps("product:nginx", size=5000)
+            assert (retn["size"], retn["limit"], retn["lowered"]) == (5000, None, False)
+            assert not svc.facetlimits
+            await svc.countIps("product:nginx")
+            assert [r["query"]["facets"] for r in counts()[-2:]] == ["ip:131072", "ip:5120"]
+            fake.facetlimit = 1000
+
+            # A learned limit expires, so the plan's limit is checked again.
+            keyhash = next(iter(svc.facetlimits))
+            svc.facetlimits[keyhash] = (5120, svc.facetlimits[keyhash][1] - 86401)
+            retn = await svc.countIps("product:nginx")
+            assert (retn["size"], retn["limit"]) == (1000, 1000)
+            assert [r["query"]["facets"] for r in counts()[-2:]] == ["ip:131072", "ip:1000"]
+
+            # A size that the IPs fill is full, and extra facets are returned (ip ones replaced).
+            retn = await svc.countIps("product:nginx", size=2, facets="country, ip:9,nope")
+            assert retn["ips"] == ["8.8.8.8", "2001:4860:4860::8888"]
+            assert (retn["size"], retn["full"], retn["lowered"]) == (2, True, False)
+            assert retn["facets"] == {"country": [{"value": "US", "count": 900}, {"value": "DE", "count": 100}][:5]}
+            assert counts()[-1]["query"]["facets"] == "ip:2,country,nope"
+
+            # Each key learns its own limit.
+            fake.facetlimit = 3
+            retn = await svc.countIps("product:nginx", apikey="otherkey", size=10)
+            assert (retn["size"], retn["full"], retn["lowered"]) == (3, True, True)
+            assert sorted(limit for limit, _ in svc.facetlimits.values()) == [3, 1000]
+
+            # An extra facet over the limit isn't mistaken for the ip facet's limit.
+            with self.raises(ShodanApiError) as cm:
+                await svc.countIps("product:nginx", apikey="otherkey", facets="port:50")
+            assert "limit: 3" in cm.exception.mesg
+
+            with self.raises(ShodanApiError):
+                await svc.countIps("product:nginx", size=0)
+
+    async def test_scans_no_apikey(self):
+        async with shodanSvc(self) as (core, svc, fake):
+            fake.routes[("GET", "/api/shodan/scans")] = (
+                200,
+                {"total": 1, "matches": [{"id": "SCAN1", "status": "DONE", "api_key": "secretkey"}]},
+            )
+            fake.routes[("GET", "/api/shodan/scan/SCAN1")] = (
+                200,
+                {"id": "SCAN1", "status": "DONE", "count": 1, "api_key": "secretkey"},
+            )
+            assert "secretkey" not in repr(await svc.scans())
+            assert "secretkey" not in repr(await svc.scanStatus("SCAN1"))
+            assert (await svc.scans())["matches"][0]["id"] == "SCAN1"
 
     async def test_cvedb(self):
         async with shodanSvc(self) as (core, svc, fake):

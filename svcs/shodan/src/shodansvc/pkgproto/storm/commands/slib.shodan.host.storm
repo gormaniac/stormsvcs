@@ -5,27 +5,36 @@ init {
         "history": $cmdopts.history,
         "minify": $cmdopts.minify,
         "internetdb": $cmdopts.internetdb,
+        // History lookups build the IP's timeline unless --no-timeline.
+        "timeline": (($cmdopts.timeline or $cmdopts.history) and not $cmdopts.no_timeline),
     })
+
+    // The IP node of each IP already looked up, so inbound nodes for the same IP (ex. its
+    // servers) only use one lookup.
+    $done = ({})
+}
+
+// Look up an IP once, returning its IP node (or null).
+function lookup(ip) {
+    if ($done.$ip = $lib.null) {
+        $done.$ip = ({"node": $shodan.host($ip, history=$opts.history, minify=$opts.minify,
+                                           internetdb=$opts.internetdb, timeline=$opts.timeline)})
+    }
+    return($done.$ip.node)
 }
 
 if $cmdopts.ip {
     // --ip ignores inbound nodes.
     spin |
     for $ip in $cmdopts.ip {
-        $ipnode = $shodan.host($ip, history=$opts.history, minify=$opts.minify,
-                               internetdb=$opts.internetdb)
+        $ipnode = $lookup($ip)
         if ($cmdopts.yield and $ipnode) { yield $ipnode }
     }
 }
 else {
-    switch $node.form() {
-        "inet:ipv4": { }
-        "inet:ipv6": { }
-        *: {
-            $lib.warn("slib.shodan.host: The node form {form} is not supported.", form=$node.form())
-            spin
-        }
-    }
-    divert $cmdopts.yield $model.nodes(($shodan.host($node.repr(), history=$opts.history, minify=$opts.minify,
-                                                     internetdb=$opts.internetdb),))
+    // See slib.shodan.lib.hostIp for the IP of each supported form.
+    // NOTE: Not $ip, the --ip loop above makes that a runtsafe variable.
+    $nodeip = $shodan.hostIp($node)
+    if ($nodeip = $lib.null) { spin }
+    divert $cmdopts.yield $model.nodes(($lookup($nodeip),))
 }

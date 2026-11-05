@@ -26,20 +26,29 @@ function addAlert(name, ips) {
     }
 }
 
+// Add a target once. Defined before init, which uses it.
+function addTarget(target) {
+    if $added.$target { return() }
+    $added.$target = (true)
+    $ips.append($target)
+}
+
 init {
     $privalert = $lib.import(slib.shodan.priv.alert)
     $util = $lib.import(slib.shodan.util)
 
     $ips = ([])
-    for $ip in $cmdopts.ip { $ips.append($ip) }
+    // Each target is added once (a dict, a list's has() is a linear scan).
+    $added = ({})
+    for $ip in $cmdopts.ip { $addTarget($ip) }
 }
 
 // Inbound nodes are collected and added to a single alert in the fini block.
 switch $node.form() {
-    "inet:ipv4": { $ips.append($node.repr()) }
-    "inet:ipv6": { $ips.append($node.repr()) }
-    "inet:cidr4": { $ips.append($node.repr()) }
-    "inet:cidr6": { $ips.append($node.repr()) }
+    "inet:ipv4": { $addTarget($node.repr()) }
+    "inet:ipv6": { $addTarget($node.repr()) }
+    "inet:cidr4": { $addTarget($node.repr()) }
+    "inet:cidr6": { $addTarget($node.repr()) }
     *: { $lib.warn("slib.shodan.alert.add: The node form {form} is not supported.", form=$node.form()) }
 }
 

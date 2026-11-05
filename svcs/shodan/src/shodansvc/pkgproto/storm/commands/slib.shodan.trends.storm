@@ -1,6 +1,8 @@
 init {
+    $shodan = $lib.import(slib.shodan.lib)
     $priv = $lib.import(slib.shodan.priv.user)
     $util = $lib.import(slib.shodan.util)
+    $query = $cmdopts.query
 
     if $cmdopts.filters {
         $retn = $priv.trendsFilters()
@@ -12,30 +14,62 @@ init {
             $lib.print("Facets: {facets}", facets=(", ").join($retn.data))
         }
     }
-    elif (not $cmdopts.query) {
-        $lib.raise(BadArg, "slib.shodan.trends requires a query (or --filters).")
+
+    // nodes is set once there are inbound nodes, so the query isn't also run on its own.
+    // ran holds each query run, dupes counts repeats.
+    $state = ({"nodes": (false), "ran": ({}), "dupes": (0)})
+}
+
+// Print the monthly totals and facets of a Trends search.
+function run(query) {
+    $state.ran.$query = (true)
+    $retn = $priv.trendsSearch($query, facets=$cmdopts.facets)
+    if $util.failed($retn, "Trends search") { return() }
+
+    $lib.print("Total results: {total} ({query})", total=$retn.data.total, query=$query)
+
+    $rows = ([])
+    for $month in $retn.data.matches {
+        $rows.append(($month.month, $month.count))
     }
-    else {
-        $retn = $priv.trendsSearch($cmdopts.query, facets=$cmdopts.facets)
-        if (not $util.failed($retn, "Trends search")) {
-            $lib.print("Total results: {total}", total=$retn.data.total)
+    if $rows { $util.table(([["month", 10], ["count", 14]]), $rows) }
 
+    // Trends facets are broken down by month.
+    for ($facet, $months) in $retn.data.facets {
+        for $month in $months {
+            $lib.print("")
+            $lib.print(`{$facet} - {$month.key}`)
             $rows = ([])
-            for $month in $retn.data.matches {
-                $rows.append(($month.month, $month.count))
-            }
-            if $rows { $util.table(([["month", 10], ["count", 14]]), $rows) }
-
-            // Trends facets are broken down by month.
-            for ($facet, $months) in $retn.data.facets {
-                for $month in $months {
-                    $lib.print("")
-                    $lib.print(`{$facet} - {$month.key}`)
-                    $rows = ([])
-                    for $val in $month.values { $rows.append(($val.value, $val.count)) }
-                    $util.table(([["value", 40], ["count", 14]]), $rows)
-                }
-            }
+            for $val in $month.values { $rows.append(($val.value, $val.count)) }
+            $util.table(([["value", 40], ["count", 14]]), $rows)
         }
+    }
+}
+
+// Inbound nodes are searched for with the query slib.shodan.search builds for their form, AND'd
+// with any query, if Trends supports its filters. Unsupported nodes are warned about and dropped.
+// Inbound nodes are otherwise passed through, this command only prints.
+// NOTE: The flag is set in an if on $node so it only runs for inbound nodes (see slib.shodan.search).
+if $node { $state.nodes = (true) }
+$nodequery = $shodan.trendsQuery($node, filehash=$cmdopts.file_hash)
+if ($nodequery = $lib.null) { spin }
+$nodequery = (" ").join(($nodequery, $query)).strip()
+
+// Inbound nodes that build the same query as an earlier one don't run it again.
+if $state.ran.$nodequery { $state.dupes = ($state.dupes + 1) }
+else { $run($nodequery) }
+
+// Without inbound nodes, run the query on its own (once).
+| if (not $state.nodes) {
+    if $query { $run($query) }
+    elif (not $cmdopts.filters) {
+        $lib.raise(BadArg, "slib.shodan.trends requires a query, inbound nodes, or --filters.")
+    }
+}
+
+fini {
+    if $state.dupes {
+        $lib.print("slib.shodan.trends: {n} inbound nodes had the same query as an earlier one, each query was run once.",
+                   n=$state.dupes)
     }
 }

@@ -1,8 +1,23 @@
 init {
+    $shodan = $lib.import(slib.shodan.lib)
     $priv = $lib.import(slib.shodan.priv.user)
+    $model = $lib.import(slib.shodan.model)
     $util = $lib.import(slib.shodan.util)
 
+    $source = $cmdopts.source
+    $local = ($source = "all" or $source = "local")
+    $remote = ($source = "all" or $source = "shodan")
+
+    // The meta:rule nodes to yield with --yield.
+    $out = ([])
+
+    // These only apply to Shodan's directory.
+    if ($source = "local" and ($cmdopts.page != 1 or $cmdopts.sort != "timestamp" or $cmdopts.order != "desc")) {
+        $lib.warn("slib.shodan.queries: --page, --sort, and --order only apply to Shodan's directory, not --source local.")
+    }
+
     if $cmdopts.tags {
+        if ($source = "local") { $lib.warn("slib.shodan.queries: --tags lists Shodan's directory tags, not local ones.") }
         $retn = $priv.queriesTags(size=$cmdopts.size)
         if (not $util.failed($retn, "Listing query tags")) {
             $rows = ([])
@@ -11,18 +26,46 @@ init {
         }
     }
     else {
-        if $cmdopts.search {
-            $retn = $priv.queriesSearch($cmdopts.search, page=$cmdopts.page)
-        } else {
-            $retn = $priv.queries(page=$cmdopts.page, sort=$cmdopts.sort, order=$cmdopts.order)
-        }
-        if (not $util.failed($retn, "Listing saved queries")) {
-            $lib.print("Total saved queries: {total}", total=$retn.data.total)
+        // Queries stored in the Cortex: local ones, and community ones copied from Shodan.
+        if $local {
             $rows = ([])
-            for $q in $retn.data.matches {
-                $rows.append(($q.votes, $q.title, $q.query))
+            // A function that yields nodes gives (node, path) pairs.
+            for ($rule, $path) in $shodan.storedQueries(match=$cmdopts.search) {
+                $kind = local
+                if $shodan.isCommunityRule($rule) { $kind = community }
+                $rows.append(($kind, $rule.props.name, $rule.props.text))
+                if $cmdopts.yield { $out.append($rule) }
             }
-            $util.table(([["votes", 6], ["title", 40], ["query", 60]]), $rows)
+            $lib.print("Stored saved queries: {total}", total=$rows.size())
+            if $rows { $util.table(([["source", 10], ["name", 40], ["query", 60]]), $rows) }
+        }
+
+        // Shodan's query directory. With --yield, its queries are stored as community meta:rules.
+        if $remote {
+            if $cmdopts.search {
+                $retn = $priv.queriesSearch($cmdopts.search, page=$cmdopts.page)
+            } else {
+                $retn = $priv.queries(page=$cmdopts.page, sort=$cmdopts.sort, order=$cmdopts.order)
+            }
+            if (not $util.failed($retn, "Listing saved queries")) {
+                if $local { $lib.print("") }
+                $lib.print("Total saved queries: {total}", total=$retn.data.total)
+                $tagPrefix = $priv.tagPrefix()
+                $rows = ([])
+                for $q in $retn.data.matches {
+                    $kind = shodan
+                    if $shodan.isStored($q) { $kind = "shodan (stored)" }
+                    $rows.append(($kind, $q.votes, $q.title, $q.query))
+                    if $cmdopts.yield { $out.append($model.communityRule($q, $tagPrefix)) }
+                }
+                $util.table(([["source", 16], ["votes", 6], ["title", 40], ["query", 60]]), $rows)
+            }
         }
     }
 }
+
+spin |
+
+for $rule in $out { yield $rule }
+
+| uniq

@@ -1,0 +1,23 @@
+init {
+    $bgphe = $lib.import(slib.bgphe.lib)
+    $util = $lib.import(slib.bgphe.util)
+    $forms = (inet:ipv4, inet:ipv6, inet:cidr4, inet:cidr6)
+}
+
+if $cmdopts.valus {
+    // Values ignore inbound nodes.
+    spin |
+    for $valu in $cmdopts.valus {
+        for $n in $bgphe.hosts($valu, print=$cmdopts.print) { yield $n }
+    }
+}
+else {
+    // Statements after an if block still run for a node that leaves it, so the work is in the else.
+    // Unsupported nodes are passed through (or dropped, with --yield).
+    if (not $forms.has($node.form())) {
+        $lib.warn(`slib.bgphe.certs.ip: Unable to look up {$node.form()} {$node.repr()}, it needs an IP or CIDR.`)
+        if $cmdopts.yield { spin }
+    } else {
+        divert $cmdopts.yield $util.nodes($bgphe.hosts($node.repr(), print=$cmdopts.print))
+    }
+}

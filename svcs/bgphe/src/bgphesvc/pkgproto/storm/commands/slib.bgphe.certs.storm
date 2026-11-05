@@ -1,0 +1,26 @@
+init {
+    $bgphe = $lib.import(slib.bgphe.lib)
+    $util = $lib.import(slib.bgphe.util)
+    $opts = ({"limit": $cmdopts.limit, "valid": $cmdopts.valid, "precerts": (not $cmdopts.no_precerts)})
+}
+
+if $cmdopts.domains {
+    // Values ignore inbound nodes.
+    spin |
+    for $domain in $cmdopts.domains {
+        for $n in $bgphe.certs($domain, limit=$opts.limit, valid=$opts.valid, precerts=$opts.precerts) {
+            yield $n
+        }
+    }
+}
+else {
+    // Statements after an if block still run for a node that leaves it, so the work is in the else.
+    // Unsupported nodes are passed through (or dropped, with --yield).
+    if ($node.form() != "inet:fqdn") {
+        $lib.warn(`slib.bgphe.certs: Unable to look up {$node.form()} {$node.repr()}, it needs an inet:fqdn.`)
+        if $cmdopts.yield { spin }
+    } else {
+        divert $cmdopts.yield $util.nodes($bgphe.certs($node.repr(), limit=$opts.limit,
+                                                       valid=$opts.valid, precerts=$opts.precerts))
+    }
+}

@@ -1,8 +1,8 @@
 init {
     $shodan = $lib.import(slib.shodan.lib)
     $priv = $lib.import(slib.shodan.priv.user)
-    $model = $lib.import(slib.shodan.model)
     $util = $lib.import(slib.shodan.util)
+    $model = $lib.import(slib.shodan.model)
     $query = $cmdopts.query
 
     // Modes that only print, returning before any nodes are created.
@@ -22,16 +22,32 @@ init {
     if ($cmdopts.limit = 0 and not $printonly) {
         $lib.warn("slib.shodan.search: --limit 0 retrieves every result, using a query credit per 100 results.")
     }
-    $tagPrefix = $priv.tagPrefix()
+    // Recorded on each search's it:exec:query, never include the API key.
+    $opts = ({
+        "command": "slib.shodan.search",
+        "limit": $cmdopts.limit,
+        "page": $cmdopts.page,
+        "minify": $cmdopts.minify,
+    })
 
-    // Set once there are inbound nodes, so the query isn't also searched on its own.
-    $state = ({"nodes": (false)})
+    // nodes is set once there are inbound nodes, so the query isn't also searched on its own.
+    // ran maps each query to ({"query": <it:exec:query or null>, "nodes": [<inbound nodes>]}),
+    // pending holds the queries to run once every inbound node is read (without --stream-inbound),
+    // and dupes counts the inbound nodes with a query seen before.
+    $state = ({"nodes": (false), "ran": ({}), "pending": ([]), "dupes": (0)})
 }
 
 // Run a search. Prints the --tokens/--count/--facets output, then (unless only printing)
-// models every matching banner and yields the IP nodes.
+// models every matching banner, records the run as an it:exec:query, and yields the IP nodes
+// (or the it:exec:query with --yield-query). The it:exec:query refs the inbound nodes the query
+// was built from (see $state.ran).
 // NOTE: No return() here, it would make this a function that returns a value instead of yielding nodes.
 function run(query) {
+    if ($state.ran.$query = $lib.null) { $state.ran.$query = ({"query": $lib.null, "nodes": ([])}) }
+    $entry = $state.ran.$query
+    $ref = $lib.null
+    if $entry.nodes { $ref = $entry.nodes.0 }
+
     if $cmdopts.tokens {
         $retn = $priv.searchTokens($query)
         if (not $util.failed($retn, "Parsing the query")) { $util.printJson($retn.data) }
@@ -45,11 +61,20 @@ function run(query) {
     }
 
     if (not $printonly) {
-        for $retn in $priv.searchGenr($query, limit=$cmdopts.limit, minify=$cmdopts.minify, page=$cmdopts.page) {
-            if $util.failed($retn, "Search") { break }
-            $model.banner($retn.data, $tagPrefix)
-            $ipnode = $model.ipNode($retn.data.ip)
-            if $ipnode { yield $ipnode }
+        $genr = $priv.searchGenr($query, limit=$cmdopts.limit, minify=$cmdopts.minify, page=$cmdopts.page)
+        for $res in $shodan.ingest($genr, "Search", $query, $shodan.searchUrl(), $opts, ref=$ref) {
+            if $res.done {
+                $entry.query = $res.query
+                // Inbound nodes collected after the first with the same query.
+                for $other in $entry.nodes {
+                    if ($other.iden() != $ref.iden()) { $model.linkRefs($res.query, $other) }
+                }
+            }
+            if $cmdopts.yield_query {
+                if $res.done { yield $res.query }
+            } elif $res.ip {
+                yield $res.ip
+            }
         }
     }
 }
@@ -64,15 +89,50 @@ if ($nodequery = $lib.null) { spin }
 
 // NOTE: Not "if $query {...}", which is runtsafe and would run without inbound nodes too.
 $nodequery = (" ").join(($nodequery, $query)).strip()
-divert (true) $run($nodequery)
+
+// Inbound nodes that build the same query as an earlier one (ex. inet:banner nodes with the same
+// text, servers presenting the same cert) don't run it again. Its it:exec:query refs them too.
+$prev = $state.ran.$nodequery
+if ($prev != $lib.null) {
+    $prev.nodes.append($node)
+    if $prev.query { $model.linkRefs($prev.query, $node) }
+    $state.dupes = ($state.dupes + 1)
+    spin
+}
+$state.ran.$nodequery = ({"query": $lib.null, "nodes": ([$node])})
+
+// By default, every inbound node is read before any search runs, so the nodes a search creates
+// can't come back in from a lift that's still running (ex. "inet:banner | slib.shodan.search"
+// would also search the banners it found, using more query credits). --stream-inbound searches
+// as each node arrives instead, for inbound sets too large to hold in memory.
+if $cmdopts.stream_inbound {
+    divert (true) $run($nodequery)
+} else {
+    $state.pending.append($nodequery)
+    spin
+}
 
 // Without inbound nodes, run the query on its own (once).
 | if (not $state.nodes) {
     if $query {
-        for $ipnode in $run($query) { yield $ipnode }
+        for $n in $run($query) { yield $n }
     } elif (not $cmdopts.filters) {
         $lib.raise(BadArg, "slib.shodan.search requires a query, inbound nodes, or --filters.")
     }
 }
 
+// The inbound nodes' queries, once all of them are read (without --stream-inbound).
+| if $state.pending {
+    for $q in $state.pending {
+        for $n in $run($q) { yield $n }
+    }
+}
+
 | uniq
+
+fini {
+    if $state.dupes {
+        $lib.print("slib.shodan.search: {n} inbound nodes had the same query as an earlier one, each query was searched once.",
+                   n=$state.dupes)
+    }
+}
