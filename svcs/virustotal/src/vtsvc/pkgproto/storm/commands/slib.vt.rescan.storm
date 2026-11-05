@@ -1,0 +1,15 @@
+init {
+    $submit = $lib.import(slib.vt.priv.submit)
+    $util = $lib.import(slib.vt.util)
+}
+
+$tgt = $util.target($node)
+if ($tgt = $lib.null) {
+    $lib.warn("slib.vt.rescan: Can't rescan {repr}, it has no hash.", repr=$node.repr())
+} else {
+    ($kind, $ident) = $tgt
+    $retn = $submit.rescan($kind, $ident)
+    if (not $util.failed($retn, `Rescanning {$ident}`)) {
+        $lib.print("slib.vt.rescan: Rescanning {ident}, analysis {aid}.", ident=$ident, aid=$retn.data.id)
+    }
+}

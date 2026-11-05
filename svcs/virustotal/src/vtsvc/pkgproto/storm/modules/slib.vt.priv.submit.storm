@@ -1,0 +1,47 @@
+// Privileged (asroot) wrappers around the slib.vt service for slib.vt.submit.
+// These send data to VirusTotal: submissions, rescans, comments, and votes.
+
+init {
+    $svc = $lib.service.get("slib.vt")
+}
+
+// Only reads the calling user's own vault, see slib.vt.priv.user.
+function userKey() {
+    $vault = $lib.vault.bytype(virustotal, scope=user)
+    if ($vault = $lib.null) { return($lib.null) }
+    $secrets = $vault.secrets
+    if ($secrets = $lib.null) { return($lib.null) }
+    return($secrets.apikey)
+}
+
+function _fail(mesg) { return(({"status": (false), "mesg": $mesg, "data": $lib.null})) }
+
+// Read a file from the Axon as a list of (up to 1MiB) chunks for the service.
+function _chunks(sha256, size) {
+    $retn = ([])
+    $offs = (0)
+    while ($offs < $size) {
+        $byts = $lib.axon.read($sha256, offs=$offs, size=(1048576))
+        if (not $byts) { break }
+        $retn.append($byts)
+        $offs = ($offs + $lib.len($byts))
+    }
+    return($retn)
+}
+
+// Submit a file from the Axon.
+function submitFile(sha256, size, name=$lib.null, password=$lib.null) {
+    if (not $lib.axon.has($sha256)) { return($_fail(`The Axon doesn't have {$sha256}.`)) }
+    if ($size = $lib.null) { return($_fail("The file's size is unknown.")) }
+    // VirusTotal's max upload size.
+    if ($size > (681574400)) { return($_fail(`The file is {$size} bytes, larger than VirusTotal's max of 650MB.`)) }
+    return($svc.submitFile($_chunks($sha256, $size), name=$name, password=$password, apikey=$userKey()))
+}
+
+function submitUrl(url) { return($svc.submitUrl($url, apikey=$userKey())) }
+
+function rescan(kind, ident) { return($svc.rescan($kind, $ident, apikey=$userKey())) }
+
+function addComment(kind, ident, text) { return($svc.addComment($kind, $ident, $text, apikey=$userKey())) }
+
+function addVote(kind, ident, verdict) { return($svc.addVote($kind, $ident, $verdict, apikey=$userKey())) }

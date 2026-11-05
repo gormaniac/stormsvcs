@@ -1,0 +1,159 @@
+{
+ "data": {
+  "dns_lookups": [
+   {
+    "hostname": "www.iuqerfsodp9ifjaposdfjhgosurijfaewrwergwea.com",
+    "resolved_ips": [
+     "104.17.244.81",
+     "104.16.173.80",
+     "104.16.166.228",
+     "104.16.167.228",
+     "104.17.38.137",
+     "104.17.40.137",
+     "104.17.41.137",
+     "104.17.39.137",
+     "104.17.37.137"
+    ]
+   },
+   {
+    "hostname": "wpad"
+   },
+   {
+    "hostname": "query.prod.cms.rt.microsoft.com",
+    "resolved_ips": [
+     "184.25.191.235",
+     "23.198.146.35",
+     "104.112.185.183",
+     "104.91.212.133",
+     "23.6.103.183"
+    ]
+   },
+   {
+    "hostname": "www.microsoft.com",
+    "resolved_ips": [
+     "23.216.81.152",
+     "23.62.209.152",
+     "104.71.214.69",
+     "23.213.37.172",
+     "23.45.137.206",
+     "23.55.140.42",
+     "96.7.158.45",
+     "23.197.238.105",
+     "23.217.131.226",
+     "184.27.218.92",
+     "23.0.166.89"
+    ]
+   }
+  ],
+  "ip_traffic": [
+   {
+    "destination_ip": "104.16.167.228",
+    "destination_port": 80,
+    "transport_layer_protocol": "TCP"
+   },
+   {
+    "destination_ip": "104.16.173.80",
+    "destination_port": 80,
+    "transport_layer_protocol": "TCP"
+   },
+   {
+    "destination_ip": "a83f:8110:2002:0:0:0:0:0",
+    "destination_port": 53,
+    "transport_layer_protocol": "UDP"
+   },
+   {
+    "destination_ip": "23.209.116.9",
+    "destination_port": 443,
+    "transport_layer_protocol": "TCP"
+   }
+  ],
+  "http_conversations": [
+   {
+    "url": "http://www.iuqerfsodp9ifjaposdfjhgosurijfaewrwergwea.com/",
+    "request_method": "GET",
+    "request_headers": {
+     "Cache-Control": "no-cache",
+     "Host": "www.iuqerfsodp9ifjaposdfjhgosurijfaewrwergwea.com"
+    },
+    "response_status_code": 200
+   },
+   {
+    "url": "http://www.iuqerfsodp9ifjaposdfjhgosurijfaewrwergwea.com/",
+    "request_method": "GET"
+   },
+   {
+    "url": "http://www.iuqerfsodp9ifjaposdfjhgosurijfaewrwergwea.com/",
+    "request_method": "GET",
+    "response_status_code": 200
+   },
+   {
+    "url": "http://www.iuqerfsodp9ifjaposdfjhgosurijfaewrwergwea.com/",
+    "request_method": "GET",
+    "response_status_code": 200
+   }
+  ],
+  "mitre_attack_techniques": [
+   {
+    "id": "T1027.005",
+    "severity": "IMPACT_SEVERITY_INFO",
+    "signature_description": "contain obfuscated stackstrings"
+   },
+   {
+    "id": "T1543.003",
+    "severity": "IMPACT_SEVERITY_INFO",
+    "signature_description": "modify service"
+   },
+   {
+    "id": "T1569.002",
+    "severity": "IMPACT_SEVERITY_INFO",
+    "signature_description": "modify service"
+   },
+   {
+    "id": "T1016",
+    "severity": "IMPACT_SEVERITY_INFO",
+    "signature_description": "get socket status"
+   }
+  ],
+  "mutexes_created": [
+   "RasPbFile",
+   "Local\\ZonesCacheCounterMutex",
+   "Local\\ZoneAttributeCacheCounterMutex",
+   "Local\\ZonesCounterMutex"
+  ],
+  "verdicts": [
+   "RANSOM",
+   "MALWARE",
+   "TROJAN",
+   "EVADER"
+  ],
+  "tags": [
+   "OBFUSCATED",
+   "DIRECT_CPU_CLOCK_ACCESS",
+   "RUNTIME_MODULES",
+   "CHECKS_NETWORK_ADAPTERS"
+  ],
+  "command_executions": [
+   "%SAMPLEPATH%",
+   "C:\\DOCUME~1\\Miller\\LOCALS~1\\Temp\\u4Idx.exe",
+   "C:\\DOCUME~1\\Miller\\LOCALS~1\\Temp\\db349b97c37d22f5ea1d1841e3c89enalysis_subject.exe",
+   "C:\\DOCUME~1\\Miller\\LOCALS~1\\Temp\\KKI2429s.exe"
+  ],
+  "files_dropped": [
+   {
+    "path": "c:\\windows\\tasksche.exe",
+    "sha256": "d38716a81c8a9930b8d41e706eeb52ed54a0dbf39e143df3cd67f7bccbd6d159"
+   },
+   {
+    "path": "c:\\programdata\\swjwogwnbof758\\tasksche.exe",
+    "sha256": "ed01ebfbc9eb5bbea545af4d01bf5f1071661840480439c6e5babe8e080e41aa"
+   },
+   {
+    "path": "c:\\programdata\\swjwogwnbof758\\b.wnry",
+    "sha256": "984e38937a8f00a081a060d3ea3215f5974e765f7bfc82cffca7e7bf7a908d6d"
+   },
+   {
+    "path": "C:\\Windows\\System32\\spp\\store\\2.0\\data.dat.tmp"
+   }
+  ]
+ }
+}

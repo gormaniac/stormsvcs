@@ -1,0 +1,251 @@
+{
+ "data": [
+  {
+   "id": "125.21.88.13.in-addr.arpa",
+   "type": "domain",
+   "links": {
+    "self": "https://www.virustotal.com/api/v3/domains/125.21.88.13.in-addr.arpa"
+   },
+   "attributes": {
+    "tld": "in-addr.arpa",
+    "popularity_ranks": {},
+    "categories": {},
+    "last_analysis_date": 1776028472,
+    "first_seen_date": 1696912443,
+    "last_analysis_stats": {
+     "malicious": 0,
+     "suspicious": 0,
+     "undetected": 37,
+     "harmless": 55,
+     "timeout": 0
+    },
+    "last_dns_records": [],
+    "total_votes": {
+     "harmless": 0,
+     "malicious": 1
+    },
+    "last_modification_date": 1791800452,
+    "reputation": -1,
+    "last_analysis_results": {
+     "Acronis": {
+      "method": "blacklist",
+      "engine_name": "Acronis",
+      "category": "harmless",
+      "result": "clean"
+     },
+     "0xSI_f33d": {
+      "method": "blacklist",
+      "engine_name": "0xSI_f33d",
+      "category": "undetected",
+      "result": "unrated"
+     },
+     "Abusix": {
+      "method": "blacklist",
+      "engine_name": "Abusix",
+      "category": "harmless",
+      "result": "clean"
+     },
+     "BitDefender": {
+      "method": "blacklist",
+      "engine_name": "BitDefender",
+      "category": "harmless",
+      "result": "clean"
+     },
+     "Bkav": {
+      "method": "blacklist",
+      "engine_name": "Bkav",
+      "category": "undetected",
+      "result": "unrated"
+     },
+     "Fortinet": {
+      "method": "blacklist",
+      "engine_name": "Fortinet",
+      "category": "harmless",
+      "result": "clean"
+     },
+     "Kaspersky": {
+      "method": "blacklist",
+      "engine_name": "Kaspersky",
+      "category": "undetected",
+      "result": "unrated"
+     },
+     "Sophos": {
+      "method": "blacklist",
+      "engine_name": "Sophos",
+      "category": "harmless",
+      "result": "clean"
+     }
+    },
+    "tags": []
+   }
+  },
+  {
+   "id": "130.155.190.20.in-addr.arpa",
+   "type": "domain",
+   "links": {
+    "self": "https://www.virustotal.com/api/v3/domains/130.155.190.20.in-addr.arpa"
+   },
+   "attributes": {
+    "tld": "in-addr.arpa",
+    "popularity_ranks": {},
+    "categories": {},
+    "last_analysis_date": 1782144162,
+    "first_seen_date": 1697543301,
+    "last_analysis_stats": {
+     "malicious": 0,
+     "suspicious": 0,
+     "undetected": 37,
+     "harmless": 55,
+     "timeout": 0
+    },
+    "last_dns_records": [],
+    "total_votes": {
+     "harmless": 0,
+     "malicious": 0
+    },
+    "last_modification_date": 1791800439,
+    "reputation": 0,
+    "last_analysis_results": {
+     "Acronis": {
+      "method": "blacklist",
+      "engine_name": "Acronis",
+      "category": "harmless",
+      "result": "clean"
+     },
+     "0xSI_f33d": {
+      "method": "blacklist",
+      "engine_name": "0xSI_f33d",
+      "category": "undetected",
+      "result": "unrated"
+     },
+     "Abusix": {
+      "method": "blacklist",
+      "engine_name": "Abusix",
+      "category": "harmless",
+      "result": "clean"
+     },
+     "BitDefender": {
+      "method": "blacklist",
+      "engine_name": "BitDefender",
+      "category": "harmless",
+      "result": "clean"
+     },
+     "Bkav": {
+      "method": "blacklist",
+      "engine_name": "Bkav",
+      "category": "undetected",
+      "result": "unrated"
+     },
+     "Fortinet": {
+      "method": "blacklist",
+      "engine_name": "Fortinet",
+      "category": "harmless",
+      "result": "clean"
+     },
+     "Kaspersky": {
+      "method": "blacklist",
+      "engine_name": "Kaspersky",
+      "category": "undetected",
+      "result": "unrated"
+     },
+     "Sophos": {
+      "method": "blacklist",
+      "engine_name": "Sophos",
+      "category": "harmless",
+      "result": "clean"
+     }
+    },
+    "tags": []
+   }
+  },
+  {
+   "id": "137.90.64.13.in-addr.arpa",
+   "type": "domain",
+   "links": {
+    "self": "https://www.virustotal.com/api/v3/domains/137.90.64.13.in-addr.arpa"
+   },
+   "attributes": {
+    "tld": "in-addr.arpa",
+    "popularity_ranks": {},
+    "categories": {
+     "Sophos": "information technology"
+    },
+    "last_analysis_date": 1784731348,
+    "first_seen_date": 1696447190,
+    "last_analysis_stats": {
+     "malicious": 0,
+     "suspicious": 0,
+     "undetected": 39,
+     "harmless": 53,
+     "timeout": 0
+    },
+    "last_dns_records": [],
+    "total_votes": {
+     "harmless": 0,
+     "malicious": 1
+    },
+    "last_modification_date": 1787150768,
+    "reputation": -1,
+    "last_analysis_results": {
+     "Acronis": {
+      "method": "blacklist",
+      "engine_name": "Acronis",
+      "category": "harmless",
+      "result": "clean"
+     },
+     "0xSI_f33d": {
+      "method": "blacklist",
+      "engine_name": "0xSI_f33d",
+      "category": "undetected",
+      "result": "unrated"
+     },
+     "Abusix": {
+      "method": "blacklist",
+      "engine_name": "Abusix",
+      "category": "harmless",
+      "result": "clean"
+     },
+     "BitDefender": {
+      "method": "blacklist",
+      "engine_name": "BitDefender",
+      "category": "harmless",
+      "result": "clean"
+     },
+     "Bkav": {
+      "method": "blacklist",
+      "engine_name": "Bkav",
+      "category": "undetected",
+      "result": "unrated"
+     },
+     "Fortinet": {
+      "method": "blacklist",
+      "engine_name": "Fortinet",
+      "category": "harmless",
+      "result": "clean"
+     },
+     "Kaspersky": {
+      "method": "blacklist",
+      "engine_name": "Kaspersky",
+      "category": "undetected",
+      "result": "unrated"
+     },
+     "Sophos": {
+      "method": "blacklist",
+      "engine_name": "Sophos",
+      "category": "harmless",
+      "result": "clean"
+     }
+    },
+    "tags": []
+   }
+  }
+ ],
+ "meta": {
+  "count": 70,
+  "cursor": "eyJsaW1pdCI6IDMsICJvZmZzZXQiOiAzfQ=="
+ },
+ "links": {
+  "self": "https://www.virustotal.com/api/v3/files/24d004a104d4d54034dbcffc2a4b19a11f39008a575aa614ea04703480b1022c/contacted_domains?limit=3",
+  "next": "https://www.virustotal.com/api/v3/files/24d004a104d4d54034dbcffc2a4b19a11f39008a575aa614ea04703480b1022c/contacted_domains?limit=3&cursor=eyJsaW1pdCI6IDMsICJvZmZzZXQiOiAzfQ%3D%3D"
+ }
+}

@@ -48,6 +48,11 @@ name = "Hurricane Electric BGP Toolkit"
 src = "svcs/bgphe/"
 workflow = ".github/workflows/bgphe.yml"
 
+[stormsvcs.virustotal]
+name = "VirusTotal"
+src = "svcs/virustotal/"
+workflow = ".github/workflows/virustotal.yml"
+
 # [stormsvcs.report-ingest]
 # name = "Report Ingest"
 # src = "svcs/report-ingest/"

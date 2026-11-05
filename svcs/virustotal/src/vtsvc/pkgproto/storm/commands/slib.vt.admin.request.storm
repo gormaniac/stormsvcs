@@ -1,0 +1,31 @@
+init {
+    $admin = $lib.import(slib.vt.priv.admin)
+    $util = $lib.import(slib.vt.util)
+    $name = "slib.vt.admin.request"
+
+    $params = ({})
+    $ok = (true)
+    for $p in $cmdopts.param {
+        $parts = $p.split("=", maxsplit=(1))
+        if ($lib.len($parts) != 2) {
+            $lib.warn("{name}: Invalid --param {p}, use name=value.", name=$name, p=$p)
+            $ok = (false)
+        } else {
+            $params.($parts.0) = $parts.1
+        }
+    }
+
+    $body = $lib.null
+    if ($ok and $cmdopts.json) {
+        try { $body = $lib.json.load($cmdopts.json) }
+        catch * as err {
+            $lib.warn("{name}: Invalid --json: {err}", name=$name, err=$err.mesg)
+            $ok = (false)
+        }
+    }
+
+    if $ok {
+        $retn = $admin.rawRequest($cmdopts.path, method=$cmdopts.method, params=$params, json=$body)
+        if (not $util.failed($retn, "The request")) { $util.printJson($retn.data) }
+    }
+}

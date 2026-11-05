@@ -1,0 +1,26 @@
+init {
+    $user = $lib.import(slib.vt.priv.user)
+    $util = $lib.import(slib.vt.util)
+
+    $retn = $user.quota(remote=$cmdopts.remote)
+    if (not $util.failed($retn, "Getting the quota")) {
+        $q = $retn.data
+        if $q.enforced { $mode = "enforced (vt:community)" } else { $mode = "not enforced" }
+        $lib.print("slib.vt: VirusTotal request limits are {mode}.", mode=$mode)
+        $rows = ([])
+        for $period in (minute, day, month) {
+            $limit = $q.limits.$period
+            if (not $limit) { $limit = "none" }
+            $rows.append(($period, $q.used.$period, $limit))
+        }
+        $util.table(([["period", 8], ["used", 8], ["limit", 8]]), $rows)
+        $lib.print("Next request can be sent in {wait}s. The daily count resets at {resets}. {cached} responses are cached.",
+            wait=$q.wait, resets=$util.when($q.resets), cached=$q.cached)
+        if $q.remote {
+            $lib.print("VirusTotal's counts for the key:")
+            $rows = ([])
+            for ($name, $valu) in $q.remote { $rows.append(($name, $valu.used, $valu.allowed)) }
+            $util.table(([["quota", 24], ["used", 8], ["allowed", 8]]), $rows)
+        }
+    }
+}

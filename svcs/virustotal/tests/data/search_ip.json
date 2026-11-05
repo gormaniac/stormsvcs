@@ -1,0 +1,93 @@
+{
+ "data": [
+  {
+   "id": "8.8.8.8",
+   "type": "ip_address",
+   "links": {
+    "self": "https://www.virustotal.com/api/v3/ip_addresses/8.8.8.8"
+   },
+   "attributes": {
+    "country": "US",
+    "as_owner": "Google LLC",
+    "jarm": "29d3fd00029d29d00042d43d00041d8f924f5255cbc229bc55efa16391dad6",
+    "reputation": 564,
+    "last_analysis_date": 1793709358,
+    "last_analysis_stats": {
+     "malicious": 1,
+     "suspicious": 0,
+     "undetected": 34,
+     "harmless": 57,
+     "timeout": 0
+    },
+    "regional_internet_registry": "ARIN",
+    "first_seen_date": 1695911274,
+    "last_https_certificate_date": 1793709663,
+    "total_votes": {
+     "harmless": 298,
+     "malicious": 60
+    },
+    "network": "8.8.8.0/24",
+    "tags": [
+     "suspicious-udp"
+    ],
+    "asn": 15169,
+    "last_modification_date": 1793716237,
+    "last_analysis_results": {
+     "Acronis": {
+      "method": "blacklist",
+      "engine_name": "Acronis",
+      "category": "harmless",
+      "result": "clean"
+     },
+     "0xSI_f33d": {
+      "method": "blacklist",
+      "engine_name": "0xSI_f33d",
+      "category": "undetected",
+      "result": "unrated"
+     },
+     "Abusix": {
+      "method": "blacklist",
+      "engine_name": "Abusix",
+      "category": "harmless",
+      "result": "clean"
+     },
+     "BitDefender": {
+      "method": "blacklist",
+      "engine_name": "BitDefender",
+      "category": "harmless",
+      "result": "clean"
+     },
+     "Bkav": {
+      "method": "blacklist",
+      "engine_name": "Bkav",
+      "category": "undetected",
+      "result": "unrated"
+     },
+     "Fortinet": {
+      "method": "blacklist",
+      "engine_name": "Fortinet",
+      "category": "harmless",
+      "result": "clean"
+     },
+     "Kaspersky": {
+      "method": "blacklist",
+      "engine_name": "Kaspersky",
+      "category": "harmless",
+      "result": "clean"
+     },
+     "Sophos": {
+      "method": "blacklist",
+      "engine_name": "Sophos",
+      "category": "harmless",
+      "result": "clean"
+     }
+    },
+    "whois_date": 1791287555,
+    "continent": "NA"
+   }
+  }
+ ],
+ "links": {
+  "self": "https://www.virustotal.com/api/v3/search?query=8.8.8.8"
+ }
+}

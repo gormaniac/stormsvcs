@@ -1,0 +1,147 @@
+{
+ "data": [
+  {
+   "id": "8.8.8.8www.cysdetred.net",
+   "type": "resolution",
+   "links": {
+    "self": "https://www.virustotal.com/api/v3/resolutions/8.8.8.8www.cysdetred.net"
+   },
+   "attributes": {
+    "resolver": "VirusTotal",
+    "ip_address_last_analysis_stats": {
+     "malicious": 1,
+     "suspicious": 0,
+     "undetected": 34,
+     "harmless": 57,
+     "timeout": 0
+    },
+    "host_name_last_analysis_stats": {
+     "malicious": 1,
+     "suspicious": 2,
+     "undetected": 35,
+     "harmless": 54,
+     "timeout": 0
+    },
+    "ip_address": "8.8.8.8",
+    "date": 1793714796,
+    "host_name": "www.cysdetred.net"
+   }
+  },
+  {
+   "id": "8.8.8.8qq88cd8.com",
+   "type": "resolution",
+   "links": {
+    "self": "https://www.virustotal.com/api/v3/resolutions/8.8.8.8qq88cd8.com"
+   },
+   "attributes": {
+    "resolver": "VirusTotal",
+    "ip_address_last_analysis_stats": {
+     "malicious": 1,
+     "suspicious": 0,
+     "undetected": 34,
+     "harmless": 57,
+     "timeout": 0
+    },
+    "host_name_last_analysis_stats": {
+     "malicious": 0,
+     "suspicious": 0,
+     "undetected": 37,
+     "harmless": 55,
+     "timeout": 0
+    },
+    "ip_address": "8.8.8.8",
+    "date": 1793714509,
+    "host_name": "qq88cd8.com"
+   }
+  },
+  {
+   "id": "8.8.8.80169081.com",
+   "type": "resolution",
+   "links": {
+    "self": "https://www.virustotal.com/api/v3/resolutions/8.8.8.80169081.com"
+   },
+   "attributes": {
+    "resolver": "VirusTotal",
+    "ip_address_last_analysis_stats": {
+     "malicious": 1,
+     "suspicious": 0,
+     "undetected": 34,
+     "harmless": 57,
+     "timeout": 0
+    },
+    "host_name_last_analysis_stats": {
+     "malicious": 0,
+     "suspicious": 1,
+     "undetected": 38,
+     "harmless": 53,
+     "timeout": 0
+    },
+    "ip_address": "8.8.8.8",
+    "date": 1793714204,
+    "host_name": "0169081.com"
+   }
+  },
+  {
+   "id": "8.8.8.8nasvhla.vndns.net",
+   "type": "resolution",
+   "links": {
+    "self": "https://www.virustotal.com/api/v3/resolutions/8.8.8.8nasvhla.vndns.net"
+   },
+   "attributes": {
+    "resolver": "VirusTotal",
+    "ip_address_last_analysis_stats": {
+     "malicious": 1,
+     "suspicious": 0,
+     "undetected": 34,
+     "harmless": 57,
+     "timeout": 0
+    },
+    "host_name_last_analysis_stats": {
+     "malicious": 0,
+     "suspicious": 0,
+     "undetected": 92,
+     "harmless": 0,
+     "timeout": 0
+    },
+    "ip_address": "8.8.8.8",
+    "date": 1793713678,
+    "host_name": "nasvhla.vndns.net"
+   }
+  },
+  {
+   "id": "8.8.8.8www.enormouslyepicpuma.shop",
+   "type": "resolution",
+   "links": {
+    "self": "https://www.virustotal.com/api/v3/resolutions/8.8.8.8www.enormouslyepicpuma.shop"
+   },
+   "attributes": {
+    "resolver": "VirusTotal",
+    "ip_address_last_analysis_stats": {
+     "malicious": 1,
+     "suspicious": 0,
+     "undetected": 34,
+     "harmless": 57,
+     "timeout": 0
+    },
+    "host_name_last_analysis_stats": {
+     "malicious": 3,
+     "suspicious": 2,
+     "undetected": 37,
+     "harmless": 50,
+     "timeout": 0
+    },
+    "ip_address": "8.8.8.8",
+    "date": 1793713244,
+    "host_name": "www.enormouslyepicpuma.shop"
+   }
+  }
+ ],
+ "meta": {
+  "count": 200,
+  "cursor": "CmAKEQoEZGF0ZRIJCPOzlsb265cDEkdqEXN-dmlydXN0b3RhbGNsb3VkcjILEgpSZXNvbHV0aW9uIiI4LjguOC44d3d3LmVub3Jtb3VzbHllcGljcHVtYS5zaG9wDBgAIAE="
+ },
+ "links": {
+  "self": "https://www.virustotal.com/api/v3/ip_addresses/8.8.8.8/resolutions?limit=5",
+  "next": "https://www.virustotal.com/api/v3/ip_addresses/8.8.8.8/resolutions?limit=5&cursor=CmAKEQoEZGF0ZRIJCPOzlsb265cDEkdqEXN-dmlydXN0b3RhbGNsb3VkcjILEgpSZXNvbHV0aW9uIiI4LjguOC44d3d3LmVub3Jtb3VzbHllcGljcHVtYS5zaG9wDBgAIAE%3D"
+ }
+}

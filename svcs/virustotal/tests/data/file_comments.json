@@ -1,0 +1,88 @@
+{
+ "data": [
+  {
+   "id": "f-24d004a104d4d54034dbcffc2a4b19a11f39008a575aa614ea04703480b1022c-c19a567f",
+   "type": "comment",
+   "links": {
+    "self": "https://www.virustotal.com/api/v3/comments/f-24d004a104d4d54034dbcffc2a4b19a11f39008a575aa614ea04703480b1022c-c19a567f"
+   },
+   "attributes": {
+    "html": "lgtm",
+    "tags": [],
+    "text": "lgtm",
+    "date": 1789789529,
+    "votes": {
+     "positive": 0,
+     "negative": 0,
+     "abuse": 0
+    }
+   }
+  },
+  {
+   "id": "f-24d004a104d4d54034dbcffc2a4b19a11f39008a575aa614ea04703480b1022c-a4c5a6e5",
+   "type": "comment",
+   "links": {
+    "self": "https://www.virustotal.com/api/v3/comments/f-24d004a104d4d54034dbcffc2a4b19a11f39008a575aa614ea04703480b1022c-a4c5a6e5"
+   },
+   "attributes": {
+    "html": "<strong>Original filename</strong> : 24d004a104d4d54034dbcffc2a4b19a11f39008a575aa614ea04703480b1022c<br /><br />Comment added on 2026-09-03 16:04:55 French Time Zone<br /><br /><strong>MWDB Link</strong> : https://mwdb.cert.pl/file/24d004a104d4d54034dbcffc2a4b19a11f39008a575aa614ea04703480b1022c<br /><strong>VirusShare Link</strong> : https://virusshare.com/file?24d004a104d4d54034dbcffc2a4b19a11f39008a575aa614ea04703480b1022c<br /><strong>VXUG Link</strong> : https://virus.exchange/samples/<br /><strong>Triage Link</strong> : https://tria.ge/260903-qwh3batzgs<br /><strong>Yara Rules from petikvx :</strong><br />#WannaCry_Ransomware<br />#WannaCry_Ransomware_Gen<br />#Win32_Ransomware_WannaCry<br />#ExeInfection<br /><br /><strong>Yara Rules from VT :</strong><br />#WannaCry_Ransomware #wannacry_ransomware<br />#WannaCry_Ransomware_Gen #wannacry_ransomware_gen<br />#Win32_Ransomware_WannaCry #win32_ransomware_wannacry<br /><br /><strong>Kaspersky Name :</strong><br />#Trojan-Ransom.Win32.Wanna.m #trojan-ransom_win32_wanna_m<br /><br />#petik-triage ",
+    "tags": [
+     "wannacry_ransomware",
+     "wannacry_ransomware_gen",
+     "win32_ransomware_wannacry",
+     "exeinfection",
+     "trojan-ransom_win32_wanna_m",
+     "petik-triage"
+    ],
+    "text": "[b]Original filename[/b] : 24d004a104d4d54034dbcffc2a4b19a11f39008a575aa614ea04703480b1022c\n\nComment added on 2026-09-03 16:04:55 French Time Zone\n\n[b]MWDB Link[/b] : https://mwdb.cert.pl/file/24d004a104d4d54034dbcffc2a4b19a11f39008a575aa614ea04703480b1022c\n[b]VirusShare Link[/b] : https://virusshare.com/file?24d004a104d4d54034dbcffc2a4b19a11f39008a575aa614ea04703480b1022c\n[b]VXUG Link[/b] : https://virus.exchange/samples/\n[b]Triage Link[/b] : https://tria.ge/260903-qwh3batzgs\n[b]Yara Rules from petikvx :[/b]\n#WannaCry_Ransomware\n#WannaCry_Ransomware_Gen\n#Win32_Ransomware_WannaCry\n#ExeInfection\n\n\n[b]Yara Rules from VT :[/b]\n#WannaCry_Ransomware #wannacry_ransomware\n#WannaCry_Ransomware_Gen #wannacry_ransomware_gen\n#Win32_Ransomware_WannaCry #win32_ransomware_wannacry\n\n\n[b]Kaspersky Name :[/b]\n#Trojan-Ransom.Win32.Wanna.m #trojan-ransom_win32_wanna_m\n\n\n#petik-triage ",
+    "date": 1788444302,
+    "votes": {
+     "positive": 0,
+     "negative": 0,
+     "abuse": 0
+    }
+   }
+  },
+  {
+   "id": "f-24d004a104d4d54034dbcffc2a4b19a11f39008a575aa614ea04703480b1022c-7df3ed2a",
+   "type": "comment",
+   "links": {
+    "self": "https://www.virustotal.com/api/v3/comments/f-24d004a104d4d54034dbcffc2a4b19a11f39008a575aa614ea04703480b1022c-7df3ed2a"
+   },
+   "attributes": {
+    "html": "**File Info:**<br /><br />**Filename:**<br />mssecsvc.exe<br /><br />**Threat Score:**<br />10/10<br /><br />**Family:**<br />\u2022 wannacry<br /><br />**File Report:**<br />https://jaffacakes118.dev/analysis/24d004a104d4d54034dbcffc2a4b19a11f39008a575aa614ea04703480b1022c<br />https://tria.ge/260903-qwh3batzgs<br /><br />**Tags:**<br />#mssecsvcexe<br />#wannacry<br />#defense_evasion<br />#discovery<br />#execution<br />#persistence<br />#privilege_escalation<br />#worm<br />#malware<br />#impact<br />#ransomware<br />#spyware<br />#stealer<br />#jaffacakes118",
+    "tags": [
+     "mssecsvcexe",
+     "wannacry",
+     "defense_evasion",
+     "discovery",
+     "execution",
+     "persistence",
+     "privilege_escalation",
+     "worm",
+     "malware",
+     "impact",
+     "ransomware",
+     "spyware",
+     "stealer",
+     "jaffacakes118"
+    ],
+    "text": "**File Info:**\n\n**Filename:**\nmssecsvc.exe\n\n**Threat Score:**\n10/10\n\n**Family:**\n\u2022 wannacry\n\n**File Report:**\nhttps://jaffacakes118.dev/analysis/24d004a104d4d54034dbcffc2a4b19a11f39008a575aa614ea04703480b1022c\nhttps://tria.ge/260903-qwh3batzgs\n\n**Tags:**\n#mssecsvcexe\n#wannacry\n#defense_evasion\n#discovery\n#execution\n#persistence\n#privilege_escalation\n#worm\n#malware\n#impact\n#ransomware\n#spyware\n#stealer\n#jaffacakes118",
+    "date": 1788443948,
+    "votes": {
+     "positive": 0,
+     "negative": 0,
+     "abuse": 0
+    }
+   }
+  }
+ ],
+ "meta": {
+  "count": 88,
+  "cursor": "CtIBChEKBGRhdGUSCQjJgJbyyNKWAxK4AWoRc352aXJ1c3RvdGFsY2xvdWRyogELEgZTYW1wbGUiQDI0ZDAwNGExMDRkNGQ1NDAzNGRiY2ZmYzJhNGIxOWExMWYzOTAwOGE1NzVhYTYxNGVhMDQ3MDM0ODBiMTAyMmMMCxIHQ29tbWVudCJJMjRkMDA0YTEwNGQ0ZDU0MDM0ZGJjZmZjMmE0YjE5YTExZjM5MDA4YTU3NWFhNjE0ZWEwNDcwMzQ4MGIxMDIyYy03ZGYzZWQyYQwYACAB"
+ },
+ "links": {
+  "self": "https://www.virustotal.com/api/v3/files/24d004a104d4d54034dbcffc2a4b19a11f39008a575aa614ea04703480b1022c/comments?limit=3",
+  "next": "https://www.virustotal.com/api/v3/files/24d004a104d4d54034dbcffc2a4b19a11f39008a575aa614ea04703480b1022c/comments?limit=3&cursor=CtIBChEKBGRhdGUSCQjJgJbyyNKWAxK4AWoRc352aXJ1c3RvdGFsY2xvdWRyogELEgZTYW1wbGUiQDI0ZDAwNGExMDRkNGQ1NDAzNGRiY2ZmYzJhNGIxOWExMWYzOTAwOGE1NzVhYTYxNGVhMDQ3MDM0ODBiMTAyMmMMCxIHQ29tbWVudCJJMjRkMDA0YTEwNGQ0ZDU0MDM0ZGJjZmZjMmE0YjE5YTExZjM5MDA4YTU3NWFhNjE0ZWEwNDcwMzQ4MGIxMDIyYy03ZGYzZWQyYQwYACAB"
+ }
+}

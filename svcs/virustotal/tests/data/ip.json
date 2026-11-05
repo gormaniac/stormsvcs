@@ -1,0 +1,149 @@
+{
+ "data": {
+  "id": "8.8.8.8",
+  "type": "ip_address",
+  "links": {
+   "self": "https://www.virustotal.com/api/v3/ip_addresses/8.8.8.8"
+  },
+  "attributes": {
+   "last_https_certificate": {
+    "extensions": {
+     "key_usage": [
+      "digitalSignature",
+      "keyEncipherment"
+     ],
+     "extended_key_usage": [
+      "serverAuth"
+     ],
+     "CA": false,
+     "subject_key_identifier": "e83a5887cfd77513ea20bdc2706b2458133f7c72",
+     "authority_key_identifier": {
+      "keyid": "de1b1eed7915d43e3724c321bbec34396d42b230"
+     },
+     "ca_information_access": {
+      "CA Issuers": "http://i.pki.goog/wr2.crt"
+     },
+     "subject_alternative_name": [
+      "dns.google",
+      "dns.google.com",
+      "*.dns.google.com",
+      "8888.google",
+      "dns64.dns.google",
+      "8.8.8.8",
+      "8.8.4.4",
+      "8.8.8.53",
+      "2001:4860:4860::8888",
+      "2001:4860:4860::8844",
+      "2001:4860:4860::6464",
+      "2001:4860:4860::64"
+     ],
+     "certificate_policies": [
+      "2.23.140.1.2.1"
+     ],
+     "crl_distribution_points": [
+      "http://c.pki.goog/wr2/9UVbN0w5E6Y.crl"
+     ],
+     "1.3.6.1.4.1.11129.2.4.2": "0481f200f0007600d809553b944f7affc816196f944f85abb0f8fc5e8755260f"
+    },
+    "validity": {
+     "not_after": "2026-12-30 19:09:49",
+     "not_before": "2026-10-07 19:09:50"
+    },
+    "size": 1432,
+    "version": "V3",
+    "public_key": {
+     "algorithm": "RSA"
+    },
+    "thumbprint_sha256": "6388f2d30443841db3a0d32c789bf6195064f2dd04720d07c45c8a7ddfa3e908",
+    "thumbprint": "94110b1a608e0fa53b9cf3bbc8f779d637464a3b",
+    "serial_number": "3c3c77b79994daa00a1786a9ca2215b6",
+    "issuer": {
+     "C": "US",
+     "O": "Google Trust Services",
+     "CN": "WR2"
+    },
+    "subject": {
+     "CN": "dns.google"
+    }
+   },
+   "last_analysis_results": {
+    "Acronis": {
+     "method": "blacklist",
+     "engine_name": "Acronis",
+     "category": "harmless",
+     "result": "clean"
+    },
+    "0xSI_f33d": {
+     "method": "blacklist",
+     "engine_name": "0xSI_f33d",
+     "category": "undetected",
+     "result": "unrated"
+    },
+    "Abusix": {
+     "method": "blacklist",
+     "engine_name": "Abusix",
+     "category": "harmless",
+     "result": "clean"
+    },
+    "BitDefender": {
+     "method": "blacklist",
+     "engine_name": "BitDefender",
+     "category": "harmless",
+     "result": "clean"
+    },
+    "Bkav": {
+     "method": "blacklist",
+     "engine_name": "Bkav",
+     "category": "undetected",
+     "result": "unrated"
+    },
+    "Fortinet": {
+     "method": "blacklist",
+     "engine_name": "Fortinet",
+     "category": "harmless",
+     "result": "clean"
+    },
+    "Kaspersky": {
+     "method": "blacklist",
+     "engine_name": "Kaspersky",
+     "category": "harmless",
+     "result": "clean"
+    },
+    "Sophos": {
+     "method": "blacklist",
+     "engine_name": "Sophos",
+     "category": "harmless",
+     "result": "clean"
+    }
+   },
+   "jarm": "29d3fd00029d29d00042d43d00041d8f924f5255cbc229bc55efa16391dad6",
+   "last_analysis_date": 1793709358,
+   "reputation": 564,
+   "last_https_certificate_date": 1793709663,
+   "country": "US",
+   "total_votes": {
+    "harmless": 298,
+    "malicious": 60
+   },
+   "network": "8.8.8.0/24",
+   "tags": [
+    "suspicious-udp"
+   ],
+   "whois": "NetRange: 8.8.8.0 - 8.8.8.255\nCIDR: 8.8.8.0/24\nNetName: GOGL\nNetHandle: NET-8-8-8-0-2\nParent: NET8 (NET-8-0-0-0-0)\nNetType: Direct Allocation\nOriginAS: \nOrganization: Google LLC (GOGL)\nRegDate: 2023-12-28\nUpdated: 2023-12-28\nRef: https://rdap.arin.net/registry/ip/8.8.8.0\nOrgName: Google LLC\nOrgId: GOGL\nAddress: 1600 Amphitheatre Parkway\nCity: Mountain View\nStateProv: CA\nPostalCode: 94043\nCountry: US\nRegDate: 2000-03-30\nUpdated: 2019-10-31\nComment: Please note that the recommended way to file abuse complaints are located in the following links. \nComment: \nComment: To report abuse and illegal activity: https://www.google.com/contact/\nComment: \nComment: For legal requests: http://support.google.com/legal \nComment: \nComment: Regards, \nComment: The Google Team\nRef: https://rdap.arin.net/registry/entity/GOGL\nOrgTechHandle: ZG39-ARIN\nOrgTechName: Google LLC\nOrgTechPhone: +1-650-253-0000 \nOrgTechEmail: arin-contact@google.com\nOrgTechRef: https://rdap.arin.net/registry/entity/ZG39-ARIN\nOrgAbuseHandle: ABUSE5250-ARIN\nOrgAbuseName: Abuse\nOrgAbusePhone: +1-650-253-0000 \nOrgAbuseEmail: network-abuse@google.com\nOrgAbuseRef: https://rdap.arin.net/registry/entity/ABUSE5250-ARIN\n",
+   "last_modification_date": 1793716085,
+   "regional_internet_registry": "ARIN",
+   "whois_date": 1791287555,
+   "as_owner": "Google LLC",
+   "last_analysis_stats": {
+    "malicious": 1,
+    "suspicious": 0,
+    "undetected": 34,
+    "harmless": 57,
+    "timeout": 0
+   },
+   "asn": 15169,
+   "continent": "NA",
+   "first_seen_date": 1695911274
+  }
+ }
+}

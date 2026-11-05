@@ -1,0 +1,50 @@
+// Wait for (with --wait) and model a submission's analysis. Returns the analyzed node.
+function finish(retn, what) {
+    if $util.failed($retn, `Submitting {$what}`) { return($lib.null) }
+    $aid = $retn.data.id
+    $lib.print("slib.vt.submit: Submitted {what}, analysis {aid}.", what=$what, aid=$aid)
+    if (not $opts.wait) { return($lib.null) }
+    $aretn = $user.waitAnalysis($aid, timeout=$opts.timeout, interval=$opts.interval)
+    if $util.failed($aretn, `Waiting for analysis {$aid}`) { return($lib.null) }
+    return($vtlib.analysis($aretn.data, name="slib.vt.submit"))
+}
+
+init {
+    $submit = $lib.import(slib.vt.priv.submit)
+    $user = $lib.import(slib.vt.priv.user)
+    $vtlib = $lib.import(slib.vt.lib)
+    $util = $lib.import(slib.vt.util)
+    $model = $lib.import(slib.vt.model)
+    $opts = $cmdopts
+    $found = ([])
+
+    for $u in $opts.url {
+        $n = $finish($submit.submitUrl($u), $u)
+        if ($n = $lib.null) { $n = $model.urlNode($u) }
+        if $n { $found.append($n) }
+    }
+}
+
+switch $node.form() {
+    "file:bytes": {
+        if (not :sha256) {
+            $lib.warn("slib.vt.submit: {repr} has no :sha256, so it can't be read from the Axon.", repr=$node.repr())
+        } else {
+            $retn = $submit.submitFile(:sha256, :size, name=:name, password=$opts.password)
+            $finish($retn, :sha256)
+            if $opts.yield { $found.append($node) }
+        }
+    }
+    "inet:url": {
+        $finish($submit.submitUrl($node.repr()), $node.repr())
+        if $opts.yield { $found.append($node) }
+    }
+}
+
+if $opts.yield { spin }
+
+fini {
+    if $opts.yield {
+        for $n in $found { yield $n }
+    }
+}

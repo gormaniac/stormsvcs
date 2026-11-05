@@ -1,0 +1,37 @@
+// Privileged (asroot) wrappers around the slib.vt service for slib.vt.admin.
+
+init {
+    $svc = $lib.service.get("slib.vt")
+}
+
+// Only reads the calling user's own vault, see slib.vt.priv.user.
+function userKey() {
+    $vault = $lib.vault.bytype(virustotal, scope=user)
+    if ($vault = $lib.null) { return($lib.null) }
+    $secrets = $vault.secrets
+    if ($secrets = $lib.null) { return($lib.null) }
+    return($secrets.apikey)
+}
+
+function setApiKey(apikey) { return($svc.setApiKey($apikey)) }
+function hasApiKey() { return($svc.hasApiKey()) }
+
+function tagSettings() {
+    return(({
+        "enabled": $lib.globals.get("slib:vt:tag:enabled"),
+        "prefix": $lib.globals.get("slib:vt:tag:prefix"),
+    }))
+}
+
+// Set the tag prefix. Raises BadArg if it isn't a valid tag.
+function setTagPrefix(prefix) {
+    $norm = $lib.cast(syn:tag, $prefix)
+    $lib.globals.set("slib:vt:tag:prefix", $norm)
+    return($norm)
+}
+
+function setTagsEnabled(enabled) { $lib.globals.set("slib:vt:tag:enabled", $enabled) }
+
+function rawRequest(path, method=get, params=$lib.null, json=$lib.null) {
+    return($svc.rawRequest($method, $path, params=$params, json_data=$json, apikey=$userKey()))
+}

@@ -1,0 +1,107 @@
+// The slib.vt command logic: look things up with slib.vt.priv.user, and model them with
+// slib.vt.model. Functions here run as the calling user (node edits need their perms).
+
+init {
+    $user = $lib.import(slib.vt.priv.user)
+    $model = $lib.import(slib.vt.model)
+    $util = $lib.import(slib.vt.util)
+    $model.setPrefix($user.tagPrefix())
+}
+
+// Look up and model one object. Returns its node, or null (with a warning or print) if it
+// couldn't be looked up.
+function enrich(kind, ident, engines=detected, behaviour=(false), cache=(true), name="slib.vt.enrich") {
+    $retn = $user.lookup($kind, $ident, cache=$cache)
+    if $util.failed($retn, `Looking up {$ident}`) { return($lib.null) }
+    $obj = $retn.data
+    if ($obj = $lib.null) {
+        $lib.print("{name}: VirusTotal doesn't have {kind} {ident}.", name=$name, kind=$kind, ident=$ident)
+        return($lib.null)
+    }
+
+    $n = $model.obj($obj, $engines)
+    if ($n = $lib.null) {
+        $lib.warn("{name}: Unable to model {kind} {ident}.", name=$name, kind=$kind, ident=$ident)
+        return($lib.null)
+    }
+    $lib.print("{name}: {repr} - {dets}.", name=$name, repr=$n.repr(), dets=$util.detections($obj.scan))
+
+    if ($behaviour and $kind = "file") {
+        $bretn = $user.behaviour($obj.sha256)
+        if (not $util.failed($bretn, `Getting the behaviour of {$ident}`)) {
+            if $bretn.data { $model.behaviour($n, $bretn.data) }
+            else { $lib.print("{name}: VirusTotal has no behaviour reports for {ident}.", name=$name, ident=$ident) }
+        }
+    }
+    return($n)
+}
+
+// The node that related objects and comments are linked to: the file:bytes of a hash:sha256
+// (or the existing file:bytes with a hash:md5/sha1), otherwise the node itself.
+function subject(n) {
+    $valu = $n.repr()
+    switch $n.form() {
+        "hash:sha256": { return($model.sha256Node($valu)) }
+        "hash:md5": { }
+        "hash:sha1": { }
+        *: { return($n) }
+    }
+    $found = ([])
+    if ($n.form() = "hash:md5") { for $file in ${ file:bytes:md5=$valu } { $found.append($file) } }
+    else { for $file in ${ file:bytes:sha1=$valu } { $found.append($file) } }
+    // Only use the file when the hash isn't ambiguous.
+    if ($lib.len($found) = 1) { return($found.0) }
+    return($n)
+}
+
+// Get and model a node's related objects. Returns the list of related nodes.
+function related(n, kind, ident, rel, limit=(10), name="slib.vt.related") {
+    $n = $subject($n)
+    $nodes = ([])
+    $retn = $user.related($kind, $ident, $rel, limit=$limit)
+    if $util.failed($retn, `Getting the {$rel} of {$ident}`) { return($nodes) }
+    $edge = $retn.data.edge
+    $stubs = ([])
+    for $item in $retn.data.items {
+        $m = $model.obj($item, detected, $n)
+        if ($m = $lib.null) {
+            $stubs.append(`{$item.type} {$item.id}`)
+            continue
+        }
+        $nodes.append($m)
+        if $edge {
+            if ($edge.dir = "out") { $model.edge($n, $edge.verb, $m) }
+            else { $model.edge($m, $edge.verb, $n) }
+        }
+    }
+    $count = $retn.data.count
+    if ($count = $lib.null) { $count = $lib.len($retn.data.items) }
+    $lib.print("{name}: {ident} {rel}: {got} of {count}.", name=$name, ident=$ident, rel=$rel,
+        got=$lib.len($retn.data.items), count=$count)
+    for $stub in $stubs { $lib.print("    {stub}", stub=$stub) }
+    return($nodes)
+}
+
+function comments(n, kind, ident, limit=(10)) {
+    $n = $subject($n)
+    $nodes = ([])
+    $retn = $user.comments($kind, $ident, limit=$limit)
+    if $util.failed($retn, `Getting the comments on {$ident}`) { return($nodes) }
+    for $c in $retn.data.items { $nodes.append($model.comment($n, $c)) }
+    $lib.print("slib.vt.comments: {ident}: {got} comments.", ident=$ident, got=$lib.len($nodes))
+    return($nodes)
+}
+
+// Model a completed analysis (or print its status). Returns the analyzed node, or null.
+function analysis(a, engines=detected, name="slib.vt.analysis") {
+    if (not $a.done) {
+        $lib.print("{name}: Analysis {id} is {status}.", name=$name, id=$a.id, status=$a.status)
+        return($lib.null)
+    }
+    $n = $model.analysis($a, $engines)
+    $what = $a.sha256
+    if ($what = $lib.null) { $what = $a.url }
+    $lib.print("{name}: Analysis {id} of {what} completed: {dets}.", name=$name, id=$a.id, what=$what,
+        dets=$util.detections($a.scan))
+    return($n)
+}
