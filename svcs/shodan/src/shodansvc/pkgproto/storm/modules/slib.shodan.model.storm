@@ -82,34 +82,134 @@ function httpHeaderNode(banner, header, time=$lib.null) {
     return($seen($node, $time))
 }
 
-// Model an SSH server's public host key as a file the server hosts (inet:servfile).
-// The file is the key as OpenSSH saves it to disk, "<algo> <base64 key>\n" (see
-// shodansvc.norm.normSshKey), so it matches .pub and keyscan output by hash.
-// The file:bytes and inet:servfile are tagged <prefix>.banner, since they're extracted from a banner.
-function sshKeyNode(server, key, time=$lib.null, tagPrefix=$lib.null) {
-    // Only users allowed to upload to the Axon save the bytes, the file:bytes node is made either way.
+// Model a file a server returned (see shodansvc.norm.normFile), returns the file:bytes node.
+// what names the file in the warning when its bytes can't be saved, ex. "SSH key".
+// The bytes are saved to the Axon when the user is allowed to (axon.upload), the file:bytes is
+// made either way. The file is tagged <prefix>.banner, since it's extracted from a banner.
+function fileNode(file, what, time=$lib.null, tagPrefix=$lib.null) {
     if $lib.user.allowed(axon.upload) {
-        try { $lib.axon.put($key.text.encode()) }
-        catch * as err {
-            $lib.warn("slib.shodan: Unable to save the SSH key {sha256} to the Axon: {error}",
-                      sha256=$key.sha256, error=$err.mesg)
+        try {
+            if $file.b64 { $byts = $lib.base64.decode($file.b64, urlsafe=(false)) }
+            else { $byts = $file.text.encode() }
+            $lib.axon.put($byts)
+        } catch * as err {
+            $lib.warn("slib.shodan: Unable to save the {what} {sha256} to the Axon: {error}",
+                      what=$what, sha256=$file.sha256, error=$err.mesg)
         }
     }
 
-    [ file:bytes=$key.sha256
-        :size=$key.size
-        :md5=$key.md5
-        :sha1=$key.sha1
-        :sha512=$key.sha512
-        :mime=text/plain
+    [ file:bytes=$file.sha256
+        :size=$file.size
+        :md5=$file.md5
+        :sha1=$file.sha1
+        :sha512=$file.sha512
+        :mime?=$file.mime
     ]
-    $file = $seen($node, $time)
-    $applyTags($file, $tagPrefix, (banner,))
+    // The same file can come from several URLs, the first name it was seen with is kept.
+    if ($file.name and not :name) { [ :name ?= $file.name ] }
+    $filenode = $seen($node, $time)
+    return($applyTags($filenode, $tagPrefix, (banner,)))
+}
 
+// Model that a server hosts a file (inet:servfile), tagged <prefix>.banner like the file.
+function servFileNode(server, file, time=$lib.null, tagPrefix=$lib.null) {
     [ inet:servfile=($server.value(), $file.value()) ]
     $servfile = $seen($node, $time)
-    $applyTags($servfile, $tagPrefix, (banner,))
+    return($applyTags($servfile, $tagPrefix, (banner,)))
+}
+
+// Model that a URL hosts a file (inet:urlfile), tagged <prefix>.banner like the file.
+function urlFileNode(url, file, time=$lib.null, tagPrefix=$lib.null) {
+    [ inet:urlfile?=($url, $file.value()) ]
+    $urlfile = $seen($node, $time)
+    return($applyTags($urlfile, $tagPrefix, (banner,)))
+}
+
+// Model an SSH server's public host key as a file the server hosts (inet:servfile).
+// The file is the key as OpenSSH saves it to disk, "<algo> <base64 key>\n" (see
+// shodansvc.norm.normSshKey), so it matches .pub and keyscan output by hash.
+function sshKeyNode(server, key, time=$lib.null, tagPrefix=$lib.null) {
+    $file = $fileNode(({
+        "text": $key.text, "size": $key.size, "md5": $key.md5, "sha1": $key.sha1,
+        "sha256": $key.sha256, "sha512": $key.sha512, "mime": "text/plain",
+    }), "SSH key", $time, $tagPrefix)
+    $servFileNode($server, $file, $time, $tagPrefix)
     return($file)
+}
+
+// Model a file an HTTP server returned (see shodansvc.norm.normFile): the file:bytes, the
+// inet:urlfile for the URL it came from, and the inet:servfile when this server returned it
+// (a favicon can be on another server). Returns the file:bytes node.
+function httpFileNode(server, file, time=$lib.null, tagPrefix=$lib.null) {
+    $filenode = $fileNode($file, `HTTP {$file.kind} file`, $time, $tagPrefix)
+    if $file.url { $urlFileNode($file.url, $filenode, $time, $tagPrefix) }
+    if $file.local { $servFileNode($server, $filenode, $time, $tagPrefix) }
+    return($filenode)
+}
+
+// Model a request Shodan made to an HTTP server and the response it got, as an
+// inet:http:request (see shodansvc.norm.normHttp). The guid comes from the server, the time
+// (the banner's timestamp), and the URL, so modeling a banner again doesn't make another.
+// body is the response's body file:bytes, if any.
+function httpRequestNode(server, req, time=$lib.null, body=$lib.null) {
+    $guid = $lib.guid(slib, shodan, http, request, $server.repr(), $time, $req.url)
+    $headers = ([])
+    for $h in $req.headers { $headers.append(($h.name, $h.value)) }
+
+    [ inet:http:request=$guid
+        :server=$server.repr()
+        :time?=$time
+        :url?=$req.url
+        :path?=$req.path
+        :header:host?=$req.host
+        :response:code?=$req.status
+        :response:reason?=$req.reason
+    ]
+    if $headers { [ :response:headers=$headers ] }
+    if $body { [ :response:body=$body.value() ] }
+    return($seen($node, $time))
+}
+
+// Model a reference from a node to a string it contains (it:dev:str), ex. a page's title.
+function refStr(n, valu, time=$lib.null) {
+    [ it:dev:str=$valu ]
+    [ <(refs)+ $n ]
+    return($seen($node, $time))
+}
+
+// Model an HTTP banner's requests, files, and title (see shodansvc.norm.normHttp).
+// The final response is an inet:http:request, with its body as :response:body, and each
+// redirect Shodan followed to get there is another one. Every file the server returned is a
+// file:bytes and an inet:servfile (and an inet:urlfile for its URL). The page's title is an
+// it:dev:str referenced by the banner (if any) and the final request.
+// Returns the final inet:http:request node.
+function httpNodes(server, banner, http, time=$lib.null, tagPrefix=$lib.null) {
+    $body = $lib.null
+    $bodies = ({})
+    for $file in $http.files {
+        $sha256 = $file.sha256
+        $bodies.$sha256 = $httpFileNode($server, $file, $time, $tagPrefix)
+    }
+    if $http.body {
+        $sha256 = $http.body.sha256
+        $body = $bodies.$sha256
+    }
+
+    for $hop in $http.redirects {
+        $hopbody = $lib.null
+        if $hop.body {
+            $sha256 = $hop.body.sha256
+            $hopbody = $bodies.$sha256
+        }
+        $httpRequestNode($server, $hop, $time, $hopbody)
+    }
+
+    $req = $httpRequestNode($server, $http, $time, $body)
+    if $http.title {
+        $refStr($req, $http.title, $time)
+        if $banner { $refStr($banner, $http.title, $time) }
+    }
+    return($req)
 }
 
 // Create an it:prod:softver from a CPE (preferred) or a product name/version,
@@ -237,6 +337,8 @@ function bannerNodes(b, tagPrefix=$lib.null, historical=(false)) {
     elif $bannernode { $applyTags($bannernode, $tagPrefix, $b.tags) }
 
     if ($b.ssh and $b.ssh.pubkey) { $sshKeyNode($srv, $b.ssh.pubkey, $b.timestamp, $tagPrefix) }
+
+    if $b.http { $httpNodes($srv, $bannernode, $b.http, $b.timestamp, $tagPrefix) }
 
     // See shodansvc.norm.normSoftvers for how CPEs are paired with the product/version.
     for $sv in $b.softvers { $softverNode($srv, $sv.cpe, $sv.product, $sv.version) }

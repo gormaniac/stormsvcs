@@ -128,6 +128,84 @@ FAVICON_HASH = 536238901
 SCANME_HTML = '<!DOCTYPE html>\n<html lang="en">\n<head>\n<title>Go ahead and ScanMe!</title>\n<meta name="viewport" content="width=device-width,initial-scale=1">\n<meta name="theme-color" content="#2A0D45">\n<link rel="preload" as="image" href="/images/sitelogo.png" imagesizes="168px" imagesrcset="/images/sitelogo.png, /images/sitelogo-2x.png 2x">\n<link rel="preload" as="image" href="/shared/images/nst-icons.svg">\n<link rel="stylesheet" href="/shared/css/nst.css?v=2">\n<script async src="/shared/js/nst.js?v=2"></script>\n<link rel="stylesheet" href="/shared/css/nst-foot.css?v=2" media="print" onload="this.media=\'all\'">\n<link rel="stylesheet" href="/site.css">\n<!--Google Analytics Code-->\n<link rel="preload" href="https://www.google-analytics.com/analytics.js" as="script">\n<script>\n(function(i,s,o,g,r,a,m){i[\'GoogleAnalyticsObject\']=r;i[r]=i[r]||function(){\n(i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),\nm=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)\n})(window,document,\'script\',\'//www.google-analytics.com/analytics.js\',\'ga\');\nga(\'create\', \'UA-11009417-1\', \'auto\');\nga(\'send\', \'pageview\');\n</script>\n<!--END Google Analytics Code-->\n<META NAME="ROBOTS" CONTENT="NOARCHIVE">\n<link rel="shortcut icon" href="/shared/images/tiny-eyeicon.png" type="image/png">\n</head>\n<body><div id="nst-wrapper">\n\n<div id="menu">\n <div class="blur">\n  <header id="nst-head">\n\n    <a id="menu-open" href="#menu" aria-label="Open menu">\n     <img width="44" height="44" alt="" aria-hidden="true"\n      src="/shared/images/nst-icons.svg#menu">\n    </a>\n    <a id="menu-close" href="#" aria-label="Close menu">\n     <img width="44" height="44" alt="" aria-hidden="true"\n      src="/shared/images/nst-icons.svg#close">\n    </a>\n\n   <a id="nst-logo" href="/" aria-label="Home page">\n    <img alt="Home page logo" srcset="/images/sitelogo.png, /images/sitelogo-2x.png 2x" src="/images/sitelogo.png" onerror="this.onerror=null;this.srcset=this.src" height=90 width=168></a>\n\n   <nav id="nst-gnav">\n    <a class="nlink" href="https://nmap.org/">Nmap.org</a>\n    <a class="nlink" href="https://npcap.com/">Npcap.com</a>\n    <a class="nlink" href="https://seclists.org/">Seclists.org</a>\n    <a class="nlink" href="https://sectools.org">Sectools.org</a>\n    <a class="nlink" href="https://insecure.org/">Insecure.org</a>\n   </nav>\n\n   <form class="nst-search" id="nst-head-search" action="/search/">\n    <input class="nst-search-q" name="q" type="search" placeholder="Site Search">\n    <button class="nst-search-button" title="Search">\n     <img style="width:100%;aspect-ratio:1/1;" alt="" aria-hidden="true"\n      src="/shared/images/nst-icons.svg#search">\n     </button>\n   </form>\n\n  </header>\n </div>\n</div>\n\n<main id="nst-content">\n\n<p>Hello, and welcome to Scanme.Nmap.Org, a service provided by the <a href="https://nmap.org">Nmap Security Scanner Project</a>.\n\n<p>We set up this machine to help folks learn about Nmap and also to test and make sure that their Nmap installation (or Internet connection) is working properly.  You are authorized to scan this machine with Nmap or other port scanners.  Try not to hammer on the server too hard.  A few scans in a day is fine, but don\'t scan 100 times a day or use this site to test your ssh brute-force password cracking tool.\n\n<p>Thanks<br>\n-<a href="https://insecure.org/fyodor">Fyodor</a>\n</main><!-- content -->\n\n<footer id="nst-foot">\n   <form class="nst-search" id="nst-foot-search" action="/search/">\n    <input class="nst-search-q" name="q" type="search" placeholder="Site Search">\n    <button class="nst-search-button" title="Search">\n     <img style="width:100%;aspect-ratio:1/1;" alt="" aria-hidden="true"\n      src="/shared/images/nst-icons.svg#search">\n     </button>\n   </form>\n<div class="flexlists">\n<div class="fl-unit">\n<h2><a class="nlink" href="https://nmap.org/">Nmap Security Scanner</a></h2>\n<ul>\n<li><a class="nlink" href="https://nmap.org/book/man.html">Ref Guide</a>\n<li><a class="nlink" href="https://nmap.org/book/install.html">Install Guide</a>\n<li><a class="nlink" href="https://nmap.org/docs.html">Docs</a>\n<li><a class="nlink" href="https://nmap.org/download.html">Download</a>\n<li><a class="nlink" href="https://nmap.org/oem/">Nmap OEM</a>\n</ul>\n</div>\n<div class="fl-unit">\n<h2><a class="nlink" href="https://npcap.com/">Npcap packet capture</a></h2>\n<ul>\n<li><a class="nlink" href="https://npcap.com/guide/">User\'s Guide</a>\n<li><a class="nlink" href="https://npcap.com/guide/npcap-devguide.html#npcap-api">API docs</a>\n<li><a class="nlink" href="https://npcap.com/#download">Download</a>\n<li><a class="nlink" href="https://npcap.com/oem/">Npcap OEM</a>\n</ul>\n</div>\n<div class="fl-unit">\n<h2><a class="nlink" href="https://seclists.org/">Security Lists</a></h2>\n<ul>\n<li><a class="nlink" href="https://seclists.org/nmap-announce/">Nmap Announce</a>\n<li><a class="nlink" href="https://seclists.org/nmap-dev/">Nmap Dev</a>\n<li><a class="nlink" href="https://seclists.org/fulldisclosure/">Full Disclosure</a>\n<li><a class="nlink" href="https://seclists.org/oss-sec/">Open Source Security</a>\n<li><a class="nlink" href="https://seclists.org/dataloss/">BreachExchange</a>\n</ul>\n</div>\n<div class="fl-unit">\n<h2><a class="nlink" href="https://sectools.org">Security Tools</a></h2>\n<ul>\n<li><a class="nlink" href="https://sectools.org/tag/vuln-scanners/">Vuln scanners</a>\n<li><a class="nlink" href="https://sectools.org/tag/pass-audit/">Password audit</a>\n<li><a class="nlink" href="https://sectools.org/tag/web-scanners/">Web scanners</a>\n<li><a class="nlink" href="https://sectools.org/tag/wireless/">Wireless</a>\n<li><a class="nlink" href="https://sectools.org/tag/sploits/">Exploitation</a>\n</ul>\n</div>\n<div class="fl-unit">\n<h2><a class="nlink" href="https://insecure.org/">About</a></h2>\n<ul>\n<li><a class="nlink" href="https://insecure.org/fyodor/">About/Contact</a>\n<li><a class="nlink" href="https://insecure.org/privacy.html">Privacy</a>\n<li><a class="nlink" href="https://insecure.org/advertising.html">Advertising</a>\n<li><a class="nlink" href="https://nmap.org/npsl/">Nmap Public Source License</a>\n</ul>\n</div>\n<div class="fl-unit social-links">\n<a class="nlink" href="https://twitter.com/nmap" title="Visit us on Twitter">\n <img width="32" height="32" src="/shared/images/nst-icons.svg#twitter" alt="" aria-hidden="true">\n </a>\n<a class="nlink" href="https://facebook.com/nmap" title="Visit us on Facebook">\n <img width="32" height="32" src="/shared/images/nst-icons.svg#facebook" alt="" aria-hidden="true">\n </a>\n<a class="nlink" href="https://github.com/nmap/" title="Visit us on Github">\n <img width="32" height="32" src="/shared/images/nst-icons.svg#github" alt="" aria-hidden="true">\n </a>\n<a class="nlink" href="https://reddit.com/r/nmap/" title="Discuss Nmap on Reddit">\n <img width="32" height="32" src="/shared/images/nst-icons.svg#reddit" alt="" aria-hidden="true">\n </a>\n</div>\n</div>\n</footer>\n\n</div><!-- wrapper -->\n</body>\n</html>\n\n'
 SCANME_HTML_HASH = 1386351316
 
+# Modeled on real Shodan HTTP banners (scanme.nmap.org, 1.1.1.1): the page, robots.txt,
+# security.txt, a sitemap, a favicon on this server, and a redirect with a body. The second
+# banner's favicon is on another server and it returned no page.
+HTTP_IP = "198.51.100.7"
+HTTP_ROBOTS = "User-agent: *\nDisallow: /admin/\n"
+HTTP_SECURITYTXT = "Contact: mailto:security@example.com\nExpires: 2027-01-01T00:00:00Z\n"
+HTTP_SITEMAP = '<?xml version="1.0"?><urlset><url><loc>http://www.example.com/</loc></url></urlset>'
+HTTP_REDIRECT_BODY = '<html><body><a href="http://www.example.com:8080/">Moved</a></body></html>'
+HOST_HTTP = {
+    "ip_str": HTTP_IP,
+    "hostnames": ["www.example.com"],
+    "ports": [80, 8080],
+    "data": [
+        {
+            "ip_str": HTTP_IP,
+            "port": 8080,
+            "transport": "tcp",
+            "timestamp": "2026-10-30T17:18:58.000000",
+            "hostnames": ["www.example.com"],
+            "data": (
+                "HTTP/1.1 200 OK\r\nDate: Fri, 30 Oct 2026 17:18:58 GMT\r\n"
+                "Server: Apache/2.4.7 (Ubuntu)\r\nContent-Type: text/html; charset=utf-8\r\n\r\n"
+            ),
+            "http": {
+                "status": 200,
+                "title": "Go ahead and ScanMe!",
+                "host": "www.example.com",
+                "location": "/",
+                "server": "Apache/2.4.7 (Ubuntu)",
+                "html": SCANME_HTML,
+                "html_hash": SCANME_HTML_HASH,
+                "robots": HTTP_ROBOTS,
+                "securitytxt": HTTP_SECURITYTXT,
+                "sitemap": HTTP_SITEMAP,
+                "favicon": {
+                    "data": FAVICON_B64,
+                    "hash": FAVICON_HASH,
+                    "location": "http://www.example.com:8080/shared/images/tiny-eyeicon.png",
+                },
+                "redirects": [
+                    {
+                        "host": HTTP_IP,
+                        "location": "/",
+                        "data": (
+                            "HTTP/1.1 301 Moved Permanently\r\nDate: Fri, 30 Oct 2026 17:18:58 GMT\r\n"
+                            "Location: http://www.example.com:8080/\r\nContent-Type: text/html\r\n\r\n"
+                            + HTTP_REDIRECT_BODY
+                        ),
+                    }
+                ],
+            },
+            "_shodan": {"module": "http"},
+        },
+        {
+            "ip_str": HTTP_IP,
+            "port": 80,
+            "transport": "tcp",
+            "timestamp": "2026-10-30T17:20:00.000000",
+            "data": "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n",
+            "http": {
+                "status": 404,
+                "title": None,
+                "host": HTTP_IP,
+                "location": "/",
+                "html": "",
+                "html_hash": 0,
+                "favicon": {
+                    "data": FAVICON_B64,
+                    "hash": FAVICON_HASH,
+                    "location": "https://cdn.example.net/favicon.ico",
+                },
+                "redirects": [],
+            },
+            "_shodan": {"module": "http"},
+        },
+    ],
+}
+
 INTERNETDB_1111 = {
     "ip": "1.1.1.1",
     "ports": [53, 80],
@@ -390,6 +468,7 @@ ALERT = {
 ROUTES: dict[tuple[str, str], Any] = {
     ("GET", "/api/shodan/host/8.8.8.8"): (200, HOST_8888),
     ("GET", "/api/shodan/host/45.33.32.156"): (200, HOST_SSH),
+    ("GET", f"/api/shodan/host/{HTTP_IP}"): (200, HOST_HTTP),
     ("GET", f"/api/shodan/host/{HISTORY_IP}"): hostHistory,
     ("GET", "/api/shodan/host/10.0.0.1"): (404, {"error": "No information available for that IP."}),
     ("GET", "/api/shodan/host/search"): (200, SEARCH_PAGE),

@@ -1,5 +1,5 @@
 name: slib.shodan
-version: 0.12.2
+version: 0.13.0
 guid: 0f6c1d0f1d8a4c3bb7a1e3d5c9b2a864
 
 synapse_minversion: [2, 137, 0]
@@ -72,6 +72,16 @@ commands:
       (inet:server, inet:banner, it:prod:softver, crypto:x509:cert, inet:tls:servercert), and
       the HTTP response headers in HTTP banners, except Date (inet:http:response:header, linked
       with inet:banner -(refs)> inet:http:response:header).
+
+      Each HTTP banner is an inet:http:request (and another for each redirect Shodan followed),
+      with its page as the :response:body. Its title is an it:dev:str, referenced by the banner
+      and the request. Every file the web server returned (the page, robots.txt, security.txt,
+      the sitemap, the favicon, redirect bodies) is a file:bytes, saved in the Axon for users
+      with axon.upload, an inet:servfile, and an inet:urlfile for the URL it came from:
+
+        // The title and the page's hashes of each web server on an IP.
+        inet:ipv4=1.2.3.4 -> inet:server -> inet:http:request -(refs)> it:dev:str
+        inet:ipv4=1.2.3.4 -> inet:server -> inet:http:request :response:body -> file:bytes
 
       Uses the free InternetDB API when --internetdb is used, or automatically when
       no Shodan API key is available to the current user.
