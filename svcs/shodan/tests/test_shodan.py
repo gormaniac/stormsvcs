@@ -485,6 +485,13 @@ class TestNorm(s_tests.SynTest):
         assert hop["body"] == files["redirect"]
         assert base64.b64decode(hop["body"]["b64"]) == HTTP_REDIRECT_BODY.encode()
 
+        # The open directory's entries are URLs under the page's directory.
+        assert page["listing"] == [
+            "http://www.example.com:8080/linpeas.sh",
+            "http://www.example.com:8080/tools/",
+            "http://www.example.com:8080/notes%20%231.txt",
+        ]
+
         # A favicon on another server isn't one this server returned, and an empty page isn't a file.
         assert empty["url"] == f"http://{HOST_HTTP['ip_str']}/"
         assert empty["host"] is None
@@ -492,6 +499,7 @@ class TestNorm(s_tests.SynTest):
         assert empty["reason"] == "Not Found"
         assert empty["title"] is None
         assert empty["body"] is None
+        assert empty["listing"] == []
         assert [(f["kind"], f["local"], f["url"]) for f in empty["files"]] == [
             ("favicon", False, "https://cdn.example.net/favicon.ico"),
         ]
@@ -548,6 +556,17 @@ class TestNorm(s_tests.SynTest):
         assert http(favicon=favicon)["files"][0]["local"] is True
         favicon["location"] = "https://[2001:db8::1]:bad/f.ico"
         assert http(favicon=favicon)["files"][0]["local"] is False
+
+        # A listing's directory is the page's path, with or without a trailing slash, and entries
+        # that are only slashes or not strings are skipped.
+        banner = {"ip_str": "1.2.3.4", "port": 80, "http": {"location": "/pub?sort=name"}}
+        banner["open_dir"] = {"data": {"a.sh": {}, "/b/": {}, "/": {}, "": {}}}
+        assert norm.normHttp(banner, "")["listing"] == ["http://1.2.3.4/pub/a.sh", "http://1.2.3.4/pub/b/"]
+        banner["http"]["location"] = "/pub/"
+        assert norm.normHttp(banner, "")["listing"][0] == "http://1.2.3.4/pub/a.sh"
+        for opendir in (None, [], {"data": None}, {"data": ["a.sh"]}):
+            banner["open_dir"] = opendir
+            assert norm.normHttp(banner, "")["listing"] == [], opendir
 
         # Redirects without a body or a parseable response still record the URL.
         retn = http(redirects=[{"host": "www.example.com", "location": "/a", "data": "garbage"}, "bad"])

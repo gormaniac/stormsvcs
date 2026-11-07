@@ -287,9 +287,22 @@ class TestShodanStormHttp(s_tests.SynTest):
             assert len(await core.nodes(f"iden {req.iden()} <(seen)- meta:source={SVC_GUID}")) == 1
 
             # The title is referenced by the request and the banner.
-            assert await nodeset(core, f"iden {req.iden()} -(refs)> *") == {("it:dev:str", "Go ahead and ScanMe!")}
+            assert await nodeset(core, f"iden {req.iden()} -(refs)> it:dev:str") == {("it:dev:str", "Go ahead and ScanMe!")}
             q = f"inet:server={self.SERVER} -> inet:banner -(refs)> it:dev:str"
             assert await nodeset(core, q) == {("it:dev:str", "Go ahead and ScanMe!")}
+
+            # The files and folders in the open directory the page lists.
+            listed = {
+                ("inet:url", "http://www.example.com:8080/linpeas.sh"),
+                ("inet:url", "http://www.example.com:8080/tools/"),
+                ("inet:url", "http://www.example.com:8080/notes%20%231.txt"),
+            }
+            assert await nodeset(core, f"iden {req.iden()} -(refs)> inet:url") == listed
+            q = "inet:url:path=/linpeas.sh <(refs)- inet:http:request :server -> inet:server"
+            assert await nodeset(core, q) == {("inet:server", self.SERVER)}
+            for node in await core.nodes(f"iden {req.iden()} -(refs)> inet:url"):
+                assert node.get(".seen") is not None
+                assert len(await core.nodes(f"iden {node.iden()} <(seen)- meta:source={SVC_GUID}")) == 1
 
             # The redirect Shodan followed to get there, with its own body.
             hops = await core.nodes(f"inet:server={self.SERVER} -> inet:http:request +:response:code=301")
@@ -315,6 +328,16 @@ class TestShodanStormHttp(s_tests.SynTest):
             await core.nodes(f"slib.shodan.host --ip {HTTP_IP}")
             assert len(await core.nodes("inet:http:request")) == 3
             assert len(await core.nodes("it:dev:str='Go ahead and ScanMe!' <(refs)- *")) == 2
+
+    async def test_http_listing_bad_url(self):
+        # A listed URL Synapse can't parse is skipped, the rest are still modeled.
+        async with shodanSvc(self) as (core, svc, fake):
+            http = {"url": "http://1.2.3.4/", "path": "/", "headers": [], "files": [], "redirects": [],
+                    "listing": ["not a url", "http://1.2.3.4/a.sh"]}
+            q = "$m = $lib.import(slib.shodan.model) $srv = $m.serverNode(1.2.3.4, (80)) $m.httpNodes($srv, $lib.null, $http)"
+            msgs = await core.stormlist(q, opts={"vars": {"http": http}})
+            self.stormHasNoErr(msgs)
+            assert await nodeset(core, "inet:http:request -(refs)> *") == {("inet:url", "http://1.2.3.4/a.sh")}
 
     async def test_http_files(self):
         async with shodanSvc(self) as (core, svc, fake):

@@ -179,6 +179,16 @@ HOST_HTTP = {
                     }
                 ],
             },
+            # Shaped like a real open directory: a file and folder per entry, with what's in it.
+            "open_dir": {
+                "data": {
+                    "linpeas.sh": {"type": "file", "size": 1817649, "timestamp": "Tue, 27 Oct 2026 09:33:23 GMT"},
+                    "tools/": {"type": "folder", "size": 0, "timestamp": "Fri, 16 Oct 2026 11:04:12 GMT"},
+                    "notes #1.txt": {"type": "file", "size": 12, "timestamp": "Fri, 16 Oct 2026 11:04:12 GMT"},
+                },
+                "extensions": ["sh", "txt"],
+                "hash": 1735751217,
+            },
             "_shodan": {"module": "http"},
         },
         {

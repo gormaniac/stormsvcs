@@ -177,11 +177,20 @@ function refStr(n, valu, time=$lib.null) {
     return($seen($node, $time))
 }
 
+// Model a reference from a node to a URL, ex. a file in an open directory a page lists.
+// Returns the inet:url node, or null if the URL isn't valid.
+function refUrl(n, url, time=$lib.null) {
+    [ inet:url?=$url ]
+    [ <(refs)+ $n ]
+    return($seen($node, $time))
+}
+
 // Model an HTTP banner's requests, files, and title (see shodansvc.norm.normHttp).
 // The final response is an inet:http:request, with its body as :response:body, and each
 // redirect Shodan followed to get there is another one. Every file the server returned is a
 // file:bytes and an inet:servfile (and an inet:urlfile for its URL). The page's title is an
-// it:dev:str referenced by the banner (if any) and the final request.
+// it:dev:str referenced by the banner (if any) and the final request. When the page is an open
+// directory, the URL of each file and folder it lists is an inet:url referenced by the request.
 // Returns the final inet:http:request node.
 function httpNodes(server, banner, http, time=$lib.null, tagPrefix=$lib.null) {
     $body = $lib.null
@@ -209,6 +218,7 @@ function httpNodes(server, banner, http, time=$lib.null, tagPrefix=$lib.null) {
         $refStr($req, $http.title, $time)
         if $banner { $refStr($banner, $http.title, $time) }
     }
+    for $url in $http.listing { $refUrl($req, $url, $time) }
     return($req)
 }
 

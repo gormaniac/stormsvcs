@@ -525,8 +525,9 @@ def normHttp(banner: dict, text: str) -> dict | None:
     the final request (``url``, ``status``, ``reason``, ``headers``, ``title``, and its ``body``
     file), the ``redirects`` Shodan followed to get there (the same keys, oldest first), and
     every ``files`` the server returned (the body, robots.txt, security.txt, the sitemap, the
-    favicon, and redirect bodies). See ``normFile`` for the files. Returns None without an
-    ``http`` field.
+    favicon, and redirect bodies). See ``normFile`` for the files. ``listing`` is the URL of
+    each file and folder in an open directory the page lists (Shodan's ``open_dir``). Returns
+    None without an ``http`` field.
     """
 
     http = banner.get("http")
@@ -579,6 +580,25 @@ def normHttp(banner: dict, text: str) -> dict | None:
                 local = (parts.hostname or "").lower() in names and favport == port
             files.append(normFile(byts, _imageMime(byts), "favicon", favurl, local))
 
+    # An open directory's entries are listed by the page, so they're under its URL's directory.
+    listing = []
+    opendir = banner.get("open_dir") or {}
+    entries = opendir.get("data") if isinstance(opendir, dict) else None
+    if isinstance(entries, dict):
+        parts = urllib.parse.urlsplit(url)
+        base = urllib.parse.urlunsplit(
+            (
+                parts.scheme,
+                parts.netloc,
+                parts.path if parts.path.endswith("/") else f"{parts.path}/",
+                "",
+                "",
+            )
+        )
+        for name in entries:
+            if isinstance(name, str) and name.strip("/"):
+                listing.append(urllib.parse.urljoin(base, urllib.parse.quote(name.lstrip("/"))))
+
     redirects = []
     for hop in _list(http.get("redirects")):
         if not isinstance(hop, dict):
@@ -618,6 +638,7 @@ def normHttp(banner: dict, text: str) -> dict | None:
         "body": body,
         "redirects": redirects,
         "files": files,
+        "listing": listing,
     }
 
 
