@@ -29,7 +29,12 @@ from .fakeshodan import (
     HOST_8888,
     FAVICON_B64,
     FAVICON_HASH,
+    HOST_HTTP,
     HOST_SSH,
+    HTTP_REDIRECT_BODY,
+    HTTP_ROBOTS,
+    HTTP_SECURITYTXT,
+    HTTP_SITEMAP,
     SCANME_HTML,
     SCANME_HTML_HASH,
     INTERNETDB_1111,
@@ -416,6 +421,170 @@ class TestNorm(s_tests.SynTest):
         banner = norm.normBanner({"ip_str": "1.2.3.4", "port": 1, "data": text})
         assert banner["data"] == text
         assert banner["transport"] == "tcp"
+
+    def test_norm_http(self):
+        page, empty = (norm.normBanner(b)["http"] for b in HOST_HTTP["data"])
+
+        assert page["url"] == "http://www.example.com:8080/"
+        assert page["host"] == "www.example.com"
+        assert page["path"] == "/"
+        assert page["status"] == 200
+        assert page["reason"] == "OK"
+        assert page["title"] == "Go ahead and ScanMe!"
+        # The final response's headers, without the Date header.
+        assert page["headers"] == [
+            {"name": "server", "value": "Apache/2.4.7 (Ubuntu)"},
+            {"name": "content-type", "value": "text/html; charset=utf-8"},
+        ]
+
+        files = {f["kind"]: f for f in page["files"]}
+        assert list(files) == ["html", "robots", "securitytxt", "sitemap", "favicon", "redirect"]
+
+        # The page is the response body, as UTF-8, so Shodan's html_hash matches it.
+        html = files["html"]
+        assert page["body"] == html
+        byts = base64.b64decode(html["b64"])
+        assert byts == SCANME_HTML.encode()
+        assert norm.htmlHash(byts) == SCANME_HTML_HASH
+        assert html["mime"] == "text/html"
+        assert html["url"] == "http://www.example.com:8080/"
+        assert html["name"] is None
+        assert html["local"] is True
+        assert html["size"] == len(byts)
+        assert html["sha256"] == hashlib.sha256(byts).hexdigest()
+        assert html["md5"] == hashlib.md5(byts).hexdigest()
+
+        for kind, text, url, name, mime in (
+            ("robots", HTTP_ROBOTS, "/robots.txt", "robots.txt", "text/plain"),
+            ("securitytxt", HTTP_SECURITYTXT, "/.well-known/security.txt", "security.txt", "text/plain"),
+            ("sitemap", HTTP_SITEMAP, "/sitemap.xml", "sitemap.xml", "application/xml"),
+        ):
+            assert base64.b64decode(files[kind]["b64"]) == text.encode(), kind
+            assert files[kind]["url"] == f"http://www.example.com:8080{url}"
+            assert files[kind]["name"] == name
+            assert files[kind]["mime"] == mime
+            assert files[kind]["local"] is True
+
+        # The favicon is decoded from Shodan's base64, and its type is sniffed from the bytes.
+        favicon = files["favicon"]
+        favbyts = base64.b64decode(favicon["b64"])
+        assert favbyts == base64.b64decode(FAVICON_B64)
+        assert norm.faviconHash(favbyts) == FAVICON_HASH
+        assert favicon["mime"] == "image/png"
+        assert favicon["name"] == "tiny-eyeicon.png"
+        assert favicon["local"] is True
+
+        # Each redirect Shodan followed is its own response, with its body as a file.
+        assert len(page["redirects"]) == 1
+        hop = page["redirects"][0]
+        assert hop["url"] == f"http://{HOST_HTTP['ip_str']}:8080/"
+        assert hop["host"] is None
+        assert hop["status"] == 301
+        assert hop["reason"] == "Moved Permanently"
+        assert {"name": "location", "value": "http://www.example.com:8080/"} in hop["headers"]
+        assert hop["body"] == files["redirect"]
+        assert base64.b64decode(hop["body"]["b64"]) == HTTP_REDIRECT_BODY.encode()
+
+        # The open directory's entries are URLs under the page's directory.
+        assert page["listing"] == [
+            "http://www.example.com:8080/linpeas.sh",
+            "http://www.example.com:8080/tools/",
+            "http://www.example.com:8080/notes%20%231.txt",
+        ]
+
+        # A favicon on another server isn't one this server returned, and an empty page isn't a file.
+        assert empty["url"] == f"http://{HOST_HTTP['ip_str']}/"
+        assert empty["host"] is None
+        assert empty["status"] == 404
+        assert empty["reason"] == "Not Found"
+        assert empty["title"] is None
+        assert empty["body"] is None
+        assert empty["listing"] == []
+        assert [(f["kind"], f["local"], f["url"]) for f in empty["files"]] == [
+            ("favicon", False, "https://cdn.example.net/favicon.ico"),
+        ]
+
+    def test_norm_http_edges(self):
+        def http(**info):
+            banner = {"ip_str": "2001:db8::1", "port": 443, "ssl": {}, "http": info}
+            return norm.normHttp(banner, info.pop("text", ""))
+
+        assert norm.normHttp({"ip_str": "1.2.3.4", "port": 80}, "") is None
+        assert norm.normHttp({"ip_str": "1.2.3.4", "port": 80, "http": {}}, "") is None
+
+        # TLS servers are https, IPv6 hosts go in brackets, and the scheme's default port is left out.
+        retn = http(status=200, location="/login?next=/")
+        assert retn["url"] == "https://[2001:db8::1]/login?next=/"
+        assert retn["path"] == "/login"
+        assert retn["host"] is None
+        # Without a status line, the status comes from Shodan's http.status alone.
+        assert retn["status"] == 200 and retn["reason"] is None
+        # Only an ssl field makes it https, Shodan's https modules scan plain HTTP servers too.
+        banner = {"ip_str": "1.2.3.4", "port": 8880, "_shodan": {"module": "https-simple-new"}}
+        banner["http"] = {"location": "/"}
+        assert norm.normHttp(banner, "")["url"] == "http://1.2.3.4:8880/"
+        # A full URL location is used as-is, and a relative one gets a leading slash.
+        assert http(location="https://www.example.com/x")["url"] == "https://www.example.com/x"
+        assert http(location="index.php")["url"] == "https://[2001:db8::1]/index.php"
+
+        # The page's MIME type comes from its Content-Type, text/html without one.
+        text = "HTTP/1.1 200 OK\r\nContent-Type: Application/JSON; charset=utf-8\r\n\r\n"
+        assert http(html="{}", text=text)["body"]["mime"] == "application/json"
+        text = "HTTP/1.1 200 OK\r\nContent-Type: bogus\r\n\r\n"
+        assert http(html="<html></html>", text=text)["body"]["mime"] == "text/html"
+
+        # Favicons are sniffed from their magic bytes, and image/x-icon otherwise.
+        for byts, mime in (
+            (b"\x00\x00\x01\x00rest", "image/x-icon"),
+            (b"GIF89a...", "image/gif"),
+            (b"\xff\xd8\xff\xe0", "image/jpeg"),
+            (b"BMxxxx", "image/bmp"),
+            (b"RIFF\x00\x00\x00\x00WEBPVP8 ", "image/webp"),
+            (b'<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg"/>', "image/svg+xml"),
+            (b"\x01\x02\x03", "image/x-icon"),
+        ):
+            favicon = {"data": base64.b64encode(byts).decode()}
+            assert http(favicon=favicon)["files"][0]["mime"] == mime, byts
+
+        # A favicon without a location came from this server, bad base64 is skipped, and a
+        # favicon on this host but another port is on another server.
+        assert http(favicon={"data": base64.b64encode(b"x").decode()})["files"][0]["local"] is True
+        assert http(favicon={"data": "!!!notbase64"})["files"] == []
+        favicon = {"data": base64.b64encode(b"x").decode(), "location": "https://[2001:db8::1]:8443/f.ico"}
+        assert http(favicon=favicon)["files"][0]["local"] is False
+        favicon["location"] = "https://[2001:db8::1]/f.ico"
+        assert http(favicon=favicon)["files"][0]["local"] is True
+        favicon["location"] = "https://[2001:db8::1]:bad/f.ico"
+        assert http(favicon=favicon)["files"][0]["local"] is False
+
+        # A listing's directory is the page's path, with or without a trailing slash, and entries
+        # that are only slashes or not strings are skipped.
+        banner = {"ip_str": "1.2.3.4", "port": 80, "http": {"location": "/pub?sort=name"}}
+        banner["open_dir"] = {"data": {"a.sh": {}, "/b/": {}, "/": {}, "": {}}}
+        assert norm.normHttp(banner, "")["listing"] == ["http://1.2.3.4/pub/a.sh", "http://1.2.3.4/pub/b/"]
+        banner["http"]["location"] = "/pub/"
+        assert norm.normHttp(banner, "")["listing"][0] == "http://1.2.3.4/pub/a.sh"
+        for opendir in (None, [], {"data": None}, {"data": ["a.sh"]}):
+            banner["open_dir"] = opendir
+            assert norm.normHttp(banner, "")["listing"] == [], opendir
+
+        # Redirects without a body or a parseable response still record the URL.
+        retn = http(redirects=[{"host": "www.example.com", "location": "/a", "data": "garbage"}, "bad"])
+        assert retn["redirects"] == [
+            {
+                "url": "https://www.example.com/a",
+                "host": "www.example.com",
+                "path": "/a",
+                "status": None,
+                "reason": None,
+                "headers": [],
+                "body": None,
+            }
+        ]
+        # Bodies after a bare "\n\n" are found too.
+        retn = http(redirects=[{"location": "/", "data": "HTTP/1.0 302 Found\n\nmoved"}])
+        assert base64.b64decode(retn["redirects"][0]["body"]["b64"]) == b"moved"
+        assert retn["redirects"][0]["status"] == 302
 
     def test_file_hash(self):
         # Real files with the hashes Shodan returned for them.

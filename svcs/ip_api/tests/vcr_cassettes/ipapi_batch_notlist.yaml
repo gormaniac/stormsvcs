@@ -1,0 +1,18 @@
+interactions:
+- request:
+    body: '["8.8.8.8", "1.1.1.1"]'
+    headers:
+      Content-Type:
+      - application/json
+    method: POST
+    uri: http://ip-api.com/batch?fields=status,message,country,countryCode,region,regionName,city,lat,lon,isp,org,as,asname,reverse,mobile,proxy,hosting,query
+  response:
+    body:
+      string: '{"status": "fail", "message": "invalid query"}'
+    headers:
+      Content-Type:
+      - application/json; charset=utf-8
+    status:
+      code: 200
+      message: OK
+version: 1

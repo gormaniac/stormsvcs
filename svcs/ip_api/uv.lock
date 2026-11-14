@@ -49,15 +49,15 @@ wheels = [
 
 [[package]]
 name = "aiohttp-socks"
-version = "0.11.0"
+version = "0.12.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
     { name = "python-socks" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/1f/cc/e5bbd54f76bd56291522251e47267b645dac76327b2657ade9545e30522c/aiohttp_socks-0.11.0.tar.gz", hash = "sha256:0afe51638527c79077e4bd6e57052c87c4824233d6e20bb061c53766421b10f0", size = 11196, upload-time = "2025-12-09T13:35:52.564Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/18/1d/a306e0111222180e60f17131a3f5d9bc694dd999a8115959a7dd76c2238e/aiohttp_socks-0.12.0.tar.gz", hash = "sha256:3caf9f5a4164611122d412bc11b2f9114fd29c85e1ba27bb38060d3c236bdc8d", size = 12061, upload-time = "2026-08-12T04:43:15.791Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/bf/7d/4b633d709b8901d59444d2e512b93e72fe62d2b492a040097c3f7ba017bb/aiohttp_socks-0.11.0-py3-none-any.whl", hash = "sha256:9aacce57c931b8fbf8f6d333cf3cafe4c35b971b35430309e167a35a8aab9ec1", size = 10556, upload-time = "2025-12-09T13:35:50.18Z" },
+    { url = "https://files.pythonhosted.org/packages/86/64/ca6289632020523ea1841f01363f83ada10eeb0f21dd931fc1118dd85668/aiohttp_socks-0.12.0-py3-none-any.whl", hash = "sha256:ba6f95ec775c761d87f8578ab48f137d0457c676da104984202bf75e747d5ee6", size = 10693, upload-time = "2026-08-12T04:43:14.524Z" },
 ]
 
 [[package]]
@@ -356,7 +356,7 @@ wheels = [
 
 [[package]]
 name = "ipapi"
-version = "0.2.3"
+version = "0.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "stormlibpp" },
@@ -370,7 +370,7 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "stormlibpp", specifier = ">=0.10.1" }]
+requires-dist = [{ name = "stormlibpp", specifier = ">=0.12.1" }]
 
 [package.metadata.requires-dev]
 dev = [
@@ -911,19 +911,19 @@ wheels = [
 
 [[package]]
 name = "stormlibpp"
-version = "0.10.1"
+version = "0.12.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "synapse" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/56/09/08d5107c0171ef1b0a2dcd74ef32b21fcf11891988aecbd0b08523f8d058/stormlibpp-0.10.1.tar.gz", hash = "sha256:3b9cbe2dbcc0bba6c810397e486293af95d4e82e3370197731ad200435f47026", size = 27116, upload-time = "2024-03-27T01:51:43.35Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/aa/63/1e9c399902e3c9a823e9a8cef54ba55b684dc50f057c435759a43f52878e/stormlibpp-0.12.1.tar.gz", hash = "sha256:d516107dfa676ab167acbe5ad033e681cd1473081294f6376af3809132861492", size = 31065, upload-time = "2026-11-01T22:44:55.023Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/fe/05/bccfd1c0ba8dd2cf399a63ac378db04ece160c7e0cfdc43b512271f65b89/stormlibpp-0.10.1-py3-none-any.whl", hash = "sha256:cc659d49419c5258c4f2aa5a5c836d28f7a1956955984b194a7e8f6a3987be02", size = 28980, upload-time = "2024-03-27T01:51:41.611Z" },
+    { url = "https://files.pythonhosted.org/packages/6e/d2/88fd37fe38d09d20aa3fec268f6ffbddfb3d3bc8c93842edc6209303b110/stormlibpp-0.12.1-py3-none-any.whl", hash = "sha256:c91f1151f362aaa91375c2ec00e7d0ef1eb0bf6c0255744d42b0d43b8c7953ce", size = 34228, upload-time = "2026-11-01T22:44:54.123Z" },
 ]
 
 [[package]]
 name = "synapse"
-version = "2.248.0"
+version = "2.256.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -957,9 +957,9 @@ dependencies = [
     { name = "vtx-yyjson" },
     { name = "xxhash" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a8/8e/f2ff75b48e7b01f7a42fb6652495920167a3bfde63c44097eaa3f67498b9/synapse-2.248.0.tar.gz", hash = "sha256:0aa82db41b3aacc75fb0d8d95ade2e3e70b8e664dbeb62e9efa8bc95eb28fc9c", size = 3569216, upload-time = "2026-07-17T15:37:48.75Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/00/92/24e0df947e286589641b87dce6a23674f01cb45bb952cf3b431413a19612/synapse-2.256.0.tar.gz", hash = "sha256:fa7641a025760a6f038b3c9a2d0db44c987efcdc51a2fef04dafb3c89160bcde", size = 3714814, upload-time = "2026-10-21T19:00:32.815Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/af/ea/b61a7ac11b4fa0a71e1b6b5d105cf379d7ac7b5a4cbbdf5befe3759d52ca/synapse-2.248.0-py311-none-any.whl", hash = "sha256:b9178a53aba15c23d26e215b566b20e810522edb5d262c864cb057af804cdded", size = 3849668, upload-time = "2026-07-17T15:37:47.17Z" },
+    { url = "https://files.pythonhosted.org/packages/cd/96/4f7424d742b211891c59a0ced8de6b40aade2334c5bbab9eec14e63c5059/synapse-2.256.0-py311-none-any.whl", hash = "sha256:4cc3017aaf3c2c402239997e2281c939490bd65f2d70e6f8cb5fd93dc29244e2", size = 4001636, upload-time = "2026-10-21T19:00:30.907Z" },
 ]
 
 [[package]]

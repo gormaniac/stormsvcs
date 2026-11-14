@@ -73,6 +73,21 @@ commands:
       the HTTP response headers in HTTP banners, except Date (inet:http:response:header, linked
       with inet:banner -(refs)> inet:http:response:header).
 
+      Each HTTP banner is an inet:http:request (and another for each redirect Shodan followed),
+      with its page as the :response:body. Its title is an it:dev:str, referenced by the banner
+      and the request. Every file the web server returned (the page, robots.txt, security.txt,
+      the sitemap, the favicon, redirect bodies) is a file:bytes, saved in the Axon for users
+      with axon.upload, an inet:servfile, and an inet:urlfile for the URL it came from. When the
+      page is an open directory, each file and folder it lists is an inet:url referenced by the
+      request:
+
+        // The title and the page's hashes of each web server on an IP.
+        inet:ipv4=1.2.3.4 -> inet:server -> inet:http:request -(refs)> it:dev:str
+        inet:ipv4=1.2.3.4 -> inet:server -> inet:http:request :response:body -> file:bytes
+
+        // The web servers with an open directory listing linpeas.sh.
+        inet:url:path=/linpeas.sh <(refs)- inet:http:request :server -> inet:server
+
       Uses the free InternetDB API when --internetdb is used, or automatically when
       no Shodan API key is available to the current user.
 

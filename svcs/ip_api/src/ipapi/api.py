@@ -9,7 +9,7 @@ from stormlibpp.utils import normver
 from .defs import PKGDEFS, SVC_EVTS, SVC_NAME, SVC_VER
 
 if TYPE_CHECKING:
-    from .svc import IpRetn
+    from .svc import IpBatchRetn, IpRetn
 
 
 class IpApiCellApi(s_cell.CellApi, s_stormsvc.StormSvc):
@@ -24,3 +24,8 @@ class IpApiCellApi(s_cell.CellApi, s_stormsvc.StormSvc):
         """Query information about the given IP address."""
 
         return await self.cell.queryIp(ipaddr)
+
+    async def queryIps(self, ipaddrs: list[str]) -> "IpBatchRetn":
+        """Query information about many IP addresses with ip-api.com's /batch endpoint."""
+
+        return await self.cell.queryIps(list(ipaddrs))

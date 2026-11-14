@@ -1,0 +1,16 @@
+init {
+    $yaralib = $lib.import(slib.yara.lib)
+
+    if (not $lib.user.allowed(slib.yara.admin)) {
+        $lib.warn("slib.yara.sync requires the slib.yara.admin permission.")
+    }
+    else {
+        $retn = $yaralib.sync()
+        for $fail in $retn.failed {
+            $lib.warn(`Unable to sync it:app:yara:rule={$fail.rule}: {$fail.mesg}`)
+        }
+        $nfail = $lib.len($retn.failed)
+        $nremoved = $lib.len($retn.removed)
+        $lib.print(`Synced the slib.yara rules: {$retn.compiled} compiled, {$nremoved} removed, {$nfail} failed.`)
+    }
+}

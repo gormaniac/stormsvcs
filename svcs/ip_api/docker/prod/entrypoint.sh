@@ -1,1 +1,2 @@
+#!/bin/sh
 exec uv run --no-sync --directory /opt/stormsvcs/ip_api/ python -O -m ipapi /vertex/storage

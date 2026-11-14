@@ -3,17 +3,14 @@ interactions:
     body: null
     headers: {}
     method: GET
-    uri: http://ip-api.com/json/192.0.2.1?fields=status,message,country,countryCode,region,regionName,city,zip,lat,lon,timezone,isp,org,as,asname,mobile,proxy,hosting,query
+    uri: http://ip-api.com/json/192.0.2.1?fields=status,message,country,countryCode,region,regionName,city,lat,lon,isp,org,as,asname,reverse,mobile,proxy,hosting,query
   response:
     body:
       string: '{"status": "success", "country": "United States", "countryCode": "US",
-        "region": "VA", "regionName": "Virginia", "city": "Ashburn", "zip": "20149",
-        "lat": 39.03, "lon": -77.5, "timezone": "America/New_York", "isp": "Example
-        ISP", "org": "Example Org", "asname": "", "mobile": false, "proxy": false,
+        "region": "VA", "regionName": "Virginia", "city": "Ashburn", "lat": 39.03,
+        "lon": -77.5, "isp": "Example ISP", "org": "Example Org", "asname": "", "reverse": "", "mobile": false, "proxy": false,
         "hosting": false, "query": "192.0.2.1"}'
     headers:
-      Content-Length:
-      - '340'
       Content-Type:
       - application/json; charset=utf-8
       Date:

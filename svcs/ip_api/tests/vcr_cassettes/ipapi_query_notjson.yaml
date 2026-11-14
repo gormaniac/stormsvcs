@@ -1,0 +1,16 @@
+interactions:
+- request:
+    body: null
+    headers: {}
+    method: GET
+    uri: http://ip-api.com/json/8.8.8.8?fields=status,message,country,countryCode,region,regionName,city,lat,lon,isp,org,as,asname,reverse,mobile,proxy,hosting,query
+  response:
+    body:
+      string: '<html><body>Service temporarily unavailable</body></html>'
+    headers:
+      Content-Type:
+      - text/html; charset=utf-8
+    status:
+      code: 200
+      message: OK
+version: 1

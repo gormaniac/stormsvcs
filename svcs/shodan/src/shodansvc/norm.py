@@ -8,7 +8,9 @@ without a Cortex.
 import base64
 import binascii
 import hashlib
+import ipaddress
 import re
+import urllib.parse
 from typing import Any
 
 
@@ -392,11 +394,258 @@ def normHttpHeaders(text: str) -> list[dict]:
     return retn
 
 
+def _httpStatus(text: str) -> tuple[int | None, str | None]:
+    """Parse the (code, reason) out of an HTTP response's status line, ex. ``HTTP/1.1 200 OK``."""
+
+    match = re.match(r"HTTP/\S+[ \t]+(\d{3})(?:[ \t]+([^\r\n]*))?", text)
+    if not match:
+        return None, None
+    return int(match.group(1)), (match.group(2) or "").strip() or None
+
+
+def _httpBody(text: str) -> str:
+    """The body of a raw HTTP response, everything after the blank line that ends the headers."""
+
+    _, sep, body = text.partition("\r\n\r\n")
+    if not sep:
+        _, sep, body = text.partition("\n\n")
+    return body if sep else ""
+
+
+def _isIp(valu: str) -> bool:
+    """Whether a string is an IPv4 or IPv6 address (ex. the host of a URL)."""
+
+    try:
+        ipaddress.ip_address(valu.strip("[]"))
+    except ValueError:
+        return False
+    return True
+
+
+def _urlHost(host: str) -> str:
+    """A host as it's written in a URL, IPv6 addresses go in brackets."""
+
+    return f"[{host}]" if ":" in host and not host.startswith("[") else host
+
+
+# The port each URL scheme uses when the URL doesn't name one.
+DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def _httpUrl(scheme: str, host: str, port: int | None, location: str | None) -> str:
+    """Build the URL of a request to ``host``:``port``, ``location`` is a path or a full URL."""
+
+    location = location or "/"
+    if re.match(r"(?i)https?://", location):
+        return location
+    if not location.startswith("/"):
+        location = f"/{location}"
+    hostport = _urlHost(host)
+    if port and port != DEFAULT_PORTS.get(scheme):
+        hostport = f"{hostport}:{port}"
+    return f"{scheme}://{hostport}{location}"
+
+
+def _mimeType(headers: list[dict], default: str) -> str:
+    """The MIME type from a response's Content-Type header (without parameters), or ``default``."""
+
+    for header in headers:
+        if header["name"] == "content-type":
+            mime = header["value"].split(";", 1)[0].strip().lower()
+            if re.fullmatch(r"[\w.+-]+/[\w.+-]+", mime):
+                return mime
+    return default
+
+
+# Magic bytes of the image formats favicons are saved as, and their MIME types.
+IMAGE_MAGIC = (
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
+    (b"\x00\x00\x01\x00", "image/x-icon"),
+    (b"GIF87a", "image/gif"),
+    (b"GIF89a", "image/gif"),
+    (b"\xff\xd8\xff", "image/jpeg"),
+    (b"BM", "image/bmp"),
+)
+
+
+def _imageMime(byts: bytes) -> str:
+    """Guess an image's MIME type from its magic bytes. Favicons are ``image/x-icon`` otherwise."""
+
+    for magic, mime in IMAGE_MAGIC:
+        if byts.startswith(magic):
+            return mime
+    if byts[:12].startswith(b"RIFF") and byts[8:12] == b"WEBP":
+        return "image/webp"
+    if b"<svg" in byts[:1024].lower():
+        return "image/svg+xml"
+    return "image/x-icon"
+
+
+def normFile(byts: bytes, mime: str, kind: str, url: str | None = None, local: bool = True) -> dict:
+    """Describe a file a server returned, for modeling a file:bytes (and the bytes for the Axon).
+
+    ``kind`` says what the file is (ex. ``html``, ``favicon``), ``url`` is where it was fetched
+    from if known, and ``local`` is whether the server the banner is for returned it (a favicon
+    can be on another server). ``b64`` is the bytes as standard base64, without newlines.
+    """
+
+    name = None
+    if url:
+        base = urllib.parse.urlsplit(url).path.rsplit("/", 1)[-1]
+        name = urllib.parse.unquote(base).strip() or None
+
+    return {
+        "kind": kind,
+        "url": url,
+        "local": local,
+        "name": name,
+        "mime": mime,
+        "b64": base64.b64encode(byts).decode("ascii"),
+        "size": len(byts),
+        "md5": hashlib.md5(byts).hexdigest(),
+        "sha1": hashlib.sha1(byts).hexdigest(),
+        "sha256": hashlib.sha256(byts).hexdigest(),
+        "sha512": hashlib.sha512(byts).hexdigest(),
+    }
+
+
+# The files Shodan fetches from every web server besides the page itself: the http field each
+# file's text is in, the path it's fetched from, and its MIME type.
+HTTP_TEXT_FILES = (
+    ("robots", "/robots.txt", "text/plain"),
+    ("securitytxt", "/.well-known/security.txt", "text/plain"),
+    ("sitemap", "/sitemap.xml", "application/xml"),
+)
+
+
+def normHttp(banner: dict, text: str) -> dict | None:
+    """Normalize a banner's ``http`` field into the HTTP requests and files the server returned.
+
+    ``text`` is the banner's ``data``: the final response's status line and headers. Returns
+    the final request (``url``, ``status``, ``reason``, ``headers``, ``title``, and its ``body``
+    file), the ``redirects`` Shodan followed to get there (the same keys, oldest first), and
+    every ``files`` the server returned (the body, robots.txt, security.txt, the sitemap, the
+    favicon, and redirect bodies). See ``normFile`` for the files. ``listing`` is the URL of
+    each file and folder in an open directory the page lists (Shodan's ``open_dir``). Returns
+    None without an ``http`` field.
+    """
+
+    http = banner.get("http")
+    if not isinstance(http, dict) or not http:
+        return None
+
+    ip = banner.get("ip_str") or ""
+    port = banner.get("port")
+    # TLS servers have an ssl field, even when Shodan couldn't parse the cert. The module name
+    # doesn't say, ex. "https-simple-new" scans plain HTTP servers too.
+    scheme = "https" if banner.get("ssl") is not None else "http"
+    host = (http.get("host") or ip).strip().lower()
+    # The names a URL can use for this server, to tell if a favicon came from it.
+    names = {ip.lower(), host, *(h.lower() for h in _list(banner.get("hostnames")))}
+
+    headers = normHttpHeaders(text)
+    code, reason = _httpStatus(text)
+    status = http.get("status") if isinstance(http.get("status"), int) else code
+    url = _httpUrl(scheme, host, port, http.get("location"))
+
+    files = []
+
+    body = None
+    html = http.get("html")
+    if isinstance(html, str) and html:
+        body = normFile(html.encode("utf-8"), _mimeType(headers, "text/html"), "html", url)
+        files.append(body)
+
+    for field, path, mime in HTTP_TEXT_FILES:
+        valu = http.get(field)
+        if isinstance(valu, str) and valu:
+            fileurl = _httpUrl(scheme, host, port, path)
+            files.append(normFile(valu.encode("utf-8"), mime, field, fileurl))
+
+    favicon = http.get("favicon") or {}
+    if isinstance(favicon, dict) and favicon.get("data"):
+        try:
+            byts = base64.b64decode(favicon["data"])
+        except (binascii.Error, ValueError):
+            byts = b""
+        if byts:
+            favurl = favicon.get("location") or None
+            local = True
+            if favurl:
+                parts = urllib.parse.urlsplit(favurl)
+                try:
+                    favport = parts.port or DEFAULT_PORTS.get(parts.scheme.lower())
+                except ValueError:
+                    favport = None
+                local = (parts.hostname or "").lower() in names and favport == port
+            files.append(normFile(byts, _imageMime(byts), "favicon", favurl, local))
+
+    # An open directory's entries are listed by the page, so they're under its URL's directory.
+    listing = []
+    opendir = banner.get("open_dir") or {}
+    entries = opendir.get("data") if isinstance(opendir, dict) else None
+    if isinstance(entries, dict):
+        parts = urllib.parse.urlsplit(url)
+        base = urllib.parse.urlunsplit(
+            (
+                parts.scheme,
+                parts.netloc,
+                parts.path if parts.path.endswith("/") else f"{parts.path}/",
+                "",
+                "",
+            )
+        )
+        for name in entries:
+            if isinstance(name, str) and name.strip("/"):
+                listing.append(urllib.parse.urljoin(base, urllib.parse.quote(name.lstrip("/"))))
+
+    redirects = []
+    for hop in _list(http.get("redirects")):
+        if not isinstance(hop, dict):
+            continue
+        data = hop.get("data") if isinstance(hop.get("data"), str) else ""
+        hopheaders = normHttpHeaders(data)
+        hopcode, hopreason = _httpStatus(data)
+        hophost = (hop.get("host") or host).strip().lower()
+        hopurl = _httpUrl(scheme, hophost, port, hop.get("location"))
+        hopbody = None
+        byts = _httpBody(data).encode("utf-8")
+        if byts:
+            hopbody = normFile(byts, _mimeType(hopheaders, "text/html"), "redirect", hopurl)
+            files.append(hopbody)
+        redirects.append(
+            {
+                "url": hopurl,
+                "host": None if _isIp(hophost) else hophost or None,
+                "path": urllib.parse.urlsplit(hopurl).path or "/",
+                "status": hopcode,
+                "reason": hopreason,
+                "headers": hopheaders,
+                "body": hopbody,
+            }
+        )
+
+    return {
+        "url": url,
+        "host": None if _isIp(host) else host or None,
+        "path": urllib.parse.urlsplit(url).path or "/",
+        "status": status,
+        "reason": reason,
+        "headers": headers,
+        "title": http.get("title") or None,
+        "server": http.get("server"),
+        "favicon": favicon.get("hash") if isinstance(favicon, dict) else None,
+        "body": body,
+        "redirects": redirects,
+        "files": files,
+        "listing": listing,
+    }
+
+
 def normBanner(banner: dict) -> dict:
     """Normalize a single Shodan banner (from host lookups, search, or streams)."""
 
     shodan = banner.get("_shodan") or {}
-    http = banner.get("http") or {}
     ssh = banner.get("ssh") or {}
 
     shodanopts = shodan.get("options") or {}
@@ -442,15 +691,7 @@ def normBanner(banner: dict) -> dict:
         "isp": banner.get("isp"),
         "location": normLocation(banner.get("location")),
         "cert": normCert(banner.get("ssl")),
-        "http": {
-            "title": http.get("title"),
-            "server": http.get("server"),
-            "host": http.get("host"),
-            "status": http.get("status"),
-            "favicon": (http.get("favicon") or {}).get("hash"),
-        }
-        if http
-        else None,
+        "http": normHttp(banner, text),
         "ssh": {
             "type": ssh.get("type"),
             "fingerprint": ssh.get("fingerprint"),
