@@ -89,10 +89,9 @@ replacement is the same everywhere:
   API key ID. The read-check-write runs with no network await in between, and the caller
   `$lib.time.sleep`s until its slot. This can overshoot by one under concurrency. The upstream 429
   plus a cooldown then catches it.
-- **v2 (strict, only if needed):** a `$lib.queue` per key holding one token. `pop(wait=true)` is
-  atomic and returns null if another consumer already took the item. To guard against tokens lost
-  when a query is cancelled (Storm has no `finally`), store a lease timestamp. A later caller can
-  then put back a token that has gone stale.
+- **v2 (strict, only if needed):** package queues used as locks and token buckets. A queue's
+  `pop()` is atomic. This is an implementation option, not a requirement; see
+  **Appendix A** for the verified behaviour, patterns and caveats.
 
 Both are per-Cortex, which matches today: no service coordinates across Cortexes either.
 
@@ -100,7 +99,7 @@ Both are per-Cortex, which matches today: no service coordinates across Cortexes
 
 | Today (service) | Pure Storm |
 |---|---|
-| Cell `confdefs` (URLs, intervals, timeouts, limits) | `$lib.globals` under `slib:<pkg>:*`, set by a `slib.<pkg>.admin.config` command (admin perm). The defaults live in the package. |
+| Cell `confdefs` (URLs, intervals, timeouts, limits) | `$lib.globals` under `slib:<pkg>:*`, set by a `slib.<pkg>.admin.config` command (admin perm). The defaults live in the package. Option: package vars (`$lib.pkg.vars("<pkg>")`) instead, which are scoped to the package and gated by `power-ups.<pkg>.admin` (see Appendix A.2). |
 | Service-stored API key (slab, never readable from Storm) | A **global-scope `$lib.vault`** of the package's type, read only inside asroot modules. Per-user keys already use user-scope vaults today (abusech, hatching, vt, shodan), so that part stays the same. |
 | Service `add` event (meta:source, tag globals, crons) | Package `onload`. It runs on every load, so it must be idempotent: check before creating. |
 | Slab state (snapshots, quotas) | Small state in `$lib.globals` or `$lib.jsonstor` (asroot). Large blobs go in the Axon as jsonlines, with the sha256 kept in jsonstor. |
@@ -470,3 +469,113 @@ Before committing:
 7. **hatching:** approve the migration, with events degraded to polling?
 8. **abusech:** approve the hybrid (ii-A) and a generic unzip helper service in this repo?
 9. **Rule wording:** adopt the "parse/unpack/transform file contents" refinement from §1?
+
+---
+
+## Appendix A. Implementation option: queue-based locks and rate limiters
+
+**Status:** an option on record, not a decision. The best-effort throttle in §3.2 v1 may be enough
+for every package. Use this only where a package needs strict mutual exclusion or exact quotas.
+
+Researched 2026-11-10 to 2026-11-14 against the Synapse 2.256 source. Each behaviour below was
+checked on a throwaway test Cortex (`SynTest.getTestCore`). The test scripts are not in the repo.
+
+### A.1 What makes queues usable as locks
+
+- `$lib.queue` and `$lib.pkg.queues` share the same storage (`lmdbslab.MultiQueue`). Both are
+  persistent and shared across the whole Cortex.
+- `pop()` is a change-log write (`coreQueuePop` / `stormPkgQueuePop`, `@onPushAuto`). Writes are
+  applied one at a time. If another query already took the item, `pop()` returns `null`, so a
+  caller loops until it gets a non-null item.
+- `pop(wait=(true))` blocks until an item exists. Every waiter wakes and races for it (an
+  `asyncio.Event`), so waiters are **not served FIFO**.
+- On a mirror, the write is forwarded to the leader, so this should hold under mirroring too.
+  That was not tested.
+
+**Measured, with 20 concurrent queries each doing read, sleep 50 ms, write on a global counter:**
+
+| Variant | Result |
+|---|---|
+| No lock | 2–3 of 20 increments survived |
+| One-token queue as a mutex | 20 of 20, ~1.1 s total, 1 token left; 35 failed (`null`) pops along the way |
+| Token bucket: 5 tokens, then 5 refills, 20 waiting consumers | exactly 5 ran, then exactly 10; 0 tokens left |
+
+**Pipes (`$lib.pipe`) don't help here.** A pipe lives in memory and is reachable only from the query
+that created it and its filler subquery. Within one command it is a bounded producer/consumer
+buffer (max 10,000 items, `put` blocks when full). That could still be useful, for example to
+overlap hatching's task-report fetches with modeling.
+
+### A.2 Use package queues and package vars, not global ones
+
+`$lib.pkg.queues("<pkg>")` gives `add`/`gen`/`get`/`del`/`list`. The queue object has
+`put`/`puts`/`get`/`gets`/`pop`/`cull`/`size`, the same pop semantics as above.
+
+- **Namespaced** per package (the queue key is `guid((pkgname, name))`), so names can't collide
+  across the Cortex.
+- **Gated by `power-ups.<pkg>.admin`.** A plain user calling it directly gets `AuthDeny`
+  (verified). The package's asroot modules can use it, which matches how packages already guard
+  their keys.
+- **Survives `pkg.del` and reloads (verified).** Tokens and counters persist across upgrades. So:
+  - `onload` must create queues with `.gen(name)`. It must not add a token on every load, or
+    reloads keep adding tokens. Check `size()` first or keep an "initialized" package var.
+  - Uninstalling leaves the queues behind. Delete them explicitly if a cleanup command is wanted.
+- **`$lib.pkg.vars("<pkg>")`** has the same scope and permission model. It's a fit for the
+  package's config and for lease records.
+
+### A.3 Patterns
+
+**Token bucket (preferred: nothing to release).**
+- Consumers pop one token per request and never return it.
+- A Storm daemon (`$lib.dmon`) refills it at the allowed rate up to a cap:
+  `while (true) { if ($q.size() < $cap) { $q.put(1) } $lib.time.sleep($interval) }`.
+  A cron also works for coarse intervals.
+- The refiller needs no API key, so the "a daemon runs as one user" problem doesn't come up.
+- A token lost to a cancelled query is one missed slot. The next refill makes up for it.
+
+Candidate uses:
+
+| Package | Bucket |
+|---|---|
+| virustotal | per key ID: minute bucket (cap 4, +1 every 15 s); day bucket (500, a cron resets it at 00:00 UTC by culling and refilling); month bucket (15,500). Pops are atomic, so these quotas become exact instead of "can go one over". |
+| ip-api | cap 45, refilled per minute, with the `X-Rl`/`X-Ttl` headers as a backstop |
+| bgphe | 1 token per `interval` |
+| abusech | 5 per second (check the daemon's sleep granularity at that rate) |
+
+Retries count against the bucket, the same as today.
+
+**Mutex (only where mutual exclusion is truly needed, e.g. malpedia's single pull).**
+- One token. Acquire with `pop(wait=(true))`, looping on `null`. Release with `put`.
+- **Semaphore:** the same pattern with N tokens, which caps how many queries run at once.
+
+### A.4 Releasing a mutex: `fini` is not `finally`
+
+A Storm `fini` block (`ast.FiniBlock`) runs only after the node stream finishes normally. It is not
+a `try/finally`. Verified:
+
+| How the query ends | `fini` ran? | Mutex token |
+|---|---|---|
+| Normal completion | yes | returned |
+| `stop` | **no** | — |
+| `$lib.raise(...)` | **no** | **lost** |
+| Query cancelled or timed out | **no** | **lost** |
+
+A Cortex restart while the token is held also loses it, because the pop is already persisted.
+
+So a mutex needs three layers:
+1. **`fini`** releases on the normal path.
+2. **`try { ... } catch * as err { release, then re-raise or warn }`** around the locked section
+   covers Storm errors. `catch` does not run on cancellation, a restart, or `stop`.
+3. **A lease as the backstop.** On acquire, write `{holder, expires}` to a package var. A cron
+   puts the token back when the queue is empty and the lease has expired. Keep locked sections
+   short and the lease generous, so a slow holder doesn't outlive its lease and end up with two
+   holders. A lease counter (epoch) checked before committing work would remove that risk if it
+   ever matters.
+
+### A.5 Costs
+
+- Every `pop` is a persisted write, failed pops included. That's fine at API request rates, but
+  don't use a queue to guard a tight loop.
+- Waiters aren't served in order. Under heavy contention a waiter can keep losing; the services'
+  `asyncio.Lock`s were first-come, first-served.
+- Like everything in §3.2, this is per-Cortex. Nothing coordinates across Cortexes, the same as
+  today.
