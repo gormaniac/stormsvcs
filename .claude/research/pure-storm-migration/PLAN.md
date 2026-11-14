@@ -1,7 +1,7 @@
 # Migrating services to pure Storm packages in StormLib++
 
-**Status:** PLAN with maintainer decisions (2026-11-14, see §8). The first piece of code is in:
-`slib.utils.x509` (§4.2), on the StormLib++ branch `claude/hopeful-heisenberg-feq5rv`.
+**Status:** CONCLUDED (2026-11-14). Only ip_api moves to pure Storm; the other services stay
+services. See §9 for why. The rest of this document is kept as the record of the research.
 **Date:** 2026-11-10, updated 2026-11-14
 **Targets:** Synapse 2.256 Storm runtime (checked against its source) · StormLib++ `src/pkgs/` conventions
 **Scope:**
@@ -510,6 +510,55 @@ Before committing:
 | 9 | Rule wording | **Open:** adopt the "parse, unpack or transform file contents" refinement from §1? |
 
 ---
+
+## 9. Conclusion (2026-11-14)
+
+**Decision:**
+- **ip_api moves** to pure Storm. It's now the `slib.ipapi` 1.0.0 package in StormLib++, with the
+  shared ASN code in `slib.utils.inet`. The service is retired here.
+- **bgphe, malpedia, virustotal and hatching stay services.**
+- **abusech** was already deferred (§7) and stays a service.
+- **`slib.utils.x509` is kept** in StormLib++, for any package that needs certificate details in
+  Storm. bgphe will not use it.
+
+**Why.** The goal was to save resources (the deployment runs on 64 GB of RAM and 16 vCPUs),
+not just to reduce the number of images. On those terms the migration mostly trades speed
+for very little RAM.
+
+- **RAM saved per service is small.** Measured on Synapse 2.256, idle (PSS, so shared pages
+  aren't double counted):
+
+  | Process | Memory |
+  |---|---|
+  | A bare Cell | ~75 MB |
+  | abusech, the heaviest service, helper processes off | ~130 MB |
+  | abusech, normal mode with Synapse's helper processes | ~200 MB |
+
+  The four migration candidates come to about 0.6–0.8 GB, around 1% of the host. Containers add
+  almost nothing on top of the process, since they share the kernel and the base image layers.
+- **Storm is much slower for compute.** It's interpreted: about 15–20 µs per simple statement and
+  about 165 µs per function call.
+  - The X.509 parser takes ~100–120 ms per certificate, so a 200-certificate bgphe lookup goes
+    from ~1 s in Python to 20–25 s.
+  - malpedia's bibliography parse and virustotal's and hatching's normalization would slow down
+    the same way.
+- **The compute moves onto the Cortex.** Storm runs inside the Cortex process, which is mostly
+  single-threaded and shared by every user's queries. A service runs in its own process on
+  another core. So migrating doesn't just make the work slower: it takes CPU from analysts'
+  queries, and leaves the host's other cores idle.
+- **Memory doesn't disappear either.** Large payloads (malpedia's 15 MB of JSON, virustotal
+  reports) land in the Cortex's memory instead of a service's. Only the idle baseline is saved.
+- **What pure Storm does buy is operations, not resources.** No image, `service.add`, Telepath
+  or TLS setup, and no Python dependency patching per service; updates are a `pkg.load`. That
+  is worth it only where the Python is thin.
+
+**Why ip_api still moved.** Its Python was ~300 lines: one HTTP call plus a rate-limit queue,
+with all the modeling already in Storm. Pure Storm loses nothing for it, and it drops a
+service.
+
+**If the number of images or containers becomes the problem,** consolidating several services
+into one container (or one Cell hosting several services' APIs) would cut the per-service
+baseline and image count while keeping compute in Python and off the Cortex. This is untested.
 
 ## Appendix A. Implementation option: queue-based locks and rate limiters
 
