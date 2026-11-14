@@ -242,7 +242,11 @@ class CrtshDb:
     - A dropped connection is reopened and the query retried. Reconnecting right after
       a drop is often refused (``max_client_conn``) until crt.sh notices the old one
       is gone, so connecting backs off (with jitter) for up to ``connect_timeout`` seconds.
-    - Queries have no timeout unless ``timeout`` is set, crt.sh can be very slow.
+    - Each query runs in its own read-only transaction that sets ``statement_timeout``
+      with ``SET LOCAL``. PgBouncer may pool by transaction, where a session level ``SET``
+      only reaches whichever backend served it. ``timeout`` (client side, None for none)
+      is a backstop for a query the server never cancels, keep it longer than
+      ``statement_timeout``.
 
     Every query method returns rows as plain dicts.
     """
@@ -273,24 +277,14 @@ class CrtshDb:
         self._lock = asyncio.Lock()
         self._lastUsed = 0.0
         self._keeper: asyncio.Task | None = None
+        self._setLocal = True  # False once crt.sh refuses SET LOCAL statement_timeout.
 
     # ---- Connection management ----
 
     async def _connectOnce(self) -> asyncpg.Connection:
-        # PgBouncer may pool by transaction, so no prepared statements are cached, and
-        # the read-only replica means statements run outside explicit transactions.
-        conn = await self._connectFn(self.dsn, statement_cache_size=0, timeout=30)
-
-        # crt.sh's default statement_timeout cancels big queries (chains, wide searches) that
-        # finish fine given time, so the session's is set (0 is no limit). It's a SET, not a
-        # startup parameter, since PgBouncer rejects startup parameters it doesn't know.
-        try:
-            await conn.execute(f"SET statement_timeout = {int(self.statement_timeout * 1000)}")
-        except asyncpg.PostgresError as err:
-            logger.warning(
-                "Unable to set the crt.sh statement_timeout, using the server's: %s", err
-            )
-        return conn
+        # PgBouncer may pool by transaction, so no prepared statements are cached. Settings
+        # are made per query (see _run), PgBouncer rejects startup parameters it doesn't know.
+        return await self._connectFn(self.dsn, statement_cache_size=0, timeout=30)
 
     async def _connect(self) -> asyncpg.Connection:
         """Open the connection, backing off while crt.sh refuses it."""
@@ -327,6 +321,59 @@ class CrtshDb:
             if self._keeper is None or self._keeper.done():
                 self._keeper = asyncio.get_running_loop().create_task(self._keepalive())
         return self._conn
+
+    def _kill(self, conn: asyncpg.Connection) -> None:
+        """Terminate the connection immediately, ex. when a query on it was cancelled midway."""
+
+        self._conn = None
+        conn.terminate()
+
+    async def _run(self, conn: asyncpg.Connection, sql: str, args: tuple) -> list:
+        """Run one query in a read-only transaction with its own statement_timeout.
+
+        crt.sh's default statement_timeout cancels big queries (chains, wide searches) that
+        finish fine given time, so each query sets its own (0 is no limit). ``SET LOCAL`` in
+        a transaction works with any PgBouncer pooling mode.
+        """
+
+        if self._setLocal:
+            prelude = (
+                "BEGIN READ ONLY; "
+                f"SET LOCAL statement_timeout = {int(self.statement_timeout * 1000)}"
+            )
+            try:
+                await conn.execute(prelude)
+            except asyncpg.PostgresError as err:
+                await self._rollback(conn)
+                logger.warning(
+                    "Unable to set the crt.sh statement_timeout, using the server's: %s", err
+                )
+                self._setLocal = False
+                if self._conn is not conn:
+                    # The ROLLBACK failed and dropped the connection, retry on a new one.
+                    raise ConnectionError(
+                        "crt.sh connection dropped after a failed ROLLBACK"
+                    ) from err
+        if not self._setLocal:
+            await conn.execute("BEGIN READ ONLY")
+
+        try:
+            rows = await conn.fetch(sql, *args, timeout=self.timeout)
+        except asyncpg.PostgresError:
+            # The transaction is aborted, end it so the connection can be reused.
+            await self._rollback(conn)
+            raise
+        await conn.execute("COMMIT")
+        return rows
+
+    async def _rollback(self, conn: asyncpg.Connection) -> None:
+        """Roll back the current transaction, dropping the connection if that fails."""
+
+        try:
+            await asyncio.wait_for(conn.execute("ROLLBACK"), timeout=30)
+        except Exception as err:
+            logger.debug("crt.sh ROLLBACK failed, dropping the connection: %s", err)
+            await self._drop()
 
     async def _drop(self) -> None:
         """Close the connection without raising. Must hold the lock."""
@@ -380,8 +427,12 @@ class CrtshDb:
                 conn = await self._ensure()
                 self._lastUsed = loop.time()
                 try:
-                    rows = await conn.fetch(sql, *args, timeout=self.timeout)
+                    rows = await self._run(conn, sql, args)
                     return [dict(row) for row in rows]
+                except asyncio.CancelledError:
+                    # The caller went away mid-query, the connection is mid-query and can't be reused.
+                    self._kill(conn)
+                    raise
                 except asyncpg.exceptions.QueryCanceledError as err:
                     raise CrtshDbError(
                         f"crt.sh canceled the query (statement timeout), try a narrower search: {err}"
@@ -400,6 +451,8 @@ class CrtshDb:
                     ):
                         if isinstance(err, asyncpg.PostgresError):
                             raise CrtshDbError(f"crt.sh query failed: {err}") from err
+                        # Not from the database, so the connection's state is unknown.
+                        await self._drop()
                         raise
                     retry = err
                     await self._drop()
@@ -629,7 +682,18 @@ class CrtshDb:
 
     # ---- Escape hatch ----
 
-    async def raw(self, sql: str, args: list | None = None) -> list[dict]:
-        """Run any SQL. The guest account is read-only, so this can't change anything."""
+    async def raw(self, sql: str, args: list | None = None, limit: int = 1000) -> list[dict]:
+        """Run a single query that returns rows, returning at most ``limit`` of them.
 
-        return await self.fetch(sql, *(args or ()))
+        The query is wrapped as ``SELECT * FROM (<sql>) q LIMIT <limit>``, so it must be a
+        SELECT, VALUES, TABLE, or WITH ... SELECT query. That bounds the rows held in memory,
+        and rejects statements that change the session (``SET``, ``COMMIT``) or data, along
+        with the read-only transaction every query runs in (see ``_run``).
+        """
+
+        args = list(args or ())
+        sql = re.sub(r"[\s;]+$", "", sql.strip())
+        if not sql:
+            raise CrtshDbError("No SQL to run.")
+        wrapped = f"SELECT * FROM (\n{sql}\n) q LIMIT ${len(args) + 1}"
+        return await self.fetch(wrapped, *args, int(limit))

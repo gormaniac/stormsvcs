@@ -35,7 +35,7 @@ from cryptography.hazmat.primitives.asymmetric import ec, ed25519, rsa
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 from crtshsvc import CrtshSvc
-from crtshsvc.db import CrtshDbError
+from crtshsvc.db import CrtshDbError, tsquery
 
 
 NOW = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
@@ -476,6 +476,43 @@ def _identities(cert: x509.Certificate) -> list[tuple[str, str]]:
     return rows
 
 
+def identityText(cert) -> str:
+    """The text identities() indexes: each identity, and every parent domain of names."""
+
+    words = []
+    for nametype, valu in _identities(cert):
+        valu = valu.lower()
+        words.append(valu)
+        if nametype in ("2.5.4.3", "san:dNSName", "san:rfc822Name", "1.2.840.113549.1.9.1"):
+            domain = valu.split("@")[-1]
+            while "." in domain:
+                words.append(domain)
+                domain = domain.split(".", 1)[1]
+    return " ".join(words)
+
+
+def tsTokens(text: str) -> set[str]:
+    """Roughly the tokens PostgreSQL's full text parser (the ``simple`` config) makes of text.
+
+    Full text search matches whole tokens, not substrings: a host or email address is a
+    single token, so ``old`` doesn't match ``old.vertex.link`` and ``visi`` doesn't match
+    ``visi@vertex.link``. A URL is its ``host/path``, its host, and its path.
+    """
+
+    tokens = set()
+    for word in re.findall(r"[^\s,;=+\"'()<>]+", text.lower()):
+        word = word.strip(".-")
+        if not word:
+            continue
+        if "://" in word or ("/" in word and not word.startswith("/")):
+            rest = word.split("://", 1)[-1]
+            host, _, path = rest.partition("/")
+            tokens.update(t for t in (rest, host, "/" + path if _ else "") if t)
+            continue
+        tokens.add(word)
+    return tokens
+
+
 def _likeRegex(pattern: str) -> re.Pattern:
     out, i = "", 0
     while i < len(pattern):
@@ -512,6 +549,8 @@ class FakeCrtshDb:
         return next(kw for m, kw in reversed(self.calls) if m == meth)
 
     def called(self, meth: str) -> int:
+        """How many times ``meth`` was called. It must be a query method, so typos fail loudly."""
+        assert callable(getattr(self, meth, None)), f"FakeCrtshDb has no method {meth}"
         return sum(1 for m, _ in self.calls if m == meth)
 
     def _valid(self, cert, valid=False, since=None, until=None) -> bool:
@@ -616,7 +655,10 @@ class FakeCrtshDb:
             until=until,
             limit=limit,
         )
-        words = text.lower().split()
+        # plainto_tsquery(text) @@ identities(...): every token of the text is a token of the cert.
+        words = tsTokens(tsquery(text))
+        if not words:
+            return []  # An empty tsquery matches nothing.
         regex = _likeRegex(like) if like is not None else None
         issuers = (
             {i for i, n in CA_NAMES.items() if issuer.lower() in n.lower()} if issuer else None
@@ -627,8 +669,7 @@ class FakeCrtshDb:
             if cert is None:
                 continue
             idents = _identities(cert)
-            blob = " ".join(v.lower() for _, v in idents)
-            if not all(word in blob for word in words):
+            if not words <= tsTokens(identityText(cert)):
                 continue
             if regex is not None or nametypes:
                 if not any(
@@ -734,8 +775,8 @@ class FakeCrtshDb:
                     out.append(self._row(row, ca_id=caid, ca_name=CA_NAMES[caid]))
         return out
 
-    async def raw(self, sql, args=None):
-        self._call("raw", sql=sql, args=args)
+    async def raw(self, sql, args=None, limit=1000):
+        self._call("raw", sql=sql, args=args, limit=limit)
         if "nope" in sql:
             raise CrtshDbError('relation "nope" does not exist')
         return [

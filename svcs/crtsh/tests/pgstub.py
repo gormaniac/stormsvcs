@@ -20,7 +20,7 @@ import sys
 
 import asyncpg
 
-from .fakecrtsh import CA_NAMES, PKI, Pki, _derSerial, _identities, _ski, _spki
+from .fakecrtsh import CA_NAMES, PKI, Pki, _derSerial, _identities, _ski, _spki, identityText
 
 
 SCHEMA = """
@@ -91,21 +91,6 @@ CREATE TABLE crl_revoked (
     REVOCATION_DATE timestamp, PRIMARY KEY (CA_ID, SERIAL_NUMBER)
 );
 """
-
-
-def identityText(cert) -> str:
-    """The text identities() indexes: each identity, and every parent domain of names."""
-
-    words = []
-    for nametype, valu in _identities(cert):
-        valu = valu.lower()
-        words.append(valu)
-        if nametype in ("2.5.4.3", "san:dNSName", "san:rfc822Name", "1.2.840.113549.1.9.1"):
-            domain = valu.split("@")[-1]
-            while "." in domain:
-                words.append(domain)
-                domain = domain.split(".", 1)[1]
-    return " ".join(words)
 
 
 def _naive(when: datetime.datetime) -> datetime.datetime:

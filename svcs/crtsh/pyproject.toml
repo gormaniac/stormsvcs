@@ -1,6 +1,6 @@
 [project]
 name = "crtshsvc"
-version = "0.2.1"
+version = "0.3.0"
 description = "A crt.sh Storm Service backed by the crt.sh certwatch database"
 readme = "README.md"
 license-files = ["LICENSE"]
@@ -23,6 +23,7 @@ build-backend = "uv_build"
 [tool.uv.build-backend]
 source-include = [
     "pkgproto/*.yaml",
+    "pkgproto/*.md",
     "pkgproto/storm/*/*.storm",
 ]
 

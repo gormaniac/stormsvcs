@@ -13,4 +13,4 @@ function tagSettings() {
 function setTagPrefix(prefix) { $lib.globals.set("slib:crtsh:tag:prefix", $prefix) }
 function setTagsEnabled(enabled) { $lib.globals.set("slib:crtsh:tag:enabled", $enabled) }
 
-function rawQuery(sql, args=$lib.null) { return($svc.rawQuery($sql, args=$args)) }
+function rawQuery(sql, args=$lib.null, limit=(100)) { return($svc.rawQuery($sql, args=$args, limit=$limit)) }

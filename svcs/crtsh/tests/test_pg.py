@@ -14,6 +14,7 @@ import pytest
 import synapse.tests.utils as s_tests
 
 from crtshsvc import CrtshSvc
+from crtshsvc.db import CrtshDbError
 
 from . import pgstub
 from .fakecrtsh import PKI
@@ -140,6 +141,19 @@ class TestPostgres(s_tests.SynTest):
 
             rows = await svc.rawQuery("SELECT ID, NAME FROM ca WHERE ID = $1", [1])
             assert rows == [{"id": 1, "name": "C=US, O=Test Trust, CN=Test Root R1"}]
+            assert len(await svc.rawQuery("SELECT ID FROM certificate;", limit=2)) == 2
+            # Raw SQL can't change the session or any data, even with a writable account.
+            for sql in (
+                "SET statement_timeout = 0",
+                "COMMIT",
+                "DELETE FROM ca RETURNING *",
+                "WITH d AS (DELETE FROM ca RETURNING *) SELECT * FROM d",
+            ):
+                with pytest.raises(CrtshDbError):
+                    await svc.rawQuery(sql)
+            assert len(await svc.rawQuery("SELECT ID FROM ca")) == 3
+            # The connection is still usable after those errors.
+            assert (await svc.rawQuery("VALUES (1)")) == [{"column1": 1}]
 
     async def test_cycles(self):
         # CAs that cross-sign each other: CA 2 (certs 2, 4) is signed by CA 3, whose certificate
@@ -153,4 +167,8 @@ class TestPostgres(s_tests.SynTest):
             assert [c["crtsh"]["id"] for c in chain["certs"]] == [10, 2, 4, 1, 14]
             assert all(len(path) == len(set(path)) for path in chain["paths"])
             assert len(await svc.db.chain({"id": [10]}, maxrows=3)) == 3
-            assert (await svc.rawQuery("SHOW statement_timeout"))[0]["statement_timeout"] == "30s"
+            # Each query sets its own statement_timeout (SET LOCAL), in a read-only transaction.
+            rows = await svc.rawQuery(
+                "SELECT current_setting('statement_timeout') AS st, current_setting('transaction_read_only') AS ro"
+            )
+            assert rows == [{"st": "30s", "ro": "on"}]

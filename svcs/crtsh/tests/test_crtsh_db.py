@@ -59,11 +59,14 @@ class FakeConn:
             self.server.busy = False
 
     async def execute(self, sql):
+        assert not self.closed
         self.server.executed.append(sql)
-        if self.server.setfail:
+        if self.server.setfail and "SET" in sql:
             raise asyncpg.exceptions.InsufficientPrivilegeError(
                 "permission denied to set parameter"
             )
+        if self.server.rollbackfail and sql == "ROLLBACK":
+            raise OSError("connection lost")
 
     async def fetchval(self, sql, timeout=None):
         if self.server.pingfail:
@@ -94,6 +97,7 @@ class FakeServer:
         self.terminated = 0
         self.executed: list[str] = []
         self.setfail = False
+        self.rollbackfail = False
 
     async def connect(self, dsn, **kwargs):
         self.attempts += 1
@@ -222,26 +226,94 @@ async def test_keepalive_and_idle_close():
     assert server.open == 0
 
 
+BEGIN = "BEGIN READ ONLY; SET LOCAL statement_timeout = {}"
+
+
 async def test_statement_timeout():
-    # crt.sh's default statement_timeout cancels big queries, every connection sets its own.
+    # crt.sh's default statement_timeout cancels big queries, so every query sets its own,
+    # with SET LOCAL in a read-only transaction (a session SET is lost behind transaction pooling).
     server = FakeServer()
     db = makeDb(server, statement_timeout=90)
     try:
         await db.fetch("SELECT 1")
-        assert server.executed == ["SET statement_timeout = 90000"]
+        assert server.executed == [BEGIN.format(90000), "COMMIT"]
+        # A dropped connection's transaction is rolled back, and the retry sets it again.
+        server.executed.clear()
         server.errors = [asyncpg.exceptions.ProtocolViolationError("client_idle_timeout")]
         await db.fetch("SELECT 2")
-        assert server.executed == ["SET statement_timeout = 90000"] * 2
+        assert server.executed == [BEGIN.format(90000), "ROLLBACK", BEGIN.format(90000), "COMMIT"]
+        assert len(server.conns) == 2
     finally:
         await db.close()
 
-    # The default is no limit, and a server that refuses the SET is still used.
+    # The default is no limit, and a server that refuses the SET is still used, without it.
     server = FakeServer()
     server.setfail = True
     db = makeDb(server)
     try:
         assert (await db.fetch("SELECT 1"))[0]["conn"] == 0
-        assert server.executed == ["SET statement_timeout = 0"]
+        assert server.executed == [BEGIN.format(0), "ROLLBACK", "BEGIN READ ONLY", "COMMIT"]
+        server.executed.clear()
+        await db.fetch("SELECT 2")
+        assert server.executed == ["BEGIN READ ONLY", "COMMIT"]
+    finally:
+        await db.close()
+
+    # A refused SET whose ROLLBACK fails drops the connection, and the query is retried.
+    server = FakeServer()
+    server.setfail = True
+    server.rollbackfail = True
+    db = makeDb(server)
+    try:
+        assert (await db.fetch("SELECT 1"))[0]["conn"] == 1
+    finally:
+        await db.close()
+
+
+async def test_transaction_errors():
+    # A failed query rolls its transaction back, and the connection is reused.
+    server = FakeServer()
+    db = makeDb(server)
+    try:
+        server.errors = [asyncpg.exceptions.UndefinedTableError('relation "nope" does not exist')]
+        with pytest.raises(CrtshDbError, match="nope"):
+            await db.fetch("SELECT * FROM nope")
+        assert server.executed[-1] == "ROLLBACK"
+        assert (await db.fetch("SELECT 1"))[0]["conn"] == 0
+
+        # crt.sh canceling the query (statement timeout) rolls back too.
+        server.errors = [asyncpg.exceptions.QueryCanceledError("canceling statement")]
+        with pytest.raises(CrtshDbError, match="statement timeout"):
+            await db.fetch("SELECT 2")
+        assert server.executed[-1] == "ROLLBACK"
+        assert (await db.fetch("SELECT 3"))[0]["conn"] == 0
+
+        # A ROLLBACK that fails drops the connection.
+        server.rollbackfail = True
+        server.errors = [asyncpg.exceptions.UndefinedTableError('relation "nope" does not exist')]
+        with pytest.raises(CrtshDbError, match="nope"):
+            await db.fetch("SELECT * FROM nope")
+        assert db._conn is None and server.open == 0
+    finally:
+        await db.close()
+
+
+async def test_cancel_drops_connection():
+    # A query cancelled midway leaves the connection mid-query, so it's terminated.
+    server = FakeServer()
+    server.delay = 5
+    db = makeDb(server)
+    try:
+        task = asyncio.get_running_loop().create_task(db.fetch("SELECT pg_sleep(60)"))
+        await asyncio.sleep(0.2)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert db._conn is None and server.terminated == 1 and server.open == 0
+
+        # The next query gets a new connection.
+        server.delay = 0.01
+        assert (await db.fetch("SELECT 1"))[0]["conn"] == 1
     finally:
         await db.close()
 
@@ -289,12 +361,14 @@ async def test_drop_edges():
     assert db._conn is None and server.conns[0].closed
     await db.close()
 
-    # Errors that aren't from the database are bugs, they're raised as-is.
+    # Errors that aren't from the database are bugs, they're raised as-is, and the
+    # connection (in an unknown state) is dropped.
     server = FakeServer()
     db = makeDb(server)
     server.errors = [ValueError("bug")]
     with pytest.raises(ValueError, match="bug"):
         await db.fetch("SELECT 1")
+    assert db._conn is None and server.open == 0
     await db.close()
 
 
@@ -525,11 +599,14 @@ async def test_sql_cas():
 
 
 async def test_sql_raw():
+    # Raw SQL is wrapped so it can only be a query, and its rows are capped.
     db = Recorder()
     await db.raw("SELECT $1", [1])
-    assert db.queries[-1] == ("SELECT $1", (1,))
-    await db.raw("SELECT 1")
-    assert db.queries[-1] == ("SELECT 1", ())
+    assert db.queries[-1] == ("SELECT * FROM (\nSELECT $1\n) q LIMIT $2", (1, 1000))
+    await db.raw("SELECT 1 -- a comment;\n ;", limit=5)
+    assert db.queries[-1] == ("SELECT * FROM (\nSELECT 1 -- a comment\n) q LIMIT $1", (5,))
+    with pytest.raises(CrtshDbError, match="No SQL"):
+        await db.raw(" ; ")
 
 
 def test_tsquery():

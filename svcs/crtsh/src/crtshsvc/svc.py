@@ -61,6 +61,8 @@ def identityQuery(field: str, valu: str, exact: bool = False) -> tuple[str, str 
             valu = str(addr)
         return valu, likeEscape(valu)
 
+    if field == "dns" and not exact:
+        valu = normDomain(valu)
     pattern = likeEscape(valu.lstrip("*").lstrip(".") if field == "dns" else valu)
     if exact:
         return valu, pattern
@@ -68,6 +70,48 @@ def identityQuery(field: str, valu: str, exact: bool = False) -> tuple[str, str 
         # The domain itself, its subdomains, and wildcards for it.
         return valu, "%" + pattern
     return valu, "%" + pattern + "%"
+
+
+def normDomain(valu: str) -> str:
+    """A domain search value without a leading wildcard or dot (``*.x.com`` and ``.x.com`` are ``x.com``)."""
+
+    return valu.strip().lstrip("*").lstrip(".")
+
+
+def normIp(valu: Any) -> str:
+    """The canonical form of an IP address search value, as certificate details hold IP SANs."""
+
+    try:
+        return str(ipaddress.ip_address(str(valu).strip()))
+    except ValueError:
+        raise CrtshDbError(f"Invalid IP address: {valu}") from None
+
+
+def toInt(name: str, valu: Any) -> int:
+    """Convert an integer argument, raising CrtshDbError for anything else."""
+
+    if isinstance(valu, bool):
+        raise CrtshDbError(f"Invalid {name}, expected an integer: {valu}")
+    try:
+        return int(valu)
+    except (TypeError, ValueError):
+        raise CrtshDbError(f"Invalid {name}, expected an integer: {valu}") from None
+
+
+def toCaids(caids: Any) -> list[int]:
+    """Convert CA IDs (a value or list of values, None for none) to a list of ints."""
+
+    if caids is None:
+        return []
+    if not isinstance(caids, (list, tuple)):
+        caids = [caids]
+    return [toInt("CA ID", caid) for caid in caids]
+
+
+def toMillis(name: str, valu: Any) -> int | None:
+    """Convert an optional epoch millis argument."""
+
+    return None if valu is None else toInt(name, valu)
 
 
 def lookupValu(kind: str, valu: Any) -> list:
@@ -129,17 +173,19 @@ class CrtshSvc(s_cell.Cell):
         },
         "crtsh:timeout": {
             "type": "number",
-            "default": 0,
+            "default": 660,
             "description": (
-                "Seconds before a single query times out, 0 for no timeout. crt.sh is slow, "
-                "big searches can take minutes."
+                "Seconds before the service gives up waiting on a single query, 0 for no timeout. "
+                "crt.sh is slow, big searches can take minutes. Queries run one at a time, so a "
+                "query that never finishes would block every other call. Keep it a little longer "
+                "than crtsh:statement:timeout, so crt.sh cancels a slow query first."
             ),
         },
         "crtsh:statement:timeout": {
             "type": "number",
-            "default": 0,
+            "default": 600,
             "description": (
-                "The statement_timeout, in seconds, set on crt.sh connections, 0 for no limit. "
+                "The statement_timeout, in seconds, set for each crt.sh query, 0 for no limit. "
                 "crt.sh's default cancels big queries (chains, wide searches) that finish given time."
             ),
         },
@@ -177,6 +223,11 @@ class CrtshSvc(s_cell.Cell):
             "default": 10000,
             "description": "The max number of certificates any one call may return.",
         },
+        "crtsh:sql:limit": {
+            "type": "integer",
+            "default": 1000,
+            "description": "The max number of rows slib.crtsh.admin.sql (rawQuery) may return.",
+        },
         "crtsh:candidates": {
             "type": "integer",
             "default": 10000,
@@ -201,11 +252,16 @@ class CrtshSvc(s_cell.Cell):
         )
         self.onfini(self.db.close)
 
-    def _limit(self, limit: int | None) -> int:
-        maxlimit = self.conf.get("crtsh:limit")
-        if not limit or limit < 0:
+    def _limit(self, limit: int | None, conf: str = "crtsh:limit") -> int:
+        """A call's limit, capped at the configured max (the max when it's None)."""
+
+        maxlimit = self.conf.get(conf)
+        if limit is None:
             return maxlimit
-        return min(int(limit), maxlimit)
+        limit = toInt("limit", limit)
+        if limit < 1:
+            raise CrtshDbError(f"Invalid limit {limit}, it must be at least 1.")
+        return min(limit, maxlimit)
 
     # ---- Building certificate details ----
 
@@ -296,9 +352,11 @@ class CrtshSvc(s_cell.Cell):
     ) -> AsyncIterator[dict]:
         """Search certificates by their properties, yielding the complete details of each, newest first.
 
-        Every given field must match. ``dns`` matches the domain and its subdomains
-        (or only the domain itself with ``exact``), the other text fields match
-        substrings (or the whole value with ``exact``). ``issuer`` matches the
+        Every given field must match. crt.sh is searched with full text search on the
+        most specific field, so values match whole words, domains, and addresses, not
+        substrings (``cn="old"`` doesn't match ``old.vertex.link``). ``dns`` matches the
+        domain and its subdomains (or only the domain itself with ``exact``), ``ip``
+        matches the address exactly, and ``exact`` requires whole values. ``issuer`` matches the
         issuing CA's name and ``caids`` the issuing crt.sh CA IDs. ``valid`` only
         returns unexpired certificates, ``since``/``until`` bound notBefore (epoch
         millis), and ``precerts=False`` drops precertificates.
@@ -317,8 +375,14 @@ class CrtshSvc(s_cell.Cell):
             "identity": identity,
         }
         fields = {k: str(v) for k, v in fields.items() if v not in (None, "")}
-        caids = list(caids or [])
-        issuer = str(issuer) if issuer else None
+        if "ip" in fields:
+            # Certificate details hold IP SANs in canonical form, ex. 2001:db8::1.
+            fields["ip"] = normIp(fields["ip"])
+        if "dns" in fields and not exact:
+            fields["dns"] = normDomain(fields["dns"])
+        caids = toCaids(caids)
+        issuer = str(issuer) if issuer not in (None, "") else None
+        since, until = toMillis("since", since), toMillis("until", until)
 
         if not fields and not caids and not issuer:
             raise CrtshDbError("A search needs at least one certificate field or an issuer.")
@@ -357,7 +421,10 @@ class CrtshSvc(s_cell.Cell):
             if not precerts and details.get("precert"):
                 return False
             for field, valu in fields.items():
-                mode = "exact" if exact else ("suffix" if field == "dns" else "contains")
+                if exact or field == "ip":
+                    mode = "exact"  # A substring of an IP is a different IP.
+                else:
+                    mode = "suffix" if field == "dns" else "contains"
                 if not norm.matches(details, field, valu, mode):
                     return False
             return True
@@ -385,7 +452,8 @@ class CrtshSvc(s_cell.Cell):
         name and key, so certificates issued under any of them are returned.
         """
 
-        caids = list(caids or [])
+        caids = toCaids(caids)
+        since, until = toMillis("since", since), toMillis("until", until)
         cert = self._lookups(kind, valu) if valu is not None else None
         if not caids and not cert:
             raise CrtshDbError("A CA ID or certificate is required.")
@@ -486,6 +554,7 @@ class CrtshSvc(s_cell.Cell):
         At most ``maxcerts`` certificates, the closest to the leaf, are returned.
         """
 
+        maxdepth, maxcerts = toInt("maxdepth", maxdepth), toInt("maxcerts", maxcerts)
         rows = await self.db.chain(self._lookups(kind, valu), maxdepth=maxdepth)
         if not rows:
             raise CrtshDbError(f"crt.sh has no certificate with {kind or guessKind(valu)} {valu}")
@@ -535,11 +604,12 @@ class CrtshSvc(s_cell.Cell):
         of each of the CA's certificates when ``certs`` is true, otherwise just their crt.sh IDs.
         """
 
+        caids = toCaids(caids)
         if not caids and not name:
             raise CrtshDbError("A CA name or ID is required.")
 
         rows = await self.db.cas(
-            caids=[int(c) for c in caids] if caids else None,
+            caids=caids or None,
             name=name or None,
             certs=certs,
             limit=self._limit(limit),
@@ -556,10 +626,20 @@ class CrtshSvc(s_cell.Cell):
 
     # ---- Escape hatch ----
 
-    async def rawQuery(self, sql: str, args: list | None = None) -> list[dict]:
-        """Run raw SQL against crt.sh. Bytes are hex encoded and times are epoch millis."""
+    async def rawQuery(
+        self, sql: str, args: list | None = None, limit: int | None = None
+    ) -> list[dict]:
+        """Run a raw SQL query against crt.sh. Bytes are hex encoded and times are epoch millis.
 
-        return [_safeRow(row) for row in await self.db.raw(sql, args)]
+        ``sql`` must be a single query that returns rows (SELECT, VALUES, TABLE, or WITH ... SELECT),
+        it runs in a read-only transaction. At most ``limit`` rows are returned, capped by
+        ``crtsh:sql:limit``.
+        """
+
+        if args is not None and not isinstance(args, (list, tuple)):
+            raise CrtshDbError("Invalid args, expected a list of positional query arguments.")
+        limit = self._limit(limit, conf="crtsh:sql:limit")
+        return [_safeRow(row) for row in await self.db.raw(str(sql), args, limit=limit)]
 
 
 def _safeRow(row: dict) -> dict:

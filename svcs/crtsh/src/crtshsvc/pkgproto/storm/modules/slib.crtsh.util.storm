@@ -3,7 +3,7 @@
 // Warn about a failed service call. Returns true if the call failed.
 function failed(retn, what) {
     if $retn.status { return((false)) }
-    $lib.warn("slib.crtsh: {what} failed: {err}", what=$what, err=$retn.mesg)
+    $lib.warn(`slib.crtsh: {$what} failed: {$retn.mesg}`)
     return((true))
 }
 
@@ -27,7 +27,7 @@ function printJson(valu) {
 
 // Convert a time string (ex. 2024-01-01, "-30 days") to epoch millis, or null.
 function toTime(valu) {
-    if ($valu = $lib.null or $valu = "") { return($lib.null) }
+    if ($valu = $lib.null or $valu = "") { return() }
     return($lib.cast(time, $valu))
 }
 
@@ -45,11 +45,56 @@ function certKey(n) {
     if $sha256 { return((sha256, $sha256)) }
     $sha1 = $n.props."sha1"
     if $sha1 { return((sha1, $sha1)) }
-    return($lib.null)
+    return()
+}
+
+// certKey() for a node of any form, null unless it's a crypto:x509:cert.
+function certKeyOf(n) {
+    if ($n.form() = "crypto:x509:cert") { return($certKey($n)) }
+    return()
+}
+
+// The (kind, value) slib.crtsh.cert looks a node up by, or null for nodes it can't look up.
+function lookupKey(n) {
+    switch $n.form() {
+        "crypto:x509:cert": { return($certKey($n)) }
+        "hash:sha256": { return((sha256, $n.repr())) }
+        "hash:sha1": { return((sha1, $n.repr())) }
+    }
+    return()
+}
+
+// The (search field, value) slib.crtsh.search searches a node for, or null for nodes it can't search.
+function searchKey(n) {
+    $fields = ({
+        "inet:fqdn": "dns",
+        "inet:email": "email",
+        "inet:ipv4": "ip",
+        "inet:ipv6": "ip",
+        "inet:url": "uri",
+        "ou:name": "org",
+    })
+    $form = $n.form()
+    if ($form = "ou:org") {
+        $name = $n.props.name
+        if $name { return((org, $name)) }
+        return()
+    }
+    $field = $fields.$form
+    if $field { return(($field, $n.repr())) }
+    return()
 }
 
 // Yield the nodes a generator emits. divert needs a node generator (one that yields nodes),
 // the slib.crtsh.lib functions emit them.
 function nodes(items) {
     for $item in $items { yield $item }
+}
+
+// Whether an option was given: not null, not an empty string, and not an empty list.
+// 0 and false count as given.
+function given(valu) {
+    if ($valu = $lib.null or $valu = "") { return((false)) }
+    if ($lib.vars.type($valu) = "list") { return(($lib.len($valu) > 0)) }
+    return((true))
 }
