@@ -1,8 +1,9 @@
 # pcap research
 
 Research behind `svcs/pcap` (PR #16), done 2026-10-31. It covers planning the merge of the pcap, Snort
-(PR #17), and a future Suricata service into one service, plus a tshark sandbox. This is planning
-material only. Nothing here has been implemented yet.
+(PR #17), and a future Suricata service into one service, plus a tshark sandbox. The plan has since
+been implemented in `svcs/pcap` (see its README), which is the source of truth for how the service
+works. Where the two differ, these notes record what was planned, not what was built.
 
 Start with the plan:
 

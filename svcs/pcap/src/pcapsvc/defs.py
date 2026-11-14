@@ -10,8 +10,6 @@ SVC_VER = __version__
 """The service's version."""
 SVC_GUID = "cae9b5f5923a48b9a1a691f851a77429"
 """The guid of the service's meta:source node."""
-SVC_SYN_MIN_VER = (2, 234, 0)
-"""The minimum Synapse version the service supports."""
 
 SYNC_PERIOD = "hourly@:17"
 """The default schedule (a cron.add --period) of the slib.pcap.sync cron job."""
@@ -27,6 +25,10 @@ SYNC_DOC = (
 
 CRON_GLOBAL = "slib:pcap:cron"
 """The Storm global that holds the iden of the scheduled sync cron job."""
+
+RULES_VIEW_GLOBAL = "slib:pcap:rules:view"
+"""The Storm global that holds the iden of the view the service's rules come from. The service
+has one set of rules, so pushes (and rule edits) from any other view are refused."""
 
 
 def _addStorm() -> str:
@@ -45,6 +47,9 @@ def _addStorm() -> str:
         $cron.set(doc, "{SYNC_DOC}")
         $lib.globals.set({CRON_GLOBAL}, $cron.iden)
     }}
+    if (not $lib.globals.get({RULES_VIEW_GLOBAL})) {{
+        $lib.globals.set({RULES_VIEW_GLOBAL}, $lib.view.get().iden)
+    }}
     """
 
 
@@ -52,6 +57,7 @@ def _delStorm() -> str:
     """The Storm run when the service is removed from a Cortex, removes the sync cron job."""
 
     return f"""
+    $lib.globals.pop({RULES_VIEW_GLOBAL})
     $iden = $lib.globals.pop({CRON_GLOBAL})
     if $iden {{
         try {{ $lib.cron.del($iden) }} catch * as err {{ }}

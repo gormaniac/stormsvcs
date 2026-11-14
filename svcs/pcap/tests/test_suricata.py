@@ -10,6 +10,7 @@ from pcapsvc import flows as p_flows
 from pcapsvc import sandbox as p_sandbox
 from pcapsvc import suricata as p_suricata
 
+from . import pcapgen as g
 from .engines import needs
 
 DATA = pathlib.Path(__file__).parent / "data"
@@ -203,6 +204,25 @@ class TestSuricata:
             assert seen and seen <= ids, name
             nums = [e["pcap_cnt"] for e in events if e.get("pcap_cnt")]
             assert nums and max(nums) <= summary["packets"], name
+
+        # ICMP types without a counterpart (ex. unreachable) too, Suricata hashes them its own
+        # way (see pcapsvc.communityid._icmpPorts). One ICMP flow per address pair, the
+        # service's ICMP flows are by address.
+        icmp = tmp_path / "icmp.pcap"
+        icmp.write_bytes(g.pcap([
+            (0.0, g.eth(g.icmp("10.0.0.9", "10.0.0.1", 3))),
+            (0.1, g.eth(g.icmp("10.0.0.2", "10.0.0.8", 11))),
+            (0.2, g.eth(g.icmp("10.0.0.3", "10.0.0.7", 8))),
+            (0.3, g.eth(g.icmp("10.0.0.7", "10.0.0.3", 0))),
+            (0.4, g.eth(g.icmp("2001:db8::9", "2001:db8::1", 1))),
+        ]))
+        (tmp_path / "icmpout").mkdir()
+        res = await suri.run(str(icmp), str(tmp_path / "icmpout"))
+        with open(icmp, "rb") as fd:
+            flows, _ = p_flows.analyze(fd)
+        seen = {e["community_id"] for e in p_suricata.iterEve(res["eve"])
+                if e.get("community_id")}
+        assert len(seen) == 4 and seen <= {f["community_id"] for f in flows}
 
         # Files are stored by SHA-256.
         (tmp_path / "http2").mkdir()

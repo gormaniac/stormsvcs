@@ -15,28 +15,33 @@ function feedEnable(name, enabled=(true)) { return($svc.feedEnable($name, enable
 // The sync cron job, or null if there isn't one.
 function cron() {
     $iden = $lib.globals.get($cronglobal)
-    if (not $iden) { return($lib.null) }
+    if (not $iden) { return() }
     try {
         return($lib.cron.get($iden))
     } catch (NoSuchIden, StormRuntimeError) as err {
-        return($lib.null)
+        return()
     }
 }
 
 // Replace the sync cron job with one on a new schedule (a cron.add --period), in the current view.
+// The job runs as the calling user (not root), so slib.pcap.sync checks their permissions.
 function schedule(period) {
     $old = $cron()
     $new = $lib.cron.add(query="slib.pcap.sync", period=$period)
+    // $lib.user is still the caller in this asroot module, set it explicitly anyway.
+    $new.set(creator, $lib.user.iden)
     $new.set(name, "slib.pcap.sync")
     $new.set(doc, "Sync the slib.pcap rule feeds into the Cortex and push the enabled it:app:snort:rule and it:app:suricata:rule nodes to the slib.pcap service.")
     $lib.globals.set($cronglobal, $new.iden)
+    // The service's rules now come from this view (see slib.pcap.priv.sync.rulesView).
+    $lib.globals.set("slib:pcap:rules:view", $lib.view.get().iden)
     if $old { $lib.cron.del($old.iden) }
     return($new)
 }
 
 function enable(enabled=(true)) {
     $job = $cron()
-    if (not $job) { return($lib.null) }
+    if (not $job) { return() }
     if $enabled { $lib.cron.enable($job.iden) }
     else { $lib.cron.disable($job.iden) }
     return($lib.cron.get($job.iden))
@@ -44,14 +49,14 @@ function enable(enabled=(true)) {
 
 function decodeDefaults() {
     $rules = $lib.globals.get("slib:pcap:decode")
-    if ($rules = $lib.null) { return(([])) }
+    if ($rules = null) { return(([])) }
     return($rules)
 }
 
 // The network variables (ex. HOME_NET) both engines use for every run, {name: address group}.
 function netVars() {
     $vars = $lib.globals.get("slib:pcap:vars")
-    if ($vars = $lib.null) { return(({})) }
+    if ($vars = null) { return(({})) }
     return($vars)
 }
 

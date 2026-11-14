@@ -1,9 +1,11 @@
 """Pytests for pcapsvc.sandbox and pcapsvc._sbxexec, the sandbox engines run in."""
 
 
+import asyncio
 import os
 import signal
 import sys
+import time
 
 import pytest
 
@@ -69,6 +71,11 @@ class TestSandbox:
             assert [a["kind"] for a in res.alerts] == ["seccomp"], family
         res = await runPy(sbx, "import socket; socket.socket(socket.AF_UNIX); print('ok')", dirs)
         assert res.stdout.strip() == b"ok"
+        # Other families (ex. netlink) fail quietly, they aren't network access.
+        res = await runPy(sbx, "import socket\ntry:\n    socket.socket(socket.AF_NETLINK, "
+                               "socket.SOCK_RAW)\nexcept PermissionError:\n    print('denied')",
+                          dirs)
+        assert res.stdout.strip() == b"denied" and res.alerts == []
 
         # Without seccomp, Landlock still blocks TCP connects (ABI 4+), UDP is allowed.
         nosec = p_sandbox.Sandbox(seccomp=False)
@@ -301,6 +308,63 @@ class TestDetection:
         pid = int(res.alerts[0]["detail"].split()[1])
         assert not os.path.exists(f"/proc/{pid}") or \
             "Z" in open(f"/proc/{pid}/stat").read().rsplit(")", 1)[1].split()[0]
+
+    async def test_escaped_timeout(self, dirs):
+        # An engine that times out while a child that left its process group holds its pipes
+        # open is still given up on (proc.wait() would wait for the pipes forever).
+        sbx = p_sandbox.Sandbox()
+        code = ("import os, sys, time\n"
+                "if os.fork() == 0:\n"
+                "    os.setsid()\n"
+                "    time.sleep(60)\n"
+                "    os._exit(0)\n"
+                "time.sleep(60)")
+        loop = asyncio.get_running_loop()
+        start = loop.time()
+        with pytest.raises(p_sandbox.SandboxError, match="took longer than 1 seconds"):
+            await asyncio.wait_for(runPy(sbx, code, dirs, timeout=1), 15)
+        assert loop.time() - start < 10
+        sbx.sweep()
+
+    def test_reap_other_zombies(self):
+        # The service is a subreaper for every orphan, not only the engines'. A zombie of an
+        # orphan that wasn't started in the sandbox is reaped once it's old enough.
+        sbx = p_sandbox.Sandbox()
+        if not sbx.subreaper:
+            pytest.skip("can't be a child subreaper here")
+        rfd, wfd = os.pipe()
+        mid = os.fork()
+        if mid == 0:
+            if os.fork() == 0:
+                os.read(rfd, 1)  # Exits once the test says so, after its parent is gone.
+                os._exit(0)
+            os._exit(0)
+        os.waitpid(mid, 0)
+        os.write(wfd, b"x")
+        for _ in range(100):
+            zombies = [
+                int(pid) for pid in os.listdir("/proc") if pid.isdigit()
+                and (st := p_sandbox._procStatus(int(pid))) is not None
+                and st.get("PPid") == str(os.getpid()) and st.get("State", "").startswith("Z")
+            ]
+            if zombies:
+                break
+            time.sleep(0.05)
+        assert zombies
+        # Not reaped while it's young (whatever started it may still wait on it).
+        assert sbx.sweep() == [] and all(os.path.exists(f"/proc/{z}") for z in zombies)
+        sbx.sweep(zombieage=0)
+        assert not any(os.path.exists(f"/proc/{z}") for z in zombies)
+        os.close(rfd)
+        os.close(wfd)
+
+    def test_restore(self, tmp_path):
+        sbx = p_sandbox.Sandbox()
+        tmp_path.chmod(0o711)
+        sbx._modes[str(tmp_path)] = 0o700
+        sbx._reached.add(str(tmp_path))
+        sbx.restore()
+        assert (tmp_path.stat().st_mode & 0o777) == 0o700 and not sbx._reached
 
     def test_sandboxed_marker(self):
         own = {"Seccomp_filters": "1", "NoNewPrivs": "0"}

@@ -30,6 +30,11 @@ def test_norm_feed():
 
     with pytest.raises(s_feeds.FeedError, match="name"):
         s_feeds.normFeed({"name": "bad name", "url": "https://e.com"})
+    # The name is a path component, so it can't be (or start like) "." or "..".
+    for name in (".", "..", "...", ".hidden", "-x"):
+        with pytest.raises(s_feeds.FeedError, match="name"):
+            s_feeds.normFeed({"name": name, "url": "https://e.com"})
+    assert s_feeds.normFeed({"name": "et.open-2", "url": "https://e.com"})["name"] == "et.open-2"
     with pytest.raises(s_feeds.FeedError, match="URL"):
         s_feeds.normFeed({"name": "x", "url": "ftp://e.com"})
     with pytest.raises(s_feeds.FeedError, match="engine"):
@@ -69,6 +74,30 @@ def test_unpack_formats():
         list(s_feeds.unpack(gzip.compress(b"x" * 100), maxsize=10))
     with pytest.raises(s_feeds.FeedError, match="unpack"):
         list(s_feeds.unpack(b"PK\x03\x04garbage"))
+
+
+def test_unpack_zip_lies():
+    # A zip member that declares a smaller size than it decompresses to.
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zfd:
+        zfd.writestr("a.rules", b"x" * 100_000)
+    byts = bytearray(buf.getvalue())
+    info = zipfile.ZipFile(io.BytesIO(bytes(byts))).infolist()[0]
+    # The uncompressed size, in the local header (offset 22) and the central directory (24).
+    cdir = byts.rindex(b"PK\x01\x02")
+    for offs in (info.header_offset + 22, cdir + 24):
+        byts[offs:offs + 4] = (10).to_bytes(4, "little")
+    with pytest.raises(s_feeds.FeedError):
+        list(s_feeds.unpack(bytes(byts), maxsize=1000))
+
+    # The declared sizes are checked first, and what's read is counted too.
+    total = [0]
+    with pytest.raises(s_feeds.FeedError, match="max size"):
+        s_feeds._read(io.BytesIO(b"x" * 50), 5, 20, total)
+    assert total == [21]
+    total = [15]
+    with pytest.raises(s_feeds.FeedError, match="max size"):
+        s_feeds._read(io.BytesIO(b"x"), 10, 20, total)
 
 
 def test_parse_feed():

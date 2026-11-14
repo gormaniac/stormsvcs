@@ -5,7 +5,7 @@ init {
 
     $guids = ([])
     $feeds = $pcap.feeds()
-    if ($feeds != $lib.null) {
+    if ($feeds != null) {
         $rows = ([])
         for $feed in $feeds {
             $guids.append($feed.ruleset)
@@ -14,15 +14,15 @@ init {
             // Synced into this view.
             if ($info.sha256 and $info.synced = $info.sha256) { $synced = yes }
             $count = ""
-            if ($info.count != $lib.null) { $count = $lib.cast(str, $info.count) }
+            if ($info.count != null) { $count = $lib.cast(str, $info.count) }
             $rows.append(($feed.name, $lib.cast(str, $feed.enabled), $lib.cast(str, $feed.engine), $count,
                           $util.when($info.pulled), $synced))
         }
         $util.table((("name", (20)), ("enabled", (8)), ("engine", (7)), ("rules", (7)), ("downloaded", (20)), ("synced", (7))), $rows)
         for $feed in $feeds {
-            $lib.print("{name}: {url}", name=$feed.name, url=$feed.url)
+            $lib.print(`{$feed.name}: {$feed.url}`)
             if $feed.info.error {
-                $lib.warn("slib.pcap.feed.list: The last download of {name} failed: {err}", name=$feed.name, err=$feed.info.error)
+                $lib.warn(`slib.pcap.feed.list: The last download of {$feed.name} failed: {$feed.info.error}`)
             }
         }
     }

@@ -64,15 +64,6 @@ _DAQ_WARN = re.compile(r"Error receiving message from the DAQ")
 _SID = re.compile(r"\bsid\s*:\s*(\d+)")
 _GID = re.compile(r"\bgid\s*:\s*(\d+)")
 
-PCAP_MAGICS = (
-    b"\xa1\xb2\xc3\xd4",
-    b"\xd4\xc3\xb2\xa1",  # pcap (usec)
-    b"\xa1\xb2\x3c\x4d",
-    b"\x4d\x3c\xb2\xa1",  # pcap (nsec)
-    b"\x0a\x0d\x0d\x0a",  # pcapng
-)
-"""The magic bytes a PCAP (or PCAPNG) file starts with."""
-
 
 def _luaString(valu: str) -> str:
     """A Lua string literal."""
@@ -86,12 +77,6 @@ class SnortError(Exception):
     def __init__(self, mesg: str) -> None:
         super().__init__(mesg)
         self.mesg = mesg
-
-
-def isPcap(head: bytes) -> bool:
-    """Whether the first bytes of a file are a PCAP or PCAPNG magic number."""
-
-    return head[:4] in PCAP_MAGICS
 
 
 def precheck(text: str) -> str | None:

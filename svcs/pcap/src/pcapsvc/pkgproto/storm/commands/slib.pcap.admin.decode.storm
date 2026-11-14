@@ -22,14 +22,14 @@ init {
     if ($cmdopts.add or $cmdopts.del or $cmdopts.clear) {
         $retn = $privadmin.setDecodeDefaults($rules)
         if (not $retn.status) {
-            $lib.warn("slib.pcap.admin.decode: {err}", err=$retn.mesg)
+            $lib.warn(`slib.pcap.admin.decode: {$retn.mesg}`)
         }
     }
 
     $rules = $privadmin.decodeDefaults()
     if $rules {
         $lib.print("slib.pcap Decode As rules for every run:")
-        for $rule in $rules { $lib.print("    {rule}", rule=$rule) }
+        for $rule in $rules { $lib.print(`    {$rule}`) }
     } else {
         $lib.print("slib.pcap has no Decode As rules for every run.")
     }

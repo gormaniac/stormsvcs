@@ -160,7 +160,9 @@ def redact(text: str, secrets: dict[str, dict] | None = None) -> str:
     return text
 
 
-FEED_NAME_CHARS = set("abcdefghijklmnopqrstuvwxyz0123456789-_.")
+FEED_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]*$")
+"""A valid feed name. It starts with a letter or number, so ``.`` and ``..`` are invalid (the
+name is used as a path component)."""
 
 
 def normFeed(fdef: dict[str, Any]) -> FeedDef:
@@ -173,9 +175,10 @@ def normFeed(fdef: dict[str, Any]) -> FeedDef:
     """
 
     name = str(fdef.get("name") or "").strip().lower()
-    if not name or not set(name) <= FEED_NAME_CHARS:
+    if not FEED_NAME_RE.match(name):
         raise FeedError(
-            f"Invalid feed name {name!r}, use lowercase letters, numbers, '-', '_', and '.'."
+            f"Invalid feed name {name!r}, use lowercase letters, numbers, '-', '_', and '.', "
+            "starting with a letter or number."
         )
 
     url = str(fdef.get("url") or "").strip()
@@ -209,10 +212,20 @@ def _wanted(path: str, exclude: list[str]) -> bool:
 
 
 def _read(fobj: Any, size: int, maxsize: int, total: list[int]) -> bytes:
-    total[0] += size
+    """Read an archive member, counting it against the feed's max (unpacked) size.
+
+    The member's declared ``size`` is checked first, but not trusted: at most what's left of
+    ``maxsize`` (plus a byte) is read, so a member that lies about its size can't be fully
+    decompressed into memory.
+    """
+
+    if total[0] + size > maxsize:
+        raise FeedError(f"The feed unpacks to more than the max size of {maxsize} bytes.")
+    byts = fobj.read(maxsize - total[0] + 1)
+    total[0] += len(byts)
     if total[0] > maxsize:
         raise FeedError(f"The feed unpacks to more than the max size of {maxsize} bytes.")
-    return fobj.read()
+    return byts
 
 
 def unpack(

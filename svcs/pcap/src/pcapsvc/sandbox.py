@@ -40,18 +40,26 @@ logger = logging.getLogger(__name__)
 MODES = ("best-effort", "strict", "off")
 """The sandbox modes."""
 
+ZOMBIE_AGE = 60.0
+"""Seconds a zombie child of the service that wasn't started in the sandbox is left for its
+parent to wait on before the sweep reaps it."""
+
 DEFAULT_USER = "slib-pcap-engine"
 """The unprivileged user engines run as (created in the service's image), when the service runs
 as root."""
 
 DEFAULT_RLIMITS = {
-    "as": 8 * 1024**3,
+    "as": 4 * 1024**3,
     "cpu": 3600,
     "fsize": 4 * 1024**3,
     "nofile": 4096,
     "core": 0,
+    "nproc": 256,
 }
-"""The default resource limits of an engine run, bytes or seconds (0 is unlimited)."""
+"""The default resource limits of an engine run, bytes or seconds (0 is unlimited).
+
+``nproc`` only applies when engines run as the sandbox user, it counts every process of the
+user, so it would also limit the service's own threads."""
 
 SYSTEM_READ = (
     "/etc/ld.so.cache",
@@ -274,6 +282,10 @@ class Sandbox:
         self.script = os.path.abspath(_sbxexec.__file__)
         self._probe: dict[str, Any] | None = None
         self._reached: set[str] = set()
+        # The modes of the directories reach() opened up, to put back (see restore).
+        self._modes: dict[str, int] = {}
+        # When each zombie child that wasn't started in the sandbox was first seen (see sweep).
+        self._zombies: dict[int, float] = {}
         self._live: set[int] = set()
         self.alerts: collections.deque[dict] = collections.deque(maxlen=100)
         self.alertcount = 0
@@ -300,10 +312,18 @@ class Sandbox:
             result.alerts.append(rec)
         return rec
 
-    def sweep(self, engine: str = "engine", result: Result | None = None) -> list[int]:
+    def sweep(
+        self, engine: str = "engine", result: Result | None = None, zombieage: float = ZOMBIE_AGE
+    ) -> list[int]:
         """Kill engine processes that got out of their run: orphans the service inherited
         (as a subreaper) and, with a sandbox user, the user's processes outside every running
-        engine's process group. Returns the killed pids."""
+        engine's process group. Returns the killed pids.
+
+        As a subreaper, the service also inherits orphans that have nothing to do with the
+        sandbox (ex. of a library's child process). Zombies of those are reaped once they've
+        been zombies for ``zombieage`` seconds, by then whatever started them (if it's still
+        the service's own child) would have waited on them.
+        """
 
         ids = self.ids()
         me = os.getpid()
@@ -313,6 +333,8 @@ class Sandbox:
             pids = [int(name) for name in os.listdir("/proc") if name.isdigit()]
         except OSError:
             return killed
+        now = time.monotonic()
+        zombies: dict[int, float] = {}
         for pid in pids:
             if pid == me or pid in self._live:
                 continue
@@ -328,6 +350,13 @@ class Sandbox:
                 if orphan:
                     with contextlib.suppress(ChildProcessError, OSError):
                         os.waitpid(pid, os.WNOHANG)
+                elif self.subreaper and status.get("PPid") == str(me):
+                    first = self._zombies.get(pid, now)
+                    if now - first >= zombieage:
+                        with contextlib.suppress(ChildProcessError, OSError):
+                            os.waitpid(pid, os.WNOHANG)
+                    else:
+                        zombies[pid] = first
                 continue
             ours = ids is not None and bool(uids) and int(uids[0]) == ids[0]
             if ours and _procPgrp(pid) in self._live:
@@ -343,7 +372,18 @@ class Sandbox:
             name = status.get("Name", "?")
             how = "was orphaned to the service" if orphan else "left its run's process group"
             self.alert("escaped", engine, f"process {pid} ({name}) {how}, it was killed", result)
+        self._zombies = zombies
         return killed
+
+    def restore(self) -> None:
+        """Put back the modes of the directories ``reach`` opened up (ex. when the service
+        stops)."""
+
+        for path, mode in sorted(self._modes.items(), key=lambda i: -len(i[0])):
+            with contextlib.suppress(OSError):
+                os.chmod(path, mode)
+        self._modes.clear()
+        self._reached.clear()
 
     def sweepFiles(
         self,
@@ -454,9 +494,12 @@ class Sandbox:
         """The ``_sbxexec`` spec of a run."""
 
         ids = self.ids()
+        rlimits = dict(self.rlimits)
+        if not ids:
+            rlimits.pop("nproc", None)
         return {
             "strict": self.mode == "strict",
-            "rlimits": self.rlimits,
+            "rlimits": rlimits,
             "uid": ids[0] if ids else None,
             "gid": ids[1] if ids else None,
             "landlock": True,
@@ -495,7 +538,9 @@ class Sandbox:
         directories (and the directories above them) that it can't search, ex. a 0700 cell
         directory.
 
-        Only the search bit is added, so the engine's user can't list those directories.
+        Only the search bit is added, so the engine's user can't list those directories. The
+        directories keep it while the service runs, ``restore`` (when the service stops) puts
+        their modes back.
         """
 
         ids = self.ids()
@@ -534,6 +579,7 @@ class Sandbox:
                             why,
                         )
                         break
+                    self._modes.setdefault(parent, stat.S_IMODE(info.st_mode))
                     os.chmod(parent, stat.S_IMODE(info.st_mode) | need)
                 self._reached.add(parent)
                 if parent == os.path.dirname(parent):
@@ -684,12 +730,10 @@ class Sandbox:
             try:
                 await asyncio.wait_for(waitAll(), timeout=timeout or None)
             except TimeoutError:
-                self._kill(proc)
-                await proc.wait()
+                await self._reap(proc, engine, result)
                 raise SandboxError(f"{argv[0]} took longer than {timeout} seconds.") from None
             except BaseException:
-                self._kill(proc)
-                await proc.wait()
+                await self._reap(proc, engine, result)
                 raise
             finally:
                 for task in tasks:
@@ -747,6 +791,29 @@ class Sandbox:
                     result,
                 )
         return result
+
+    async def _reap(
+        self, proc: asyncio.subprocess.Process, engine: str, result: Result, wait: float = 5
+    ) -> None:
+        """Kill a run that's being abandoned (it timed out or was cancelled) and wait, for at
+        most ``wait`` seconds, for it to exit.
+
+        ``proc.wait()`` isn't used: it also waits for the output pipes to close, and a process
+        that left the run's group (ex. with ``setsid()``) can hold them open forever.
+        """
+
+        self._kill(proc)
+        # Processes that left the run's process group.
+        self.sweep(engine, result)
+        transport = getattr(proc, "_transport", None)
+        if transport is not None:
+            # Closes the pipes (and kills the process, again).
+            with contextlib.suppress(Exception):
+                transport.close()
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + wait
+        while proc.returncode is None and loop.time() < deadline:
+            await asyncio.sleep(0.02)
 
     @staticmethod
     def _kill(proc: asyncio.subprocess.Process) -> None:

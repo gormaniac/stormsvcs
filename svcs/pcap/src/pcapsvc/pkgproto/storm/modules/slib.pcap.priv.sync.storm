@@ -102,8 +102,8 @@ function _retire(rule, rsguid) {
 function syncFeed(feed, force=(false)) {
     $name = $feed.name
     $view = $lib.view.get().iden
-    $summary = ({"name": $name, "error": $lib.null, "pulled": (false), "synced": (false),
-                 "full": (false), "added": (0), "updated": (0), "removed": (0), "count": (0)})
+    $summary = ({"name": $name, "error": null, "pulled": false, "synced": false,
+                 "full": false, "added": 0, "updated": 0, "removed": 0, "count": 0})
 
     $retn = $svc.feedPull($name, force=$force, view=$view)
     if (not $retn.status) {
@@ -194,9 +194,36 @@ function _send(iden, batch) {
     return($retn)
 }
 
+// The view the service's rules come from (see slib.pcap.admin.schedule), or null if it isn't
+// bound to one. The service has one set of rules, so only this view may change them.
+function rulesView() {
+    $view = $lib.globals.get("slib:pcap:rules:view")
+    if $view { return($view) }
+    // Installs from before the rules were bound to a view use the sync cron job's view.
+    $iden = $lib.globals.get("slib:pcap:cron")
+    if (not $iden) { return() }
+    try {
+        return($lib.cron.get($iden).pprint().view)
+    } catch (NoSuchIden, StormRuntimeError) as err {
+        return()
+    }
+}
+
+// A failed retn if the current view isn't the rules view, otherwise null.
+function _reqRulesView() {
+    $view = $rulesView()
+    if ($view and $view != $lib.view.get().iden) {
+        return(({"status": false, "data": null,
+                 "mesg": `The service's rules come from view {$view}, they can't be changed from this view. An admin can move them with slib.pcap.admin.schedule --period in another view.`}))
+    }
+    return()
+}
+
 // Push every enabled rule in the current view to the service. Returns the service's
 // {status, mesg, data} with the build summary.
 function push(force=(false)) {
+    $deny = $_reqRulesView()
+    if $deny { return($deny) }
     $retn = $svc.pushStart()
     if (not $retn.status) { return($retn) }
     $iden = $retn.data

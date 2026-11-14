@@ -33,13 +33,19 @@ PORT_PROTOS = (6, 17, 132)
 """IP protocols with ports (TCP, UDP, SCTP)."""
 
 
-def _icmpPorts(ipproto: int, itype: int, code: int) -> tuple[int, int, bool]:
-    """The (port, port, one way) ICMP types and codes are hashed as."""
+def _icmpPorts(ipproto: int, itype: int, code: int) -> tuple[int, int]:
+    """The (port, port) an ICMP type and code are hashed as, the way Suricata does it.
+
+    Suricata hashes the type and its counterpart type, or 0 for a type without one (ex. 3,
+    unreachable), and orders the endpoints like any other flow's. The Community ID spec (and
+    its reference implementation) hash a one way type with its code instead, and don't reorder
+    it, so for those types this differs from the spec on purpose: the IDs have to match the
+    ones Suricata logs (src/output-json.c and FlowSetICMPv4CounterPart in src/flow-util.c).
+    The code isn't used.
+    """
 
     pairs = ICMP4_PAIRS if ipproto == 1 else ICMP6_PAIRS
-    if itype in pairs:
-        return itype, pairs[itype], False
-    return itype, code, True
+    return itype, pairs.get(itype, 0)
 
 
 def communityId(
@@ -65,14 +71,13 @@ def communityId(
         The Community ID seed (0 by default, the same as Suricata's).
     """
 
-    oneway = False
     if ipproto in (1, 58) and sport is not None:
-        sport, dport, oneway = _icmpPorts(ipproto, sport, dport or 0)
+        sport, dport = _icmpPorts(ipproto, sport, dport or 0)
 
     hasports = (
         sport is not None and dport is not None and (ipproto in PORT_PROTOS or ipproto in (1, 58))
     )
-    if not oneway and ((src, sport if hasports else 0) > (dst, dport if hasports else 0)):
+    if (src, sport if hasports else 0) > (dst, dport if hasports else 0):
         src, dst = dst, src
         sport, dport = dport, sport
 

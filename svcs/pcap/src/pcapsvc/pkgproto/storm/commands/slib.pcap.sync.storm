@@ -25,22 +25,20 @@ init {
 
             $s = $sync.syncFeed($feed, force=$cmdopts.force)
             if $s.error {
-                $lib.warn("slib.pcap.sync: Syncing the {name} feed failed: {err}", name=$s.name, err=$s.error)
+                $lib.warn(`slib.pcap.sync: Syncing the {$s.name} feed failed: {$s.error}`)
             } elif ($s.synced and $s.full) {
-                $lib.print("slib.pcap.sync: {name}: synced {count} rules ({added} added, {updated} updated, {removed} removed).",
-                    name=$s.name, count=$s.count, added=$s.added, updated=$s.updated, removed=$s.removed)
+                $lib.print(`slib.pcap.sync: {$s.name}: synced {$s.count} rules ({$s.added} added, {$s.updated} updated, {$s.removed} removed).`)
             } elif $s.synced {
-                $lib.print("slib.pcap.sync: {name}: synced the feed's changes ({added} added, {updated} updated, {removed} removed), it has {count} rules.",
-                    name=$s.name, count=$s.count, added=$s.added, updated=$s.updated, removed=$s.removed)
+                $lib.print(`slib.pcap.sync: {$s.name}: synced the feed's changes ({$s.added} added, {$s.updated} updated, {$s.removed} removed), it has {$s.count} rules.`)
             } elif $s.pulled {
-                $lib.print("slib.pcap.sync: {name}: downloaded, the feed is unchanged.", name=$s.name)
+                $lib.print(`slib.pcap.sync: {$s.name}: downloaded, the feed is unchanged.`)
             } else {
-                $lib.print("slib.pcap.sync: {name}: up to date (the feed isn't due to be downloaded yet).", name=$s.name)
+                $lib.print(`slib.pcap.sync: {$s.name}: up to date (the feed isn't due to be downloaded yet).`)
             }
         }
 
         for $name in $wanted {
-            if (not $found.has($name)) { $lib.warn("slib.pcap.sync: Unknown feed: {name}", name=$name) }
+            if (not $found.has($name)) { $lib.warn(`slib.pcap.sync: Unknown feed: {$name}`) }
         }
     }
 

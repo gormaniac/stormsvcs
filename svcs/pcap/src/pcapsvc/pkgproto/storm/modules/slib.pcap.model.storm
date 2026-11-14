@@ -84,8 +84,9 @@ function certNode(c) {
     [
         :sha1 = $c.sha1
         :md5 = $c.md5
-        :file = `sha256:{$c.sha256}`
     ]
+    // Only when the service saved the cert to the Axon (it has one and files are extracted).
+    if $c.stored { [ :file = `sha256:{$c.sha256}` ] }
     if (not $c.error) {
         [
             :serial ?= $c.serial
@@ -135,7 +136,7 @@ function side(n, name, s, proto) {
     $protoprop = `{$name}:proto`
     $port = `{$name}:port`
     $handshake = `{$name}:handshake`
-    if ($s.ip.find(":") = $lib.null) { $ip = `{$name}:ipv4` } else { $ip = `{$name}:ipv6` }
+    if ($s.ip.find(":") = null) { $ip = `{$name}:ipv4` } else { $ip = `{$name}:ipv6` }
     yield $n
     [
         :$txcount=$s.pkts
@@ -159,9 +160,13 @@ function enrichSide(n, name, s) {
     if $s."ssh:key" {
         $setProp($n, `{$name}:ssh:key`, $sshKeyNode($s."ssh:key").value())
     }
-    if $s."rdp:hostname" { $setProp($n, `{$name}:rdp:hostname`, $s."rdp:hostname") }
-    if $s."rdp:keyboard:layout" {
-        $setProp($n, `{$name}:rdp:keyboard:layout`, $s."rdp:keyboard:layout")
+    // inet:flow only has RDP props for the client (src), tshark can report a client's
+    // fields on either side in a capture that starts midstream.
+    if ($name = "src") {
+        if $s."rdp:hostname" { $setProp($n, `{$name}:rdp:hostname`, $s."rdp:hostname") }
+        if $s."rdp:keyboard:layout" {
+            $setProp($n, `{$name}:rdp:keyboard:layout`, $s."rdp:keyboard:layout")
+        }
     }
     $addValus($n, `{$name}:softnames`, $s.softnames)
     $addValus($n, `{$name}:cpes`, $s.cpes)
@@ -202,8 +207,8 @@ function flowNode(f, file, opts) {
 // f is a flow from the service, file is the PCAP's file:bytes node, and opts may have a "tag"
 // to add, a "host" (it:host) to set as the :capture:host, and a "sandbox" (file:bytes) to set
 // as the :sandbox:file.
-function flow(f, file, opts=$lib.null) {
-    if ($opts = $lib.null) { $opts = ({}) }
+function flow(f, file, opts=(null)) {
+    if ($opts = null) { $opts = ({}) }
     $n = $flowNode($f, $file, $opts)
     $enrichSide($n, src, $f.src)
     $enrichSide($n, dst, $f.dst)
@@ -250,7 +255,27 @@ function hit(flownode, f, h, file, opts) {
 
 // ---- DNS ----
 
+// Answer types inet:dns:answer has a prop for, the rest (ex. SRV, HTTPS) aren't modeled.
+function _dnsAnswerOk(a) {
+    switch $a.rrtype {
+        ("A", "AAAA", "CNAME", "NS", "MX", "TXT"): { return((true)) }
+        "PTR": { return(($a.ptr.ipv4 or $a.ptr.ipv6)) }
+        "SOA": { return(($a.soa and $a.soa.mname)) }
+    }
+    return((false))
+}
+
+function _dnsSoa(a) {
+    [ inet:dns:soa=$lib.guid(slib.pcap.dns.soa, $a.rrname, $a.soa.mname, $a.soa.rname)
+        :fqdn?=$a.rrname
+        :ns?=$a.soa.mname
+        :email?=$a.soa.email
+    ]
+    return($node)
+}
+
 function _dnsAnswer(req, a) {
+    if (not $_dnsAnswerOk($a)) { return() }
     [ inet:dns:answer=$lib.guid(slib.pcap.dns.answer, $req.repr(), $a.rrname, $a.rrtype, $a.rdata)
         :request=$req
         :ttl?=$a.ttl
@@ -262,6 +287,14 @@ function _dnsAnswer(req, a) {
         "NS": { [ :ns?=($a.rrname, $a.rdata) ] }
         "MX": { [ :mx?=($a.rrname, $a.rdata) ] }
         "TXT": { [ :txt?=($a.rrname, $a.rdata) ] }
+        // The service adds the address a PTR query's name is for (see pcapsvc.eve.ptrAddr).
+        "PTR": {
+            if $a.ptr.ipv4 { [ :rev?=($a.ptr.ipv4, $a.rdata) ] }
+            elif $a.ptr.ipv6 { [ :rev6?=($a.ptr.ipv6, $a.rdata) ] }
+        }
+        "SOA": {
+            [ :soa=$_dnsSoa($a).value() ]
+        }
     }
     return($node)
 }
@@ -277,11 +310,11 @@ function _dnsRequest(flownode, f, q, opts) {
         :server?=$f.dst.addr
         :sandbox:file?=$opts.sandbox
     ]
-    if ($qtype != $lib.null) { [ :query:type=$qtype ] }
-    if ($f.src.addr and $q.rrname and $qtype != $lib.null) {
+    if ($qtype != null) { [ :query:type=$qtype ] }
+    if ($f.src.addr and $q.rrname and $qtype != null) {
         [ :query?=($f.src.addr, $q.rrname, $qtype) ]
     }
-    if ($q.rcode != $lib.null) { [ :reply:code?=$q.rcode ] }
+    if ($q.rcode != null) { [ :reply:code?=$q.rcode ] }
     [ <(refs)+ { yield $flownode } ]
     return($node)
 }
@@ -300,7 +333,7 @@ function dns(flownode, f, opts) {
 // Create or update a rule node from a parsed rule (the service's ruleParse or a feed's rule
 // record): an it:app:snort:rule (Snort 2.x and 3 rules) or it:app:suricata:rule.
 // enabled is only set when it isn't null.
-function rule(r, enabled=$lib.null) {
+function rule(r, enabled=(null)) {
     // Only Snort rules have an engine and a family.
     if ($r.form = "it:app:suricata:rule") {
         [ it:app:suricata:rule=$r.guid ]
@@ -332,8 +365,7 @@ function ruleRefs(rule, refs) {
         if (not $form) { continue }
         ($ok, $norm) = $lib.trycast($form, $valu)
         if (not $ok) {
-            $lib.warn("slib.pcap: Skipped the {scheme} reference of {form}={guid}, it isn't a valid {type}: {valu}",
-                scheme=$scheme, form=$rule.form(), guid=$rule.repr(), type=$form, valu=$valu)
+            $lib.warn(`slib.pcap: Skipped the {$scheme} reference of {$rule.form()}={$rule.repr()}, it isn't a valid {$form}: {$valu}`)
         } elif ($scheme = "cve") {
             $cves.append($norm)
         } else {

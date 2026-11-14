@@ -36,7 +36,7 @@ function _runOpts(opts) {
         "timeout": $opts.timeout, "limit": $opts.limit, "handshake": $opts.handshake,
         "tshark": $opts.tshark, "files": $opts.files, "keylogs": $keylogs,
         "decode": $decodeRules($opts.decode), "suricata": $opts.suricata, "snort": $opts.snort,
-        "rules": ($opts.rules != (false)), "netvars": $priv.netVarDefaults(),
+        "rules": ($opts.rules != false), "netvars": $priv.netVarDefaults(),
     }))
 }
 
@@ -55,8 +55,8 @@ function _runOpts(opts) {
 // file is the PCAP's file:bytes node (created from the SHA-256 if null).
 //
 // Raises slib.pcap.Error if the PCAP can't be analyzed (ex. it isn't in the Axon).
-function flows(sha256, opts=$lib.null, file=$lib.null) {
-    if ($opts = $lib.null) { $opts = ({}) }
+function flows(sha256, opts=(null), file=(null)) {
+    if ($opts = null) { $opts = ({}) }
     $sha256 = $normSha256($sha256)
     for $retn in $priv.flows($sha256, $_runOpts($opts)) {
         if (not $retn.status) { $lib.raise(slib.pcap.Error, $retn.mesg, sha256=$sha256) }
@@ -72,16 +72,18 @@ function flows(sha256, opts=$lib.null, file=$lib.null) {
 // The same as flows(), but for user facing code: it warns instead of raising, and prints a
 // summary of the PCAP (or more details with $lib.debug). With hits, it emits the rule matches
 // (it:app:snort:hit and it:app:suricata:matched nodes) instead of the flows.
-function ingest(sha256, opts=$lib.null, file=$lib.null, hits=(false)) {
-    if ($opts = $lib.null) { $opts = ({}) }
+function ingest(sha256, opts=(null), file=(null), hits=(false)) {
+    if ($opts = null) { $opts = ({}) }
+    // Checked before the run, an invalid value would stop modeling after the first flow.
+    $opts = $_modelOpts($opts)
+    if ($opts = null) { stop }
     $sha256 = $normSha256($sha256)
-    $summary = $lib.null
+    $summary = (null)
     $count = (0)
     $nhits = (0)
     for $retn in $priv.flows($sha256, $_runOpts($opts)) {
         if (not $retn.status) {
-            $lib.warn("slib.pcap: Unable to analyze {sha256}: {err}", sha256=$sha256,
-                      err=$retn.mesg)
+            $lib.warn(`slib.pcap: Unable to analyze {$sha256}: {$retn.mesg}`)
             stop
         }
         if $retn.data.summary {
@@ -103,53 +105,65 @@ function ingest(sha256, opts=$lib.null, file=$lib.null, hits=(false)) {
     $_report($sha256, $summary, $count, $nhits, $file, hits=$hits)
 }
 
+// Normalize the options that are set on the nodes (tag, host, and sandbox). Returns a copy of
+// opts, or null (after a warning) if one is invalid.
+function _modelOpts(opts) {
+    $opts = $lib.copy($opts)
+    for ($key, $type, $flag) in ((tag, syn:tag, "--tag"), (host, it:host, "--host"),
+                                 (sandbox, file:bytes, "--sandbox-file")) {
+        $valu = $opts.$key
+        if ($valu = null) { continue }
+        ($ok, $norm) = $lib.trycast($type, $valu)
+        if (not $ok) {
+            $lib.warn(`slib.pcap: Invalid {$flag} {$valu}, it needs to be a {$type}.`)
+            return()
+        }
+        $opts.$key = $norm
+    }
+    return($opts)
+}
+
 // Print (and warn about) a PCAP's summary.
 function _report(sha256, summary, count, nhits, file, hits=(false)) {
-    $lib.print("slib.pcap: Modeled {count} flows ({hits} rule matches) from {packets} packets in file:bytes={file}",
-               count=$count, hits=$nhits, packets=$summary.packets, file=$file.repr())
+    $lib.print(`slib.pcap: Modeled {$count} flows ({$nhits} rule matches) from {$summary.packets} packets in file:bytes={$file.repr()}`)
     if $summary.truncated {
-        $lib.warn("slib.pcap: {sha256} is truncated, read up to the error: {err}",
-                  sha256=$sha256, err=$summary.error)
+        $lib.warn(`slib.pcap: {$sha256} is truncated, read up to the error: {$summary.error}`)
     }
     if $summary.limited {
-        $lib.warn("slib.pcap: {sha256} has more than {count} flows, {dropped} packets for the rest were dropped.",
-                  sha256=$sha256, count=$count, dropped=$summary.dropped)
+        $lib.warn(`slib.pcap: {$sha256} has more than {$count} flows, {$summary.dropped} packets for the rest were dropped.`)
+    }
+    // Engine output records that couldn't be read (see pcapsvc.eve.countMalformed).
+    for ($kind, $num) in $summary.events.malformed {
+        $lib.warn(`slib.pcap: Skipped {$num} malformed {$kind} records from the engines for {$sha256}.`)
     }
     // What the sandbox caught an engine doing while it read this capture: the capture may be
     // an exploit attempt against the engine.
     for $alert in $summary.sandbox.alerts {
-        $lib.warn("slib.pcap: The sandbox caught {engine} on {sha256} ({kind}): {detail}. The capture may be trying to exploit it, see slib.pcap.status.",
-                  engine=$alert.engine, sha256=$sha256, kind=$alert.kind, detail=$alert.detail)
+        $lib.warn(`slib.pcap: The sandbox caught {$alert.engine} on {$sha256} ({$alert.kind}): {$alert.detail}. The capture may be trying to exploit it, see slib.pcap.status.`)
     }
     for ($name, $info) in $summary.engines {
         if ($info.enabled and $info.error) {
-            $lib.warn("slib.pcap: {engine} had a problem with {sha256}: {err}", engine=$name,
-                      sha256=$sha256, err=$info.error)
+            $lib.warn(`slib.pcap: {$name} had a problem with {$sha256}: {$info.error}`)
         } elif ($info.error and $lib.debug) {
-            $lib.print("slib.pcap: No {engine} details for {sha256}: {err}", engine=$name,
-                       sha256=$sha256, err=$info.error)
+            $lib.print(`slib.pcap: No {$name} details for {$sha256}: {$info.error}`)
         }
     }
     if ($hits and not $summary.engines.snort.rules and not $summary.engines.suricata.rules) {
         $lib.warn("slib.pcap: No rules are loaded in the service yet, see slib.pcap.sync.")
     }
     if ($summary.keylogs and not $summary.engines.tshark.enabled) {
-        $lib.warn("slib.pcap: TLS key logs need tshark, {sha256} wasn't decrypted.",
-                  sha256=$sha256)
+        $lib.warn(`slib.pcap: TLS key logs need tshark, {$sha256} wasn't decrypted.`)
     }
     if $summary.files {
         if $summary.files.unsaved {
-            $lib.warn("slib.pcap: {count} files in {sha256} weren't saved, the service has no Axon (axon:url) to save them to. Ask an admin to set it.",
-                      count=$summary.files.unsaved, sha256=$sha256)
+            $lib.warn(`slib.pcap: {$summary.files.unsaved} files in {$sha256} weren't saved, the service has no Axon (axon:url) to save them to. Ask an admin to set it.`)
         }
         if $summary.files.skipped {
-            $lib.warn("slib.pcap: {count} files in {sha256} were over the extraction limits.",
-                      count=$summary.files.skipped, sha256=$sha256)
+            $lib.warn(`slib.pcap: {$summary.files.skipped} files in {$sha256} were over the extraction limits.`)
         }
     }
     if $lib.debug {
-        $lib.print("slib.pcap: {sha256} summary: {summary}", sha256=$sha256,
-                   summary=$lib.json.save($summary))
+        $lib.print(`slib.pcap: {$sha256} summary: {$lib.json.save($summary)}`)
     }
     return()
 }
@@ -165,12 +179,12 @@ function feeds() {
 }
 
 // The guid -> error of the rules the engines couldn't load, or null if they couldn't be listed.
-function ruleErrors(guids=$lib.null) {
+function ruleErrors(guids=(null)) {
     return($util.data($priv.ruleErrors(guids=$guids), "Listing the rule errors"))
 }
 
 // The guid -> warnings of loaded rules that might not do what they look like they do, or null.
-function ruleWarnings(guids=$lib.null) {
+function ruleWarnings(guids=(null)) {
     return($util.data($priv.ruleWarnings(guids=$guids), "Listing the rule warnings"))
 }
 

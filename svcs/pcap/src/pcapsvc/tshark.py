@@ -231,7 +231,8 @@ class Tshark:
     args : Iterable[str]
         Extra tshark arguments, ex. ``("-d", "tcp.port==2222,ssh")`` to decode SSH on port 2222.
     timeout : float
-        Seconds a tshark run may take before it's killed, 0 for no limit.
+        Seconds a tshark run may take before it's killed (10 minutes by default, like the
+        service's tshark:timeout), 0 for no limit.
     sandbox : Sandbox | None
         The sandbox tshark runs in, by default a best-effort one.
     protocols : Iterable[str] | None
@@ -244,7 +245,7 @@ class Tshark:
         self,
         path: str = "tshark",
         args: Iterable[str] = (),
-        timeout: float = 0,
+        timeout: float = 600,
         sandbox: p_sandbox.Sandbox | None = None,
         protocols: Iterable[str] | None = PROTOCOLS,
         tmpdir: str | None = None,

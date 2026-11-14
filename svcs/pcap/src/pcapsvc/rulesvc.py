@@ -466,11 +466,6 @@ class RuleMixin:
         }
         return summary
 
-    async def rebuild(self) -> dict[str, Any]:
-        """Rebuild the rules files from the service's rules (ex. after an engine upgrade)."""
-
-        return await self._build()
-
     async def ruleErrors(self, guids: list[str] | None = None) -> dict[str, str]:
         """The errors of rules the engines couldn't load (guid -> error)."""
 
@@ -485,18 +480,6 @@ class RuleMixin:
         if guids is not None:
             return {guid: w for guid in guids if (w := self.rulewarns.get(guid)) is not None}
         return dict(self.rulewarns.items())
-
-    async def ruleInfo(self, guid: str) -> dict[str, Any]:
-        """Whether a rule was pushed to the service, is loaded, and its error if it isn't."""
-
-        pushed = self.corpus.get(guid)
-        error = self.ruleerrs.get(guid)
-        return {
-            "pushed": pushed is not None,
-            "engine": pushed[1] if pushed else None,
-            "loaded": pushed is not None and error is None and bool(self.active),
-            "error": error,
-        }
 
     async def ruleParse(self, text: str, engine: str | None = None) -> dict[str, Any]:
         """Parse rule text into the metadata Storm models (see ``pcapsvc.rules.parseRule``).
@@ -542,11 +525,22 @@ class RuleMixin:
             raise RuleSvcError(f"Unknown feed: {name}")
         return fdef
 
+    def _under(self, base: str, path: str) -> str:
+        """Return ``path`` if it resolves to somewhere under ``base``, otherwise raise."""
+
+        real = os.path.realpath(path)
+        if os.path.commonpath([os.path.realpath(base), real]) != os.path.realpath(base) or (
+            real == os.path.realpath(base)
+        ):
+            raise RuleSvcError(f"Invalid feed path: {path!r}")
+        return path
+
     def _feedPath(self, name: str) -> str:
-        return os.path.join(self.feeddir, f"{name}.mpk")
+        return self._under(self.feeddir, os.path.join(self.feeddir, f"{name}.mpk"))
 
     def _snapDir(self, name: str) -> str:
-        return os.path.join(self.feeddir, "synced", name)
+        base = os.path.join(self.feeddir, "synced")
+        return self._under(base, os.path.join(base, name))
 
     def _snapPath(self, name: str, view: str) -> str:
         if not s_common.isguid(view):
@@ -563,7 +557,13 @@ class RuleMixin:
     def _dropSync(self, name: str) -> None:
         """Forget what was synced into each view, the next sync of the feed is a full sync."""
 
-        shutil.rmtree(self._snapDir(name), ignore_errors=True)
+        try:
+            path = self._snapDir(name)
+        except RuleSvcError:
+            # A name saved before names were validated as path components, there is nothing
+            # safe to remove.
+            return
+        shutil.rmtree(path, ignore_errors=True)
 
     def _feedOut(self, fdef: p_feeds.FeedDef) -> dict[str, Any]:
         return {
@@ -606,7 +606,7 @@ class RuleMixin:
         fdef = self._reqFeed(name)
         self.feeddefs.delete(fdef["name"])
         self.feedinfo.pop(fdef["name"])
-        with contextlib.suppress(OSError):
+        with contextlib.suppress(OSError, RuleSvcError):
             os.remove(self._feedPath(fdef["name"]))
         self._dropSync(fdef["name"])
         return self._feedOut(fdef)

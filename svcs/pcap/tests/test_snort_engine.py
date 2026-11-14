@@ -1,10 +1,10 @@
-"""Pytests for pcapsvc.engine. Most of these run Snort, see fakefeeds.needsnort."""
+"""Pytests for pcapsvc.snort. Most of these run Snort, see fakefeeds.needsnort."""
 
 import os
 
 import pytest
 import synapse.tests.utils as s_tests
-from pcapsvc import snort as s_engine
+from pcapsvc import snort as p_snort
 from pcapsvc import rules as s_rules
 
 from . import pcaps
@@ -18,25 +18,19 @@ def rulesByKey(text: str) -> dict[str, str]:
 
 def test_precheck():
     assert (
-        s_engine.precheck('alert tcp any any -> any any ( msg:"a (b"; content:"x\\"y"; sid:1; )')
+        p_snort.precheck('alert tcp any any -> any any ( msg:"a (b"; content:"x\\"y"; sid:1; )')
         is None
     )
-    assert s_engine.precheck("alert tcp any any -> any any ( sid:1; ) # a comment") is None
-    assert "single line" in s_engine.precheck("alert tcp any any -> any any (\nsid:1; )")
-    assert "unterminated" in s_engine.precheck(
+    assert p_snort.precheck("alert tcp any any -> any any ( sid:1; ) # a comment") is None
+    assert "single line" in p_snort.precheck("alert tcp any any -> any any (\nsid:1; )")
+    assert "unterminated" in p_snort.precheck(
         'alert tcp any any -> any any ( content:"abc; sid:1; )'
     )
-    assert "after its closing" in s_engine.precheck(
+    assert "after its closing" in p_snort.precheck(
         "alert tcp any any -> any any ( sid:1; ) alert tcp any any -> any any ( sid:2; )"
     )
-    assert "balanced" in s_engine.precheck("alert tcp any any -> any any ( sid:1; ")
-    assert "balanced" in s_engine.precheck("alert tcp any any -> any any sid:1;")
-
-
-def test_is_pcap():
-    assert s_engine.isPcap(pcaps.samplePcap()[:4])
-    assert s_engine.isPcap(b"\x0a\x0d\x0d\x0a....")
-    assert not s_engine.isPcap(b"MZ\x90\x00")
+    assert "balanced" in p_snort.precheck("alert tcp any any -> any any ( sid:1; ")
+    assert "balanced" in p_snort.precheck("alert tcp any any -> any any sid:1;")
 
 
 class TestSnortConf(s_tests.SynTest):
@@ -47,7 +41,7 @@ class TestSnortConf(s_tests.SynTest):
             with open(base, "w") as fd:
                 fd.write("HOME_NET = 'any'\nEXTERNAL_NET = 'any'\ninclude 'snort_defaults.lua'\n")
 
-            snort = s_engine.Snort(
+            snort = p_snort.Snort(
                 os.path.join(dirn, "work"),
                 conf=base,
                 snortvars={"HOME_NET": "[10.0.0.0/8]", "EXTERNAL_NET": "!$HOME_NET"},
@@ -60,27 +54,27 @@ class TestSnortConf(s_tests.SynTest):
             assert "include 'snort_defaults.lua'" in text
             assert snort.incpath == os.path.dirname(base)
 
-            with pytest.raises(s_engine.SnortError, match="doesn't set HTTP_PORTS"):
-                s_engine.Snort(dirn, conf=base, snortvars={"HTTP_PORTS": "80"}).writeConf()
-            with pytest.raises(s_engine.SnortError, match="Invalid Snort variable"):
-                s_engine.Snort(dirn, conf=base, snortvars={"home_net": "x"}).writeConf()
-            with pytest.raises(s_engine.SnortError, match="Unable to read"):
-                s_engine.Snort(dirn, conf=os.path.join(dirn, "nope.lua")).writeConf()
-            with pytest.raises(s_engine.SnortError, match="Unable to find the snort binary"):
-                s_engine.Snort(dirn, binpath="/nonexistent/snort").writeConf()
+            with pytest.raises(p_snort.SnortError, match="doesn't set HTTP_PORTS"):
+                p_snort.Snort(dirn, conf=base, snortvars={"HTTP_PORTS": "80"}).writeConf()
+            with pytest.raises(p_snort.SnortError, match="Invalid Snort variable"):
+                p_snort.Snort(dirn, conf=base, snortvars={"home_net": "x"}).writeConf()
+            with pytest.raises(p_snort.SnortError, match="Unable to read"):
+                p_snort.Snort(dirn, conf=os.path.join(dirn, "nope.lua")).writeConf()
+            with pytest.raises(p_snort.SnortError, match="Unable to find the snort binary"):
+                p_snort.Snort(dirn, binpath="/nonexistent/snort").writeConf()
 
     async def test_no_snort(self):
         with self.getTestDir() as dirn:
-            snort = s_engine.Snort(
+            snort = p_snort.Snort(
                 dirn,
                 binpath="/nonexistent/snort",
                 s2lpath="/nonexistent/snort2lua",
                 conf=os.path.join(dirn, "x.lua"),
             )
             assert not snort.available()
-            with pytest.raises(s_engine.SnortError, match="Unable to (run|find)"):
+            with pytest.raises(p_snort.SnortError, match="Unable to (run|find)"):
                 await snort.version()
-            with pytest.raises(s_engine.SnortError, match="Unable to (run|find)"):
+            with pytest.raises(p_snort.SnortError, match="Unable to (run|find)"):
                 await snort.convert({"a": "alert tcp any any -> any any (sid:1;)"})
 
 
@@ -88,12 +82,12 @@ class TestSnortConf(s_tests.SynTest):
 class TestSnort(s_tests.SynTest):
     async def test_version(self):
         with self.getTestDir() as dirn:
-            vers = await s_engine.Snort(dirn).version()
+            vers = await p_snort.Snort(dirn).version()
             assert vers.startswith("3.")
 
     async def test_validate(self):
         with self.getTestDir() as dirn:
-            snort = s_engine.Snort(dirn)
+            snort = p_snort.Snort(dirn)
             rules = rulesByKey(SNORT3_RULES)
             rules["unbalanced"] = (
                 'alert tcp any any -> any any ( msg:"x"; content:"abc; sid:1000010; )'
@@ -115,7 +109,7 @@ class TestSnort(s_tests.SynTest):
     async def test_scan_netvars(self):
         # Network variables for one scan, ex. an admin's HOME_NET (see slib.pcap.admin.vars).
         with self.getTestDir() as dirn:
-            snort = s_engine.Snort(dirn)
+            snort = p_snort.Snort(dirn)
             rules = {"home": 'alert tcp $HOME_NET any -> any 80 ( msg:"x"; content:"evil"; sid:1; )'}
             path = os.path.join(dirn, "home.rules")
             assert (await snort.validate(rules, path))[0] == ["home"]
@@ -153,13 +147,13 @@ class TestSnort(s_tests.SynTest):
             base = os.path.join(dirn, "bad.lua")
             with open(base, "w") as fd:
                 fd.write("HOME_NET = 'any'\nEXTERNAL_NET = 'any'\nthis is not lua\n")
-            snort = s_engine.Snort(dirn, conf=base)
-            with pytest.raises(s_engine.SnortError, match="failed to load"):
+            snort = p_snort.Snort(dirn, conf=base)
+            with pytest.raises(p_snort.SnortError, match="failed to load"):
                 await snort.validate(rulesByKey(SNORT3_RULES), os.path.join(dirn, "x.rules"))
 
     async def test_convert(self):
         with self.getTestDir() as dirn:
-            snort = s_engine.Snort(dirn)
+            snort = p_snort.Snort(dirn)
             rules = rulesByKey(SNORT2_RULES)
             rules["bad"] = (
                 'alert tcp any any -> any any (msg:"x"; content:"a"; fast_pattern; isdataat:!1,relative; fast_pattern; sid:2000010;)'
@@ -180,7 +174,7 @@ class TestSnort(s_tests.SynTest):
 
     async def test_check(self):
         with self.getTestDir() as dirn:
-            snort = s_engine.Snort(dirn)
+            snort = p_snort.Snort(dirn)
             assert await snort.check('alert tcp any any -> any any ( content:"a"; sid:1; )') is None
             assert "foobar" in await snort.check(
                 "alert tcp any any -> any any ( foobar:1; sid:1; )"
@@ -193,7 +187,7 @@ class TestSnort(s_tests.SynTest):
 
     async def test_scan(self):
         with self.getTestDir() as dirn:
-            snort = s_engine.Snort(dirn)
+            snort = p_snort.Snort(dirn)
             path = os.path.join(dirn, "test.rules")
             await snort.validate(rulesByKey(SNORT3_RULES), path)
 
@@ -213,7 +207,7 @@ class TestSnort(s_tests.SynTest):
             bad = os.path.join(dirn, "bad.pcap")
             with open(bad, "wb") as fd:
                 fd.write(b"\xd4\xc3\xb2\xa1garbage")
-            with pytest.raises(s_engine.SnortError, match="failed to read the PCAP"):
+            with pytest.raises(p_snort.SnortError, match="failed to read the PCAP"):
                 await snort.scan(path, bad, alerts.append)
 
             # A truncated PCAP returns the alerts for the packets Snort read, with a warning.

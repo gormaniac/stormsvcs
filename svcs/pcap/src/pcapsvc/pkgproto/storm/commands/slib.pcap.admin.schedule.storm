@@ -10,11 +10,9 @@ init {
         if $cmdopts.period {
             try {
                 $job = $admin.schedule($cmdopts.period)
-                $lib.print("slib.pcap.admin.schedule: slib.pcap.sync now runs {period} (cron {iden}).",
-                    period=$cmdopts.period, iden=$job.iden)
+                $lib.print(`slib.pcap.admin.schedule: slib.pcap.sync now runs {$cmdopts.period} (cron {$job.iden}).`)
             } catch * as err {
-                $lib.warn("slib.pcap.admin.schedule: Unable to schedule slib.pcap.sync with period {period}: {err}",
-                    period=$cmdopts.period, err=$err.mesg)
+                $lib.warn(`slib.pcap.admin.schedule: Unable to schedule slib.pcap.sync with period {$cmdopts.period}: {$err.mesg}`)
             }
         }
         if ($cmdopts.enable or $cmdopts.disable) {
@@ -27,8 +25,7 @@ init {
         if $job {
             $state = disabled
             if $job.enabled { $state = enabled }
-            $lib.print("slib.pcap.admin.schedule: cron {iden} ({state}) runs slib.pcap.sync, in view {view}, last run: {last}",
-                iden=$job.iden, state=$state, view=$job.view, last=$util.when($job.laststart))
+            $lib.print(`slib.pcap.admin.schedule: cron {$job.iden} ({$state}) runs slib.pcap.sync, in view {$job.view}, last run: {$util.when($job.laststart)}`)
         } else {
             $lib.print("slib.pcap.admin.schedule: There is no sync cron job, create one with --period.")
         }

@@ -2,11 +2,11 @@ init {
     $priv = $lib.import(slib.pcap.priv.user)
     $util = $lib.import(slib.pcap.util)
 
-    if ($cmdopts.text != $lib.null) {
+    if ($cmdopts.text != null) {
         $retn = $priv.ruleCheck($cmdopts.text, engine=$cmdopts.engine)
         if (not $util.failed($retn, "Checking the rule")) {
-            if ($retn.data = $lib.null) { $lib.print("slib.pcap.rule.check: The rule is valid.") }
-            else { $lib.warn("slib.pcap.rule.check: The rule is invalid: {err}", err=$retn.data) }
+            if ($retn.data = null) { $lib.print("slib.pcap.rule.check: The rule is valid.") }
+            else { $lib.warn(`slib.pcap.rule.check: The rule is invalid: {$retn.data}`) }
         }
     }
 }
@@ -19,15 +19,14 @@ if ($form = "it:app:snort:rule" or $form = "it:app:suricata:rule") {
         if ($node.props.engine = 2) { $engine = snort2 }
     }
     if (not $node.props.text) {
-        $lib.warn("slib.pcap.rule.check: {form}={guid} has no :text.", form=$form, guid=$node.repr())
+        $lib.warn(`slib.pcap.rule.check: {$form}={$node.repr()} has no :text.`)
     } else {
         $retn = $priv.ruleCheck($node.props.text, engine=$engine)
         if (not $util.failed($retn, `Checking {$form}={$node.repr()}`)) {
-            if ($retn.data = $lib.null) {
-                $lib.print("slib.pcap.rule.check: {form}={guid} is valid.", form=$form, guid=$node.repr())
+            if ($retn.data = null) {
+                $lib.print(`slib.pcap.rule.check: {$form}={$node.repr()} is valid.`)
             } else {
-                $lib.warn("slib.pcap.rule.check: {form}={guid} is invalid: {err}", form=$form,
-                          guid=$node.repr(), err=$retn.data)
+                $lib.warn(`slib.pcap.rule.check: {$form}={$node.repr()} is invalid: {$retn.data}`)
             }
         }
     }

@@ -7,7 +7,7 @@ init {
               "keylogs": $cmdopts.keylog, "decode": $cmdopts.decode_as, "rules": (not $cmdopts.no_rules),
               "tag": $cmdopts.tag, "host": $cmdopts.host, "sandbox": $cmdopts.sandbox_file})
     for ($name, $off) in $optional {
-        $opts.$name = $lib.null
+        $opts.$name = (null)
         if $off { $opts.$name = (false) }
     }
     $yieldit = $cmdopts.yield
@@ -26,8 +26,7 @@ else {
     if ($node.form() = "file:bytes" and :sha256) {
         divert $yieldit $pcap.nodes($pcap.ingest(:sha256, opts=$opts, file=$node, hits=$cmdopts.hits))
     } else {
-        $lib.warn("slib.pcap.flows: Unable to analyze {form} {repr}, it needs to be a file:bytes with a :sha256.",
-                  form=$node.form(), repr=$node.repr())
+        $lib.warn(`slib.pcap.flows: Unable to analyze {$node.form()} {$node.repr()}, it needs to be a file:bytes with a :sha256.`)
         spin
     }
 }

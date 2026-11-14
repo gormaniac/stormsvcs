@@ -13,6 +13,8 @@ import gzip
 import ipaddress
 import os
 import struct
+import threading
+import zlib
 from collections.abc import Iterator
 from typing import Any, BinaryIO, NamedTuple
 
@@ -406,7 +408,7 @@ def readPackets(fd: BinaryIO, state: dict | None = None) -> Iterator[Packet]:
 
     try:
         yield from genr
-    except (EOFError, gzip.BadGzipFile, struct.error, OSError, ValueError) as err:
+    except (EOFError, gzip.BadGzipFile, zlib.error, struct.error, OSError, ValueError) as err:
         # Captures are often cut off (ex. a capture that was still being written), so keep
         # everything read until the problem, but report it.
         state["truncated"] = True
@@ -1046,6 +1048,7 @@ def analyze(
     rules: dict | None = None,
     loose: list | None = None,
     filestore: str | None = None,
+    cancel: threading.Event | None = None,
 ) -> tuple[list[dict], dict]:
     """Read a capture file and return its flows (see ``Flow.asdict``) and a summary of it.
 
@@ -1078,12 +1081,19 @@ def analyze(
         alert's engine.
     filestore : str | None
         The directory of the files Suricata extracted.
+    cancel : threading.Event | None
+        Stop (raising PcapError) once this is set, ex. when the run calling this in a thread
+        was cancelled.
 
     Raises
     ------
     PcapError
-        If the file isn't a capture file this can read.
+        If the file isn't a capture file this can read, or ``cancel`` was set.
     """
+
+    def checkCancel() -> None:
+        if cancel is not None and cancel.is_set():
+            raise PcapError("The analysis was cancelled")
 
     frames = frames or {}
     state: dict = {}
@@ -1091,6 +1101,8 @@ def analyze(
     matched = 0
     unframed = 0
     for pkt in readPackets(fd, state):
+        if not pkt.num % 1000:
+            checkCancel()
         rec = frames.get(pkt.num)
         flow = table.add(pkt, rec)
         if rec is not None:
@@ -1134,6 +1146,7 @@ def analyze(
     flows = []
     unsavedcount = 0
     for flow, fdict in base:
+        checkCancel()
         enricher = p_enrich.Enricher(
             files, unsaved=unsaved, rules=rules, counts=counts, filestore=filestore
         )

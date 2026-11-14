@@ -14,7 +14,7 @@ import synapse.common as s_common
 import synapse.tests.utils as s_tests
 from pcapsvc import PcapSvc, __version__
 from pcapsvc import feeds as s_feeds
-from pcapsvc.defs import CRON_GLOBAL, PKGDEFS, SVC_GUID, SVC_NAME
+from pcapsvc.defs import CRON_GLOBAL, PKGDEFS, RULES_VIEW_GLOBAL, SVC_GUID, SVC_NAME
 from pcapsvc.rulesvc import RuleSvcError, _prepare
 
 from . import pcaps
@@ -431,6 +431,19 @@ class TestFeedSync(s_tests.SynTest):
             assert new != old
             assert [c["iden"] for c in await core.callStorm("return($lib.cron.list())")] == [new]
 
+            # The add event's job runs as root, a rescheduled job runs as the admin.
+            admin = await core.auth.addUser("pcapadmin")
+            await admin.addRule((True, ("slib", "pcap", "admin")))
+            await admin.addRule((True, ("slib", "pcap", "user")))
+            msgs = await core.stormlist(
+                'slib.pcap.admin.schedule --period "daily@04:30"', opts={"user": admin.iden}
+            )
+            self.stormHasNoErr(msgs)
+            self.stormIsInPrint("slib.pcap.sync now runs daily@04:30", msgs)
+            mine = await core.callStorm(f"return($lib.globals.get({CRON_GLOBAL}))")
+            assert (await core.agenda.get(mine)).creator == admin.iden
+            new = mine
+
             msgs = await core.stormlist("slib.pcap.admin.schedule --disable")
             self.stormIsInPrint("(disabled) runs slib.pcap.sync", msgs)
             msgs = await core.stormlist("slib.pcap.admin.schedule --enable")
@@ -476,6 +489,29 @@ class TestFeedSync(s_tests.SynTest):
             msgs = await core.stormlist(f"slib.pcap.sync --no-push --feed {S3}", opts=opts)
             self.stormHasNoWarnErr(msgs)
             assert await count(core, "it:app:snort:rule") == 6
+
+            # The service has one set of rules, from the view the add event (or the last
+            # slib.pcap.admin.schedule --period) ran in. Pushes from a fork are refused.
+            main = await core.callStorm("return($lib.view.get().iden)")
+            assert await core.callStorm(f"return($lib.globals.get({RULES_VIEW_GLOBAL}))") == main
+            await user.addRule((True, ("view", "add")))
+            fork = await core.callStorm("return($lib.view.get().fork().iden)", opts=opts)
+            fopts = {"user": user.iden, "view": fork}
+            msgs = await core.stormlist("slib.pcap.sync --no-feeds", opts=fopts)
+            self.stormIsInWarn(f"The service's rules come from view {main}", msgs)
+            await user.addRule((True, ("slib", "pcap", "rules")))
+            await user.addRule((True, ("node",)))
+            msgs = await core.stormlist(
+                "slib.pcap.rule.add 'alert tcp any any -> any any (sid:9; msg:\"x\";)'",
+                opts=fopts,
+            )
+            self.stormIsInWarn(f"The service's rules come from view {main}", msgs)
+            msgs = await core.stormlist("slib.pcap.sync --no-feeds", opts=opts)
+            self.stormHasNoErr(msgs)
+
+            # Rescheduling in the fork moves the rules there.
+            await core.stormlist('slib.pcap.admin.schedule --period "daily@03:30"', opts={"view": fork})
+            assert await core.callStorm(f"return($lib.globals.get({RULES_VIEW_GLOBAL}))") == fork
 
 
 class TestPrepare(s_tests.SynTest):

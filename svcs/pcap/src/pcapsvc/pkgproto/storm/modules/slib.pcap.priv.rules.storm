@@ -5,5 +5,35 @@ init {
 }
 
 
+
+// The view the service's rules come from (see slib.pcap.admin.schedule), or null if it isn't
+// bound to one. The service has one set of rules, so only this view may change them.
+function rulesView() {
+    $view = $lib.globals.get("slib:pcap:rules:view")
+    if $view { return($view) }
+    // Installs from before the rules were bound to a view use the sync cron job's view.
+    $iden = $lib.globals.get("slib:pcap:cron")
+    if (not $iden) { return() }
+    try {
+        return($lib.cron.get($iden).pprint().view)
+    } catch (NoSuchIden, StormRuntimeError) as err {
+        return()
+    }
+}
+
+// A failed retn if the current view isn't the rules view, otherwise null.
+function _reqRulesView() {
+    $view = $rulesView()
+    if ($view and $view != $lib.view.get().iden) {
+        return(({"status": false, "data": null,
+                 "mesg": `The service's rules come from view {$view}, they can't be changed from this view. An admin can move them with slib.pcap.admin.schedule --period in another view.`}))
+    }
+    return()
+}
+
 // Add/update (guid, form, text, engine) rules in the service and remove rules (by guid), then rebuild its rules.
-function update(rules=$lib.null, dels=$lib.null) { return($svc.ruleUpdate(rules=$rules, dels=$dels)) }
+function update(rules=(null), dels=(null)) {
+    $deny = $_reqRulesView()
+    if $deny { return($deny) }
+    return($svc.ruleUpdate(rules=$rules, dels=$dels))
+}

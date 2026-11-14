@@ -443,6 +443,21 @@ class TestFileStorePath:
         assert store.addPath(str(tmp_path)) is None
         assert store.addPath(str(tmp_path / "missing")) is None
 
+        # Under a root (ex. Suricata's file store) no component may be a symlink.
+        fstore = tmp_path / "filestore"
+        (fstore / "ab").mkdir(parents=True)
+        (fstore / "ab" / "good").write_bytes(b"hello")
+        assert store.addPath("ab/good", root=str(fstore))[1] == 5
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        (elsewhere / "f").write_bytes(b"secret")
+        (fstore / "cd").symlink_to(elsewhere)
+        assert store.addPath("cd/f", root=str(fstore)) is None
+        (tmp_path / "rootlink").symlink_to(fstore)
+        assert store.addPath("ab/good", root=str(tmp_path / "rootlink")) is None
+        assert store.addPath("../secret", root=str(fstore)) is None
+        assert store.addPath("/etc/passwd", root=str(fstore)) is None
+
         big = tmp_path / "big"
         big.write_bytes(b"x" * 11)
         assert store.addPath(str(big)) is None and store.skipped == 1

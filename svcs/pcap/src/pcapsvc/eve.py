@@ -83,198 +83,235 @@ def applyEve(enr: Any, flow: dict, events: list[dict], filestore: str | None) ->
     client, server = enr.sides[True], enr.sides[False]
     txs: dict[int, dict] = {}
     files: list[dict] = []
+    # The HTTP requests tshark already found (ex. with a key log both engines see cleartext
+    # HTTP), by (method, URI). Each request Suricata logs is one of them at most once, so
+    # requests a flow really repeats are kept.
+    seen: dict[tuple, list[int]] = {}
+    for idx, req in enumerate(enr.http["requests"]):
+        seen.setdefault((req.get("method"), req.get("uri")), []).append(idx)
     for ev in events:
-        etype = ev.get("event_type")
-        body = ev.get(etype) if isinstance(ev.get(etype), dict) else {}
+        try:
+            _applyEvent(enr, ev, client, server, txs, files, seen)
+        except (ValueError, TypeError, KeyError, IndexError, AttributeError):
+            # Engine output is untrusted, a malformed event is skipped (and counted).
+            countMalformed(enr.counts, f"suricata:{ev.get('event_type')}")
+    for ev in files:
+        try:
+            _fileinfo(enr, flow, ev, txs, filestore)
+        except (ValueError, TypeError, KeyError, IndexError, AttributeError):
+            countMalformed(enr.counts, "suricata:fileinfo")
 
-        if etype == "tls":
-            for key in ("sni",):
-                if body.get(key):
-                    enr._uniq(enr.tls["sni"], str(body[key]).lower())
-            for key, name in (("ja3", "ja3"), ("ja3s", "ja3s")):
-                if isinstance(body.get(key), dict) and body[key].get("hash"):
-                    enr._uniq(enr.tls[name], body[key]["hash"])
-            if body.get("ja4"):
-                enr._uniq(enr.tls["ja4"], body["ja4"])
-            if body.get("version"):
-                enr._uniq(enr.tls.setdefault("versions", []), body["version"])
-            # Suricata 8 puts the client's chain in client.chain (older, client_chain).
-            cinfo = body.get("client") if isinstance(body.get("client"), dict) else {}
-            for side, chain in (
-                (server, body.get("chain")),
-                (client, cinfo.get("chain") or body.get("client_chain")),
-            ):
-                if chain and not side["ssl:certs"]:
-                    for b64 in chain:
-                        try:
-                            der = base64.b64decode(b64)
-                        except ValueError:
-                            continue
+
+def countMalformed(counts: dict[str, dict[str, int]], kind: str) -> None:
+    """Count an engine output record that was skipped because it's malformed (it's in the
+    summary's ``events.malformed``, by engine and record kind)."""
+
+    bucket = counts.setdefault("malformed", {})
+    bucket[kind] = bucket.get(kind, 0) + 1
+
+
+def _applyEvent(
+    enr: Any,
+    ev: dict,
+    client: dict,
+    server: dict,
+    txs: dict[int, dict],
+    files: list[dict],
+    seen: dict[tuple, list[int]],
+) -> None:
+    """Add one EVE event to an Enricher (see ``applyEve``)."""
+
+    etype = ev.get("event_type")
+    body = ev.get(etype) if isinstance(ev.get(etype), dict) else {}
+
+    if etype == "tls":
+        for key in ("sni",):
+            if body.get(key):
+                enr._uniq(enr.tls["sni"], str(body[key]).lower())
+        for key, name in (("ja3", "ja3"), ("ja3s", "ja3s")):
+            if isinstance(body.get(key), dict) and body[key].get("hash"):
+                enr._uniq(enr.tls[name], body[key]["hash"])
+        if body.get("ja4"):
+            enr._uniq(enr.tls["ja4"], body["ja4"])
+        if body.get("version"):
+            enr._uniq(enr.tls.setdefault("versions", []), body["version"])
+        # Suricata 8 puts the client's chain in client.chain (older, client_chain).
+        cinfo = body.get("client") if isinstance(body.get("client"), dict) else {}
+        for side, chain in (
+            (server, body.get("chain")),
+            (client, cinfo.get("chain") or body.get("client_chain")),
+        ):
+            if chain and not side["ssl:certs"]:
+                for b64 in chain:
+                    try:
+                        der = base64.b64decode(b64, validate=True)
+                    except (ValueError, TypeError):
+                        continue
+                    if der:
                         enr._cert(side, der)
 
-        elif etype == "http":
-            txs[ev.get("tx_id", 0)] = {
-                "method": body.get("http_method"),
-                "url": body.get("url"),
-                "status": body.get("status"),
-                "reqtype": _header(body.get("request_headers"), "content-type"),
-                "resptype": _header(body.get("response_headers"), "content-type")
-                or body.get("http_content_type"),
-            }
-            if body.get("hostname"):
-                enr._uniq(enr.http["hosts"], str(body["hostname"]).lower())
-            req = {"method": body.get("http_method"), "uri": body.get("url")}
-            if body.get("status") is not None:
-                req["status"] = body["status"]
+    elif etype == "http":
+        txs[ev.get("tx_id", 0)] = {
+            "method": body.get("http_method"),
+            "url": body.get("url"),
+            "status": body.get("status"),
+            "reqtype": _header(body.get("request_headers"), "content-type"),
+            "resptype": _header(body.get("response_headers"), "content-type")
+            or body.get("http_content_type"),
+        }
+        if body.get("hostname"):
+            enr._uniq(enr.http["hosts"], str(body["hostname"]).lower())
+        req = {"method": body.get("http_method"), "uri": body.get("url")}
+        if body.get("status") is not None:
+            req["status"] = body["status"]
+        dups = seen.get((req["method"], req["uri"]))
+        if dups:
+            found = enr.http["requests"][dups.pop(0)]
+            if "status" in req:
+                found.setdefault("status", req["status"])
+        else:
             enr.http["requests"].append(req)
-            enr._soft(client, body.get("http_user_agent"))
-            enr._soft(server, _header(body.get("response_headers"), "server"))
+        enr._soft(client, body.get("http_user_agent"))
+        enr._soft(server, _header(body.get("response_headers"), "server"))
 
-        elif etype == "fileinfo":
-            files.append(ev)
+    elif etype == "fileinfo":
+        files.append(ev)
 
-        elif etype == "ssh":
-            enr._soft(client, (body.get("client") or {}).get("software_version"))
-            enr._soft(server, (body.get("server") or {}).get("software_version"))
+    elif etype == "ssh":
+        enr._soft(client, (body.get("client") or {}).get("software_version"))
+        enr._soft(server, (body.get("server") or {}).get("software_version"))
 
-        elif etype == "rdp":
-            info = body.get("client") or {}
-            if body.get("event_type") == "connect_request" and info:
-                if info.get("client_name") and not client["rdp:hostname"]:
-                    client["rdp:hostname"] = str(info["client_name"]).strip().lower() or None
-                layout = keyboardLayout(info.get("keyboard_layout"))
-                if layout and not client["rdp:keyboard:layout"]:
-                    client["rdp:keyboard:layout"] = layout
+    elif etype == "rdp":
+        info = body.get("client") or {}
+        if body.get("event_type") == "connect_request" and info:
+            if info.get("client_name") and not client["rdp:hostname"]:
+                client["rdp:hostname"] = str(info["client_name"]).strip().lower() or None
+            layout = keyboardLayout(info.get("keyboard_layout"))
+            if layout and not client["rdp:keyboard:layout"]:
+                client["rdp:keyboard:layout"] = layout
 
-        elif etype == "smtp":
-            email = ev.get("email") or {}
-            for key in ("x_mailer", "user_agent"):
-                enr._soft(client, email.get(key))
-            enr.extra.setdefault("smtp", [])
-            _append(
-                enr.extra["smtp"],
-                {
-                    "helo": body.get("helo"),
-                    "from": body.get("mail_from"),
-                    "to": body.get("rcpt_to"),
-                    "subject": email.get("subject"),
-                },
+    elif etype == "smtp":
+        email = ev.get("email") or {}
+        for key in ("x_mailer", "user_agent"):
+            enr._soft(client, email.get(key))
+        enr.extra.setdefault("smtp", [])
+        _append(
+            enr.extra["smtp"],
+            {
+                "helo": body.get("helo"),
+                "from": body.get("mail_from"),
+                "to": body.get("rcpt_to"),
+                "subject": email.get("subject"),
+            },
+        )
+
+    elif etype == "quic":
+        if body.get("sni"):
+            enr._uniq(enr.tls["sni"], str(body["sni"]).lower())
+        if body.get("ja4"):
+            enr._uniq(enr.tls["ja4"], body["ja4"])
+        for key in ("ja3", "ja3s"):
+            if isinstance(body.get(key), dict) and body[key].get("hash"):
+                enr._uniq(enr.tls[key], body[key]["hash"])
+        for ext in body.get("extensions") or ():
+            if isinstance(ext, dict) and ext.get("name") == "alpn":
+                for alpn in ext.get("values") or ():
+                    enr._uniq(enr.tls.setdefault("alpn", []), str(alpn))
+        enr._soft(client, body.get("ua"))
+        enr.extra.setdefault("quic", [])
+        _append(
+            enr.extra["quic"],
+            {k: body.get(k) for k in ("version", "sni", "ua", "cyu") if body.get(k) is not None},
+        )
+
+    elif etype == "dns":
+        enr.extra.setdefault("dns", [])
+        _append(enr.extra["dns"], {**body, "time": eveTime(ev.get("timestamp"))})
+
+    elif etype == "smb":
+        enr.extra.setdefault("smb", [])
+        keep = {
+            k: body.get(k)
+            for k in (
+                "command",
+                "status",
+                "dialect",
+                "share",
+                "share_type",
+                "filename",
+                "disposition",
+                "client_dialects",
+                "server_guid",
             )
+            if body.get(k) not in (None, "", [])
+        }
+        if body.get("ntlmssp"):
+            keep["ntlmssp"] = body["ntlmssp"]
+        if body.get("request") or body.get("response"):
+            keep["native"] = {"request": body.get("request"), "response": body.get("response")}
+        _append(enr.extra["smb"], keep)
+        for key in ("request", "response"):
+            info = body.get(key) or {}
+            side = client if key == "request" else server
+            for nkey in ("native_os", "native_lm"):
+                enr._soft(side, info.get(nkey))
 
-        elif etype == "quic":
-            if body.get("sni"):
-                enr._uniq(enr.tls["sni"], str(body["sni"]).lower())
-            if body.get("ja4"):
-                enr._uniq(enr.tls["ja4"], body["ja4"])
-            for key in ("ja3", "ja3s"):
-                if isinstance(body.get(key), dict) and body[key].get("hash"):
-                    enr._uniq(enr.tls[key], body[key]["hash"])
-            for ext in body.get("extensions") or ():
-                if isinstance(ext, dict) and ext.get("name") == "alpn":
-                    for alpn in ext.get("values") or ():
-                        enr._uniq(enr.tls.setdefault("alpn", []), str(alpn))
-            enr._soft(client, body.get("ua"))
-            enr.extra.setdefault("quic", [])
-            _append(
-                enr.extra["quic"],
-                {
-                    k: body.get(k)
-                    for k in ("version", "sni", "ua", "cyu")
-                    if body.get(k) is not None
-                },
-            )
-
-        elif etype == "dns":
-            enr.extra.setdefault("dns", [])
-            _append(enr.extra["dns"], {**body, "time": eveTime(ev.get("timestamp"))})
-
-        elif etype == "smb":
-            enr.extra.setdefault("smb", [])
-            keep = {
+    elif etype == "krb5":
+        enr.extra.setdefault("krb5", [])
+        _append(
+            enr.extra["krb5"],
+            {
                 k: body.get(k)
                 for k in (
-                    "command",
-                    "status",
-                    "dialect",
-                    "share",
-                    "share_type",
-                    "filename",
-                    "disposition",
-                    "client_dialects",
-                    "server_guid",
+                    "msg_type",
+                    "cname",
+                    "realm",
+                    "sname",
+                    "encryption",
+                    "weak_encryption",
+                    "error_code",
+                    "failed_request",
+                    "ticket_encryption",
+                    "ticket_weak_encryption",
                 )
-                if body.get(k) not in (None, "", [])
-            }
-            if body.get("ntlmssp"):
-                keep["ntlmssp"] = body["ntlmssp"]
-            if body.get("request") or body.get("response"):
-                keep["native"] = {"request": body.get("request"), "response": body.get("response")}
-            _append(enr.extra["smb"], keep)
-            for key in ("request", "response"):
-                info = body.get(key) or {}
-                side = client if key == "request" else server
-                for nkey in ("native_os", "native_lm"):
-                    enr._soft(side, info.get(nkey))
+                # Suricata fills missing names with placeholders.
+                if body.get(k) not in (None, "", "<empty>", "<none>")
+            },
+        )
 
-        elif etype == "krb5":
-            enr.extra.setdefault("krb5", [])
+    elif etype == "sip":
+        enr.extra.setdefault("sip", [])
+        _append(
+            enr.extra["sip"],
+            {
+                k: body.get(k)
+                for k in ("method", "uri", "version", "code", "reason")
+                if body.get(k) is not None
+            },
+        )
+
+    elif etype == "ftp":
+        if body.get("command"):
+            enr.extra.setdefault("ftp", [])
             _append(
-                enr.extra["krb5"],
+                enr.extra["ftp"],
                 {
-                    k: body.get(k)
-                    for k in (
-                        "msg_type",
-                        "cname",
-                        "realm",
-                        "sname",
-                        "encryption",
-                        "weak_encryption",
-                        "error_code",
-                        "failed_request",
-                        "ticket_encryption",
-                        "ticket_weak_encryption",
-                    )
-                    # Suricata fills missing names with placeholders.
-                    if body.get(k) not in (None, "", "<empty>", "<none>")
+                    "command": body.get("command"),
+                    "data": body.get("command_data"),
+                    "codes": body.get("completion_code"),
                 },
             )
 
-        elif etype == "sip":
-            enr.extra.setdefault("sip", [])
-            _append(
-                enr.extra["sip"],
-                {
-                    k: body.get(k)
-                    for k in ("method", "uri", "version", "code", "reason")
-                    if body.get(k) is not None
-                },
-            )
+    elif etype == "anomaly":
+        enr.extra.setdefault("anomalies", [])
+        _append(
+            enr.extra["anomalies"],
+            {k: body.get(k) for k in ("type", "event", "layer") if body.get(k) is not None},
+        )
 
-        elif etype == "ftp":
-            if body.get("command"):
-                enr.extra.setdefault("ftp", [])
-                _append(
-                    enr.extra["ftp"],
-                    {
-                        "command": body.get("command"),
-                        "data": body.get("command_data"),
-                        "codes": body.get("completion_code"),
-                    },
-                )
-
-        elif etype == "anomaly":
-            enr.extra.setdefault("anomalies", [])
-            _append(
-                enr.extra["anomalies"],
-                {k: body.get(k) for k in ("type", "event", "layer") if body.get(k) is not None},
-            )
-
-        elif etype == "flow":
-            if ev.get("app_proto") and ev["app_proto"] != "failed":
-                enr._uniq(enr.extra.setdefault("app_proto", []), ev["app_proto"])
-
-    for ev in files:
-        _fileinfo(enr, flow, ev, txs, filestore)
+    elif etype == "flow":
+        if ev.get("app_proto") and ev["app_proto"] != "failed":
+            enr._uniq(enr.extra.setdefault("app_proto", []), ev["app_proto"])
 
 
 def _fileinfo(enr: Any, flow: dict, ev: dict, txs: dict[int, dict], filestore: str | None) -> None:
@@ -301,7 +338,8 @@ def _fileinfo(enr: Any, flow: dict, ev: dict, txs: dict[int, dict], filestore: s
     sha256 = str(sha256).lower()
     if not _SHA256.fullmatch(sha256):
         return
-    path = os.path.join(filestore, sha256[:2], sha256)
+    # Opened under the file store one component at a time, see FileStore.addPath.
+    path = os.path.join(sha256[:2], sha256)
 
     client = fromClient(flow, ev)
     side = enr.sides[client]
@@ -331,7 +369,41 @@ def _fileinfo(enr: Any, flow: dict, ev: dict, txs: dict[int, dict], filestore: s
         name=name,
         mime=mime,
         complete=not info.get("gaps") and info.get("state") != "TRUNCATED",
+        root=filestore,
     )
+
+
+def ptrAddr(name: str | None) -> dict[str, str] | None:
+    """The address a PTR query's name (ex. ``4.3.2.1.in-addr.arpa``) is for, as
+    ``{"ipv4": ...}`` or ``{"ipv6": ...}``, or None if it isn't a reverse lookup name."""
+
+    labels = str(name or "").lower().rstrip(".").split(".")
+    try:
+        if labels[-2:] == ["in-addr", "arpa"] and len(labels) == 6:
+            return {"ipv4": str(ipaddress.IPv4Address(".".join(reversed(labels[:4]))))}
+        if labels[-2:] == ["ip6", "arpa"] and len(labels) == 34:
+            nibbles = "".join(reversed(labels[:32]))
+            if len(nibbles) == 32:
+                return {"ipv6": str(ipaddress.IPv6Address(int(nibbles, 16)))}
+    except ValueError:
+        return None
+    return None
+
+
+def soaInfo(soa: Any) -> dict[str, Any] | None:
+    """An SOA answer's ``mname``, ``rname``, and ``email`` (the rname as an email address),
+    from Suricata's ``soa`` object."""
+
+    if not isinstance(soa, dict) or not soa.get("mname"):
+        return None
+    rname = str(soa.get("rname") or "").lower().rstrip(".") or None
+    email = None
+    if rname and "." in rname:
+        # The first unescaped label is the mailbox (ex. hostmaster.example.com).
+        user, _, domain = rname.partition(".")
+        if user and domain and "\\" not in user:
+            email = f"{user}@{domain}"
+    return {"mname": str(soa["mname"]).lower().rstrip("."), "rname": rname, "email": email}
 
 
 def dnsQueries(events: list[dict] | None) -> list[dict] | None:
@@ -376,6 +448,10 @@ def dnsQueries(events: list[dict] | None) -> list[dict] | None:
                         "ttl": ans.get("ttl"),
                         "rdata": ans.get("rdata"),
                     }
+                    if rec["rrtype"] == "PTR":
+                        rec["ptr"] = ptrAddr(rec["rrname"])
+                    elif rec["rrtype"] == "SOA":
+                        rec["soa"] = soaInfo(ans.get("soa"))
                     if rec not in item["answers"]:
                         item["answers"].append(rec)
     return list(queries.values())
@@ -439,7 +515,11 @@ def hits(
 
     grouped: dict[tuple[str, str], dict] = {}
     for engine, alert in alerts:
-        gid, sid, rev, msg, action = alertKey(engine, alert)
+        try:
+            gid, sid, rev, msg, action = alertKey(engine, alert)
+        except (ValueError, TypeError, AttributeError):
+            countMalformed(counts, f"{engine}:alert")
+            continue
         key = f"{gid}:{sid}"
         rinfo = index.get(engine, {}).get(key)
         if rinfo is None:

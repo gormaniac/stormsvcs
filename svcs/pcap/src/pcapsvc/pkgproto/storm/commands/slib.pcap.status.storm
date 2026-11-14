@@ -6,30 +6,26 @@ init {
     if $status {
         for ($name, $eng) in $status.engines {
             if (not $eng.available) {
-                $lib.print("{name}: not installed", name=$name)
+                $lib.print(`{$name}: not installed`)
             } elif (not $eng.enabled) {
-                $lib.print("{name}: {vers} (disabled by default)", name=$name, vers=$eng.version)
+                $lib.print(`{$name}: {$eng.version} (disabled by default)`)
             } else {
-                $lib.print("{name}: {vers}", name=$name, vers=$eng.version)
+                $lib.print(`{$name}: {$eng.version}`)
             }
         }
 
         $sbx = $status.sandbox
-        $lib.print("Sandbox: {mode}, engines run as {user}, Landlock ABI {abi}, seccomp {sec}",
-            mode=$sbx.mode, user=$sbx.uid, abi=$sbx.landlock, sec=$sbx.seccomp)
+        $lib.print(`Sandbox: {$sbx.mode}, engines run as {$sbx.uid}, Landlock ABI {$sbx.landlock}, seccomp {$sbx.seccomp}`)
         if $sbx.alerts {
-            $lib.warn("slib.pcap: The sandbox has {count} alerts since the service started (an engine crashed, tried to open a socket, or got out of its sandbox). The latest:",
-                count=$sbx.alerts)
+            $lib.warn(`slib.pcap: The sandbox has {$sbx.alerts} alerts since the service started (an engine crashed, tried to open a socket, or got out of its sandbox). The latest:`)
             for $alert in $sbx.recent {
-                $lib.warn("    {time} {engine} ({kind}): {detail}", time=$lib.time.format($alert.time, "%Y-%m-%d %H:%M:%S"),
-                    engine=$alert.engine, kind=$alert.kind, detail=$alert.detail)
+                $lib.warn(`    {$lib.time.format($alert.time, "%Y-%m-%d %H:%M:%S")} {$alert.engine} ({$alert.kind}): {$alert.detail}`)
             }
         } else {
             $lib.print("Sandbox alerts: none")
         }
         if $sbx.missing {
-            $lib.warn("slib.pcap: The host doesn't support these sandbox layers: {missing}",
-                missing=$lib.str.join(", ", $sbx.missing))
+            $lib.warn(`slib.pcap: The host doesn't support these sandbox layers: {$lib.str.join(", ", $sbx.missing)}`)
         }
 
         if $status.axon {
@@ -42,21 +38,17 @@ init {
         $engines = ([])
         for ($engine, $count) in $rules.engines { $engines.append(`{$engine} {$count}`) }
         if (not $engines) { $engines.append("no engines") }
-        $lib.print("Rules: {loaded} loaded of {count} pushed ({engines}), {invalid} invalid",
-            loaded=$rules.loaded, count=$rules.rules, engines=$lib.str.join(", ", $engines),
-            invalid=$rules.invalid)
-        $lib.print("Last pushed: {pushed}, last built: {built}", pushed=$util.when($rules.pushed),
-            built=$util.when($rules.built))
+        $lib.print(`Rules: {$rules.loaded} loaded of {$rules.rules} pushed ({$lib.str.join(", ", $engines)}), {$rules.invalid} invalid`)
+        $lib.print(`Last pushed: {$util.when($rules.pushed)}, last built: {$util.when($rules.built)}`)
         if $rules.building { $lib.print("The service is building its rules now.") }
-        if $rules.error { $lib.warn("slib.pcap: The last rule build failed: {err}", err=$rules.error) }
+        if $rules.error { $lib.warn(`slib.pcap: The last rule build failed: {$rules.error}`) }
     }
 
     $job = $pcap.schedule()
     if $job {
         $state = disabled
         if $job.enabled { $state = enabled }
-        $lib.print("Sync schedule: cron {iden} ({state}), last run: {last}", iden=$job.iden, state=$state,
-            last=$util.when($job.laststart))
+        $lib.print(`Sync schedule: cron {$job.iden} ({$state}), last run: {$util.when($job.laststart)}`)
     } else {
         $lib.print("Sync schedule: none, see slib.pcap.admin.schedule.")
     }
