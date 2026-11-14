@@ -162,19 +162,26 @@ Saved Shodan queries are `meta:rule` nodes (`:text` is the query) of two kinds, 
 | | Community queries | Local queries |
 |---|---|---|
 | From | Shodan's query directory, copied with `slib.shodan.queries --yield` | Saved with `slib.shodan.query.save` |
-| `:type` | `svc.shodan.query.community.` | `svc.shodan.query.local.` (or the older `svc.shodan.query.`) |
+| `:type` | `svc.shodan.query.community.` | `svc.shodan.query.local.` |
 | `:name` | `[Community] <title>` (Synapse lower-cases `:name`, so ex. `[community] webcams`) | The name given |
 | Updates | A snapshot. Directory changes only arrive by copying again, and removed queries are never deleted. | Never sent to Shodan, its API can't save to the directory. |
 
 The same query text is a separate node for each kind. Re-copying keeps edits to `:name` and `:desc`.
 `slib.shodan.queries` lists both (stored ones first), and `--source local` or `--source shodan`
 picks one. Pipe any saved query to `slib.shodan.search`, `slib.shodan.count`, or `slib.shodan.stream`
-to run it:
+to run it. Only the two types above are saved queries, not the bare parent type `svc.shodan.query.`.
+
+`--search` matches stored queries by `:name`, `:text`, or `:desc`, ignoring case. For the
+directory it uses Shodan's directory search, which returns a 503 at the moment (see
+[Known API quirks](#known-api-quirks)). Until that's fixed, the command warns and matches the
+directory pages it listed (`--page`, `--pages`, 10 queries a page) by title, query, description,
+or tags instead. The directory has ~7,000 queries, none newer than 2021, so the easiest way to
+search all of it is to copy it once (~700 requests) and search the copies:
 
 ```
 slib.shodan.query.save "http.favicon.hash:-1166125415" --name "Favicon"
-slib.shodan.queries --source shodan --search webcam --yield
-slib.shodan.queries --source local
+slib.shodan.queries --source shodan --pages 1000 --yield | count
+slib.shodan.queries --source local --search webcam
 meta:rule:type^=svc.shodan.query | slib.shodan.count
 ```
 
@@ -253,7 +260,7 @@ the full list:
 | `inet:asn`, `inet:cidr4/6`, `inet:fqdn`, `inet:server` | `asn:AS<n>`, `net:<cidr>`, `hostname:"<fqdn>"`, `ip:"<ip>" port:<port>` |
 | `ou:org`, `ou:name` | `org:"<name>"` |
 | `it:dev:str` | The string, as-is |
-| `meta:rule` (`:type` `svc.shodan.query`) | Its `:text` |
+| `meta:rule` (`:type` `svc.shodan.query.local.` or `svc.shodan.query.community.`) | Its `:text` |
 
 ## Data model
 
@@ -400,7 +407,9 @@ Notes from verifying the service against the live APIs (2026-10):
 - **Host history.** `GET /shodan/host/{ip}?history=true` returned a 404 ("No information
   available for that IP.") for `8.8.8.8` and `1.1.1.1`, which have data without `history`.
 - **Unavailable endpoints.** `/shodan/query/search` and `/shodan/query/tags` returned a 503
-  ("unavailable at the moment").
+  ("unavailable at the moment"), checked again 2026-11-14. `slib.shodan.queries --search` falls
+  back to matching the directory pages it lists. `GET /shodan/query` still works, with 6,965
+  queries at 10 a page, none newer than 2021-05.
 - **InternetDB** returns a 404 for IPs it hasn't seen, but some private IPs (ex. `10.0.0.1`) do
   have data.
 - **CVEDB** returns shortened CPE 2.3 strings, IDs are case-insensitive, and GHSA references

@@ -36,6 +36,9 @@ STREAM_KINDS = {
 # The default number of results Shodan returns per search page.
 SEARCH_PAGE_SIZE = 100
 
+# Saved queries per page of Shodan's query directory.
+DIRECTORY_PAGE_SIZE = 10
+
 # The ip facet size countIps() asks for before it knows the plan's limit: the most facet values
 # Shodan has published it returns (https://book.shodan.io/changelog/2025-11-06/). A plan with a
 # lower limit gets FACET_LIMIT_RE's error, and the request is retried with that limit.
@@ -81,6 +84,14 @@ def _seg(valu: Any) -> str:
     """Quote a value for use as a single URL path segment."""
 
     return quote(str(valu), safe="")
+
+
+def _directoryText(q: dict) -> str:
+    """The lower-cased text a directory query is matched on: title, query, description, tags."""
+
+    tags = q.get("tags") or []
+    vals = [q.get("title"), q.get("query"), q.get("description"), *tags]
+    return "\n".join(str(v) for v in vals if v).lower()
 
 
 class ShodanSvc(s_cell.Cell):
@@ -490,18 +501,69 @@ class ShodanSvc(s_cell.Cell):
     # ---- Directory ----
 
     async def queries(
-        self, page: int = 1, sort: str = "timestamp", order: str = "desc", apikey=None
+        self,
+        page: int = 1,
+        sort: str = "timestamp",
+        order: str = "desc",
+        pages: int = 1,
+        apikey=None,
     ) -> dict:
-        """GET /shodan/query"""
-        return await self._api(
-            "get", "/shodan/query", apikey, params={"page": page, "sort": sort, "order": order}
+        """GET /shodan/query, for ``pages`` pages (10 queries each) starting at ``page``.
+
+        Returns Shodan's ``total`` and the ``matches`` of every page fetched. Each page is
+        one request, so a large ``pages`` is slow (the directory is ~700 pages).
+        """
+
+        return await self._directoryPages(
+            "/shodan/query", {"sort": sort, "order": order}, page, pages, apikey
         )
 
-    async def queriesSearch(self, query: str, page: int = 1, apikey=None) -> dict:
-        """GET /shodan/query/search"""
-        return await self._api(
-            "get", "/shodan/query/search", apikey, params={"query": query, "page": page}
-        )
+    async def queriesSearch(self, query: str, page: int = 1, pages: int = 1, apikey=None) -> dict:
+        """GET /shodan/query/search, or match directory pages here when it's unavailable.
+
+        Shodan's directory search has returned 503 ("Query search unavailable at the moment")
+        since at least 2026-11. On a 5xx, this lists ``pages`` pages of the directory (see
+        ``queries``) and keeps the queries with ``query`` in their title, query, description,
+        or tags (ignoring case). ``fallback`` is Shodan's error when that happens, else None.
+        """
+
+        try:
+            data = await self._directoryPages(
+                "/shodan/query/search", {"query": query}, page, pages, apikey
+            )
+            data["fallback"] = None
+            return data
+        except ShodanApiError as err:
+            if err.code is None or err.code < 500:
+                raise
+            fallback = err.mesg
+
+        data = await self.queries(page=page, pages=pages, apikey=apikey)
+        needle = query.lower()
+        matches = [q for q in data["matches"] if needle in _directoryText(q)]
+        return {
+            "total": len(matches),
+            "matches": matches,
+            "fallback": fallback,
+            "scanned": len(data["matches"]),
+            "directoryTotal": data["total"],
+        }
+
+    async def _directoryPages(
+        self, path: str, params: dict, page: int, pages: int, apikey=None
+    ) -> dict:
+        """Fetch ``pages`` pages of a directory endpoint, stopping early when they run out."""
+
+        total = None
+        matches: list[dict] = []
+        for num in range(page, page + max(pages, 1)):
+            data = await self._api("get", path, apikey, params=dict(params, page=num)) or {}
+            total = data.get("total")
+            batch = data.get("matches") or []
+            matches.extend(batch)
+            if not batch or num * DIRECTORY_PAGE_SIZE >= (total or 0):
+                break
+        return {"total": total, "matches": matches}
 
     async def queriesTags(self, size: int = 10, apikey=None) -> dict:
         """GET /shodan/query/tags"""

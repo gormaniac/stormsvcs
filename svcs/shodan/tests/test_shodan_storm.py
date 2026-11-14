@@ -661,7 +661,7 @@ class TestShodanStormSearchInputs(s_tests.SynTest):
                 ('[ ou:org=* :name="github, inc." ]', 'org:"github\\, inc."'),
                 ("[ ou:name='say \"hi\"' ]", 'org:"say \\"hi\\""'),
                 ('[ it:dev:str="product:nginx port:8080" ]', "product:nginx port:8080"),
-                ('[ meta:rule=* :type=svc.shodan.query :text="http.title:test" ]', "http.title:test"),
+                ('[ meta:rule=* :type=svc.shodan.query.local. :text="http.title:test" ]', "http.title:test"),
             ):
                 queries, msgs = await self.countQuery(core, fake, storm)
                 assert queries == [expected], (storm, queries)
@@ -679,8 +679,10 @@ class TestShodanStormSearchInputs(s_tests.SynTest):
                 ("[ risk:vuln=* ]", "missing the props needed"),
                 ("[ it:prod:softver=* ]", "missing the props needed"),
                 ("[ ou:org=* ]", "missing the props needed"),
-                ("[ meta:rule=* :type=svc.shodan.query ]", "missing the props needed"),
-                ('[ meta:rule=* :type=yara :text="rule x {}" ]', "its :type must be svc.shodan.query"),
+                ("[ meta:rule=* :type=svc.shodan.query.local. ]", "missing the props needed"),
+                ('[ meta:rule=* :type=yara :text="rule x {}" ]', "its :type must be svc.shodan.query.local."),
+                # The bare parent type isn't a saved query.
+                ('[ meta:rule=* :type=svc.shodan.query :text="port:1" ]', "its :type must be svc.shodan.query.local."),
                 ("[ inet:email=visi@vertex.link ]", "The node form inet:email is not supported"),
             ):
                 queries, msgs = await self.countQuery(core, fake, storm)
@@ -749,10 +751,10 @@ class TestShodanStormSearchInputs(s_tests.SynTest):
 
     async def test_search_meta_rules(self):
         async with shodanSvc(self) as (core, svc, fake):
-            await core.nodes('[ meta:rule=* :type=svc.shodan.query :text="product:nginx" ]')
-            await core.nodes('[ meta:rule=* :type=svc.shodan.query :text="port:8080" ]')
+            await core.nodes('[ meta:rule=* :type=svc.shodan.query.local. :text="product:nginx" ]')
+            await core.nodes('[ meta:rule=* :type=svc.shodan.query.local. :text="port:8080" ]')
             before = len(fake.requests)
-            msgs = await core.stormlist("meta:rule:type=svc.shodan.query | slib.shodan.search")
+            msgs = await core.stormlist("meta:rule:type=svc.shodan.query.local. | slib.shodan.search")
             self.stormHasNoErr(msgs)
             searches = [
                 r["query"]["query"]
@@ -1245,8 +1247,8 @@ class TestShodanStormInputs(s_tests.SynTest):
             await core.nodes("pol:country | slib.shodan.stream --timeout 5")
             assert fake.last()["path"] == "/stream/shodan/countries/US"
 
-            await core.nodes('[ meta:rule=* :type=svc.shodan.query :text="port:22" ]')
-            await core.nodes('[ meta:rule=* :type=svc.shodan.query :text="port:80" ]')
+            await core.nodes('[ meta:rule=* :type=svc.shodan.query.local. :text="port:22" ]')
+            await core.nodes('[ meta:rule=* :type=svc.shodan.query.local. :text="port:80" ]')
             msgs = await core.stormlist("meta:rule | slib.shodan.stream --timeout 5")
             self.stormIsInWarn("A custom stream takes one query", msgs)
             assert fake.last()["path"] == "/stream/shodan/custom"
@@ -1461,11 +1463,13 @@ class TestShodanStormSavedQueries(s_tests.SynTest):
             assert len(await core.nodes("meta:rule:text=webcam")) == 2
             assert len(await core.nodes("meta:rule")) == 3
 
-            # An older rule, with the parent type, counts as local.
-            await core.nodes('[ meta:rule=* :type=svc.shodan.query :name="Old" :text="port:22" ]')
+            # A hand-made local rule (another guid) is found by its :text.
+            await core.nodes('[ meta:rule=* :type=svc.shodan.query.local. :name="Old" :text="port:22" ]')
             msgs = await core.stormlist('slib.shodan.query.save "port:22" --name "SSH"')
             self.stormIsInWarn("port:22 is already a local saved query (old)", msgs)
             await core.nodes('[ meta:rule=* :type=other :name="Not shodan" :text="port:23" ]')
+            # The bare parent type isn't a saved query.
+            await core.nodes('[ meta:rule=* :type=svc.shodan.query :name="Bare" :text="port:24" ]')
 
             msgs = await core.stormlist("slib.shodan.queries --source local --yield")
             self.stormHasNoErr(msgs)
@@ -1495,12 +1499,54 @@ class TestShodanStormSavedQueries(s_tests.SynTest):
             msgs = await core.stormlist("slib.shodan.queries --source local --tags")
             self.stormIsInWarn("--tags lists Shodan's directory tags", msgs)
             msgs = await core.stormlist("slib.shodan.queries --source local --page 2")
-            self.stormIsInWarn("--page, --sort, and --order only apply to Shodan's directory", msgs)
+            self.stormIsInWarn("--page, --pages, --sort, and --order only apply to Shodan's directory", msgs)
+
+    async def test_queries_search(self):
+        async with shodanSvc(self) as (core, svc, fake):
+            await core.nodes('slib.shodan.query.save "port:22" --name "Webcam SSH"')
+
+            # Shodan's directory search, when it works.
+            msgs = await core.stormlist("slib.shodan.queries --search webcam")
+            self.stormHasNoErr(msgs)
+            self.stormIsInPrint("Stored saved queries: 1", msgs)
+            self.stormIsInPrint("Total saved queries: 1", msgs)
+            self.stormNotInWarn("unavailable", msgs)
+            assert fake.last()["path"] == "/api/shodan/query/search"
+            assert fake.last()["query"] == {"query": "webcam", "page": "1", "key": "testkey"}
+
+            # Like the live API now, the search is unavailable: directory pages are matched instead.
+            unavailable = (503, {"error": "Query search unavailable at the moment"})
+            fake.routes[("GET", "/api/shodan/query/search")] = unavailable
+            fake.requests.clear()
+            msgs = await core.stormlist("slib.shodan.queries --search IOT --pages 3 --yield")
+            self.stormHasNoErr(msgs)
+            self.stormIsInWarn("Query search unavailable at the moment", msgs)
+            self.stormIsInWarn("only the 2 directory queries on the --pages listed (of 2) were searched", msgs)
+            self.stormIsInPrint("Stored saved queries: 0", msgs)
+            self.stormIsInPrint("Total saved queries: 1", msgs)
+            # Matched on the tag, and the directory ran out after one page.
+            assert [m[1][1]["props"]["text"] for m in msgs if m[0] == "node"] == ["webcam"]
+            assert [r["path"] for r in fake.requests] == ["/api/shodan/query/search", "/api/shodan/query"]
+
+            # Once copied, the stored search finds it too, without Shodan.
+            fake.requests.clear()
+            msgs = await core.stormlist("slib.shodan.queries --source local --search webcam")
+            self.stormIsInPrint("Stored saved queries: 2", msgs)
+            assert not fake.requests
+
+            # Other errors aren't hidden by the fallback.
+            fake.routes[("GET", "/api/shodan/query/search")] = (400, {"error": "Bad query"})
+            msgs = await core.stormlist("slib.shodan.queries --source shodan --search webcam")
+            self.stormIsInWarn("Listing saved queries failed", msgs)
+            self.stormNotInWarn("unavailable", msgs)
+
+            msgs = await core.stormlist("slib.shodan.queries --source shodan --pages 0")
+            self.stormIsInWarn("--pages must be at least 1", msgs)
 
     async def test_run_saved_queries(self):
         async with shodanSvc(self) as (core, svc, fake):
             await core.nodes('slib.shodan.query.save "product:nginx" --name nginx')
-            await core.nodes('[ meta:rule=* :type=svc.shodan.query :text="port:8080" ]')
+            await core.nodes('[ meta:rule=* :type=svc.shodan.query.local. :text="port:8080" ]')
             await core.nodes("slib.shodan.queries --source shodan --yield")
 
             msgs = await core.stormlist("meta:rule:type^=svc.shodan.query | slib.shodan.search --count")

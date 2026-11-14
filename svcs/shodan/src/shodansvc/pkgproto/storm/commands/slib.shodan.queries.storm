@@ -12,8 +12,13 @@ init {
     $out = ([])
 
     // These only apply to Shodan's directory.
-    if ($source = "local" and ($cmdopts.page != 1 or $cmdopts.sort != "timestamp" or $cmdopts.order != "desc")) {
-        $lib.warn("slib.shodan.queries: --page, --sort, and --order only apply to Shodan's directory, not --source local.")
+    if ($source = "local" and ($cmdopts.page != 1 or $cmdopts.pages != 1 or $cmdopts.sort != "timestamp" or $cmdopts.order != "desc")) {
+        $lib.warn("slib.shodan.queries: --page, --pages, --sort, and --order only apply to Shodan's directory, not --source local.")
+    }
+    $pages = $cmdopts.pages
+    if ($pages < 1) {
+        $lib.warn("slib.shodan.queries: --pages must be at least 1, using 1.")
+        $pages = (1)
     }
 
     if $cmdopts.tags {
@@ -43,12 +48,18 @@ init {
         // Shodan's query directory. With --yield, its queries are stored as community meta:rules.
         if $remote {
             if $cmdopts.search {
-                $retn = $priv.queriesSearch($cmdopts.search, page=$cmdopts.page)
+                $retn = $priv.queriesSearch($cmdopts.search, page=$cmdopts.page, pages=$pages)
             } else {
-                $retn = $priv.queries(page=$cmdopts.page, sort=$cmdopts.sort, order=$cmdopts.order)
+                $retn = $priv.queries(page=$cmdopts.page, sort=$cmdopts.sort, order=$cmdopts.order, pages=$pages)
             }
             if (not $util.failed($retn, "Listing saved queries")) {
                 if $local { $lib.print("") }
+                // Shodan's directory search was unavailable, so the service matched the pages it
+                // listed instead.
+                if $retn.data.fallback {
+                    $lib.warn("slib.shodan.queries: Shodan's directory search is unavailable ({err}), so only the {scanned} directory queries on the --pages listed (of {total}) were searched. Raise --pages (10 queries each) to search more, or copy the directory with --yield and search it with --source local.",
+                              err=$retn.data.fallback, scanned=$retn.data.scanned, total=$retn.data.directoryTotal)
+                }
                 $lib.print("Total saved queries: {total}", total=$retn.data.total)
                 $tagPrefix = $priv.tagPrefix()
                 $rows = ([])

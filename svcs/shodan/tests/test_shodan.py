@@ -974,6 +974,49 @@ class TestShodanSvc(s_tests.SynTest):
             assert len(banners) == 150
             assert len(fake.requests) == 2
 
+    async def test_directory_pages(self):
+        async with shodanSvc(self) as (core, svc, fake):
+
+            def paged(request):
+                page = int(request.query["page"])
+                matches = [
+                    {"title": f"t{page}{i}", "query": f"port:{page}{i}", "tags": ["iot"] if i == 0 else []}
+                    for i in range(10 if page < 3 else 5)
+                ]
+                return (200, {"total": 25, "matches": matches})
+
+            fake.routes[("GET", "/api/shodan/query")] = paged
+
+            # Stops when the directory runs out, not at the pages asked for.
+            data = await svc.queries(pages=10)
+            assert (data["total"], len(data["matches"])) == (25, 25)
+            assert [r["query"]["page"] for r in fake.requests] == ["1", "2", "3"]
+
+            fake.requests.clear()
+            data = await svc.queries(page=2, pages=1, sort="votes")
+            assert [m["query"] for m in data["matches"]][:1] == ["port:20"]
+            assert fake.requests[0]["query"]["sort"] == "votes"
+
+            # Shodan's search works: its results, with no fallback.
+            data = await svc.queriesSearch("webcam")
+            assert (data["total"], data["fallback"]) == (1, None)
+
+            # A 5xx from the search: the listed pages are matched on title, query, and tags.
+            unavailable = (503, {"error": "Query search unavailable at the moment"})
+            fake.routes[("GET", "/api/shodan/query/search")] = unavailable
+            data = await svc.queriesSearch("IOT", pages=10)
+            assert data["fallback"] == "Query search unavailable at the moment"
+            assert [m["title"] for m in data["matches"]] == ["t10", "t20", "t30"]
+            assert (data["total"], data["scanned"], data["directoryTotal"]) == (3, 25, 25)
+            data = await svc.queriesSearch("PORT:21", pages=2)
+            assert [m["query"] for m in data["matches"]] == ["port:21"]
+            assert data["scanned"] == 20
+
+            # Other errors are raised.
+            fake.routes[("GET", "/api/shodan/query/search")] = (400, {"error": "Bad query"})
+            with self.raises(ShodanApiError):
+                await svc.queriesSearch("webcam")
+
     async def test_dns_domain_all_pages(self):
         async with shodanSvc(self) as (core, svc, fake):
 

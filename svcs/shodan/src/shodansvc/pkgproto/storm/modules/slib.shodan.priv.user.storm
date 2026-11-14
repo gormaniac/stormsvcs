@@ -87,10 +87,12 @@ function dnsReverse(ips) { return($svc.dnsReverse($ips, apikey=$userKey())) }
 
 // Directory
 
-function queries(page=(1), sort=timestamp, order=desc) {
-    return($svc.queries(page=$page, sort=$sort, order=$order, apikey=$userKey()))
+function queries(page=(1), sort=timestamp, order=desc, pages=(1)) {
+    return($svc.queries(page=$page, sort=$sort, order=$order, pages=$pages, apikey=$userKey()))
 }
-function queriesSearch(query, page=(1)) { return($svc.queriesSearch($query, page=$page, apikey=$userKey())) }
+function queriesSearch(query, page=(1), pages=(1)) {
+    return($svc.queriesSearch($query, page=$page, pages=$pages, apikey=$userKey()))
+}
 function queriesTags(size=(10)) { return($svc.queriesTags(size=$size, apikey=$userKey())) }
 
 // Trends
