@@ -1,0 +1,34 @@
+interactions:
+- request:
+    body: '["8.8.8.8", "10.0.0.1", "1.1.1.1"]'
+    headers:
+      Content-Type:
+      - application/json
+    method: POST
+    uri: http://ip-api.com/batch?fields=status,message,country,countryCode,region,regionName,city,lat,lon,isp,org,as,asname,reverse,mobile,proxy,hosting,query
+  response:
+    body:
+      string: '[{"status": "success", "country": "United States", "countryCode": "US",
+        "region": "VA", "regionName": "Virginia", "city": "Ashburn", "lat": 39.03,
+        "lon": -77.5, "isp": "Google LLC", "org": "Google Public DNS", "as": "AS15169
+        Google LLC", "asname": "GOOGLE", "reverse": "dns.google", "mobile": false,
+        "proxy": false, "hosting": true, "query": "8.8.8.8"}, {"status": "fail",
+        "message": "private range", "query": "10.0.0.1"}, {"status": "success",
+        "country": "Australia", "countryCode": "AU", "region": "QLD", "regionName":
+        "Queensland", "city": "South Brisbane", "lat": -27.4766, "lon": 153.0166,
+        "isp": "Cloudflare, Inc", "org": "APNIC and Cloudflare DNS Resolver project",
+        "as": "AS13335 Cloudflare, Inc.", "asname": "CLOUDFLARENET", "reverse": "one.one.one.one",
+        "mobile": false, "proxy": false, "hosting": true, "query": "1.1.1.1"}]'
+    headers:
+      Content-Type:
+      - application/json; charset=utf-8
+      Date:
+      - Tue, 28 Jul 2026 13:11:19 GMT
+      X-Rl:
+      - '14'
+      X-Ttl:
+      - '60'
+    status:
+      code: 200
+      message: OK
+version: 1

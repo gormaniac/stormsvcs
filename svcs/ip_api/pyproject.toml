@@ -1,6 +1,6 @@
 [project]
 name = "ipapi"
-version = "0.2.3"
+version = "0.3.0"
 description = "An Ip-API.com Storm Service"
 readme = "README.md"
 license-files = ["LICENSE"]
@@ -11,7 +11,7 @@ authors = [
 # Stick with 3.11 until Synapse's base image changes
 requires-python = ">=3.11,<3.12"
 dependencies = [
-    "stormlibpp>=0.10.1",
+    "stormlibpp>=0.12.1",
 ]
 
 [build-system]
@@ -29,6 +29,11 @@ testpaths = [
     "tests",
 ]
 asyncio_mode = "auto"
+# Python deprecations raised from the service's own code fail the tests. Synapse's
+# deprecations are logged instead, tests/conftest.py fails the tests for those.
+filterwarnings = [
+    "error::DeprecationWarning:ipapi",
+]
 
 [dependency-groups]
 dev = [

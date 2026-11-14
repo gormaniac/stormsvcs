@@ -1,8 +1,8 @@
 name: slib.ipapi
-version: 0.2.3
+version: 0.3.0
 guid: 92cc9d722c63125d64911389cd39c685
 
-synapse_minversion: [2, 137, 0]
+synapse_version: ">=2.145.0,<3.0.0"
 
 genopts:
     dotstorm: true
@@ -43,6 +43,14 @@ commands:
     descr: |
       Query the ip-api.com API for information about the input IP addresses.
 
+      Each IP's ASN (and the AS's org), geolocation (geo:place and geo:telem), reverse DNS name,
+      and WHOIS org are modeled, and the IP is tagged with the hosting/mobile/proxy results
+      (see slib.ipapi.admin.settag).
+
+      Inbound nodes are queried in batches of up to 100 with ip-api.com's batch endpoint, so
+      they're yielded once their batch is done. Nodes that aren't inet:ipv4 or inet:ipv6 are
+      passed through with a warning.
+
       Examples:
 
         // Lift some inet:ipv4 nodes and query ip-api.com for information.
@@ -56,16 +64,17 @@ commands:
         - type: str
           default: ''
           help: |
-            An IP address string to query for.
+            An IPv4 or IPv6 address string to query for.
 
             Ignores any nodes in the pipeline and uses only the string passed to this arg.
+            Warns, without querying, if the string is not a valid IP address.
 
       - - --yield
         - default: false
           action: store_true
           help: |
             Yield the newly created inet:ipv4/ipv6 records.
-            
+
             A bit redundant when not using --query because nodes stay in the pipeline otherwise.
 
     cmdinputs:
@@ -86,11 +95,16 @@ commands:
 
       This can be disabled using the slib.ipapi.admin.disabletag command.
 
+      Examples:
+
+        // Tag IPs with #rep.myorg.ipapi.hosting, #rep.myorg.ipapi.mobile, and #rep.myorg.ipapi.proxy.
+        slib.ipapi.admin.settag rep.myorg.ipapi
+
     cmdargs:
       - - prefix
         - type: str
           help: |
-            The custom tag prefix to use.
+            The custom tag prefix to use, which must be a valid tag (ex. rep.ipapi.infra).
 
   - name: slib.ipapi.admin.disabletag
     perms:

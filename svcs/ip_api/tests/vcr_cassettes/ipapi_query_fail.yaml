@@ -3,7 +3,7 @@ interactions:
     body: null
     headers: {}
     method: GET
-    uri: http://ip-api.com/json/134744072?fields=status,message,country,countryCode,region,regionName,city,zip,lat,lon,timezone,isp,org,as,asname,mobile,proxy,hosting,query
+    uri: http://ip-api.com/json/134744072?fields=status,message,country,countryCode,region,regionName,city,lat,lon,isp,org,as,asname,reverse,mobile,proxy,hosting,query
   response:
     body:
       string: '{"status": "fail", "message": "invalid query", "query": "134744072"}'

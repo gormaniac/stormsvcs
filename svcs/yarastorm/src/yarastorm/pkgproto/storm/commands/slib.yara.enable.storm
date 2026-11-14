@@ -1,14 +1,21 @@
 init {
     $yaralib = $lib.import(slib.yara.lib)
+    $isadmin = $lib.user.allowed(slib.yara.admin)
+    if (not $isadmin) {
+        $lib.warn("slib.yara.enable requires the slib.yara.admin permission.")
+    }
 }
 
-if ($node.form() = "it:app:yara:rule") {
-    $retn = $yaralib.enable_rule($node)
-    if (not $retn.status) {
-        $lib.warn(
-            "Unable to enable it:app:yara:rule={guid}: {err}",
-            guid=$node.value(),
-            err=$retn.mesg
-        )
+if $isadmin {
+    switch $node.form() {
+        "it:app:yara:rule": {
+            $retn = $yaralib.enableRule($node)
+            if (not $retn.status) {
+                $lib.warn(`Unable to enable it:app:yara:rule={$node.repr()}: {$retn.mesg}`)
+            }
+        }
+        *: {
+            $lib.warn(`slib.yara.enable only supports it:app:yara:rule nodes, skipping {$node.form()}.`)
+        }
     }
 }
