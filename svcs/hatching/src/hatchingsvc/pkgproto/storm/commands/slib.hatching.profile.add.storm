@@ -5,6 +5,6 @@ init {
     $retn = $pman.addProfile($cmdopts.name, tags=$cmdopts.tag, timeout=$cmdopts.timeout, network=$cmdopts.network,
                            geolocation=$cmdopts.geolocation)
     if (not $util.failed($retn, `Adding profile {$cmdopts.name}`)) {
-        $lib.print("slib.hatching.profile.add: Added profile {name} ({id}).", name=$retn.data.name, id=$retn.data.id)
+        $lib.print(`slib.hatching.profile.add: Added profile {$retn.data.name} ({$retn.data.id}).`)
     }
 }

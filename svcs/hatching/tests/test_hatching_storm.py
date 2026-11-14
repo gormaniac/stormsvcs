@@ -147,10 +147,12 @@ class TestStormEnrich(s_tests.SynTest):
 
             (flow,) = await core.nodes("inet:flow:dst=tcp://198.51.100.7:443")
             assert flow.get("dst:port") == 443 and flow.get("dst:txbytes") == 1024
-            assert flow.get("src") == "tcp://10.127.0.5:49712"
+            # The sandbox VM's private address isn't modeled, it would link every analysis.
+            assert flow.get("src") is None
+            assert await core.count("inet:ipv4=10.127.0.5") == 0
             assert await core.count("inet:flow:dst=tcp://198.51.100.7:443 :src:proc -> it:exec:proc") == 1
             assert await core.count("inet:flow:dst=tcp://198.51.100.7:443 -(refs)> inet:fqdn=evil.example.com") == 1
-            assert await core.count("inet:tls:ja3:sample=(tcp://10.127.0.5:49712, a0e9f5d64349fb13191bc781f81f42e1)") == 1
+            assert await core.count("inet:tls:ja3:sample") == 0
             assert await core.count("inet:tls:ja3s:sample=(tcp://198.51.100.7:443, 15af977ce25de452b96affa2addb1036)") == 1
 
             # Triage's ASN and country of the IPs.
@@ -177,7 +179,7 @@ class TestStormEnrich(s_tests.SynTest):
 
             # The task nodes are linked to the meta:source too.
             for form in ("it:exec:proc", "inet:flow", "inet:dns:request", "inet:http:request",
-                         "it:exec:file:add", "inet:tls:ja3:sample"):
+                         "it:exec:file:add", "inet:tls:ja3s:sample"):
                 assert await core.count(f"{form} +{{ <(seen)- meta:source={SOURCE_GUID} }}") == await core.count(form), form
 
             # An existing ASN isn't overwritten.
@@ -273,6 +275,13 @@ class TestStormEnrich(s_tests.SynTest):
             self.stormIsInErr("Use --enable or --disable, not both.", msgs)
             msgs = await core.stormlist("slib.hatching.admin.tags --enable")
             self.stormIsInPrint("enabled=true", msgs)
+
+            # An invalid prefix is rejected, instead of making every tag edit fail.
+            for prefix in ('""', '"rep triage"', '"#rep"'):
+                msgs = await core.stormlist(f"slib.hatching.admin.tags --prefix {prefix}")
+                self.stormIsInErr("isn't a valid tag name", msgs)
+            msgs = await core.stormlist("slib.hatching.admin.tags --prefix Rep.Hatching2")
+            self.stormIsInPrint("prefix=rep.hatching2", msgs)
 
 
 class TestStormSamples(s_tests.SynTest):
@@ -386,6 +395,56 @@ class TestStormSamples(s_tests.SynTest):
             msgs = await core.stormlist(f"slib.hatching.download --sample {SID}")
             self.stormIsInWarn("larger than the max", msgs)
 
+    async def test_download_names_and_failures(self):
+        async with hatchingSvc(self) as (core, svc, fake):
+            pcap = hashlib.sha256(ft.PCAP_BYTES).hexdigest()
+            # An analyst's name isn't replaced by Triage's (ex. dump.pcap).
+            await core.nodes(f"[ file:bytes=sha256:{pcap} :name=case42.pcap :mime=application/vnd.tcpdump.pcap ]")
+            msgs = await core.stormlist(f"slib.hatching.download --sample {SID} --pcap")
+            self.stormHasNoWarnErr(msgs)
+            (node,) = await core.nodes(f"file:bytes=sha256:{pcap}")
+            assert node.get("name") == "case42.pcap" and node.get("mime") == "application/vnd.tcpdump.pcap"
+
+            # Failed tasks have no pcap to download.
+            fake.samples[SID]["tasks"][1]["status"] = "failed"
+            count = len(fake.requests)
+            msgs = await core.stormlist(f"slib.hatching.download --sample {SID} --pcap --yield")
+            self.stormHasNoWarnErr(msgs)
+            assert yielded(msgs) == [] and not any(r["path"].endswith("dump.pcap") for r in fake.requests[count:])
+            fake.samples[SID]["tasks"][1]["status"] = "reported"
+
+            # A task report that's unavailable is a warning, not a failure of the whole download.
+            fake.task_reports.pop((SID, "behavioral1"))
+            msgs = await core.stormlist(f"slib.hatching.download --sample {SID} --dumped")
+            self.stormIsInWarn("The behavioral1 report of", msgs)
+            self.stormNotInWarn("Listing the dropped files", msgs)
+
+    async def test_once_per_query(self):
+        # --sample/--url run once, not once per inbound node, and the inbound nodes pass through.
+        async with hatchingSvc(self) as (core, svc, fake):
+            await core.nodes("[ test:int=1 test:int=2 test:int=3 ]")
+
+            def count(method, path):
+                return len([r for r in fake.requests if r["method"] == method and r["path"].endswith(path)])
+
+            msgs = await core.stormlist(f"test:int | slib.hatching.enrich --sample {SID}")
+            self.stormHasNoWarnErr(msgs)
+            assert count("GET", "/overview.json") == 1
+            assert sorted(yielded(msgs)) == [("test:int", 1), ("test:int", 2), ("test:int", 3)]
+            msgs = await core.stormlist(f"test:int | slib.hatching.enrich --sample {SID} --yield")
+            assert count("GET", "/overview.json") == 2
+            assert yielded(msgs) == [("file:bytes", f"sha256:{ft.SAMPLE_SHA256}")]
+
+            msgs = await core.stormlist(f"test:int | slib.hatching.download --sample {SID}")
+            self.stormHasNoWarnErr(msgs)
+            assert count("GET", "/sample") == 1 and len(yielded(msgs)) == 3
+            msgs = await core.stormlist(f"test:int | slib.hatching.download --sample {SID} --yield")
+            assert yielded(msgs) == [("file:bytes", f"sha256:{ft.SAMPLE_SHA256}")]
+
+            msgs = await core.stormlist("test:int | slib.hatching.submit --url https://a.com/")
+            self.stormHasNoWarnErr(msgs)
+            assert count("POST", "/samples") == 1 and len(yielded(msgs)) == 3
+
 
 class TestStormSubmit(s_tests.SynTest):
 
@@ -415,13 +474,25 @@ class TestStormSubmit(s_tests.SynTest):
             self.stormIsInWarn("has no SHA256", msgs)
             msgs = await core.stormlist("[ inet:fqdn=vertex.link ] | slib.hatching.submit")
             self.stormIsInWarn("The node form inet:fqdn is not supported", msgs)
-            msgs = await core.stormlist(f"file:bytes=sha256:{sha256} [ -:size ] | slib.hatching.submit")
-            self.stormIsInWarn("size is unknown", msgs)
+            # The whole file is read from the Axon, whatever :size says (or without one).
+            for edit in ("[ -:size ]", "[ :size=2 ]"):
+                msgs = await core.stormlist(f"file:bytes=sha256:{sha256} {edit} | slib.hatching.submit")
+                self.stormHasNoWarnErr(msgs)
+                assert fake.last("post", "/samples")["files"]["file"][1] == b"MZ submitted file"
+
+            # Files bigger than one chunk are sent in pieces.
+            byts = b"MZ" + bytes(range(256)) * 10000
+            (size, big) = await core.axon.put(byts)
+            msgs = await core.stormlist(f"[ file:bytes=sha256:{big.hex()} ] | slib.hatching.submit --name big.exe")
+            self.stormHasNoWarnErr(msgs)
+            assert fake.last("post", "/samples")["files"]["file"] == ("big.exe", byts)
+            assert not svc.uploads
 
         async with hatchingSvc(self, conf={"hatching:maxsize": 4}) as (core, svc, fake):
             (size, sha256) = await core.axon.put(b"too big")
             msgs = await core.stormlist(f"[ file:bytes=sha256:{sha256.hex()} :size={size} ] | slib.hatching.submit")
             self.stormIsInWarn("larger than the max of 4", msgs)
+            assert not svc.uploads
 
     async def test_submit_wait(self):
         async with hatchingSvc(self) as (core, svc, fake):
@@ -572,6 +643,23 @@ class TestStormManage(s_tests.SynTest):
             msgs = await core.stormlist("[ inet:fqdn=vertex.link ] | slib.hatching.yara.add")
             self.stormIsInWarn("The node form inet:fqdn is not supported", msgs)
 
+            # A :name already ending in .yara isn't suffixed again.
+            q = '[ it:app:yara:rule=* :name=hunt3.yara :text="rule hunt3 { condition: true }" ] | slib.hatching.yara.add'
+            msgs = await core.stormlist(q)
+            self.stormIsInPrint("Added Yara rule hunt3.yara.", msgs)
+            assert "hunt3.yara" in fake.rules and "hunt3.yara.yara" not in fake.rules
+
+            # --name is saved once, however many nodes come in, and they pass through.
+            await core.nodes("[ test:int=1 test:int=2 test:int=3 ]")
+            puts = len([r for r in fake.requests if r["method"] == "POST" and r["path"].endswith("/yara")])
+            msgs = await core.stormlist('test:int | slib.hatching.yara.add --name once.yara --text "rule once { condition: true }"')
+            self.stormHasNoWarnErr(msgs)
+            assert len([r for r in fake.requests if r["method"] == "POST" and r["path"].endswith("/yara")]) == puts + 1
+            assert len(yielded(msgs)) == 3
+
+            msgs = await core.stormlist("it:app:yara:rule | slib.hatching.yara.add --rename hunt2.yara")
+            self.stormIsInErr("--rename requires --name", msgs)
+
             msgs = await core.stormlist("slib.hatching.yara.del hunt.yara")
             self.stormIsInPrint("Deleted Yara rule hunt.yara.", msgs)
             assert "hunt.yara" not in fake.rules
@@ -617,6 +705,16 @@ class TestStormAdmin(s_tests.SynTest):
             msgs = await core.stormlist("slib.hatching.apikey")
             self.stormIsInPrint("and no service-wide key is set either.", msgs)
 
+            # A non-admin user can save their own key, and it's used for their requests.
+            visi = await core.auth.addUser("visi")
+            await visi.addRule((True, ("slib", "hatching", "user")))
+            opts = {"user": visi.iden}
+            msgs = await core.stormlist("slib.hatching.apikey visikey", opts=opts)
+            self.stormHasNoWarnErr(msgs)
+            self.stormIsInPrint("Saved your Hatching Triage API key in vault hatching:visi.", msgs)
+            await core.stormlist(f"slib.hatching.sample.info {SID}", opts=opts)
+            assert fake.requests[-1]["headers"]["Authorization"] == "Bearer visikey"
+
     async def test_request(self):
         async with hatchingSvc(self) as (core, svc, fake):
             msgs = await core.stormlist('slib.hatching.admin.request /v0/samples --params ({"subset": "org", "limit": 1})')
@@ -647,7 +745,12 @@ class TestStormAdmin(s_tests.SynTest):
             msgs = await core.stormlist("slib.hatching.admin.user.add x --role root")
             self.stormIsInErr("Invalid choice for argument --role", msgs)
 
+            # The new key is masked unless --show is used.
             msgs = await core.stormlist("slib.hatching.admin.user.key.add user-1 ci")
+            self.stormIsInPrint("Created API key ci for user-1: newk... (use --show to print it all)", msgs)
+            assert "newkey" not in prints(msgs)
+            await core.stormlist("slib.hatching.admin.user.key.del user-1 ci")
+            msgs = await core.stormlist("slib.hatching.admin.user.key.add user-1 ci --show")
             self.stormIsInPrint("Created API key ci for user-1: newkey", msgs)
             msgs = await core.stormlist("slib.hatching.admin.user.keys user-1")
             self.stormIsInPrint("newk...", msgs)

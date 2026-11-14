@@ -4,6 +4,6 @@ init {
 
     for $retn in $priv.events(sample=$cmdopts.sample, limit=$cmdopts.limit, timeout=$cmdopts.timeout) {
         if $util.failed($retn, "Reading sample events") { break }
-        $lib.print("slib.hatching.events: {id} {status}", id=$retn.data.id, status=$retn.data.status)
+        $lib.print(`slib.hatching.events: {$retn.data.id} {$retn.data.status}`)
     }
 }

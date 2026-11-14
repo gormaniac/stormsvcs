@@ -1,8 +1,8 @@
 name: slib.hatching
-version: 0.1.1
+version: 0.2.0
 guid: 921df2db53ea47a49328d32b3b7c7d62
 
-synapse_minversion: [2, 137, 0]
+synapse_version: ">=2.137.0,<3.0.0"
 
 genopts:
     dotstorm: true
@@ -89,7 +89,7 @@ commands:
         - type: str
           action: append
           default: []
-          help: A sample ID (or hash) to model instead of using the inbound nodes. May be used multiple times.
+          help: A sample ID (or hash) to model, once, instead of the inbound nodes (which pass through, or are replaced with --yield). May be used multiple times.
       - - --tasks
         - default: false
           action: store_true
@@ -129,7 +129,7 @@ commands:
       - - --limit
         - type: int
           default: 20
-          help: The most samples to return, 0 for every result.
+          help: The most samples to return (at most 1000), 0 for 1000.
       - - --model
         - default: false
           action: store_true
@@ -163,7 +163,7 @@ commands:
       - - --limit
         - type: int
           default: 20
-          help: The most samples to list, 0 for all of them.
+          help: The most samples to list (at most 1000), 0 for 1000.
 
   - name: slib.hatching.sample.info
     perms:
@@ -324,7 +324,7 @@ commands:
         - type: str
           action: append
           default: []
-          help: A sample ID (or hash) to download from instead of using the inbound nodes. May be used multiple times.
+          help: A sample ID (or hash) to download from, once, instead of the inbound nodes (which pass through, or are replaced with --yield). May be used multiple times.
       - - --task
         - type: str
           default: null
@@ -427,6 +427,11 @@ commands:
 
       Your key takes precedence over the service-wide key set by slib.hatching.admin.apikey.
 
+      NOTE: A key given as an argument is part of the Storm query's text, so it can show up in
+      query logs, history, and audit records. To keep it out of them, add the vault yourself
+      (ex. in the UI's vault manager) with type "hatching", user scope, and an "apikey" secret.
+      This command only reports on it then.
+
       Examples:
 
         slib.hatching.apikey ABCDEFG
@@ -471,7 +476,7 @@ commands:
         - type: str
           action: append
           default: []
-          help: A URL to submit instead of using the inbound nodes. May be used multiple times.
+          help: A URL to submit, once, instead of the inbound nodes (which pass through, or are replaced with --yield). May be used multiple times.
       - - --fetch
         - default: false
           action: store_true
@@ -685,7 +690,7 @@ commands:
     descr: |
       Add (or with --update, replace) Yara rules from it:app:yara:rule nodes or --name/--text.
 
-      Rules from nodes are named "<:name>.yara".
+      Rules from nodes are named "<:name>.yara" (a :name already ending in .yara is used as is).
 
       Examples:
 
@@ -696,7 +701,7 @@ commands:
       - - --name
         - type: str
           default: null
-          help: The rule's name, instead of using the inbound nodes.
+          help: The rule's name, to save it once instead of using the inbound nodes (which pass through).
       - - --text
         - type: str
           default: null
@@ -708,7 +713,7 @@ commands:
       - - --rename
         - type: str
           default: null
-          help: With --name, rename this existing rule to --name (and replace its text, with --text).
+          help: Requires --name. Rename this existing rule to --name (and replace its text, with --text).
     cmdinputs:
       - form: it:app:yara:rule
 
@@ -732,6 +737,9 @@ commands:
       Set, clear, or check the service-wide Hatching Triage API key.
 
       It's used by any user that hasn't set their own key with slib.hatching.apikey.
+
+      NOTE: The key is part of the Storm query's text, so it can show up in query logs, history,
+      and audit records. Alternatively, set the service's hatching:apikey config option.
 
       Examples:
 
@@ -764,7 +772,7 @@ commands:
       - - --prefix
         - type: str
           default: null
-          help: The tag prefix.
+          help: The tag prefix, a valid tag name (ex. rep.hatching).
       - - --enable
         - default: false
           action: store_true
@@ -892,7 +900,10 @@ commands:
     perms:
       - [ slib, hatching, admin ]
     descr: |
-      Create an API key for a user, and print it.
+      Create an API key for a user, and print it (masked, unless --show is used).
+
+      NOTE: With --show, the key is in the command's output, which may be logged or kept in
+      history. It can't be retrieved again later.
     cmdargs:
       - - user
         - type: str
@@ -900,6 +911,10 @@ commands:
       - - name
         - type: str
           help: The new key's name.
+      - - --show
+        - default: false
+          action: store_true
+          help: Print the whole key instead of only its first 4 characters.
 
   - name: slib.hatching.admin.user.key.del
     perms:

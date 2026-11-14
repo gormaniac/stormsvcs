@@ -45,7 +45,7 @@ def tagName(tag: str) -> str | None:
 def families(tags: list[str] | None) -> list[str]:
     """The malware families in a list of Triage tags."""
 
-    return [t[7:] for t in tags or [] if t.startswith("family:") and t[7:]]
+    return [t[7:] for t in strs(tags) if t.startswith("family:") and t[7:]]
 
 
 def toMsecs(valu: Any) -> int | None:
@@ -98,6 +98,17 @@ def ipVersion(valu: str | None) -> str | None:
     except ValueError:
         return None
     return f"ipv{addr.version}"
+
+
+def isPublicIp(valu: str | None) -> bool:
+    """Whether a value is a globally routable IP (not private, loopback, link-local, etc.)."""
+
+    if not valu:
+        return False
+    try:
+        return ipaddress.ip_address(valu).is_global
+    except ValueError:
+        return False
 
 
 def splitHostPort(valu: str) -> tuple[str | None, int | None]:
@@ -419,7 +430,8 @@ def normTask(name: str, report: dict) -> dict:
         host, port = splitHostPort(dst)
         ipver = ipVersion(host)
         srchost, srcport = splitHostPort(flow.get("src") or "")
-        srcver = ipVersion(srchost)
+        # The client is the sandbox VM; a private address would link every analysis together.
+        srcver = ipVersion(srchost) if isPublicIp(srchost) else None
         flows.append(
             {
                 "id": flow["id"],
@@ -461,6 +473,12 @@ def normTask(name: str, report: dict) -> dict:
 
     dns, answers, http = [], [], []
     requests = network.get("requests") or []
+    # The indexes of each flow's HTTP requests, so a response is only paired with the request
+    # it follows (and not with an earlier request on a keep-alive flow that got no response).
+    reqidxs: dict = {}
+    for req in requests:
+        if req.get("http_request"):
+            reqidxs.setdefault(req.get("flow"), []).append(req.get("index") or 0)
     for req in requests:
         flow = req.get("flow")
         if req.get("dns_request"):
@@ -485,11 +503,15 @@ def normTask(name: str, report: dict) -> dict:
                     answers.append({"type": rtype, "name": ans["name"], "value": ans["value"]})
         if req.get("http_request"):
             code, reason, rheaders = None, None, []
+            index = req.get("index") or 0
+            nextidx = min((i for i in reqidxs.get(flow, ()) if i > index), default=None)
             for resp in requests:
+                rindex = resp.get("index") or 0
                 if (
                     resp.get("http_response")
                     and resp.get("flow") == flow
-                    and (resp.get("index") or 0) > (req.get("index") or 0)
+                    and rindex > index
+                    and (nextidx is None or rindex < nextidx)
                 ):
                     httpresp = resp["http_response"]
                     try:
@@ -580,7 +602,7 @@ def normSample(
             break
 
     rawtags = strs(analysis.get("tags"))
-    fams = [f.lower() for f in analysis.get("family") or []] + [
+    fams = [f.lower() for f in strs(analysis.get("family"))] + [
         f.lower() for f in families(rawtags)
     ]
     techs = []
@@ -678,7 +700,7 @@ def normSample(
 
     for name, report in (tasks or {}).items():
         tanalysis = report.get("analysis") or {}
-        ret["rawtags"] += tanalysis.get("tags") or []
+        ret["rawtags"] += strs(tanalysis.get("tags"))
         fams += [f.lower() for f in families(tanalysis.get("tags"))]
         techs += ttps(tanalysis.get("ttp"))
         for sig in report.get("signatures") or []:

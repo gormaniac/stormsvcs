@@ -21,7 +21,7 @@ init {
     }
     elif (not $cmdopts.apikey) {
         if $vault {
-            $lib.print("slib.hatching: Your Hatching Triage API key is set in vault {name}.", name=$vault.name)
+            $lib.print(`slib.hatching: Your Hatching Triage API key is set in vault {$vault.name}.`)
         } else {
             $lib.print($noUserKey($priv))
         }
@@ -31,8 +31,9 @@ init {
         $lib.print("slib.hatching: Updated your Hatching Triage API key.")
     }
     else {
-        $name = `hatching:{$lib.user.name()}`
-        $lib.vault.add($name, hatching, user, $lib.user.iden, ({"apikey": $cmdopts.apikey}), ({}))
-        $lib.print("slib.hatching: Saved your Hatching Triage API key in vault {name}.", name=$name)
+        $me = $lib.auth.users.get()
+        $name = `hatching:{$me.name}`
+        $lib.vault.add($name, hatching, user, $me.iden, ({"apikey": $cmdopts.apikey}), ({}))
+        $lib.print(`slib.hatching: Saved your Hatching Triage API key in vault {$name}.`)
     }
 }

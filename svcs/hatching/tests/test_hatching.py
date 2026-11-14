@@ -3,15 +3,22 @@
 import copy
 import pathlib
 import tomllib
+from unittest import mock
 
 import synapse.tests.utils as s_tests
 from pyhatching import testing as ft
 
+import hatchingsvc.svc as svc_mod
 from hatchingsvc import __version__, norm
 from hatchingsvc.defs import PKGDEFS
 from hatchingsvc.errors import HatchingApiError
 
 from .helpers import hatchingSvc
+
+
+async def _running():
+    """An events stream that closes before the sample finishes."""
+    yield {"status": "running"}
 
 
 class TestVersions(s_tests.SynTest):
@@ -63,6 +70,45 @@ class TestNorm(s_tests.SynTest):
         assert norm.basename("C:\\a\\b.exe") == "b.exe" and norm.basename(None) is None
         assert norm.cmdLine(["a", "b"]) == "a b" and norm.cmdLine("") is None
         assert norm.rrType("IN A") == "A" and norm.rrType("cname") == "CNAME" and norm.rrType("") is None
+        assert norm.isPublicIp("198.51.100.7") is False  # TEST-NET-2 isn't globally routable.
+        assert norm.isPublicIp("8.8.8.8") and norm.isPublicIp("2001:4860:4860::8888")
+        assert not norm.isPublicIp("10.127.0.5") and not norm.isPublicIp("fe80::1")
+        assert not norm.isPublicIp("a.com") and not norm.isPublicIp(None)
+        # Non-string tags and families are ignored, not raised on.
+        assert norm.families(["family:a", None, 5]) == ["a"]
+
+    def test_norm_public_client(self):
+        report = copy.deepcopy(ft.TASK_REPORT)
+        report["network"]["flows"][0]["src"] = "8.8.4.4:49712"
+        task = norm.normTask("behavioral1", report)
+        assert task["flows"][0]["client"] == "tcp://8.8.4.4:49712"
+        assert task["flows"][1]["client"] is None
+
+    def test_norm_http_pairing(self):
+        # A keep-alive flow where the first request got no response.
+        report = copy.deepcopy(ft.TASK_REPORT)
+        reqs = report["network"]["requests"]
+        second = copy.deepcopy(reqs[2])
+        second["index"] = 4
+        second["http_request"]["url"] = "http://evil.example.com/second"
+        reqs[3]["index"] = 5
+        reqs.insert(3, second)
+        http = norm.normTask("behavioral1", report)["http"]
+        assert [(h["url"], h["code"]) for h in http] == [
+            ("http://evil.example.com/jquery-3.3.1.min.js", None),
+            ("http://evil.example.com/second", 200),
+        ]
+
+    def test_norm_bad_shapes(self):
+        sample = copy.deepcopy(ft.SAMPLE)
+        overview = copy.deepcopy(ft.OVERVIEW)
+        overview["analysis"]["family"] = ["cobaltstrike", None, 5]
+        overview["analysis"]["tags"] = ["family:cobaltstrike", None, "trojan"]
+        report = copy.deepcopy(ft.TASK_REPORT)
+        report["analysis"]["tags"] = [None, "backdoor", 1]
+        data = norm.normSample(sample, overview, None, {"behavioral1": report})
+        assert "cobaltstrike" in data["families"] and all(isinstance(f, str) for f in data["families"])
+        assert "backdoor" in data["tags"] and "trojan" in data["tags"]
 
     def test_norm_sample(self):
         tasks = {"behavioral1": ft.TASK_REPORT}
@@ -119,7 +165,8 @@ class TestNorm(s_tests.SynTest):
         # Parents that weren't reported are dropped.
         assert task["procs"][0]["parent"] is None and task["procs"][0]["sample"]
         assert task["flows"][0] == {
-            "id": 1, "server": "tcp://198.51.100.7:443", "client": "tcp://10.127.0.5:49712",
+            # The sandbox VM's private address isn't kept as the client.
+            "id": 1, "server": "tcp://198.51.100.7:443", "client": None,
             "proto": "tcp", "ip": "198.51.100.7", "ipver": "ipv4", "port": 443, "procid": 1,
             "txbytes": 512, "rxbytes": 1024, "txcount": None, "rxcount": None,
             "protocols": ["tls", "http"], "domain": "evil.example.com", "sni": "evil.example.com",
@@ -297,7 +344,8 @@ class TestHatchingSvc(s_tests.SynTest):
                 assert len(events) == 1 and not events[0]["status"]
 
                 retn = await prox.dumpedFiles(ft.SAMPLE_ID)
-                assert [dict(d) for d in retn["data"]] == [{"task": "behavioral1", "name": "files/0x0003000000022c2b-1.dat",
+                assert retn["data"]["errors"] == ()
+                assert [dict(d) for d in retn["data"]["files"]] == [{"task": "behavioral1", "name": "files/0x0003000000022c2b-1.dat",
                                          "path": "C:\\Users\\Admin\\AppData\\Roaming\\upd.exe",
                                          "sha256": ft.DROPPED_SHA256, "size": len(ft.DROPPED_BYTES)}]
 
@@ -305,6 +353,38 @@ class TestHatchingSvc(s_tests.SynTest):
                 assert retn["data"]["data"][0]["id"] == ft.SAMPLE_ID
                 retn = await prox.rawRequest("get", "/v0/samples/nope")
                 assert not retn["status"] and "NOT_FOUND" in retn["mesg"] and "HTTP 404" in retn["mesg"]
+
+                # One unavailable task report doesn't block the others' dropped files.
+                report = fake.task_reports.pop((ft.SAMPLE_ID, "behavioral1"))
+                retn = await prox.dumpedFiles(ft.SAMPLE_ID)
+                assert retn["status"] and retn["data"]["files"] == ()
+                assert "behavioral1 report" in retn["data"]["errors"][0]
+                fake.task_reports[(ft.SAMPLE_ID, "behavioral1")] = report
+
+                # Unexpected errors come back as a failed TelepathRetn, not a raw exception.
+                orig = svc.sample
+
+                async def boom(*args, **kwargs):
+                    raise AttributeError("'NoneType' object has no attribute 'lower'")
+
+                svc.sample = boom
+                with self.getLoggerStream("hatchingsvc.api") as stream:
+                    retn = await prox.sample(ft.SAMPLE_ID)
+                stream.seek(0)
+                assert "Unexpected slib.hatching error" in stream.read()
+                assert not retn["status"] and retn["mesg"].startswith("Unexpected error (AttributeError)")
+                svc.sample = orig
+
+                orig = svc.downloadSample
+
+                async def boomgenr(*args, **kwargs):
+                    raise KeyError("x")
+                    yield b""  # pragma: no cover
+
+                svc.downloadSample = boomgenr
+                items = [r async for r in prox.downloadSample(ft.SAMPLE_ID)]
+                assert len(items) == 1 and items[0]["mesg"].startswith("Unexpected error (KeyError)")
+                svc.downloadSample = orig
 
                 assert (await prox.maxSize())["data"] == 104857600
                 assert (await prox.resolve(ft.SAMPLE_MD5))["data"] == ft.SAMPLE_ID
@@ -356,7 +436,10 @@ class TestHatchingSvc(s_tests.SynTest):
 
     async def test_submit(self):
         async with hatchingSvc(self) as (core, svc, fake):
-            sample = await svc.submitFile([b"MZ", b" chunks"], "a.exe", password="infected",
+            upload = await svc.submitFileInit()
+            assert await svc.submitFileChunk(upload, b"MZ") == 2
+            assert await svc.submitFileChunk(upload, b" chunks") == 9
+            sample = await svc.submitFile(upload, "a.exe", password="infected",
                                           profiles=["win10-internet:a.exe", {"profile": "w7"}],
                                           tags=["case:1"], timeout=60, network="drop")
             assert sample["filename"] == "a.exe"
@@ -370,8 +453,26 @@ class TestHatchingSvc(s_tests.SynTest):
                 "user_tags": ["case:1"], "defaults": {"timeout": 60, "network": "drop"},
             }
 
+            # An upload is gone once it's submitted.
+            assert not svc.uploads
+            with self.raises(HatchingApiError) as cm:
+                await svc.submitFile(upload, "again")
+            assert "doesn't exist" in cm.exception.mesg
             with self.raises(HatchingApiError):
-                await svc.submitFile([], "empty")
+                await svc.submitFileChunk(upload, b"x")
+
+            with self.raises(HatchingApiError):
+                await svc.submitFile(await svc.submitFileInit(), "empty")
+
+            # Uploads are dropped once idle for too long, or when too many are open.
+            stale = await svc.submitFileInit()
+            svc.uploads[stale]["time"] -= 7200
+            fresh = await svc.submitFileInit()
+            assert stale not in svc.uploads and fresh in svc.uploads
+            for _ in range(20):
+                await svc.submitFileInit()
+            assert len(svc.uploads) == 16 and fresh not in svc.uploads
+            svc.uploads.clear()
 
             sample = await svc.submitUrl("http://example.com/a.exe", fetch=True, interactive=True)
             assert sample["kind"] == "fetch" and sample["status"] == "static_analysis"
@@ -391,9 +492,12 @@ class TestHatchingSvc(s_tests.SynTest):
 
     async def test_submit_maxsize(self):
         async with hatchingSvc(self, conf={"hatching:maxsize": 4}) as (core, svc, fake):
+            upload = await svc.submitFileInit()
+            await svc.submitFileChunk(upload, b"123")
             with self.raises(HatchingApiError) as cm:
-                await svc.submitFile([b"12345"], "big")
+                await svc.submitFileChunk(upload, b"45")
             assert "larger than the max" in cm.exception.mesg
+            assert upload not in svc.uploads
             with self.raises(HatchingApiError):
                 [c async for c in svc.downloadSample(ft.SAMPLE_ID)]
 
@@ -415,6 +519,48 @@ class TestHatchingSvc(s_tests.SynTest):
 
             with self.raises(HatchingApiError):
                 [e async for e in svc.sampleEvents("nope")]
+
+    async def test_wait_reopens_events(self):
+        async with hatchingSvc(self) as (core, svc, fake):
+            # The events stream closes before the sample is reported, wait re-opens it.
+            calls = []
+
+            async def genr(apikey, meth, *args, **kwargs):
+                calls.append(meth)
+                if len(calls) == 2:
+                    fake.samples[ft.SAMPLE_ID]["status"] = "reported"
+                yield {"id": ft.SAMPLE_ID, "status": "running"}
+
+            fake.samples[ft.SAMPLE_ID]["status"] = "running"
+            svc._genr = genr
+            with mock.patch("hatchingsvc.svc.WAIT_RETRY", 0):
+                sample = await svc.wait(ft.SAMPLE_ID, timeout=10)
+            assert sample["status"] == "reported" and calls == ["sample_events", "sample_events"]
+
+            # It still gives up at the timeout.
+            fake.samples[ft.SAMPLE_ID]["status"] = "running"
+            calls.clear()
+            with mock.patch("hatchingsvc.svc.WAIT_RETRY", 0.01):
+                fake.samples[ft.SAMPLE_ID]["status"] = "running"
+                svc._genr = lambda *a, **k: _running()
+                sample = await svc.wait(ft.SAMPLE_ID, timeout=0.2)
+            assert sample["status"] == "running"
+
+    async def test_limits_and_tasks(self):
+        async with hatchingSvc(self) as (core, svc, fake):
+            await svc.search("family:x", limit=0)
+            assert fake.last("get", "/search")["query"]["limit"] == "200"
+            await svc.samples(limit=0)
+            await svc.samples(limit=5000)
+            assert svc_mod.resultLimit(0) == svc_mod.resultLimit(5000) == 1000
+            assert svc_mod.resultLimit(-1) == 1000 and svc_mod.resultLimit("7") == 7
+
+            # Only reported behavioral tasks are used.
+            overview = {"tasks": [{"name": "s-behavioral1", "kind": "behavioral", "status": "reported"},
+                                  {"name": "s-behavioral2", "kind": "behavioral", "status": "failed"},
+                                  {"name": "s-behavioral3", "kind": "behavioral"},
+                                  {"name": "s-static1", "kind": "static", "status": "reported"}]}
+            assert svc.behavioralTasks("s", overview) == ["behavioral1"]
 
     async def test_downloads(self):
         async with hatchingSvc(self) as (core, svc, fake):

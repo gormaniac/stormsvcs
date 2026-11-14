@@ -6,7 +6,7 @@ init {
         if $cmdopts.link {
             $retn = $priv.magicLink($sample)
             if (not $util.failed($retn, `Getting the magic link of {$sample}`)) {
-                $lib.print("slib.hatching.sample.info: {sample}: {link}", sample=$sample, link=$retn.data)
+                $lib.print(`slib.hatching.sample.info: {$sample}: {$retn.data}`)
             }
             continue
         }

@@ -9,6 +9,7 @@ them in the standard ``TelepathRetn`` convention for Storm.
 import asyncio
 import collections
 import contextlib
+import time
 import urllib.parse
 from collections.abc import AsyncIterator
 from typing import Any
@@ -16,6 +17,7 @@ from typing import Any
 import pyhatching
 import pyhatching.errors as p_errors
 import pyhatching.utils as p_utils
+import synapse.common as s_common
 import synapse.lib.cell as s_cell
 from pyhatching import base as p_base
 
@@ -34,6 +36,27 @@ MAX_TIMEOUT = 3600
 
 MAX_CLIENTS = 32
 """The most per-API-key pyhatching clients kept open at once."""
+
+MAX_RESULTS = 1000
+"""The most samples a search or sample listing returns (a limit of 0 means this many)."""
+
+MAX_UPLOADS = 16
+"""The most file uploads (see ``submitFileInit``) kept open at once, the oldest is dropped."""
+
+UPLOAD_TTL = 3600
+"""Seconds an idle file upload is kept before it's dropped."""
+
+WAIT_RETRY = 2
+"""Seconds ``wait`` pauses before re-opening a sample's events stream that closed early."""
+
+
+def resultLimit(limit: int) -> int:
+    """A search/listing limit, capped at ``MAX_RESULTS`` (0, or less, means ``MAX_RESULTS``)."""
+
+    limit = int(limit)
+    if limit <= 0 or limit > MAX_RESULTS:
+        return MAX_RESULTS
+    return limit
 
 
 def dump(obj: Any) -> Any:
@@ -111,6 +134,8 @@ class HatchingSvc(s_cell.Cell):
         # How many calls are using each client, so evicted clients are only closed once idle.
         self.inuse: collections.Counter = collections.Counter()
         self.retired: set[pyhatching.PyHatchingClient] = set()
+        # File uploads in progress (see submitFileInit), by ID: {"byts": bytearray, "time": float}.
+        self.uploads: collections.OrderedDict[str, dict] = collections.OrderedDict()
         self.onfini(self._closeClients)
 
     async def _closeClients(self) -> None:
@@ -280,14 +305,17 @@ class HatchingSvc(s_cell.Cell):
     # ---- Samples ----
 
     async def search(self, query: str, limit: int = 20, apikey: str | None = None) -> list[dict]:
-        """GET /v0/search - up to ``limit`` samples (0 for every result)."""
-        return await self._call(apikey, "search", query, limit=limit)
+        """GET /v0/search - up to ``limit`` samples (0 for ``MAX_RESULTS``)."""
+        return await self._call(apikey, "search", query, limit=resultLimit(limit))
 
     async def samples(
         self, subset: str = "owned", limit: int = 20, apikey: str | None = None
     ) -> list[dict]:
-        """GET /v0/samples - up to ``limit`` samples of a subset (owned, org, or public)."""
-        return await self._call(apikey, "get_samples", subset, limit=limit)
+        """GET /v0/samples - up to ``limit`` samples (0 for ``MAX_RESULTS``) of a subset.
+
+        ``subset`` is owned, org, or public.
+        """
+        return await self._call(apikey, "get_samples", subset, limit=resultLimit(limit))
 
     async def sample(self, sample: str, apikey: str | None = None) -> dict:
         """GET /v0/samples/{id} - by sample ID or file hash."""
@@ -420,9 +448,48 @@ class HatchingSvc(s_cell.Cell):
         req = self._submitReq("import", url=str(sample).strip())
         return await self._call(apikey, "submit_sample", req)
 
+    def _pruneUploads(self) -> None:
+        """Drop file uploads that have been idle for longer than ``UPLOAD_TTL``."""
+
+        now = time.monotonic()
+        for upload, item in list(self.uploads.items()):
+            if now - item["time"] > UPLOAD_TTL:
+                del self.uploads[upload]
+
+    async def submitFileInit(self) -> str:
+        """Start a file upload, returning its ID.
+
+        Send the file with ``submitFileChunk`` then submit it with ``submitFile``. This keeps
+        each Telepath call small, instead of sending the whole file in one request.
+        """
+
+        self._pruneUploads()
+        upload = s_common.guid()
+        self.uploads[upload] = {"byts": bytearray(), "time": time.monotonic()}
+        while len(self.uploads) > MAX_UPLOADS:
+            self.uploads.popitem(last=False)
+        return upload
+
+    def _upload(self, upload: str) -> dict:
+        item = self.uploads.get(upload)
+        if item is None:
+            raise HatchingApiError("The file upload doesn't exist, it may have expired.")
+        return item
+
+    async def submitFileChunk(self, upload: str, byts: bytes) -> int:
+        """Add the next chunk of a file to an upload, returning the upload's size so far."""
+
+        item = self._upload(upload)
+        if len(item["byts"]) + len(byts) > self.maxsize:
+            del self.uploads[upload]
+            raise HatchingApiError(f"The file is larger than the max of {self.maxsize} bytes.")
+        item["byts"] += byts
+        item["time"] = time.monotonic()
+        return len(item["byts"])
+
     async def submitFile(
         self,
-        chunks: list[bytes],
+        upload: str,
         name: str,
         interactive: bool = False,
         password: str | None = None,
@@ -433,13 +500,11 @@ class HatchingSvc(s_cell.Cell):
         geolocation: str | None = None,
         apikey: str | None = None,
     ) -> dict:
-        """POST /v0/samples - submit a file, given as a list of chunks (as read from an Axon)."""
+        """POST /v0/samples - submit a file sent with ``submitFileInit``/``submitFileChunk``."""
 
-        byts = b"".join(chunks)
-        if len(byts) > self.maxsize:
-            raise HatchingApiError(
-                f"The file is {len(byts)} bytes, larger than the max of {self.maxsize}."
-            )
+        byts = bytes(self._upload(upload)["byts"])
+        # The upload is done with either way, keep only one copy of the file.
+        del self.uploads[upload]
         if not byts:
             raise HatchingApiError("The file is empty.")
         req = self._submitReq(
@@ -467,9 +532,15 @@ class HatchingSvc(s_cell.Cell):
             return info
 
         async def follow():
-            async for event in self._genr(apikey, "sample_events", sid):
-                if event.get("status") in TERMINAL:
+            while True:
+                async for event in self._genr(apikey, "sample_events", sid):
+                    if event.get("status") in TERMINAL:
+                        return
+                # The stream closed early (ex. an idle timeout or a proxy), check and re-open it.
+                status = (await self._call(apikey, "get_sample", sid)).get("status")
+                if status in TERMINAL:
                     return
+                await asyncio.sleep(WAIT_RETRY)
 
         try:
             await asyncio.wait_for(follow(), timeout=timeout)
@@ -577,7 +648,7 @@ class HatchingSvc(s_cell.Cell):
             if name.startswith(f"{sid}-"):
                 name = name[len(sid) + 1 :]
             behavioral = task.get("kind") == "behavioral" or name.startswith("behavioral")
-            if behavioral and task.get("status") in (None, "reported"):
+            if behavioral and task.get("status") == "reported":
                 ret.append(name)
         return ret
 
@@ -628,19 +699,21 @@ class HatchingSvc(s_cell.Cell):
                 raise report
         return reports
 
-    async def dumpedFiles(self, sample: str, apikey: str | None = None) -> list[dict]:
+    async def dumpedFiles(self, sample: str, apikey: str | None = None) -> dict:
         """The files dropped during a sample's behavioral tasks, that can be downloaded.
 
-        Returns ``[{task, name, path, sha256, size}]``.
+        Returns ``{"files": [{task, name, path, sha256, size}], "errors": [str]}``. A task
+        report that can't be retrieved is skipped and described in ``errors``.
         """
 
         sid = await self.resolve(sample, apikey)
         overview = await self._call(apikey, "overview", sid)
         names = self.behavioralTasks(sid, overview)
-        ret = []
+        ret, errors = [], []
         for task, report in zip(names, await self._taskReports(sid, names, apikey)):
             if isinstance(report, HatchingApiError):
-                raise report
+                errors.append(f"The {task} report of {sid} is unavailable: {report.mesg}")
+                continue
             for item in report.get("dumped") or []:
                 if item.get("sha256") and item.get("name") and item.get("kind") != "region":
                     ret.append(
@@ -652,7 +725,7 @@ class HatchingSvc(s_cell.Cell):
                             "size": item.get("size"),
                         }
                     )
-        return ret
+        return {"files": ret, "errors": errors}
 
     # ---- Downloads (async generators of byte chunks) ----
 

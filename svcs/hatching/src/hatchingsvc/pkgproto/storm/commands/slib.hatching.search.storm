@@ -2,25 +2,32 @@ init {
     $priv = $lib.import(slib.hatching.priv.user)
     $hatching = $lib.import(slib.hatching.lib)
     $util = $lib.import(slib.hatching.util)
-}
 
-spin |
-
-$retn = $priv.search($cmdopts.query, limit=$cmdopts.limit)
-if (not $util.failed($retn, `Searching for {$cmdopts.query}`)) {
-    if ($cmdopts.model or $cmdopts.yield) {
-        for $sample in $retn.data {
-            if ($sample.status = "reported") {
-                $n = $hatching.model($sample.id, tasks=$cmdopts.tasks)
-                if ($cmdopts.yield and $n) { yield $n }
-            }
-            else {
-                $lib.print("slib.hatching.search: Skipping sample {id}, it's {status}.", id=$sample.id, status=$sample.status)
+    // Runs once per query (not once per inbound node).
+    $made = ([])
+    $retn = $priv.search($cmdopts.query, limit=$cmdopts.limit)
+    if (not $util.failed($retn, `Searching for {$cmdopts.query}`)) {
+        if ($cmdopts.model or $cmdopts.yield) {
+            for $sample in $retn.data {
+                if ($sample.status = "reported") {
+                    $n = $hatching.model($sample.id, tasks=$cmdopts.tasks)
+                    if $n { $made.append($n) }
+                }
+                else {
+                    $lib.print(`slib.hatching.search: Skipping sample {$sample.id}, it's {$sample.status}.`)
+                }
             }
         }
+        else {
+            $lib.print(`slib.hatching.search: {$lib.len($retn.data)} samples matched {$cmdopts.query}.`)
+            $util.printSamples($retn.data)
+        }
     }
-    else {
-        $lib.print("slib.hatching.search: {count} samples matched {query}.", count=$lib.len($retn.data), query=$cmdopts.query)
-        $util.printSamples($retn.data)
-    }
+}
+
+// The work ran once in init. Inbound nodes pass through, unless --yield replaces them.
+if $cmdopts.yield { spin }  // noqa: P001
+
+fini {
+    if $cmdopts.yield { for $n in $made { yield $n } }
 }

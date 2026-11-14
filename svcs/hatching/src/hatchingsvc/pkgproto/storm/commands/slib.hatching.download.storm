@@ -41,24 +41,31 @@ init {
         if (not $any) { $nodes.append($hatching.downloadSample($sample)) }
         return($nodes)
     }
-}
 
-if $cmdopts.sample {
-    // --sample ignores inbound nodes.
-    spin |
+    // --sample is downloaded once here (init runs once per query), not once per inbound node.
+    $made = ([])
     for $sid in $cmdopts.sample {
         for $n in $download($sid) {
-            if ($cmdopts.yield and $n) { yield $n }
+            if $n { $made.append($n) }
         }
     }
 }
+
+if $cmdopts.sample {
+    // Inbound nodes pass through, unless --yield replaces them with the downloaded files.
+    if $cmdopts.yield { spin }  // noqa: P001
+}
 else {
     $hash = $util.nodeHash($node)
-    if ($hash = $lib.null) {
-        $lib.warn("slib.hatching.download: {form} {repr} has no hash to find a sample by.", form=$node.form(), repr=$node.repr())
-        spin
+    if ($hash = null) {
+        $lib.warn(`slib.hatching.download: {$node.form()} {$node.repr()} has no hash to find a sample by.`)
+        spin  // noqa: P001 - drop the node it can't be used with
     }
     $retn = $priv.resolve($hash)
-    if $util.failed($retn, `Finding the sample of {$hash}`) { spin }
+    if $util.failed($retn, `Finding the sample of {$hash}`) { spin }  // noqa: P001
     divert $cmdopts.yield $model.nodes($download($retn.data))
+}
+
+fini {
+    if $cmdopts.yield { for $n in $made { yield $n } }
 }

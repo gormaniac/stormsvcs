@@ -2,15 +2,7 @@
 
 init {
     $svc = $lib.service.get("slib.hatching")
-}
-
-// Only reads the calling user's own vault, see slib.hatching.priv.user.
-function userKey() {
-    $vault = $lib.vault.bytype(hatching, scope=user)
-    if ($vault = $lib.null) { return($lib.null) }
-    $secrets = $vault.secrets
-    if ($secrets = $lib.null) { return($lib.null) }
-    return($secrets.apikey)
+    $userKey = $lib.import(slib.hatching.util).userKey
 }
 
 // API key and tag settings
@@ -29,9 +21,9 @@ function setTagsEnabled(enabled) { $lib.globals.set("slib:hatching:tag:enabled",
 
 // Users and API keys (private and self-hosted Triage instances)
 
-function users(limit=$lib.null) { return($svc.users(limit=$limit, apikey=$userKey())) }
+function users(limit=(null)) { return($svc.users(limit=$limit, apikey=$userKey())) }
 function user(user) { return($svc.user($user, apikey=$userKey())) }
-function addUser(login, password=$lib.null, name=$lib.null, role=$lib.null, confirmed=(false)) {
+function addUser(login, password=(null), name=(null), role=(null), confirmed=(false)) {
     return($svc.addUser($login, password=$password, name=$name, role=$role, confirmed=$confirmed,
                         apikey=$userKey()))
 }
@@ -48,6 +40,6 @@ function orgStats() { return($svc.stats(org=(true), apikey=$userKey())) }
 
 // Raw requests
 
-function rawRequest(path, method=get, params=$lib.null, json=$lib.null) {
+function rawRequest(path, method=get, params=(null), json=(null)) {
     return($svc.rawRequest($method, $path, params=$params, json_data=$json, apikey=$userKey()))
 }

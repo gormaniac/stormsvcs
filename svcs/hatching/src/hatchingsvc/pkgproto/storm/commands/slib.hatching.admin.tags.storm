@@ -5,11 +5,17 @@ init {
         $lib.raise(BadArg, "slib.hatching.admin.tags: Use --enable or --disable, not both.")
     }
 
-    if ($cmdopts.prefix != $lib.null) { $padmin.setTagPrefix($cmdopts.prefix) }
+    if ($cmdopts.prefix != null) {
+        // An invalid prefix (ex. "" or one with spaces) would make every tag edit silently fail.
+        ($ok, $prefix) = $lib.trycast(syn:tag, $cmdopts.prefix)
+        if ((not $ok) or ($prefix != $lib.cast(str, $cmdopts.prefix).strip().lower())) {
+            $lib.raise(BadArg, `slib.hatching.admin.tags: {$cmdopts.prefix} isn't a valid tag name.`)
+        }
+        $padmin.setTagPrefix($prefix)
+    }
     if $cmdopts.enable { $padmin.setTagsEnabled((true)) }
     if $cmdopts.disable { $padmin.setTagsEnabled((false)) }
 
     $settings = $padmin.tagSettings()
-    $lib.print("slib.hatching tags: enabled={enabled} prefix={prefix}",
-        enabled=$settings.enabled, prefix=$settings.prefix)
+    $lib.print(`slib.hatching tags: enabled={$settings.enabled} prefix={$settings.prefix}`)
 }

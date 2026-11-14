@@ -1,6 +1,6 @@
 [project]
 name = "hatchingsvc"
-version = "0.1.1"
+version = "0.2.0"
 description = "A Hatching Triage Sandbox Storm Service"
 readme = "README.md"
 license-files = ["LICENSE"]
@@ -12,7 +12,7 @@ authors = [
 requires-python = ">=3.11,<3.12"
 dependencies = [
     "pyhatching>=1.1.0",
-    "stormlibpp>=0.10.1",
+    "stormlibpp>=0.12.1",
 ]
 
 [build-system]
@@ -30,6 +30,9 @@ testpaths = [
     "tests",
 ]
 asyncio_mode = "auto"
+filterwarnings = [
+    "error::DeprecationWarning:hatchingsvc",
+]
 
 [dependency-groups]
 dev = [

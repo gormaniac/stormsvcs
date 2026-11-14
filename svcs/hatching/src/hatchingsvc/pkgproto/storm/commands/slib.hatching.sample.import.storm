@@ -5,8 +5,7 @@ init {
     for $sample in $cmdopts.sample {
         $retn = $psub.importSample($sample)
         if (not $util.failed($retn, `Importing {$sample}`)) {
-            $lib.print("slib.hatching.sample.import: Imported {sample} as {id} ({status}).", sample=$sample,
-                       id=$retn.data.id, status=$retn.data.status)
+            $lib.print(`slib.hatching.sample.import: Imported {$sample} as {$retn.data.id} ({$retn.data.status}).`)
         }
     }
 }

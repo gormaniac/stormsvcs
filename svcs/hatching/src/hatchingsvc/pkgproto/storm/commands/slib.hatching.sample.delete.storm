@@ -5,7 +5,7 @@ init {
     for $sample in $cmdopts.sample {
         $retn = $psub.deleteSample($sample)
         if (not $util.failed($retn, `Deleting sample {$sample}`)) {
-            $lib.print("slib.hatching.sample.delete: Deleted sample {id}.", id=$sample)
+            $lib.print(`slib.hatching.sample.delete: Deleted sample {$sample}.`)
         }
     }
 }
