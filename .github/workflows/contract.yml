@@ -1,0 +1,26 @@
+name: Service Contract
+
+# Checks every service under svcs/ against the repo's service contract (scripts/check_svcs.py,
+# configured by the [contract] table in services.toml). Rules in [contract].enforce fail this
+# job; the rest are reported in the job summary until every service passes them.
+# Runs on every PR, not only ones that touch a service, so a change to services.toml, the
+# workflows, or the contract itself is checked too.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v7.0.1
+
+      - name: Check the service contract
+        # Only needs the standard library, and the runner's python3 is 3.11 or later.
+        run: python3 scripts/check_svcs.py --summary "$GITHUB_STEP_SUMMARY"

@@ -19,4 +19,6 @@ jobs:
     uses: ./.github/workflows/_service.yml
     with:
       service: yarastorm
+      # Lints clean, so keep it that way.
+      storm_lint: block
     secrets: inherit
