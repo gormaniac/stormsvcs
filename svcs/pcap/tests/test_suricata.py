@@ -205,9 +205,11 @@ class TestSuricata:
             nums = [e["pcap_cnt"] for e in events if e.get("pcap_cnt")]
             assert nums and max(nums) <= summary["packets"], name
 
-        # ICMP types without a counterpart (ex. unreachable) too, Suricata hashes them its own
-        # way (see pcapsvc.communityid._icmpPorts). One ICMP flow per address pair, the
-        # service's ICMP flows are by address.
+        # ICMP types without a counterpart (ex. ICMPv6 unreachable) too, Suricata hashes them
+        # its own way (see pcapsvc.communityid._icmpPorts). One ICMP flow per address pair, the
+        # service's ICMP flows are by address. Suricata gives ICMPv4 errors (unreachable, time
+        # exceeded) to the flow of the packet they carry, these carry none, so they have no
+        # events.
         icmp = tmp_path / "icmp.pcap"
         icmp.write_bytes(g.pcap([
             (0.0, g.eth(g.icmp("10.0.0.9", "10.0.0.1", 3))),
@@ -222,7 +224,8 @@ class TestSuricata:
             flows, _ = p_flows.analyze(fd)
         seen = {e["community_id"] for e in p_suricata.iterEve(res["eve"])
                 if e.get("community_id")}
-        assert len(seen) == 4 and seen <= {f["community_id"] for f in flows}
+        byaddr = {(f["src"]["ip"], f["dst"]["ip"]): f["community_id"] for f in flows}
+        assert seen == {byaddr[("10.0.0.3", "10.0.0.7")], byaddr[("2001:db8::9", "2001:db8::1")]}
 
         # Files are stored by SHA-256.
         (tmp_path / "http2").mkdir()
