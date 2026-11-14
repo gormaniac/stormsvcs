@@ -240,7 +240,7 @@ package, as the `slib.utils.x509` module (slib.utils 0.2.0, StormLib++ commit `c
   - Matches Python cryptography field for field on 137 real certificates (the system and
     certifi root stores, plus bgphe's CT fixtures).
   - The committed tests cover 16 varied roots, the CT fixtures (including precertificate TBS
-    entries), generated certificates for every key type and extension, and about 35 hand built
+    entries), generated certificates for every key type and extension, and about 40 hand built
     DER edge cases.
 - **Performance:** about **100–120 ms per certificate**. Storm is interpreted, with function
   calls at about 165 µs and simple statements at 15–20 µs. OIDs and names are cached within a
