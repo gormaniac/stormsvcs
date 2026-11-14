@@ -1,7 +1,8 @@
 # Migrating services to pure Storm packages in StormLib++
 
-**Status:** PLAN. No code yet.
-**Date:** 2026-11-10
+**Status:** PLAN with maintainer decisions (2026-11-14, see §8). The first piece of code is in:
+`slib.utils.x509` (§4.2), on the StormLib++ branch `claude/hopeful-heisenberg-feq5rv`.
+**Date:** 2026-11-10, updated 2026-11-14
 **Targets:** Synapse 2.256 Storm runtime (checked against its source) · StormLib++ `src/pkgs/` conventions
 **Scope:**
 - Migrate `ip_api`, `bgphe`, `malpedia` and `virustotal` to Rapid Power-Ups in `gormaniac/stormlibpp`.
@@ -41,12 +42,12 @@ its zip handling and bulk work do not. See §6 and §7.
 
 | Service | Python LOC (src) | Verdict | Effort | Blockers / main risk |
 |---|---|---|---|---|
-| ip_api | ~300 | Migrate. Merge into the `ipinfo` package (§4.1) | **S** | Rate limit shared across queries (45/min) |
-| bgphe | ~2,550 | Migrate | **L** | X.509 DER parsing (`cryptography`) has no Storm equivalent: decide how much cert detail to keep |
-| virustotal | ~1,950 | Migrate | **L** | Quota accounting without a lock; normalization port (~760 LOC) |
-| malpedia | ~2,200 | Migrate | **L** | Initial YARA zip (switch endpoint); snapshot and per-view sync state |
-| hatching | ~1,800 | **Migrate** (recommended) | **L** | Live event stream becomes polling; normalization port (~700 LOC) |
-| abusech | ~4,400 | **Hybrid** recommended; a full port is XL | **XL** full / **L + S** hybrid | Encrypted sample zips, multi-GB zipped exports, bulk speed, normalization port (~1,600 LOC) |
+| ip_api | ~300 | Migrate as `slib.ipapi`, side by side with `slib.ipinfo`; shared ASN code in `slib.utils` (§4.1) | **S** | Rate limit shared across queries (45/min) |
+| bgphe | ~2,550 | Migrate | **L** (certs part done) | Certificate parsing is solved by `slib.utils.x509` (§4.2); Storm parses about 0.1 s per certificate |
+| virustotal | ~1,950 | Migrate | **L** | Quota enforcement still open (§4.3, Appendix A.6); normalization port (~760 LOC) |
+| malpedia | ~2,200 | Migrate | **L** | Snapshot and per-view sync state. The zip load is replaced, verified live (§4.4) |
+| hatching | ~1,800 | **Migrate** (approved) | **L** | Live event stream becomes polling; normalization port (~700 LOC) |
+| abusech | ~4,400 | **Deferred** (skipped for now) | **XL** full / **L + S** hybrid | Encrypted sample zips, multi-GB zipped exports, bulk speed, normalization port (~1,600 LOC) |
 
 Normalization is the cost driver in almost every service, not the transport. Every service keeps a
 `norm.py` that reshapes upstream JSON into dicts. The existing `*.model.storm` modules already
@@ -104,9 +105,11 @@ Both are per-Cortex, which matches today: no service coordinates across Cortexes
 | Service `add` event (meta:source, tag globals, crons) | Package `onload`. It runs on every load, so it must be idempotent: check before creating. |
 | Slab state (snapshots, quotas) | Small state in `$lib.globals` or `$lib.jsonstor` (asroot). Large blobs go in the Axon as jsonlines, with the sha256 kept in jsonstor. |
 
-**Security trade-off to accept explicitly.** A service-wide key moves from "never readable from
-Storm" to "readable by vault editors and Cortex admins". Users without permissions still can't
-read it, because only asroot modules can. Document this in each package README.
+**Keys (decided 2026-11-14).** Users can save their own keys in a user-scope vault, which takes
+precedence for their queries. The global key is managed by admins, in a global-scope vault that
+only the asroot modules read. A service-wide key moving from "never readable from Storm" to
+"readable by vault editors and Cortex admins" is a known, accepted risk. Plain users still can't
+read it. Document this in each package README.
 
 ### 3.4 Test harness
 
@@ -138,7 +141,7 @@ sync and paging tests depend on them.
    - leave a README note pointing to StormLib++
    - keep the last published image tag for anyone who pins it.
 
-**Versioning:** every migrated package ships as **1.0.0**. The deployment model and config
+**Versioning (decided):** every migrated package ships as **1.0.0**. The deployment model and config
 surface break, even where commands don't. Package versions in StormLib++ are independent of the
 StormLib++ Python version. Each migration also gets a CHANGELOG entry under "Unreleased".
 
@@ -159,31 +162,28 @@ change. The package directory in StormLib++ follows its `src/pkgs/<name>/<name>.
 The modeling is already entirely Storm (`slib.ipapi.lib.modelResult`), as are the tag-prefix admin
 commands. The Python side is only the HTTP call and the queue.
 
-**Interpretation of "reuse the other ip info package":** fold ip-api into StormLib++'s existing
-`ipinfo` package directory, so there is one IP-enrichment package with two providers. The ip-api
-modeling is the richer of the two (geo:place, geo:telem, :loc, ASN owner org, hosting/proxy/mobile
-tags). ipinfo's Lite modeling is a subset of it: ASN plus owner. Use the ip-api model functions
-(ASN/org builders) for both providers.
+**Decided (2026-11-14):** the two packages stay side by side for now: `slib.ipapi` gets its own
+`src/pkgs/ipapi/` directory next to `src/pkgs/ipinfo/`. The ASN and owner org modeling they share
+moves into the `slib.utils` package (for example a `slib.utils.inet` module with an
+`asnNode(asn, owner)` function), and both packages call it. The ip-api modeling is the richer of
+the two (geo:place, geo:telem, :loc, ASN owner org, hosting/proxy/mobile tags). ipinfo's Lite
+modeling is a subset of it: ASN plus owner.
 
 **Plan:**
-1. `src/pkgs/ipinfo/`:
-   - add a `slib.ipapi.lib` module: HTTP call, rate limiting via §3.2 (sleep until the stored
+1. `src/pkgs/ipapi/` (a new package directory, `slib.ipapi`, keeping its guid):
+   - a `slib.ipapi.lib` module: HTTP call, rate limiting via §3.2 (sleep until the stored
      "reset at" time once `X-Rl` ≤ 1; on 429, sleep `X-Ttl` and retry), and the existing
      `modelResult`
    - keep `slib.ipapi.privsep` and `slib.ipapi.admin`
    - keep the commands `slib.ipapi.query` and `slib.ipapi.admin.{settag,disabletag,enabletag}`
      with the same args. The perms stay `slib.ipapi.user`/`admin`.
-2. Refactor `slib.ipinfo.lib.getOrBuildAsn` to share the ASN/org builder.
+2. Move the ASN/org builders into `slib.utils`, and have `slib.ipinfo.lib.getOrBuildAsn` and
+   `slib.ipapi.lib` use them. Both packages then depend on `slib.utils`, as ipinfo already does.
    - Fix the ipinfo command's TODOs on the way: validate input with `$lib.trycast`, and use
      `repr()` for IPv4.
    - Its token handling via `slib.utils.getUserOrSystemOpt` stays.
-3. Package identity:
-   - **Option A (recommended):** two packages living side by side in StormLib++, `slib.ipinfo` and
-     `slib.ipapi`, with the shared builder in `slib.utils`. This keeps the guids, perms and install
-     story unchanged.
-   - **Option B:** one package (`slib.ipinfo`) exposing both command sets. This is cleaner, but
-     existing `slib.ipapi` installs need a `pkg.del`, and its perms namespace moves. It's a
-     maintainer call (open question 1).
+3. Package identity: two packages, so the guids, perms and install story stay as they are. Merging
+   them into one package stays possible later.
 4. Tests: turn the five VCR cassettes in `svcs/ip_api/tests/vcr_cassettes/` into `StormPkgTest`
    assets. Port `test_ipapi_storm.py` (507 lines) nearly 1:1.
 5. Behaviour change: the FIFO is now approximate across concurrent queries. With 45/min and
@@ -210,27 +210,53 @@ auth. It does use:
 - The whois parser is the biggest single piece (about 500 Storm lines). Named regex groups must
   be rewritten to positional ones, because `$lib.regex.search` returns `.groups()`.
 
-**Decision needed: certificate detail** (open question 2):
-- **(a) Baseline: use bgp.he.net's summary fields.** The Python already falls back to them
-  (`heFallback`). They give serial, subject, issuer, validity, SANs and the precert flag. Hashes
-  still come from the DER.
-  - `:subject` and `:issuer` change format (`C=US, O=…, CN=…` instead of RFC 4514
-    `CN=…,O=…,C=US`) unless the RDNs are reversed.
-- **(b) Add a small DER TLV walker** (about 150–250 lines, using `bytes.unpack` and `.slice`) for:
-  - precert TBS detection
-  - version and signature-algorithm OID (from a hex lookup table)
-  - SPKI bytes → `crypto:key` and the `cert -(refs)> crypto:key` edge
-  - RSA modulus and exponent
-  - self-signed check
-- **(c) Descope** the full extension parsing (KU, EKU, policies, AIA, SKI/AKI, curve names). Today it
-  mostly feeds node data and `:crl:urls`.
-- **Recommendation: (a)+(b).** This keeps the graph shape (keys, precert identity) and drops only
-  node-data detail. Watch performance: up to 10,000 certs per lookup go through a byte-level Storm
-  walk.
+**Certificates (decided, and built):** a complete certificate parser lives in the `slib.utils`
+package, as the `slib.utils.x509` module (slib.utils 0.2.0, StormLib++ commit `cb06ae6` on
+`claude/hopeful-heisenberg-feq5rv`). bgphe doesn't need a cert parser of its own.
+
+- `parse(valu)` takes DER bytes, PEM or base64, and handles certificates and bare CT
+  precertificate TBSCertificates. Its output uses the same keys as bgphe's `certs.parseCert()`
+  (`sha256`, `serial`, `subject.dn`/`attrs`, `pubkey.rsa`, `sans`, `crls`, `selfsigned`, ...), so
+  `slib.bgphe` only needs a thin adapter for bgp.he.net's metadata (`he`), `identities()` (also
+  in the module) and the summary-field fallback.
+- Coverage:
+  - RFC 5280 fields and extensions (SAN/IAN with every GeneralName type, basic constraints,
+    key usage, EKU, SKI/AKI, CRL DPs, freshest CRL, AIA/SIA, policies with CPS and user
+    notices, name constraints, policy constraints and mappings, inhibitAnyPolicy, private key
+    usage period, TLS feature, OCSP no check, CT poison).
+  - RFC 6962 SCT lists.
+  - RFC 4514 DNs, written exactly like cryptography's `rfc4514_string()`, so `:subject` and
+    `:issuer` values don't change.
+  - RFC 5952 IPv6 text.
+  - RSA, RSA-PSS (with parameters), EC (named, explicit and implicit curves), DSA, Ed25519,
+    Ed448, X25519 and X448 keys.
+  - Every ASN.1 string type, and UTCTime/GeneralizedTime in all their X.680 forms.
+- Edge cases: recoverable DER and RFC 5280 deviations become `warnings` instead of errors. For
+  example non-minimal encodings, negative or long serials, encoded DEFAULTs, odd time forms,
+  duplicate extensions and trailing data. Malformed DER raises `BadCert`. An extension that fails
+  to parse records its own `error`, and the rest of the certificate is still parsed. Unknown
+  critical extensions are listed in `unhandled`.
+- **Verified:**
+  - Matches Python cryptography field for field on 137 real certificates (the system and
+    certifi root stores, plus bgphe's CT fixtures).
+  - The committed tests cover 16 varied roots, the CT fixtures (including precertificate TBS
+    entries), generated certificates for every key type and extension, and about 35 hand built
+    DER edge cases.
+- **Performance:** about **100–120 ms per certificate**. Storm is interpreted, with function
+  calls at about 165 µs and simple statements at 15–20 µs. OIDs and names are cached within a
+  query.
+  - This is the main cost of moving bgphe: the default `--limit 200` takes about 20–25 s, and the
+    maximum of 10,000 certificates about 17–20 minutes, against about 1 s in Python today.
+  - Recommendation: lower the command's maximum `--limit` (e.g. to 1,000), or parse in batches
+    with progress output.
+- Nothing is lost compared with `cryptography`. The parser also keeps certificates that
+  cryptography rejects (duplicate extensions, unsupported GeneralName types, trailing data),
+  where bgphe falls back to the summary fields today.
 
 **Plan:**
 1. New modules: `slib.bgphe.priv` (rewritten as the HTTP client on §3.1/§3.2, same function
-   signatures), `slib.bgphe.norm`, `slib.bgphe.rdap`, `slib.bgphe.whois` and `slib.bgphe.certs`.
+   signatures), `slib.bgphe.norm`, `slib.bgphe.rdap` and `slib.bgphe.whois`. `slib.bgphe.certs`
+   is a thin adapter over `slib.utils.x509`.
 2. Config `slib:bgphe:{url,interval,timeout,backoff}` goes into globals. There are no secrets.
 3. `meta:source` is created in `onload`. `seen()` already upserts it.
 4. Keep the commands, args, node-data keys and modeling contract. Drop the 64 MB body cap; Storm
@@ -240,12 +266,13 @@ auth. It does use:
      in `tests/data`. Cert tests keep generating DER with `cryptography` (a Synapse dependency).
    - Port `test_bgphe_storm.py` against `FakeBgpHe`.
 
-**Estimate:** about 1,000–1,300 new Storm lines, plus the ~450 existing lines kept.
+**Estimate:** about 900–1,100 new Storm lines (the cert parser is already built), plus the ~450
+existing lines kept.
 
 **Phasing:**
 1. HTTP client + norm + ASN/prefixes/subdomains/hosts
 2. RDAP + whois
-3. certs
+3. certs (adapter over `slib.utils.x509`)
 
 ### 4.3 virustotal (L)
 
@@ -276,8 +303,11 @@ config.
      hex characters of sha256(key), so raw keys are never stored
    - day and month counters fail fast with the time left until reset; the minute window sleeps up
      to `maxwait`
-   - start with the best-effort mode; move to the queue-token mode if strict 4/min is a hard
-     requirement (open question 3)
+   - **still open (open question 3):** best-effort counters, or queue token buckets. Appendix A.6
+     has the resilience test results that decision needs. In short: queue buckets never
+     double-grant, a minute bucket needs size 1 refilled every 16 s to guarantee ≤4 in any
+     60 s window, and cancelled queries can leak tokens. That's harmless for buckets but means
+     a short under-use until the next refill or reset.
 3. **Cache:** descope for v1, and rely on the graph and node data. If it's wanted later, use
    `$lib.jsonstor.cacheset/cacheget(asof=...)` with a prune cron, storing normalized objects
    rather than raw reports.
@@ -311,13 +341,22 @@ config.
 - **There is no JSON alternative to BibTeX** for article metadata. The live `/get/bib` file
   (6.8 MB, 18.9k entries) is strictly line-regular, so a line-regex parser in Storm works. Measured:
   22–47 s per full parse. That's fine for a daily cron that only runs when the version changes.
-- **Zip:** replace it with `/get/yara/after/2000-01-01`, which has the same JSON shape as the
-  incremental path. **Verify live that it returns every rule** (open question 4). The fallback is
-  `/get/yara/tlp_white/raw`, split on `^rule` and mapped to `/list/yara`.
+- **Zip: replaced by `/get/yara/after/2000-01-01` (decided, verified live on 2026-11-14).**
+  - It returns `{"tlp_white": {filename: text}}`, the same JSON shape as the incremental path.
+  - It has the same 2,280 TLP:WHITE rules as the zip (4.0 MB) and `/list/yara`, with nothing
+    missing or extra.
+  - 1,826 rule texts are byte-identical. The other 454 differ only in trailing newlines or
+    whitespace.
+  - The service hashes rule text for its change detection (`norm.normYara`), and nothing in the
+    model uses that hash. So the only effect is that those 454 rules re-model once on the first
+    Storm sync, idempotently.
+  - The response is 15.4 MB of JSON, against a 4.0 MB zip, which is fine for a daily cron.
+  - The service's own first pull could switch to this endpoint now too, which drops `zipfile`
+    and `unzipRules` before the migration.
 
 **Plan:**
 1. New modules:
-   - `slib.malpedia.priv.api`: HTTP client
+   - `slib.malpedia.priv.api`: HTTP client (no zip handling)
    - `.bib`: line parser
    - `.norm`: about 350–400 lines, covering ActorIndex, the actor-ID resolution, and the
      bib×references×library join for news
@@ -358,15 +397,16 @@ config.
    fake-server test pattern. About 250 lines. It gets proven by the next step.
 2. **ip_api.** The smallest port; it validates the groundwork, the runbook and the release flow.
 3. **virustotal.** Most used. It validates vault keys, quota, and Axon multipart.
-4. **bgphe.** In phases; the certs decision blocks phase 3 only.
+4. **bgphe.** In phases; its cert parser (`slib.utils.x509`) is already built.
 5. **malpedia.** Validates crons, Axon-backed state and node-data view state.
-6. **hatching** (if approved, §6).
-7. **abusech** hybrid (if approved, §7).
+6. **hatching** (approved, §6).
+
+abusech is deferred (§7).
 
 Each step is one StormLib++ PR (package, tests, docs page under `doc/pkgs/`, CHANGELOG), followed by
 one stormsvcs PR that retires the service once the package is released.
 
-## 6. hatching: how big the lift is (L, and recommended)
+## 6. hatching: how big the lift is (L, approved)
 
 **Not as file-heavy as it looks.** It never parses a file:
 - **Submit:** multipart `_json` + `file` → `$lib.inet.http.post(fields=[{"name": "_json", "value":
@@ -402,7 +442,10 @@ Specific risks:
 **A hybrid isn't worth it.** The only gap is event streaming, which doesn't justify keeping a
 service.
 
-## 7. abusech: how big the lift is (XL full, or L + S hybrid)
+## 7. abusech: how big the lift is (XL full, or L + S hybrid). Deferred
+
+**Decided (2026-11-14): skip abuse.ch for now.** It stays a service. The analysis below is kept
+for when it's revisited.
 
 **Feature classification:**
 
@@ -452,23 +495,19 @@ Before committing:
 - spike `$lib.feed.genr('syn.nodes', …)` with Storm-built node definitions (which may roughly
   double throughput)
 
-## 8. Open questions for the maintainer
+## 8. Decisions (2026-11-14) and open questions
 
-1. **ip_api packaging:** two packages side by side with a shared ASN/org builder (A,
-   recommended), or one merged `slib.ipinfo` package (B)?
-2. **bgphe certs:** summary fields only (a), plus a DER walker (b, recommended), or descope?
-   Is changing the `:subject`/`:issuer` format OK?
-3. **virustotal quota:** is best effort (it can overshoot by one under concurrency) acceptable, or
-   is strict 4/min required (queue token)? Should the cache be dropped for v1?
-4. **malpedia:** OK to switch the first YARA load to `yara/after/2000-01-01` (pending a live check)?
-   OK for per-view state to move to node data, so forks inherit their parent's sync state?
-5. **Key secrecy:** is "readable by vault editors and admins, never by plain users" acceptable for
-   service-wide keys?
-6. **Versioning:** 1.0.0 for every migrated package (recommended), or keep the service version
-   lines? CLAUDE.md's version rule covers `svcs/` only, so StormLib++ needs its own note.
-7. **hatching:** approve the migration, with events degraded to polling?
-8. **abusech:** approve the hybrid (ii-A) and a generic unzip helper service in this repo?
-9. **Rule wording:** adopt the "parse/unpack/transform file contents" refinement from §1?
+| # | Question | Decision |
+|---|---|---|
+| 1 | ip_api packaging | Side by side for now: `slib.ipapi` next to `slib.ipinfo`. The shared ASN code moves into `slib.utils` (§4.1). |
+| 2 | bgphe certs | Write a complete cert parser in `slib.utils`, handling the RFC edge cases. **Done:** `slib.utils.x509` (§4.2). |
+| 3 | virustotal quota | **Open.** The maintainer asked how resilient the queue approach is first: see Appendix A.6. The cache question (drop it for v1) is open too. |
+| 4 | malpedia | Move away from the zip load: **checked and confirmed** (§4.4). Per-view state on node data is taken as accepted with the same "yes"; confirm if not. |
+| 5 | Keys | Known, accepted risk. Users can save their own keys; global keys are managed by admins (§3.3). |
+| 6 | Versioning | Every migrated package starts at 1.0.0 (§3.5). StormLib++ still needs its own versioning note, since CLAUDE.md's rule only covers `svcs/`. |
+| 7 | hatching | Approved: hatching moves (§6). |
+| 8 | abusech | Skipped for now (§7). |
+| 9 | Rule wording | **Open:** adopt the "parse, unpack or transform file contents" refinement from §1? |
 
 ---
 
@@ -579,3 +618,99 @@ So a mutex needs three layers:
   `asyncio.Lock`s were first-come, first-served.
 - Like everything in §3.2, this is per-Cortex. Nothing coordinates across Cortexes, the same as
   today.
+
+### A.6 Resilience testing (2026-11-14)
+
+Asked for before deciding virustotal's quota enforcement (§8 question 3). Tested on Synapse 2.256
+test Cortexes, including a leader with a mirror. Counts come from wrapping the Cortex's queue
+methods, so measuring added no writes. The test scripts are not in the repo.
+
+**Correctness: no double grants anywhere.**
+
+| Test | Result |
+|---|---|
+| Mutex, 100 and 200 concurrent consumers | Every one got the lock exactly once, max 1 holder, 1 token left |
+| Bucket: 50 tokens to 100 waiters, 100 tokens to 200 waiters, a 100-token burst to 100 waiters | Exactly 50, 100 and 100 grants |
+| 50 leader + 50 mirror consumers on one mutex | 100 grants, max 1 holder. Mirror pops are forwarded to the leader, so atomicity holds |
+
+**Token loss: the real risk.** `NexsRoot.eat()` runs the change-log write under `asyncio.shield`.
+Cancelling a query does not stop a pop already in flight: the token is removed and the result is
+thrown away.
+
+| Scenario (500 random trials each) | Tokens lost |
+|---|---|
+| Waiter blocked on an empty queue, cancelled, then a token is put | 0 of 500 |
+| Tight pop/put loop, 1 consumer, cancelled at random | 227 of 500 |
+| Same, 5 consumers (also counting cancels while holding the token) | survived in only 83 of 500 |
+
+- A held token is also lost if the Cortex stops. Tokens at rest survive a restart.
+- What counts as a cancel: `ps.kill`, a client disconnect, disabling or deleting a cron or
+  dmon, and Cortex shutdown.
+- **For buckets this is harmless:** one lost slot, and the next refill or reset restores it.
+- **For a mutex it is a deadlock:** a mutex needs the lease and watchdog from A.4.
+
+**Waste under contention.**
+- `pop(wait=true)` wakes every waiter, and each losing pop is still a change-log write.
+- With 100 waiters that was about 43 writes per acquire; with 200 it was about 100. The waste
+  grows with the square of the number of waiters.
+- A non-blocking `pop()` on an empty queue writes nothing.
+- Polling with `pop()` and a 25–75 ms jittered sleep cut it to about 19 writes per acquire at 100
+  waiters.
+
+**Refill daemon.**
+
+| Refill | 1 s interval | 0.2 s interval |
+|---|---|---|
+| Naive (`size() < cap → put; sleep`) | 0.15% slow | 0.8% slow |
+| Drift-corrected (schedule `$next += interval`, sleep until it) | exact | exact |
+
+- Drift only ever goes slow, which is the safe direction for a quota.
+- A dmon that errors restarts after about 1 s, with its variables reset.
+- Dmons come back after a Cortex restart, and run only on the leader.
+- A deleted dmon or queue leaves waiters blocked forever, with no error.
+
+**Burst limits.** A bucket of size *c* refilled at rate *r* allows *c + r·T* grants in any window
+*T*.
+- *c = 4*, refilled every 15 s, allows up to **8** in a sliding minute.
+- To guarantee **≤ 4 in any 60 s window**, use *c = 1* refilled every **16 s** (3.75/min).
+- A fixed reset of 4 tokens on each minute boundary allows 8 across a boundary.
+
+**Day and month resets.**
+- A cron doing `cull(huge)` + `puts(N)` never exceeded N with 20 consumers draining. There was a
+  brief empty gap.
+- Two resets running at once doubled the bucket. Cron doesn't overlap with itself, but a manual
+  run plus the cron would. Guard it with a stored "last reset" date.
+- Topping up with `puts(cap - size())` races and comes out slightly under.
+
+**Growth.**
+- Change-log entries are about 76 bytes each, and Synapse never trims the log by default
+  (`nexslog:en` is on; trimming takes an explicit `trimNexsLog`).
+
+| Use | Change-log growth |
+|---|---|
+| virustotal at its 500/day cap | about 2k entries, ~150 KB a day |
+| 4/min minute bucket, running continuously | ~0.9 MB a day |
+| A saturated 5/s bucket (abusech, deferred) | ~66 MB a day |
+
+- The queue slab itself plateaus, because LMDB reuses freed pages.
+
+**Other gotchas.**
+- `pop()` returns `(offs, item)`, so put back `$tok.1`, not `$tok`.
+- A bare `put(1)` stores the string `"1"`. Use `put((1))`.
+- `pop()` has no timeout.
+- A mirror `pop()` can return null while items exist, so always loop.
+- On a mirror whose leader is down, a pop raises LinkErr after 30 s.
+
+**Verdicts.**
+
+| Use | Verdict |
+|---|---|
+| Minute limit (virustotal 4/min) | **Good.** Bucket of 1, refilled every 16 s by a drift-corrected dmon. Loss heals at the next refill. |
+| Day (500) and month (15.5k) quotas | **Good, with guards.** Cron reset with a "last reset" date marker. Take tokens with non-blocking `pop()` and fail fast with "quota exhausted". A cancel can leak a few tokens until the next reset (conservative). |
+| Mutex for a single sync job (malpedia) | **Only with a lease and watchdog.** Prefer cron's built-in no-overlap when the job only runs from one cron. |
+| Best-effort globals (§3.2 v1) | Simpler and leak-free, but can overshoot by one under concurrency. VT's 429 plus a cooldown then catches it. |
+
+If virustotal goes with buckets:
+- Acquire the minute token first, since a blocking wait there loses nothing if cancelled. Then
+  take the day token, then the month token.
+- Show the refill daemon's health (`$lib.dmon.get` has an error flag) in `slib.vt.quota`.
