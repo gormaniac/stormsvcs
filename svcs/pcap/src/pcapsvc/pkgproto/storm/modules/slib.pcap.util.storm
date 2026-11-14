@@ -37,9 +37,11 @@ function table(columns, rows) {
 }
 
 // A time (epoch millis) as a string, or "never". Strings (ex. a cron job's "Never") are returned as-is.
+// NOTE: $lib.vars.type() is $lib.utils.type() in Synapse 3.x, which 2.x doesn't have, this
+// package requires Synapse <3.0.0 so R005 is ignored here.
 function when(tick) {
     if ($tick = null) { return(never) }
-    if ($lib.vars.type($tick) = "str") { return($tick) }
+    if ($lib.vars.type($tick) = "str") { return($tick) }  // noqa: R005
     return($lib.time.format($tick, "%Y-%m-%d %H:%M:%S"))
 }
 
@@ -47,7 +49,7 @@ function when(tick) {
 function printBuild(what, summary) {
     $engines = ([])
     for ($engine, $count) in $summary.engines { $engines.append(`{$engine} {$count}`) }
-    $loaded = $lib.str.join(", ", $engines)
+    $loaded = (", ").join($engines)
     if (not $loaded) { $loaded = "no engines" }
     if (not $summary.changed) {
         $lib.print(`slib.pcap: {$what}: the service's {$summary.rules} rules are unchanged ({$summary.loaded} loaded: {$loaded}, {$summary.invalid} invalid).`)

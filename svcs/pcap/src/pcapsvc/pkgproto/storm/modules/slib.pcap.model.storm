@@ -3,6 +3,9 @@
 //
 // Node edits here run as the calling user (or as root, when called by slib.pcap.priv.sync).
 // Every flow and match is linked to the slib.pcap meta:source node with a -(seen)> edge.
+//
+// NOTE: This package requires Synapse <3.0.0, so the 3.x model changes (it:app:snort:hit is
+// renamed, :seen replaces .seen) are ignored here (M001, M004).
 
 init {
     $sourceGuid = "cae9b5f5923a48b9a1a691f851a77429"
@@ -35,7 +38,7 @@ function addValus(n, prop, valus) {
 
 function refs(n, other) {
     yield $n
-    [ +(refs)> { yield $other } ]
+    [ +(refs)> $other ]
     return($node)
 }
 
@@ -69,7 +72,7 @@ function txFileNode(t) {
 // The file:attachment for a file sent in a flow, unique to the flow, side, file, and name.
 function attachmentNode(flowIden, side, t) {
     $file = $txFileNode($t)
-    [ file:attachment=$lib.guid(slib.pcap, attachment, $flowIden, $side, $t.sha256, $t.name)
+    [ file:attachment=(slib.pcap, attachment, $flowIden, $side, $t.sha256, $t.name)
         :file=$file
         :name ?= $t.name
         :text ?= $t.text
@@ -188,9 +191,9 @@ function flowNode(f, file, opts) {
         :tot:txbytes=$f.bytes
         :ip:tcp:flags ?= $f."tcp:flags"
         :raw=$f
-        .seen=($f.time, $f.last)
+        .seen=($f.time, $f.last)  // noqa: M004
         <(seen)+ { [ meta:source=$sourceGuid :name="slib.pcap" ] }
-        <(refs)+ { yield $file }
+        <(refs)+ $file
     ]
     $side($node, src, $f.src, $f.proto)
     $side($node, dst, $f.dst, $f.proto)
@@ -242,14 +245,14 @@ function hit(flownode, f, h, file, opts) {
     if ($h.engine = "suricata") {
         [ it:app:suricata:matched=$guid :rule=$h.rule :target=$flownode ]
     } else {
-        [ it:app:snort:hit=$guid :rule=$h.rule :flow=$flownode ]
+        [ it:app:snort:hit=$guid :rule=$h.rule :flow=$flownode ]  // noqa: M001
         $_hitEnds($node, $f)
     }
     [ :version?=$lib.cast(str, $h.rev) ]
-    if $h.time { [ :time=$h.time .seen=$h.time ] }
-    if $h.last { [ .seen=$h.last ] }
+    if $h.time { [ :time=$h.time .seen=$h.time ] }  // noqa: M004
+    if $h.last { [ .seen=$h.last ] }  // noqa: M004
     if $opts.host { [ :sensor=$opts.host ] }
-    [ <(seen)+ { meta:source=$sourceGuid } <(refs)+ { yield $file } ]
+    [ <(seen)+ { meta:source=$sourceGuid } <(refs)+ $file ]
     return($node)
 }
 
@@ -266,7 +269,7 @@ function _dnsAnswerOk(a) {
 }
 
 function _dnsSoa(a) {
-    [ inet:dns:soa=$lib.guid(slib.pcap.dns.soa, $a.rrname, $a.soa.mname, $a.soa.rname)
+    [ inet:dns:soa=(slib.pcap.dns.soa, $a.rrname, $a.soa.mname, $a.soa.rname)
         :fqdn?=$a.rrname
         :ns?=$a.soa.mname
         :email?=$a.soa.email
@@ -276,7 +279,7 @@ function _dnsSoa(a) {
 
 function _dnsAnswer(req, a) {
     if (not $_dnsAnswerOk($a)) { return() }
-    [ inet:dns:answer=$lib.guid(slib.pcap.dns.answer, $req.repr(), $a.rrname, $a.rrtype, $a.rdata)
+    [ inet:dns:answer=(slib.pcap.dns.answer, $req.repr(), $a.rrname, $a.rrtype, $a.rdata)
         :request=$req
         :ttl?=$a.ttl
     ]
@@ -304,7 +307,7 @@ function _dnsRequest(flownode, f, q, opts) {
     $types = ({"A": 1, "NS": 2, "CNAME": 5, "SOA": 6, "PTR": 12, "MX": 15, "TXT": 16,
                "AAAA": 28, "SRV": 33, "HTTPS": 65, "SVCB": 64, "ANY": 255})
     $qtype = $types.($q.rrtype)
-    [ inet:dns:request=$lib.guid(slib.pcap.dns, $f.iden, $q.id, $q.rrname, $q.rrtype)
+    [ inet:dns:request=(slib.pcap.dns, $f.iden, $q.id, $q.rrname, $q.rrtype)
         :query:name?=$q.rrname
         :time?=$q.time
         :server?=$f.dst.addr
@@ -315,7 +318,7 @@ function _dnsRequest(flownode, f, q, opts) {
         [ :query?=($f.src.addr, $q.rrname, $qtype) ]
     }
     if ($q.rcode != null) { [ :reply:code?=$q.rcode ] }
-    [ <(refs)+ { yield $flownode } ]
+    [ <(refs)+ $flownode ]
     return($node)
 }
 

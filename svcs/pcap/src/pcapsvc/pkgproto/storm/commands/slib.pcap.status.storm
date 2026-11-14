@@ -25,7 +25,7 @@ init {
             $lib.print("Sandbox alerts: none")
         }
         if $sbx.missing {
-            $lib.warn(`slib.pcap: The host doesn't support these sandbox layers: {$lib.str.join(", ", $sbx.missing)}`)
+            $lib.warn(`slib.pcap: The host doesn't support these sandbox layers: {(", ").join($sbx.missing)}`)
         }
 
         if $status.axon {
@@ -38,7 +38,7 @@ init {
         $engines = ([])
         for ($engine, $count) in $rules.engines { $engines.append(`{$engine} {$count}`) }
         if (not $engines) { $engines.append("no engines") }
-        $lib.print(`Rules: {$rules.loaded} loaded of {$rules.rules} pushed ({$lib.str.join(", ", $engines)}), {$rules.invalid} invalid`)
+        $lib.print(`Rules: {$rules.loaded} loaded of {$rules.rules} pushed ({(", ").join($engines)}), {$rules.invalid} invalid`)
         $lib.print(`Last pushed: {$util.when($rules.pushed)}, last built: {$util.when($rules.built)}`)
         if $rules.building { $lib.print("The service is building its rules now.") }
         if $rules.error { $lib.warn(`slib.pcap: The last rule build failed: {$rules.error}`) }

@@ -5,7 +5,7 @@ init {
     $forms = ({})
 }
 
-$form = $node.form()
+$form = $node.form()  // noqa: R002
 if ($form = "it:app:snort:rule" or $form = "it:app:suricata:rule") {
     [ :enabled=(true) ]
     $engine = $node.props.engine

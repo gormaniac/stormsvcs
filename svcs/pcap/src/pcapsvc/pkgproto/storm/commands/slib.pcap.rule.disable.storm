@@ -4,7 +4,7 @@ init {
     $dels = ([])
 }
 
-$form = $node.form()
+$form = $node.form()  // noqa: R002
 if ($form = "it:app:snort:rule" or $form = "it:app:suricata:rule") {
     [ :enabled=(false) ]
     $dels.append($node.repr())

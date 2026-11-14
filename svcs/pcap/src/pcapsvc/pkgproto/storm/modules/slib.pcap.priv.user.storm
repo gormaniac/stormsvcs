@@ -1,5 +1,8 @@
 // Privileged (asroot) wrappers around the slib.pcap service for slib.pcap.user.
 // Every function returns the service's {status, mesg, data} dict, or emits them for generators.
+//
+// NOTE: $lib.globals.get()/set() are removed in Synapse 3.x, but 2.x has no $lib.globals.<name>
+// (and these names have colons), this package requires Synapse <3.0.0 so R005 is ignored here.
 
 init {
     $svc = $lib.service.get("slib.pcap")
@@ -18,14 +21,14 @@ function checkDecodeAs(rules) { return($svc.checkDecodeAs($rules)) }
 
 // The Decode As rules an admin set for every run (see slib.pcap.admin.decode).
 function decodeDefaults() {
-    $rules = $lib.globals.get("slib:pcap:decode")
+    $rules = $lib.globals.get("slib:pcap:decode")  // noqa: R005
     if ($rules = null) { return(([])) }
     return($rules)
 }
 
 // The network variables (ex. HOME_NET) an admin set for every run (see slib.pcap.admin.vars).
 function netVarDefaults() {
-    $vars = $lib.globals.get("slib:pcap:vars")
+    $vars = $lib.globals.get("slib:pcap:vars")  // noqa: R005
     if ($vars = null) { return(({})) }
     return($vars)
 }
@@ -109,7 +112,7 @@ function flows(sha256, opts) {
 
 // The sync cron job's details (iden, enabled, view, and the last run), or null if there isn't one.
 function schedule() {
-    $iden = $lib.globals.get("slib:pcap:cron")
+    $iden = $lib.globals.get("slib:pcap:cron")  // noqa: R005
     if (not $iden) { return() }
     try {
         $job = $lib.cron.get($iden)

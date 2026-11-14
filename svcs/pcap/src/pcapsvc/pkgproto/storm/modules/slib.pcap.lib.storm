@@ -22,9 +22,7 @@ function normSha256(valu) {
 function decodeRules(decode) {
     $rules = ([])
     for $rule in $priv.decodeDefaults() { $rules.append($rule) }
-    if $decode {
-        for $rule in $decode { $rules.append($rule) }
-    }
+    for $rule in $decode { $rules.append($rule) }
     return($rules)
 }
 

@@ -194,13 +194,16 @@ function _send(iden, batch) {
     return($retn)
 }
 
+// NOTE: $lib.globals.get() is removed in Synapse 3.x, but 2.x has no $lib.globals.<name> (and
+// these names have colons), this package requires Synapse <3.0.0 so R005 is ignored here.
+//
 // The view the service's rules come from (see slib.pcap.admin.schedule), or null if it isn't
 // bound to one. The service has one set of rules, so only this view may change them.
 function rulesView() {
-    $view = $lib.globals.get("slib:pcap:rules:view")
+    $view = $lib.globals.get("slib:pcap:rules:view")  // noqa: R005
     if $view { return($view) }
     // Installs from before the rules were bound to a view use the sync cron job's view.
-    $iden = $lib.globals.get("slib:pcap:cron")
+    $iden = $lib.globals.get("slib:pcap:cron")  // noqa: R005
     if (not $iden) { return() }
     try {
         return($lib.cron.get($iden).pprint().view)

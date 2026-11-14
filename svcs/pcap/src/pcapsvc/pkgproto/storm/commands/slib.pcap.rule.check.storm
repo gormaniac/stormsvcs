@@ -11,7 +11,7 @@ init {
     }
 }
 
-$form = $node.form()
+$form = $node.form()  // noqa: R002
 if ($form = "it:app:snort:rule" or $form = "it:app:suricata:rule") {
     $engine = suricata
     if ($form = "it:app:snort:rule") {
