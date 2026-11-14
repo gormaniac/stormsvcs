@@ -451,7 +451,7 @@ function searchQuery(n, filehash=$lib.null) {
             if $isQueryRule($n) {
                 if $props.text { return($props.text) }
             } else {
-                $lib.warn("slib.shodan: meta:rule {rule} isn't a Shodan query, its :type must be svc.shodan.query.",
+                $lib.warn("slib.shodan: meta:rule {rule} isn't a Shodan query, its :type must be svc.shodan.query.local. or svc.shodan.query.community.",
                           rule=$n.repr())
                 return($lib.null)
             }
@@ -469,12 +469,11 @@ function searchQuery(n, filehash=$lib.null) {
 
 // ---- Saved queries (see slib.shodan.model's "Saved queries") ----
 
-// Whether a meta:rule is a saved Shodan query: its :type is svc.shodan.query. or under it
-// (svc.shodan.query.community. or svc.shodan.query.local.).
+// Whether a meta:rule is a saved Shodan query: its :type is svc.shodan.query.local. or
+// svc.shodan.query.community. (the parent type alone isn't a saved query).
 function isQueryRule(rule) {
     $type = $rule.props.type
-    if ($type = $lib.null) { return((false)) }
-    return($type.startswith("svc.shodan.query."))
+    return(($type = "svc.shodan.query.local." or $type = "svc.shodan.query.community."))
 }
 
 // Whether a saved query came from Shodan's directory.
@@ -510,12 +509,11 @@ function saveQuery(query, name, desc=$lib.null) {
     return($model.localRule($query, $lib.cast(str, $name), desc=$desc))
 }
 
-// The local saved query (svc.shodan.query.local., or the older svc.shodan.query.) with the
-// query text, if any.
+// The local saved query with the query text, if any. Found by :text, not the guid, since rules
+// migrated from the old svc.shodan.query. type (and hand-made ones) have other guids.
 function localRule(text) {
     meta:rule:text=$text
-    +$isQueryRule($node)
-    -:type=svc.shodan.query.community.
+    +:type=svc.shodan.query.local.
     return($node)
 }
 
@@ -598,7 +596,7 @@ function trendsQuery(n, filehash=$lib.null) {
 //     inet:asn                 asn         The ASN, without an "AS" prefix.
 //     risk:vuln/it:sec:cve     vulns       :cve / the CVE.
 //     pol:country              countries   :iso2
-//     meta:rule                custom      :text, for rules with :type svc.shodan.query.
+//     meta:rule                custom      :text, for saved queries (see isQueryRule).
 function streamTarget(n) {
     $props = $n.props
     switch $n.form() {
@@ -612,7 +610,7 @@ function streamTarget(n) {
         }
         "meta:rule": {
             if (not $isQueryRule($n)) {
-                $lib.warn("slib.shodan: meta:rule {rule} isn't a Shodan query, its :type must be svc.shodan.query.",
+                $lib.warn("slib.shodan: meta:rule {rule} isn't a Shodan query, its :type must be svc.shodan.query.local. or svc.shodan.query.community.",
                           rule=$n.repr())
                 return($lib.null)
             }

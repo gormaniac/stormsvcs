@@ -138,6 +138,21 @@ class TestLiveKeyed(s_tests.SynTest):
                 self.stormHasNoErr(msgs)
                 assert not [m for m in msgs if m[0] == "warn"], (query, msgs)
 
+    async def test_queries_search(self):
+        # Shodan's directory search has returned 503 since at least 2026-11, so this checks that
+        # a search finds something either way (directly, or by matching the listed pages).
+        async with liveSvc(self, apikey=APIKEY) as (core, svc):
+            data = await svc.queriesSearch("webcam", pages=5)
+            assert data["matches"], data
+            if data["fallback"] is not None:
+                assert data["scanned"] == 50
+                assert all("webcam" in str(m).lower() for m in data["matches"])
+
+            msgs = await core.stormlist("slib.shodan.queries --source shodan --search webcam --pages 5 --yield")
+            self.stormHasNoErr(msgs)
+            rules = await core.nodes("meta:rule:type=svc.shodan.query.community.")
+            assert rules and all(r.get("text") for r in rules)
+
     async def test_dns(self):
         async with liveSvc(self, apikey=APIKEY) as (core, svc):
             msgs = await core.stormlist("[ inet:fqdn=dns.google ] | slib.shodan.dns.lookup --yield")

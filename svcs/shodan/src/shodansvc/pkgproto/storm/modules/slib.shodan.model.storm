@@ -349,8 +349,9 @@ function eventNode(timeline, b, res) {
 //
 //   - Community queries, copied from Shodan's query directory: :type svc.shodan.query.community.,
 //     with a :name that starts with "[Community] " (Synapse lower-cases :name, so "[community] ").
-//   - Local queries, saved in the Cortex: :type svc.shodan.query.local. (or the older
-//     svc.shodan.query.). They're never sent to Shodan.
+//   - Local queries, saved in the Cortex: :type svc.shodan.query.local. They're never sent to
+//     Shodan. Rules with the bare parent type, svc.shodan.query., are migrated to it by the
+//     package's inits (see slib.shodan.yaml), and aren't saved queries.
 //
 // The same query text is a different node for each kind. :name, :desc, and :created are only set
 // when they're unset, so analysts can edit them.
