@@ -47,8 +47,6 @@ Each service must have the following:
 
 - `yarastorm`
   - Support for matching `it:prod:yara:rule` nodes to `file:bytes` nodes.
-- `ip_api`
-  - Enrich IPs from ip-api.com.
 - `crtsh`
   - Look up, search, and pivot on certificates straight from the crt.sh certwatch database.
 - `shodan`
@@ -67,6 +65,12 @@ Each service must have the following:
   - Hurricane Electric's BGP Toolkit (bgp.he.net): CT log certificates by domain, subdomain, or IP, domain whois (RDAP, or whois text) and ASN whois (the org behind an ASN), and the prefixes an ASN originates.
 - `virustotal`
   - The VirusTotal Public (community) API: enrich files, URLs, domains, and IPs (AV scans, sandbox verdicts, crowdsourced YARA/IDS/Sigma, DNS, whois, certs, behaviour), pivot on relationships, and submit, rescan, comment, and vote, all within the Public API's 4/minute and 500/day limits.
+
+## Moved to StormLib++
+
+These were services here, and are now pure Storm Rapid Power-Ups in [StormLib++](https://github.com/gormaniac/stormlibpp), with nothing to deploy:
+
+- `ip_api` is the `slib.ipapi` package. Its commands, perms and settings are the same. To upgrade, remove the service with `service.del` and load the package.
 
 ## Services Wish List/Plan
 

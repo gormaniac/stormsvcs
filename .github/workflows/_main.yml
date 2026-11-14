@@ -53,12 +53,6 @@ jobs:
     uses: ./.github/workflows/yarastorm.yml
     secrets: inherit
 
-  ip_api:
-    needs: base
-    if: ${{ !failure() && !cancelled() }}
-    uses: ./.github/workflows/ip_api.yml
-    secrets: inherit
-
   shodan:
     needs: base
     if: ${{ !failure() && !cancelled() }}
