@@ -509,8 +509,8 @@ function saveQuery(query, name, desc=$lib.null) {
     return($model.localRule($query, $lib.cast(str, $name), desc=$desc))
 }
 
-// The local saved query with the query text, if any. Found by :text, not the guid, since rules
-// migrated from the old svc.shodan.query. type (and hand-made ones) have other guids.
+// The local saved query with the query text, if any. Found by :text, not the guid, since
+// hand-made rules have other guids.
 function localRule(text) {
     meta:rule:text=$text
     +:type=svc.shodan.query.local.

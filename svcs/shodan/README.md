@@ -169,9 +169,7 @@ Saved Shodan queries are `meta:rule` nodes (`:text` is the query) of two kinds, 
 The same query text is a separate node for each kind. Re-copying keeps edits to `:name` and `:desc`.
 `slib.shodan.queries` lists both (stored ones first), and `--source local` or `--source shodan`
 picks one. Pipe any saved query to `slib.shodan.search`, `slib.shodan.count`, or `slib.shodan.stream`
-to run it. Only the two types above are saved queries: rules with the bare parent type
-`svc.shodan.query.` (used before 0.13.0) are retyped to `svc.shodan.query.local.` when the package
-loads.
+to run it. Only the two types above are saved queries, not the bare parent type `svc.shodan.query.`.
 
 `--search` matches stored queries by `:name`, `:text`, or `:desc`, ignoring case. For the
 directory it uses Shodan's directory search, which returns a 503 at the moment (see

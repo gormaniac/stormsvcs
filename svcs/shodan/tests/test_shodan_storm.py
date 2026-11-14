@@ -496,7 +496,7 @@ class TestShodanStormSearchInputs(s_tests.SynTest):
                 ("[ ou:org=* ]", "missing the props needed"),
                 ("[ meta:rule=* :type=svc.shodan.query.local. ]", "missing the props needed"),
                 ('[ meta:rule=* :type=yara :text="rule x {}" ]', "its :type must be svc.shodan.query.local."),
-                # The bare parent type isn't a saved query (the package's init migrates it).
+                # The bare parent type isn't a saved query.
                 ('[ meta:rule=* :type=svc.shodan.query :text="port:1" ]', "its :type must be svc.shodan.query.local."),
                 ("[ inet:email=visi@vertex.link ]", "The node form inet:email is not supported"),
             ):
@@ -1315,32 +1315,6 @@ class TestShodanStormSavedQueries(s_tests.SynTest):
             self.stormIsInWarn("--tags lists Shodan's directory tags", msgs)
             msgs = await core.stormlist("slib.shodan.queries --source local --page 2")
             self.stormIsInWarn("--page, --pages, --sort, and --order only apply to Shodan's directory", msgs)
-
-    async def test_queries_migrate_bare_type(self):
-        async with shodanSvc(self) as (core, svc, fake):
-            await core.nodes('[ meta:rule=* :type=svc.shodan.query :name="Old" :text="port:22" ]')
-            await core.nodes('[ meta:rule=* :type=svc.shodan.query.community. :text="webcam" ]')
-            await core.nodes('[ meta:rule=* :type=other :text="port:23" ]')
-
-            (init,) = PKGDEFS[0]["inits"]["versions"]
-            assert init["inaugural"]
-            msgs = await core.stormlist(init["query"])
-            self.stormHasNoErr(msgs)
-            self.stormIsInPrint("Counted 1 nodes.", msgs)
-
-            assert not await core.nodes("meta:rule:type=svc.shodan.query.")
-            local = await core.nodes("meta:rule:type=svc.shodan.query.local.")
-            assert [n.get("text") for n in local] == ["port:22"]
-            assert len(await core.nodes("meta:rule:type=svc.shodan.query.community.")) == 1
-            assert len(await core.nodes("meta:rule:type=other")) == 1
-
-            # Migrated rules are local saved queries again.
-            msgs = await core.stormlist('slib.shodan.query.save "port:22" --name "SSH"')
-            self.stormIsInWarn("port:22 is already a local saved query (old)", msgs)
-
-            # Running it again changes nothing.
-            msgs = await core.stormlist(init["query"])
-            self.stormIsInPrint("Counted 0 nodes.", msgs)
 
     async def test_queries_search(self):
         async with shodanSvc(self) as (core, svc, fake):

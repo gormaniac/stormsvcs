@@ -13,20 +13,6 @@ author:
 
 desc: A Storm Service that integrates every Shodan API (search, scanning, alerts, DNS, streaming, InternetDB, CVEDB, and trends) into Synapse.
 
-# Data migrations, run once each (by version) when the package is loaded. Also run on a fresh
-# install (inaugural), in case the Cortex already has the nodes.
-inits:
-  versions:
-    - version: 1
-      name: saved-query-local-type
-      inaugural: true
-      desc: Retype local saved queries from the bare svc.shodan.query. to svc.shodan.query.local.
-      # The init's output is logged, ex. "slib.shodan init vers=1 output: Counted 2 nodes."
-      query: |
-        meta:rule:type=svc.shodan.query.
-        [ :type=svc.shodan.query.local. ]
-        | count
-
 docs:
   - title: README
     path: README.md
