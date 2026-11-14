@@ -1,5 +1,5 @@
 name: slib.crtsh
-version: 0.2.1
+version: 0.3.0
 guid: 5dd9492c3e05485eb09964fa9508b23f
 
 synapse_version: ">=2.145.0,<3.0.0"
@@ -98,9 +98,12 @@ commands:
       Search crt.sh certificates by their properties and model the complete details of every match.
       Yields the crypto:x509:cert nodes, newest first.
 
-      Every given option must match. --dns matches the domain and its subdomains, the other
-      text options match substrings. --exact requires whole values. Without options, inbound
-      inet:fqdn, inet:email, inet:ipv4/6, inet:url, ou:name, and ou:org nodes are searched for.
+      Every given option must match. crt.sh searches with full text search, so values match
+      whole words, domains, and addresses, not substrings: --org vertex matches "The Vertex
+      Project" and --cn vertex.link matches www.vertex.link, but --cn old doesn't match
+      old.vertex.link. --dns matches the domain and its subdomains, --ip matches the address
+      exactly, and --exact requires whole values. Without options, inbound inet:fqdn,
+      inet:email, inet:ipv4/6, inet:url, ou:name, and ou:org nodes are searched for.
 
       Examples:
 
@@ -117,19 +120,19 @@ commands:
       - - --cn
         - type: str
           default: null
-          help: The subject common name.
+          help: The subject common name (whole words or domains).
       - - --org
         - type: str
           default: null
-          help: The subject organization.
+          help: The subject organization (whole words).
       - - --ou
         - type: str
           default: null
-          help: The subject organizational unit.
+          help: The subject organizational unit (whole words).
       - - --email
         - type: str
           default: null
-          help: An email address in the SAN or subject.
+          help: An email address (or its domain) in the SAN or subject.
       - - --ip
         - type: str
           default: null
@@ -356,7 +359,12 @@ commands:
     perms:
       - [ slib, crtsh, admin ]
     descr: |
-      Run raw (read-only) SQL against the crt.sh database and print the rows as JSON.
+      Run a raw SQL query against the crt.sh database and print the rows as JSON.
+
+      The SQL must be a single query that returns rows (SELECT, VALUES, TABLE, or WITH ... SELECT).
+      It runs in a read-only transaction, wrapped as SELECT * FROM (<sql>) q LIMIT <limit>, so it
+      can't change data or session settings. The service's crtsh:sql:limit caps --limit, and
+      crtsh:statement:timeout bounds how long it may run.
 
       Examples:
 
@@ -370,3 +378,7 @@ commands:
       - - --args
         - default: null
           help: A list of positional query arguments.
+      - - --limit
+        - type: int
+          default: 100
+          help: The max number of rows to return.

@@ -7,7 +7,7 @@ from . import __version__
 SVC_NAME = "slib.crtsh"
 SVC_VER = __version__
 SVC_GUID = "c7357722661f45a4b81c91ccfbbb37c0"
-SVC_SYN_MIN_VER = (2, 145, 0)
+"""The guid of the slib.crtsh meta:source node. Storm reads it from the model module's modconf."""
 
 SVC_EVTS = {
     "add": {
@@ -30,4 +30,12 @@ class SlibCrtshPkg(StormPkg):
     proto_name = SVC_NAME
 
 
-PKGDEFS = (SlibCrtshPkg().asdict(),)
+def _pkgdef() -> dict:
+    pkgdef = SlibCrtshPkg().asdict()
+    for mdef in pkgdef["modules"]:
+        if mdef["name"] == "slib.crtsh.model":
+            mdef["modconf"] = {"source": SVC_GUID}
+    return pkgdef
+
+
+PKGDEFS = (_pkgdef(),)

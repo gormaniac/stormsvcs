@@ -10,6 +10,5 @@ init {
     if $cmdopts.disable { $privadmin.setTagsEnabled((false)) }
 
     $settings = $privadmin.tagSettings()
-    $lib.print("slib.crtsh tags: enabled={enabled} prefix={prefix}",
-        enabled=$settings.enabled, prefix=$settings.prefix)
+    $lib.print(`slib.crtsh tags: enabled={$settings.enabled} prefix={$settings.prefix}`)
 }

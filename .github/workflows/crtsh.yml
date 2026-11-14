@@ -20,3 +20,44 @@ jobs:
     with:
       service: crtsh
     secrets: inherit
+
+  # The other tests run against a fake database. These run the service's real SQL against a
+  # PostgreSQL stub of crt.sh (see svcs/crtsh/tests/pgstub.py), so every query is parsed and planned.
+  postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_DB: certwatch
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: ./svcs/crtsh
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v9.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: svcs/crtsh/uv.lock
+
+      - name: Setup Python
+        run: uv python install
+
+      - name: Install the project
+        run: uv sync --locked --all-extras --dev
+
+      - name: Run the PostgreSQL tests
+        env:
+          SLIB_CRTSH_PGDSN: postgresql://postgres@127.0.0.1:5432/certwatch
+        run: uv run pytest tests/test_pg.py

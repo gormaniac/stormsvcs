@@ -4,7 +4,8 @@
 // slib.crtsh meta:source node with a -(seen)> edge.
 
 init {
-    $sourceGuid = "c7357722661f45a4b81c91ccfbbb37c0"
+    // The service sets this module's modconf from crtshsvc.defs.SVC_GUID, its one definition.
+    $sourceGuid = $modconf.source
 }
 
 // ---- Helpers ----
@@ -16,7 +17,7 @@ init {
 
 // Link the node to the slib.crtsh meta:source and extend its .seen to cover the times.
 function seen(n, times=$lib.null) {
-    if $times { for $time in $times { $seenAt($n, $time) } }
+    for $time in $times { $seenAt($n, $time) }
     yield $n
     [ <(seen)+ { [ meta:source=$sourceGuid :name="crt.sh" ] } ]
     return($n)
@@ -48,7 +49,7 @@ function addValus(n, prop, valus) {
 
 function refs(n, other) {
     yield $n
-    [ +(refs)> { yield $other } ]
+    [ +(refs)> $other ]
     return($n)
 }
 
@@ -56,13 +57,19 @@ function refs(n, other) {
 
 // The crypto:key node for a certificate's public key, deconflicted by its SPKI SHA-256.
 function keyNode(key) {
-    if (not $key.sha256) { return($lib.null) }
+    if (not $key.sha256) { return() }
     [ crypto:key=({"public:sha256": $key.sha256}) ]
     [
         :public ?= $key.spki
         :public:sha1 ?= $key.sha1
         :algorithm ?= $key.algo
     ]
+    return($seen($node))
+}
+
+// The rsa:key node for an RSA public key, with its size.
+function rsaKeyNode(key) {
+    [ rsa:key=($key.rsa.mod, $key.rsa.exp) :bits ?= $key.size ]
     return($seen($node))
 }
 
@@ -73,7 +80,7 @@ function crlNode(c) {
     if $url {
         [ crypto:x509:crl=({"url": $url}) ]
     } else {
-        [ crypto:x509:crl=$lib.guid(slib.crtsh, crl, $c.crtsh.issuer.id) ]
+        [ crypto:x509:crl=(slib.crtsh, crl, $c.crtsh.issuer.id) ]
     }
     return($seen($node))
 }
@@ -137,6 +144,7 @@ function cert(c, tagPrefix=$lib.null) {
 
     $key = $keyNode($c.pubkey)
     if $key { $refs($n, $key) }
+    if $c.pubkey.rsa { $rsaKeyNode($c.pubkey) }
 
     if $c.crtsh.revoked { $revokedNode($c, $n) }
 

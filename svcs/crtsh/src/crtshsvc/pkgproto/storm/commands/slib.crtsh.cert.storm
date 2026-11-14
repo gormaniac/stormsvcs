@@ -2,30 +2,32 @@ init {
     $crtsh = $lib.import(slib.crtsh.lib)
     $util = $lib.import(slib.crtsh.util)
     $opts = ({"kind": $cmdopts.type, "limit": $cmdopts.limit, "chain": $cmdopts.chain})
+    $explicit = $util.given($cmdopts.valus)
+    // The inbound nodes seen, so the fini block can tell when there were none.
+    $inbound = ([])
 }
 
-if $cmdopts.valus {
-    // Values ignore inbound nodes.
-    spin |
-    for $n in $crtsh.lookup($cmdopts.valus, kind=$opts.kind, limit=$opts.limit, chain=$opts.chain) {
-        yield $n
+// Values ignore inbound nodes, they're looked up once in the fini block.
+-$explicit
+
+$inbound.append($node.iden())
+$key = $util.lookupKey($node)
+if ($key = $lib.null) {
+    $lib.warn(`slib.crtsh.cert: Unable to look up {$node.form()} {$node.repr()}, it needs a SHA-256 or SHA-1.`)
+}
+-$($key = $lib.null)
+
+($kind, $valu) = $key
+divert $cmdopts.yield $util.nodes($crtsh.lookup(($valu,), kind=$kind, limit=$opts.limit, chain=$opts.chain))
+
+fini {
+    if $explicit {
+        for $n in $crtsh.lookup($cmdopts.valus, kind=$opts.kind, limit=$opts.limit, chain=$opts.chain) {
+            yield $n
+        }
+    } elif ($lib.len($inbound) = 0) {
+        $lib.warn("slib.crtsh.cert: Nothing to look up, give values or inbound nodes.")
     }
 }
-else {
-    switch $node.form() {
-        "crypto:x509:cert": { $key = $util.certKey($node) }
-        "hash:sha256": { $key = (sha256, $node.repr()) }
-        "hash:sha1": { $key = (sha1, $node.repr()) }
-        *: { $key = $lib.null }
-    }
-    // Statements after an if block still run for a node spun inside it, so the work is in the else.
-    if ($key = $lib.null) {
-        $lib.warn("slib.crtsh.cert: Unable to look up {form} {repr}, it needs a SHA-256 or SHA-1.",
-                  form=$node.form(), repr=$node.repr())
-        spin
-    } else {
-        ($kind, $valu) = $key
-        divert $cmdopts.yield $util.nodes($crtsh.lookup(($valu,), kind=$kind, limit=$opts.limit,
-                                                        chain=$opts.chain))
-    }
-}
+
+| uniq
