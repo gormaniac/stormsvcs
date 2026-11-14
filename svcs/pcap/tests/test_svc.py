@@ -76,6 +76,12 @@ class SvcProx:
 
 class TestPcapSvc(s_tests.SynTest):
 
+    def test_readmes_match(self):
+        # The package's README (shown in the Cortex) is a copy of the service's README.
+        pkgreadme = SVCDIR / "src" / "pcapsvc" / "pkgproto" / "README.md"
+        assert pkgreadme.read_text() == (SVCDIR / "README.md").read_text(), \
+            "Copy README.md to src/pcapsvc/pkgproto/README.md"
+
     def test_versions_match(self):
         pyproj = tomllib.loads((SVCDIR / "pyproject.toml").read_text())
         pkg = yaml.safe_load((SVCDIR / "src/pcapsvc/pkgproto/slib.pcap.yaml").read_text())
@@ -468,3 +474,120 @@ class TestPcapSvcOptions(s_tests.SynTest):
                     assert retn == {"status": True, "mesg": "", "data": ("tcp.port==22,ssh",)}
                     retn = await sprox.checkDecodeAs(["bad"])
                     assert not retn["status"] and "Invalid Decode As rule" in retn["mesg"]
+
+
+class TestPcapSvcInputs(s_tests.SynTest):
+    """Bad captures, key logs, and options (no engine needed)."""
+
+    async def test_bad_gzip(self):
+        data = g.pcap(g.session())
+        async with self.getTestCoreProxSvc(PcapSvc) as (_, _, svc):
+            prox = SvcProx(svc)
+
+            # A corrupt deflate stream raises zlib.error, which is a failed result too.
+            byts = bytearray(gzip.compress(data))
+            byts[10:30] = b"\xff" * 20
+            sha = hashlib.sha256(bytes(byts)).hexdigest()
+            retns = await collect(prox.flows(sha, upload=await prox.upload(bytes(byts)),
+                                             tshark=False))
+            assert len(retns) == 1 and not retns[0]["status"]
+            assert "Unable to decompress the capture" in retns[0]["mesg"]
+
+            # The decompressed size is limited, not only the compressed size.
+            svc.conf["pcap:maxsize:decompressed"] = 1000
+            byts = gzip.compress(data + b"\0" * 100_000)
+            sha = hashlib.sha256(byts).hexdigest()
+            retns = await collect(prox.flows(sha, upload=await prox.upload(byts, size=4096),
+                                             tshark=False))
+            assert not retns[0]["status"] and "pcap:maxsize:decompressed" in retns[0]["mesg"]
+            svc.conf["pcap:maxsize:decompressed"] = 0
+            retns = await collect(prox.flows(sha, upload=await prox.upload(byts, size=4096),
+                                             tshark=False))
+            assert retns[0]["status"], retns[0]
+            assert list(pathlib.Path(svc.tmpdir).iterdir()) == []
+
+    async def test_gunzip(self):
+        import threading
+
+        from pcapsvc import svc as p_svc
+
+        with self.getTestDir() as dirn:
+            src, dst = pathlib.Path(dirn) / "a.gz", pathlib.Path(dirn) / "a"
+            src.write_bytes(gzip.compress(b"x" * 100))
+            p_svc._gunzip(str(src), str(dst), maxsize=100)
+            assert dst.read_bytes() == b"x" * 100
+            with self.raises(p_svc.DecompressedSizeError):
+                p_svc._gunzip(str(src), str(dst), maxsize=99)
+            cancel = threading.Event()
+            cancel.set()
+            with self.raises(p_svc.CancelledRun):
+                p_svc._gunzip(str(src), str(dst), cancel=cancel)
+
+    async def test_failed_run_drops_uploads(self):
+        # A run that fails before it claims its uploads doesn't leave them behind (each one
+        # counts against pcap:uploads until it's pruned).
+        data = g.pcap(g.session())
+        sha = hashlib.sha256(data).hexdigest()
+        async with self.getTestCoreProxSvc(PcapSvc) as (core, _, svc):
+            prox = SvcProx(svc)
+            for bad in ({"decode": ["nope"]}, {"timeout": -1}, {"netvars": {"HOME_NET": "x"}}):
+                iden = await prox.upload(data)
+                klog = await prox.upload(b"CLIENT_RANDOM 00 00\n", kind="keylog")
+                retns = await collect(prox.flows(sha, upload=iden, keyloguploads=[klog], **bad))
+                assert not retns[0]["status"], bad
+                assert iden not in svc.uploads and klog not in svc.uploads, bad
+            assert svc.uploads == {}
+
+            # Storm cancels the uploads of a failed run too.
+            await core.axon.put(data)
+            msgs = await core.stormlist(f"slib.pcap.flows {sha} --decode-as nope")
+            self.stormIsInWarn("Unable to analyze", msgs)
+            assert svc.uploads == {}
+
+    async def test_keylog_uploads(self):
+        data = g.pcap(g.session())
+        sha = hashlib.sha256(data).hexdigest()
+        klog = b"CLIENT_RANDOM 00 00\n"
+        ksha = hashlib.sha256(klog).hexdigest()
+        async with self.getTestCoreProxSvc(PcapSvc) as (_, _, svc):
+            prox = SvcProx(svc)
+
+            # A key log upload can carry the SHA-256 it must have.
+            kiden = await prox.upload(klog, kind="keylog")
+            retns = await collect(prox.flows(sha, upload=await prox.upload(data), tshark=False,
+                                             keyloguploads=[{"upload": kiden, "sha256": ksha}]))
+            assert retns[0]["status"] and retns[0]["data"]["summary"]["keylogs"] == 1
+
+            kiden = await prox.upload(klog, kind="keylog")
+            other = hashlib.sha256(b"other").hexdigest()
+            retns = await collect(prox.flows(sha, upload=await prox.upload(data), tshark=False,
+                                             keyloguploads=[{"upload": kiden, "sha256": other}]))
+            assert retns[0]["mesg"] == \
+                f"The uploaded keylog has the SHA-256 {ksha}, not {other}."
+
+            retns = await collect(prox.flows(sha, upload=await prox.upload(data),
+                                             keyloguploads=[{"nope": 1}]))
+            assert retns[0]["mesg"].startswith("Invalid key log upload")
+
+            # tshark:keylog:maxsize caps a run's key logs together.
+            svc.conf["tshark:keylog:maxsize"] = 30
+            kidens = [await prox.upload(klog, kind="keylog") for _ in range(2)]
+            retns = await collect(prox.flows(sha, upload=await prox.upload(data), tshark=False,
+                                             keyloguploads=kidens))
+            assert "larger, together, than the max size of 30 bytes" in retns[0]["mesg"]
+            svc._pruneUploads(idle=-1)
+            assert list(pathlib.Path(svc.tmpdir).iterdir()) == []
+
+    def test_cancel(self):
+        import io
+        import threading
+
+        from pcapsvc import flows as p_flows
+
+        cancel = threading.Event()
+        flows, _ = p_flows.analyze(io.BytesIO(g.pcap(g.session())), cancel=cancel)
+        assert len(flows) == 4
+        cancel.set()
+        with self.raises(p_flows.PcapError) as cm:
+            p_flows.analyze(io.BytesIO(g.pcap(g.session())), cancel=cancel)
+        assert "cancelled" in cm.exception.mesg

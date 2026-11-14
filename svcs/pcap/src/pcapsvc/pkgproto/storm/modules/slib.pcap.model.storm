@@ -3,6 +3,9 @@
 //
 // Node edits here run as the calling user (or as root, when called by slib.pcap.priv.sync).
 // Every flow and match is linked to the slib.pcap meta:source node with a -(seen)> edge.
+//
+// NOTE: This package requires Synapse <3.0.0, so the 3.x model changes (it:app:snort:hit is
+// renamed, :seen replaces .seen) are ignored here (M001, M004).
 
 init {
     $sourceGuid = "cae9b5f5923a48b9a1a691f851a77429"
@@ -35,7 +38,7 @@ function addValus(n, prop, valus) {
 
 function refs(n, other) {
     yield $n
-    [ +(refs)> { yield $other } ]
+    [ +(refs)> $other ]
     return($node)
 }
 
@@ -69,7 +72,7 @@ function txFileNode(t) {
 // The file:attachment for a file sent in a flow, unique to the flow, side, file, and name.
 function attachmentNode(flowIden, side, t) {
     $file = $txFileNode($t)
-    [ file:attachment=$lib.guid(slib.pcap, attachment, $flowIden, $side, $t.sha256, $t.name)
+    [ file:attachment=(slib.pcap, attachment, $flowIden, $side, $t.sha256, $t.name)
         :file=$file
         :name ?= $t.name
         :text ?= $t.text
@@ -84,8 +87,9 @@ function certNode(c) {
     [
         :sha1 = $c.sha1
         :md5 = $c.md5
-        :file = `sha256:{$c.sha256}`
     ]
+    // Only when the service saved the cert to the Axon (it has one and files are extracted).
+    if $c.stored { [ :file = `sha256:{$c.sha256}` ] }
     if (not $c.error) {
         [
             :serial ?= $c.serial
@@ -135,7 +139,7 @@ function side(n, name, s, proto) {
     $protoprop = `{$name}:proto`
     $port = `{$name}:port`
     $handshake = `{$name}:handshake`
-    if ($s.ip.find(":") = $lib.null) { $ip = `{$name}:ipv4` } else { $ip = `{$name}:ipv6` }
+    if ($s.ip.find(":") = null) { $ip = `{$name}:ipv4` } else { $ip = `{$name}:ipv6` }
     yield $n
     [
         :$txcount=$s.pkts
@@ -159,9 +163,13 @@ function enrichSide(n, name, s) {
     if $s."ssh:key" {
         $setProp($n, `{$name}:ssh:key`, $sshKeyNode($s."ssh:key").value())
     }
-    if $s."rdp:hostname" { $setProp($n, `{$name}:rdp:hostname`, $s."rdp:hostname") }
-    if $s."rdp:keyboard:layout" {
-        $setProp($n, `{$name}:rdp:keyboard:layout`, $s."rdp:keyboard:layout")
+    // inet:flow only has RDP props for the client (src), tshark can report a client's
+    // fields on either side in a capture that starts midstream.
+    if ($name = "src") {
+        if $s."rdp:hostname" { $setProp($n, `{$name}:rdp:hostname`, $s."rdp:hostname") }
+        if $s."rdp:keyboard:layout" {
+            $setProp($n, `{$name}:rdp:keyboard:layout`, $s."rdp:keyboard:layout")
+        }
     }
     $addValus($n, `{$name}:softnames`, $s.softnames)
     $addValus($n, `{$name}:cpes`, $s.cpes)
@@ -183,9 +191,9 @@ function flowNode(f, file, opts) {
         :tot:txbytes=$f.bytes
         :ip:tcp:flags ?= $f."tcp:flags"
         :raw=$f
-        .seen=($f.time, $f.last)
+        .seen=($f.time, $f.last)  // noqa: M004
         <(seen)+ { [ meta:source=$sourceGuid :name="slib.pcap" ] }
-        <(refs)+ { yield $file }
+        <(refs)+ $file
     ]
     $side($node, src, $f.src, $f.proto)
     $side($node, dst, $f.dst, $f.proto)
@@ -202,8 +210,8 @@ function flowNode(f, file, opts) {
 // f is a flow from the service, file is the PCAP's file:bytes node, and opts may have a "tag"
 // to add, a "host" (it:host) to set as the :capture:host, and a "sandbox" (file:bytes) to set
 // as the :sandbox:file.
-function flow(f, file, opts=$lib.null) {
-    if ($opts = $lib.null) { $opts = ({}) }
+function flow(f, file, opts=(null)) {
+    if ($opts = null) { $opts = ({}) }
     $n = $flowNode($f, $file, $opts)
     $enrichSide($n, src, $f.src)
     $enrichSide($n, dst, $f.dst)
@@ -237,21 +245,41 @@ function hit(flownode, f, h, file, opts) {
     if ($h.engine = "suricata") {
         [ it:app:suricata:matched=$guid :rule=$h.rule :target=$flownode ]
     } else {
-        [ it:app:snort:hit=$guid :rule=$h.rule :flow=$flownode ]
+        [ it:app:snort:hit=$guid :rule=$h.rule :flow=$flownode ]  // noqa: M001
         $_hitEnds($node, $f)
     }
     [ :version?=$lib.cast(str, $h.rev) ]
-    if $h.time { [ :time=$h.time .seen=$h.time ] }
-    if $h.last { [ .seen=$h.last ] }
+    if $h.time { [ :time=$h.time .seen=$h.time ] }  // noqa: M004
+    if $h.last { [ .seen=$h.last ] }  // noqa: M004
     if $opts.host { [ :sensor=$opts.host ] }
-    [ <(seen)+ { meta:source=$sourceGuid } <(refs)+ { yield $file } ]
+    [ <(seen)+ { meta:source=$sourceGuid } <(refs)+ $file ]
     return($node)
 }
 
 // ---- DNS ----
 
+// Answer types inet:dns:answer has a prop for, the rest (ex. SRV, HTTPS) aren't modeled.
+function _dnsAnswerOk(a) {
+    switch $a.rrtype {
+        ("A", "AAAA", "CNAME", "NS", "MX", "TXT"): { return((true)) }
+        "PTR": { return(($a.ptr.ipv4 or $a.ptr.ipv6)) }
+        "SOA": { return(($a.soa and $a.soa.mname)) }
+    }
+    return((false))
+}
+
+function _dnsSoa(a) {
+    [ inet:dns:soa=(slib.pcap.dns.soa, $a.rrname, $a.soa.mname, $a.soa.rname)
+        :fqdn?=$a.rrname
+        :ns?=$a.soa.mname
+        :email?=$a.soa.email
+    ]
+    return($node)
+}
+
 function _dnsAnswer(req, a) {
-    [ inet:dns:answer=$lib.guid(slib.pcap.dns.answer, $req.repr(), $a.rrname, $a.rrtype, $a.rdata)
+    if (not $_dnsAnswerOk($a)) { return() }
+    [ inet:dns:answer=(slib.pcap.dns.answer, $req.repr(), $a.rrname, $a.rrtype, $a.rdata)
         :request=$req
         :ttl?=$a.ttl
     ]
@@ -262,6 +290,14 @@ function _dnsAnswer(req, a) {
         "NS": { [ :ns?=($a.rrname, $a.rdata) ] }
         "MX": { [ :mx?=($a.rrname, $a.rdata) ] }
         "TXT": { [ :txt?=($a.rrname, $a.rdata) ] }
+        // The service adds the address a PTR query's name is for (see pcapsvc.eve.ptrAddr).
+        "PTR": {
+            if $a.ptr.ipv4 { [ :rev?=($a.ptr.ipv4, $a.rdata) ] }
+            elif $a.ptr.ipv6 { [ :rev6?=($a.ptr.ipv6, $a.rdata) ] }
+        }
+        "SOA": {
+            [ :soa=$_dnsSoa($a).value() ]
+        }
     }
     return($node)
 }
@@ -271,18 +307,18 @@ function _dnsRequest(flownode, f, q, opts) {
     $types = ({"A": 1, "NS": 2, "CNAME": 5, "SOA": 6, "PTR": 12, "MX": 15, "TXT": 16,
                "AAAA": 28, "SRV": 33, "HTTPS": 65, "SVCB": 64, "ANY": 255})
     $qtype = $types.($q.rrtype)
-    [ inet:dns:request=$lib.guid(slib.pcap.dns, $f.iden, $q.id, $q.rrname, $q.rrtype)
+    [ inet:dns:request=(slib.pcap.dns, $f.iden, $q.id, $q.rrname, $q.rrtype)
         :query:name?=$q.rrname
         :time?=$q.time
         :server?=$f.dst.addr
         :sandbox:file?=$opts.sandbox
     ]
-    if ($qtype != $lib.null) { [ :query:type=$qtype ] }
-    if ($f.src.addr and $q.rrname and $qtype != $lib.null) {
+    if ($qtype != null) { [ :query:type=$qtype ] }
+    if ($f.src.addr and $q.rrname and $qtype != null) {
         [ :query?=($f.src.addr, $q.rrname, $qtype) ]
     }
-    if ($q.rcode != $lib.null) { [ :reply:code?=$q.rcode ] }
-    [ <(refs)+ { yield $flownode } ]
+    if ($q.rcode != null) { [ :reply:code?=$q.rcode ] }
+    [ <(refs)+ $flownode ]
     return($node)
 }
 
@@ -300,7 +336,7 @@ function dns(flownode, f, opts) {
 // Create or update a rule node from a parsed rule (the service's ruleParse or a feed's rule
 // record): an it:app:snort:rule (Snort 2.x and 3 rules) or it:app:suricata:rule.
 // enabled is only set when it isn't null.
-function rule(r, enabled=$lib.null) {
+function rule(r, enabled=(null)) {
     // Only Snort rules have an engine and a family.
     if ($r.form = "it:app:suricata:rule") {
         [ it:app:suricata:rule=$r.guid ]
@@ -332,8 +368,7 @@ function ruleRefs(rule, refs) {
         if (not $form) { continue }
         ($ok, $norm) = $lib.trycast($form, $valu)
         if (not $ok) {
-            $lib.warn("slib.pcap: Skipped the {scheme} reference of {form}={guid}, it isn't a valid {type}: {valu}",
-                scheme=$scheme, form=$rule.form(), guid=$rule.repr(), type=$form, valu=$valu)
+            $lib.warn(`slib.pcap: Skipped the {$scheme} reference of {$rule.form()}={$rule.repr()}, it isn't a valid {$form}: {$valu}`)
         } elif ($scheme = "cve") {
             $cves.append($norm)
         } else {

@@ -24,10 +24,8 @@ RETN_METHS = (
     "pushDone",
     "pushCancel",
     "ruleUpdate",
-    "rebuild",
     "ruleErrors",
     "ruleWarnings",
-    "ruleInfo",
     "ruleParse",
     "ruleCheck",
     # Feeds

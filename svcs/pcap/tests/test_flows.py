@@ -491,9 +491,19 @@ class TestIdentity:
             p_cid.communityId(1, ip("1.1.1.1"), ip("10.0.0.1"), 0, 0)
         assert p_cid.communityId(47, ip("10.0.0.1"), ip("10.0.0.2")) == \
             p_cid.communityId(47, ip("10.0.0.2"), ip("10.0.0.1"))
-        # One way ICMP types (ex. unreachable) aren't reordered.
-        assert p_cid.communityId(1, ip("10.0.0.1"), ip("10.0.0.9"), 3, 1) != \
-            p_cid.communityId(1, ip("10.0.0.9"), ip("10.0.0.1"), 3, 1)
+        # Like Suricata, a type without a counterpart (ex. 3, unreachable) is hashed with 0 (not
+        # its code), and the endpoints are ordered like any other flow's.
+        import base64
+        import hashlib
+        import struct
+        def cid(sport, dport):
+            data = struct.pack(">H", 0) + ip("10.0.0.1") + ip("10.0.0.9")
+            data += struct.pack(">BBHH", 1, 0, sport, dport)
+            return "1:" + base64.b64encode(hashlib.sha1(data).digest()).decode()
+
+        assert p_cid.communityId(1, ip("10.0.0.1"), ip("10.0.0.9"), 3, 1) == cid(3, 0)
+        assert p_cid.communityId(1, ip("10.0.0.1"), ip("10.0.0.9"), 3, 13) == cid(3, 0)
+        assert p_cid.communityId(1, ip("10.0.0.9"), ip("10.0.0.1"), 3, 1) == cid(0, 3)
 
         flows, _ = analyze(g.pcap(g.session()))
         http, dns, ping, ssh = flows

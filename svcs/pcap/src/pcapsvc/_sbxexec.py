@@ -81,7 +81,7 @@ AUDIT_ARCHES = {"x86_64": (0xC000003E, 41), "aarch64": (0xC00000B7, 198)}
 X32_SYSCALL_BIT = 0x40000000
 """Set in the syscall number of x32 syscalls (which report the x86_64 audit arch)."""
 
-AF_INET, AF_INET6, AF_PACKET = 2, 10, 17
+AF_UNIX, AF_INET, AF_INET6, AF_PACKET = 1, 2, 10, 17
 
 RLIMITS = {
     "as": resource.RLIMIT_AS,
@@ -89,6 +89,7 @@ RLIMITS = {
     "fsize": resource.RLIMIT_FSIZE,
     "nofile": resource.RLIMIT_NOFILE,
     "core": resource.RLIMIT_CORE,
+    "nproc": resource.RLIMIT_NPROC,
 }
 
 
@@ -217,10 +218,12 @@ def _bpf(code: int, k: int, jt: int = 0, jf: int = 0) -> _SockFilter:
 
 
 def applySeccomp(libc: ctypes.CDLL | None = None, kill: bool = True) -> None:
-    """Refuse socket() for IPv4, IPv6, and packet sockets, allow everything else.
+    """Allow socket() only for Unix sockets.
 
-    With ``kill`` the process is killed (SIGSYS), so a try is an alarm instead of a quiet
-    failure (the engines never open those sockets offline), otherwise it fails with EPERM.
+    IPv4, IPv6, and packet sockets are network access: with ``kill`` the process is killed
+    (SIGSYS), so a try is an alarm instead of a quiet failure (the engines never open those
+    sockets offline), otherwise it fails with EPERM. Every other family (ex. netlink) fails
+    with EPERM, libraries probe some of them harmlessly.
 
     Raises
     ------
@@ -249,11 +252,13 @@ def applySeccomp(libc: ctypes.CDLL | None = None, kill: bool = True) -> None:
         _bpf(jeq, nrsocket, 1, 0),  # 6: socket? -> 8, else -> 7
         _bpf(ret, SECCOMP_RET_ALLOW),  # 7
         _bpf(ld, 16),  # 8: args[0], the address family (low 32 bits)
-        _bpf(jeq, AF_INET, 3, 0),  # 9 -> 13
-        _bpf(jeq, AF_INET6, 2, 0),  # 10 -> 13
-        _bpf(jeq, AF_PACKET, 1, 0),  # 11 -> 13
-        _bpf(ret, SECCOMP_RET_ALLOW),  # 12
-        _bpf(ret, deny),  # 13
+        _bpf(jeq, AF_UNIX, 5, 0),  # 9 -> 15
+        _bpf(jeq, AF_INET, 3, 0),  # 10 -> 14
+        _bpf(jeq, AF_INET6, 2, 0),  # 11 -> 14
+        _bpf(jeq, AF_PACKET, 1, 0),  # 12 -> 14
+        _bpf(ret, SECCOMP_RET_ERRNO | errno.EPERM),  # 13: any other family
+        _bpf(ret, deny),  # 14
+        _bpf(ret, SECCOMP_RET_ALLOW),  # 15
     ]
     arr = (_SockFilter * len(prog))(*prog)
     fprog = _SockFprog(len(prog), arr)

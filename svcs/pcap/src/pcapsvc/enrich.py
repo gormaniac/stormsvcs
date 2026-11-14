@@ -168,6 +168,33 @@ def mimeType(valu: str | None) -> str | None:
     return valu.split(";", 1)[0].strip().lower() or None
 
 
+def _openUnder(root: str, path: str) -> int:
+    """Open ``path`` (relative to ``root``) for reading, one component at a time without
+    following symlinks (``O_NOFOLLOW`` only covers a path's last component).
+
+    Raises
+    ------
+    OSError
+        If a component is a symlink (or missing, or not a directory).
+    ValueError
+        If ``path`` isn't a plain relative path.
+    """
+
+    parts = path.split("/")
+    if os.path.isabs(path) or any(p in ("", ".", "..") for p in parts):
+        raise ValueError(f"Invalid path: {path!r}")
+    dirflags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    fd = os.open(root, dirflags)
+    try:
+        for part in parts[:-1]:
+            nfd = os.open(part, dirflags, dir_fd=fd)
+            os.close(fd)
+            fd = nfd
+        return os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW, dir_fd=fd)
+    finally:
+        os.close(fd)
+
+
 class FileStore:
     """Writes the files found in flows to a directory, named by SHA-256, up to the limits.
 
@@ -204,18 +231,23 @@ class FileStore:
             self.files[sha256] = len(data)
         return sha256
 
-    def addPath(self, path: str) -> tuple[str, int] | None:
+    def addPath(self, path: str, root: str | None = None) -> tuple[str, int] | None:
         """Store a file an engine extracted (ex. Suricata's file store) by copying it.
 
         The engine's output isn't trusted (it parsed the capture): the file is opened without
         following symlinks, must be a regular file, and is hashed and sized while it's copied.
+        With ``root``, ``path`` is relative to it and no component of it (or ``root`` itself)
+        may be a symlink, so a directory the engine replaced with one can't point elsewhere.
 
         Returns its (SHA-256, size), or None if it's over the limits or isn't a regular file.
         """
 
         try:
-            ifd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
-        except OSError:
+            if root is None:
+                ifd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+            else:
+                ifd = _openUnder(root, path)
+        except (OSError, ValueError):
             return None
         tmp = os.path.join(self.dirn, f".part-{os.getpid()}-{id(path)}")
         try:
@@ -337,8 +369,8 @@ class Enricher:
         cert = p_x509.parseCert(der)
         if any(c["sha256"] == cert["sha256"] for c in side["ssl:certs"]):
             return
-        if self.files is not None:
-            self.files.add(der)
+        # Whether the cert's bytes are saved to the Axon, so its :file can be set.
+        cert["stored"] = self.files is not None and self.files.add(der) is not None
         side["ssl:certs"].append(cert)
         if side["ssl:cert"] is None:
             side["ssl:cert"] = cert
@@ -391,11 +423,13 @@ class Enricher:
         name: str | None = None,
         mime: str | None = None,
         complete: bool = True,
+        root: str | None = None,
     ) -> None:
-        """Add a file that's already on disk (Suricata extracted it)."""
+        """Add a file that's already on disk (Suricata extracted it), at ``path`` (relative to
+        ``root``, when given, see ``FileStore.addPath``)."""
 
         # The file's own hash and size, not the engine's (see FileStore.addPath).
-        added = self.files.addPath(path)
+        added = self.files.addPath(path, root=root)
         if added is None:
             return
         sha256, size = added
@@ -413,8 +447,18 @@ class Enricher:
         )
 
     def add(self, client: bool, rec: dict) -> None:
-        """Add the fields of a frame, sent by the client if ``client`` (else the server)."""
+        """Add the fields of a frame, sent by the client if ``client`` (else the server).
 
+        tshark's output is untrusted, a frame with a malformed field (ex. a certificate that
+        isn't hex) is skipped from that field on, and counted (see ``eve.countMalformed``).
+        """
+
+        try:
+            self._add(client, rec)
+        except (ValueError, TypeError, KeyError, IndexError, AttributeError):
+            p_eve.countMalformed(self.counts, "tshark:frame")
+
+    def _add(self, client: bool, rec: dict) -> None:
         side = self.sides[client]
         self.eve.extend(rec.get("_eve", ()))
         self.alerts.extend(rec.get("_alerts", ()))

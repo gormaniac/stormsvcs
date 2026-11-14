@@ -33,6 +33,8 @@ import os
 import re
 import shutil
 import tempfile
+import threading
+import zlib
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -98,11 +100,37 @@ class PcapSvcError(Exception):
         self.mesg = mesg
 
 
-def _gunzip(src: str, dst: str) -> None:
-    """Decompress a gzip compressed capture (Snort and Suricata only read plain captures)."""
+class DecompressedSizeError(Exception):
+    """A gzip compressed capture decompresses to more than the max size."""
 
+
+class CancelledRun(Exception):
+    """The run's analysis was cancelled (ex. its Storm query was killed)."""
+
+
+def _gunzip(src: str, dst: str, maxsize: int = 0, cancel: threading.Event | None = None) -> None:
+    """Decompress a gzip compressed capture (Snort and Suricata only read plain captures).
+
+    Raises
+    ------
+    DecompressedSizeError
+        If it decompresses to more than ``maxsize`` bytes (0 for no limit).
+    CancelledRun
+        If ``cancel`` was set.
+    """
+
+    size = 0
     with gzip.open(src, "rb") as ifd, open(dst, "wb") as ofd:
-        shutil.copyfileobj(ifd, ofd, CHUNK)
+        while byts := ifd.read(CHUNK):
+            if cancel is not None and cancel.is_set():
+                raise CancelledRun()
+            size += len(byts)
+            if maxsize and size > maxsize:
+                raise DecompressedSizeError(
+                    f"It decompresses to more than the max size of {maxsize} bytes "
+                    "(pcap:maxsize:decompressed)."
+                )
+            ofd.write(byts)
 
 
 def _isGzip(path: str) -> bool:
@@ -224,6 +252,15 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
             "default": 1024 * 1024 * 1024,
             "minimum": 0,
             "description": "The max size, in bytes, of a capture file to read, 0 for no limit.",
+        },
+        "pcap:maxsize:decompressed": {
+            "type": "integer",
+            "default": 4 * 1024 * 1024 * 1024,
+            "minimum": 0,
+            "description": (
+                "The max size, in bytes, a gzip compressed capture may decompress to, 0 for no "
+                "limit."
+            ),
         },
         "pcap:workers": {
             "type": "integer",
@@ -411,7 +448,10 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
             "type": "integer",
             "default": 16 * 1024 * 1024,
             "minimum": 0,
-            "description": "The largest TLS key log, in bytes, read for a run, 0 for no limit.",
+            "description": (
+                "The max size, in bytes, of the TLS key logs read for a run (all of them "
+                "together), 0 for no limit."
+            ),
         },
         "tshark:timeout": {
             "type": "number",
@@ -439,13 +479,17 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
             "default": p_sandbox.DEFAULT_RLIMITS,
             "description": (
                 "Resource limits of an engine run: as (address space bytes), cpu (seconds), "
-                "fsize (bytes per file), nofile, core. 0 is unlimited."
+                "fsize (bytes per file), nofile, core, and nproc (processes of the sandbox "
+                "user, only when engines run as it). 0 is unlimited."
             ),
         },
         "sandbox:seccomp": {
             "type": "boolean",
             "default": True,
-            "description": "Refuse engines IPv4, IPv6, and packet sockets with a seccomp filter.",
+            "description": (
+                "Refuse engines every socket but Unix sockets with a seccomp filter (IPv4, IPv6, "
+                "and packet sockets kill the engine)."
+            ),
         },
     }
 
@@ -507,6 +551,8 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
 
         self.session = aiohttp.ClientSession(trust_env=True)
         self.onfini(self.session.close)
+        # reach() opened up directories (ex. the cell's) for the engines' user.
+        self.onfini(self.sandbox.restore)
         self.schedCoro(self._pruneLoop())
 
     # ---- Status ----
@@ -658,6 +704,14 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
         found = iden in self.uploads
         self._dropUpload(iden)
         return found
+
+    def _dropUnclaimed(self, idens: list[str]) -> None:
+        """Remove uploads no run has claimed (see ``analyze``)."""
+
+        for iden in idens:
+            upload = self.uploads.get(iden)
+            if upload is not None and not upload.get("busy"):
+                self._dropUpload(iden)
 
     def _takeUpload(self, iden: str, kind: str, dst: str, sha256: str | None = None) -> int:
         """Move an upload to ``dst`` (it's then gone). Returns its size."""
@@ -888,7 +942,7 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
         snort: bool | None = None,
         rules: bool = True,
         upload: str | None = None,
-        keyloguploads: list[str] | None = None,
+        keyloguploads: list[str | dict] | None = None,
         netvars: dict[str, str] | None = None,
     ) -> tuple[list[dict], dict]:
         """Analyze a capture and return its flows and a summary of it.
@@ -905,7 +959,9 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
             The ID of the capture's upload (see ``uploadStart``), otherwise it's read from
             the Axon.
         keylogs, keyloguploads : list | None
-            TLS key logs to decrypt with, by SHA-256 in the Axon or by upload ID.
+            TLS key logs to decrypt with, by SHA-256 in the Axon or by upload. An upload is
+            ``{"upload": <ID>, "sha256": <SHA-256>}`` (the upload must have that SHA-256), or
+            just its ID.
         decode : list | None
             Decode As rules, for tshark (``-d``) and Suricata (detection ports).
         tshark, suricata, snort, files : bool | None
@@ -919,16 +975,28 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
             If the capture (or a key log) can't be read, is too big, or isn't a capture.
         """
 
-        sha256 = normSha256(sha256)
-        keylogs = [normSha256(k) for k in (keylogs or ())]
-        keyloguploads = list(keyloguploads or ())
+        given = [upload] if isinstance(upload, str) else []
+        given.extend(k for k in (keyloguploads or ()) if isinstance(k, str))
+        given.extend(
+            k.get("upload")
+            for k in (keyloguploads or ())
+            if isinstance(k, dict) and k.get("upload")
+        )
         try:
-            decode = p_tshark.checkDecodeAs(decode)
-            netvars = p_rules.checkNetVars(netvars)
-        except (p_tshark.TsharkError, p_rules.RuleError, TypeError) as err:
-            raise PcapSvcError(getattr(err, "mesg", str(err))) from None
+            sha256 = normSha256(sha256)
+            keylogs = [normSha256(k) for k in (keylogs or ())]
+            keyloguploads = [self._normKeylogUpload(k) for k in (keyloguploads or ())]
+            try:
+                decode = p_tshark.checkDecodeAs(decode)
+                netvars = p_rules.checkNetVars(netvars)
+            except (p_tshark.TsharkError, p_rules.RuleError, TypeError) as err:
+                raise PcapSvcError(getattr(err, "mesg", str(err))) from None
 
-        timeout, limit, handshake = self._opts(timeout, limit, handshake)
+            timeout, limit, handshake = self._opts(timeout, limit, handshake)
+        except PcapSvcError:
+            # The run never starts, so nothing else would claim (or remove) its uploads.
+            self._dropUnclaimed(given)
+            raise
         opts = {
             "tshark": self.conf.get("tshark:enabled") if tshark is None else bool(tshark),
             "suricata": self.conf.get("suricata:enabled") if suricata is None else bool(suricata),
@@ -941,6 +1009,7 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
         if upload is None and not self.axonurl:
             raise PcapSvcError("The service has no axon:url, the capture must be uploaded.")
         if keylogs and not self.axonurl:
+            self._dropUnclaimed(given)
             raise PcapSvcError("The service has no axon:url, key logs must be uploaded.")
 
         # Waiting for a worker can outlast the idle prune, so this run's uploads are marked
@@ -948,7 +1017,7 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
         claims = []
         if upload is not None:
             claims.append((upload, "capture"))
-        claims.extend((kiden, "keylog") for kiden in keyloguploads)
+        claims.extend((kiden, "keylog") for kiden, _ in keyloguploads)
         for iden, kind in claims:
             self._reqUpload(iden, kind)
         for iden, _ in claims:
@@ -958,6 +1027,8 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
                 # Every engine run of this analysis adds what the sandbox caught it doing.
                 alerts: list[dict] = []
                 token = p_sandbox.RUN_ALERTS.set(alerts)
+                # Executor work can't be cancelled, it checks this and stops instead.
+                cancel = threading.Event()
                 try:
                     with tempfile.TemporaryDirectory(dir=self.tmpdir) as tmp:
                         flows, summary = await self._analyze(
@@ -971,8 +1042,10 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
                             limit,
                             handshake,
                             opts,
+                            cancel,
                         )
                 finally:
+                    cancel.set()
                     p_sandbox.RUN_ALERTS.reset(token)
                 summary["sandbox"] = {"alerts": alerts}
                 return flows, summary
@@ -991,7 +1064,7 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
         sha256: str,
         upload: str | None,
         keylogs: list[str],
-        keyloguploads: list[str],
+        keyloguploads: list[tuple[str, str | None]],
     ) -> tuple[str, int, str | None]:
         """Get the capture (and the key logs, joined into one) into the run's directory.
 
@@ -1007,19 +1080,44 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
         keylog = None
         if keylogs or keyloguploads:
             keylog = os.path.join(tmp, "keylog")
-            for kiden in keyloguploads:
+            # tshark:keylog:maxsize caps the key logs of a run together, not each of them.
+            maxsize = self.conf.get("tshark:keylog:maxsize")
+            total = 0
+            for kiden, ksha in keyloguploads:
                 part = os.path.join(tmp, f"keylog-{kiden}")
-                self._takeUpload(kiden, "keylog", part)
+                total += self._takeUpload(kiden, "keylog", part, ksha)
+                self._checkKeylogTotal(total, maxsize)
                 with open(part, "rb") as ifd, open(keylog, "ab") as ofd:  # noqa: ASYNC230
                     shutil.copyfileobj(ifd, ofd)
                     ofd.write(b"\n")
             for ksha in keylogs:
-                await self._download(
-                    axon, ksha, keylog, self.conf.get("tshark:keylog:maxsize"), what="TLS key log"
-                )
+                left = maxsize - total if maxsize else 0
+                if maxsize and left <= 0:
+                    self._checkKeylogTotal(total + 1, maxsize)
+                total += await self._download(axon, ksha, keylog, left, what="TLS key log")
                 with open(keylog, "ab") as fd:  # noqa: ASYNC230 - one byte
                     fd.write(b"\n")
         return path, size, keylog
+
+    @staticmethod
+    def _checkKeylogTotal(total: int, maxsize: int) -> None:
+        if maxsize and total > maxsize:
+            raise PcapSvcError(
+                f"The TLS key logs are larger, together, than the max size of {maxsize} bytes "
+                "(tshark:keylog:maxsize)."
+            )
+
+    @staticmethod
+    def _normKeylogUpload(valu: Any) -> tuple[str, str | None]:
+        """Normalize a key log upload (its ID, or ``{"upload": <ID>, "sha256": <SHA-256>}``)
+        to (ID, SHA-256 or None)."""
+
+        if isinstance(valu, str):
+            return valu, None
+        if isinstance(valu, dict) and isinstance(valu.get("upload"), str):
+            ksha = valu.get("sha256")
+            return valu["upload"], normSha256(ksha) if ksha is not None else None
+        raise PcapSvcError(f"Invalid key log upload: {valu!r}")
 
     async def _engines(
         self,
@@ -1085,12 +1183,13 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
         sha256: str,
         upload: str | None,
         keylogs: list[str],
-        keyloguploads: list[str],
+        keyloguploads: list[tuple[str, str | None]],
         decode: list[str],
         timeout: int,
         limit: int,
         handshake: int,
         opts: dict,
+        cancel: threading.Event | None = None,
     ) -> tuple[list[dict], dict]:
         filesdir = os.path.join(tmp, "files")
         os.makedirs(filesdir)
@@ -1105,8 +1204,20 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
             if await s_coro.executor(_isGzip, path):
                 plain = os.path.join(tmp, "capture.pcap")
                 try:
-                    await s_coro.executor(_gunzip, path, plain)
-                except (OSError, EOFError, gzip.BadGzipFile) as err:
+                    await s_coro.executor(
+                        _gunzip,
+                        path,
+                        plain,
+                        self.conf.get("pcap:maxsize:decompressed"),
+                        cancel,
+                    )
+                except (
+                    OSError,
+                    EOFError,
+                    gzip.BadGzipFile,
+                    zlib.error,
+                    DecompressedSizeError,
+                ) as err:
                     raise PcapSvcError(
                         f"file:bytes:sha256={sha256}: Unable to decompress the capture: {err}"
                     ) from None
@@ -1142,6 +1253,7 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
                         rules=index,
                         loose=loose,
                         filestore=suri["filestore"] if suri else None,
+                        cancel=cancel,
                     )
                 except p_flows.PcapError as err:
                     raise PcapSvcError(f"file:bytes:sha256={sha256}: {err.mesg}") from None
@@ -1193,7 +1305,7 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
         except PcapSvcError as err:
             yield TelepathRetn(status=False, mesg=err.mesg, data=None)
             return
-        except (s_exc.SynErr, OSError) as err:
+        except (s_exc.SynErr, OSError, zlib.error) as err:
             yield TelepathRetn(status=False, mesg=f"Unable to read {sha256}: {err}", data=None)
             return
 
