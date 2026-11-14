@@ -5,7 +5,7 @@ init {
     for $user in $cmdopts.user {
         $retn = $padmin.delUser($user)
         if (not $util.failed($retn, `Deleting user {$user}`)) {
-            $lib.print("slib.hatching.admin.user.del: Deleted user {user}.", user=$user)
+            $lib.print(`slib.hatching.admin.user.del: Deleted user {$user}.`)
         }
     }
 }

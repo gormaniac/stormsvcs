@@ -1,17 +1,29 @@
 init {
     $priv = $lib.import(slib.hatching.priv.user)
     $util = $lib.import(slib.hatching.util)
+
+    // An it:app:yara:rule node for a rule from Triage.
+    function ruleNode(rule) {
+        [ it:app:yara:rule=({"name": $rule.name, "text": $rule.rule}) :name=$rule.name :text=$rule.rule ]
+        return($node)
+    }
+
+    // Runs once per query (not once per inbound node).
+    $made = ([])
+    for $name in $cmdopts.name {
+        $retn = $priv.rule($name)
+        if (not $util.failed($retn, `Getting Yara rule {$name}`)) {
+            $rule = $retn.data
+            for $w in $rule.warnings { $lib.warn(`slib.hatching.yara.get: {$name}: {$w}`) }
+            if $cmdopts.yield { $made.append($ruleNode($rule)) }
+            else { $lib.print($rule.rule) }
+        }
+    }
 }
 
-spin |
-for $name in $cmdopts.name {
-    $retn = $priv.rule($name)
-    if (not $util.failed($retn, `Getting Yara rule {$name}`)) {
-        $rule = $retn.data
-        for $w in $rule.warnings { $lib.warn("slib.hatching.yara.get: {name}: {warning}", name=$name, warning=$w) }
-        if $cmdopts.yield {
-            [ it:app:yara:rule=({"name": $rule.name, "text": $rule.rule}) :name=$rule.name :text=$rule.rule ]
-        }
-        else { $lib.print($rule.rule) }
-    }
+// The work ran once in init. Inbound nodes pass through, unless --yield replaces them.
+if $cmdopts.yield { spin }  // noqa: P001
+
+fini {
+    if $cmdopts.yield { for $n in $made { yield $n } }
 }

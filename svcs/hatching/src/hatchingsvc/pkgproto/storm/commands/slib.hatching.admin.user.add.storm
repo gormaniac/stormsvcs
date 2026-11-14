@@ -5,7 +5,6 @@ init {
     $retn = $padmin.addUser($cmdopts.login, password=$cmdopts.password, name=$cmdopts.name, role=$cmdopts.role,
                             confirmed=$cmdopts.confirmed)
     if (not $util.failed($retn, `Adding user {$cmdopts.login}`)) {
-        $lib.print("slib.hatching.admin.user.add: Added user {login} ({id}) with the role {role}.",
-                   login=$retn.data.email, id=$retn.data.id, role=$retn.data.role)
+        $lib.print(`slib.hatching.admin.user.add: Added user {$retn.data.email} ({$retn.data.id}) with the role {$retn.data.role}.`)
     }
 }

@@ -1,5 +1,6 @@
 """The CellApi implementation for slib.hatching."""
 
+import logging
 from collections.abc import AsyncIterator, Awaitable
 
 import synapse.lib.cell as s_cell
@@ -9,6 +10,8 @@ from stormlibpp.utils import normver
 
 from .defs import PKGDEFS, SVC_EVTS, SVC_NAME, SVC_VER
 from .errors import HatchingApiError
+
+logger = logging.getLogger(__name__)
 
 # HatchingSvc methods that are exposed over Telepath as-is, wrapped in a TelepathRetn.
 # See HatchingSvc for each method's arguments and the Hatching Triage endpoint it calls.
@@ -25,6 +28,8 @@ RETN_METHS = (
     "setProfile",
     "magicLink",
     "submitUrl",
+    "submitFileInit",
+    "submitFileChunk",
     "submitFile",
     "importSample",
     "wait",
@@ -74,6 +79,12 @@ GENR_METHS = (
 )
 
 
+def _unexpected(err: Exception) -> str:
+    """The TelepathRetn message for an unexpected error."""
+
+    return f"Unexpected error ({type(err).__name__}): {err}"
+
+
 async def _retn(coro: Awaitable) -> TelepathRetn:
     """Await a HatchingSvc call and wrap the result (or error) in a TelepathRetn."""
 
@@ -84,6 +95,10 @@ async def _retn(coro: Awaitable) -> TelepathRetn:
     except (ValueError, TypeError) as err:
         # Bad input from Storm, ex. a non-numeric limit.
         return TelepathRetn(status=False, mesg=f"Invalid input: {err}", data=None)
+    except Exception as err:  # pylint: disable=W0718
+        # A bug, or a report shape the service doesn't expect. Keep it out of Storm as a raw error.
+        logger.exception("Unexpected slib.hatching error")
+        return TelepathRetn(status=False, mesg=_unexpected(err), data=None)
     return TelepathRetn(status=True, mesg="", data=data)
 
 
@@ -100,6 +115,9 @@ async def _retnGenr(genr: AsyncIterator) -> AsyncIterator[TelepathRetn]:
         yield TelepathRetn(status=False, mesg=err.mesg, data=None)
     except (ValueError, TypeError) as err:
         yield TelepathRetn(status=False, mesg=f"Invalid input: {err}", data=None)
+    except Exception as err:  # pylint: disable=W0718
+        logger.exception("Unexpected slib.hatching error")
+        yield TelepathRetn(status=False, mesg=_unexpected(err), data=None)
 
 
 def _retnMeth(name: str):

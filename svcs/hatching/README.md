@@ -1,7 +1,7 @@
 # hatching
 
 A Synapse Advanced Power-Up (Storm Service) for the [Hatching Triage](https://tria.ge) sandbox,
-built on [pyhatching](https://pypi.org/project/pyhatching/) (1.0.0+). It covers the documented
+built on [pyhatching](https://pypi.org/project/pyhatching/) (1.1.0+). It covers the documented
 [Triage API](https://tria.ge/docs/) (see [API coverage](#api-coverage)):
 
 - Submitting files (from the Axon) and URLs (browsed, or fetched and analyzed), with profiles,
@@ -60,6 +60,11 @@ Keys are resolved in this order, per request:
 
 Every Triage API requires a key.
 
+A key given to `slib.hatching.apikey` or `slib.hatching.admin.apikey` is part of the Storm
+query's text, so it can end up in query logs, history, and audit records. To avoid that, add your
+user scoped `hatching` vault (with an `apikey` secret) yourself, ex. in the UI's vault manager, and
+use the `hatching:apikey` config option for the service-wide key.
+
 ## Permissions
 
 | Permission | Grants |
@@ -80,8 +85,8 @@ need the normal node permissions for the nodes the commands create.
 | `slib.hatching.enrich` | Model the newest reported analysis of `file:bytes`, `hash:*`, and `inet:url` nodes, or `--sample` IDs. `--tasks` also models the behavioral tasks. |
 | `slib.hatching.submit` | Submit `file:bytes` (from the Axon) and `inet:url` nodes, or `--url`s (`--fetch` to analyze the downloaded file). `--profile`, `--network` (`vpn` with `--geolocation`), `--timeout`, `--password`, `--tag`, `--interactive`. `--wait` models the results. |
 | `slib.hatching.sample.import` | Import public tria.ge samples into a private cloud instance. |
-| `slib.hatching.search` | Search Triage and print the samples, or model them with `--model`/`--yield`. |
-| `slib.hatching.samples` | List the newest `owned`, `org`, or `public` samples. |
+| `slib.hatching.search` | Search Triage and print the samples (at most 1000), or model them with `--model`/`--yield`. |
+| `slib.hatching.samples` | List the newest `owned`, `org`, or `public` samples (at most 1000). |
 | `slib.hatching.sample.info` | Print a sample's metadata, `--summary`, or a shareable magic `--link`. |
 | `slib.hatching.sample.wait` | Wait for samples to be reported, then optionally model them. |
 | `slib.hatching.sample.profile` | Pick the profiles of an interactive sample (or `--auto`). |
@@ -90,20 +95,24 @@ need the normal node permissions for the nodes the commands create.
 | `slib.hatching.report` | Print the overview, static (`--static`), a task's (`--task`), or a URL sample's UrlScan (`--urlscan`) report. |
 | `slib.hatching.kernel` | Print a task's kernel monitor events. |
 | `slib.hatching.download` | Download a sample's file, `--task`/`--file`, `--pcap`/`--pcapng`, `--dumped` files, a URL sample's `--screenshot`, or `--archive` into the Axon. |
-| `slib.hatching.profile.list` / `.add` / `.edit` / `.del` | Manage analysis profiles (`--network vpn --geolocation <region>` for VPN profiles). |
+| `slib.hatching.profile.list`, `slib.hatching.profile.add`, `slib.hatching.profile.edit`, `slib.hatching.profile.del` | Manage analysis profiles (`--network vpn --geolocation <region>` for VPN profiles). |
 | `slib.hatching.resources` | List the analysis environments and the tags profiles pick them with. |
 | `slib.hatching.geolocations` | List the VPN regions. |
 | `slib.hatching.stats` | Print your usage stats. |
-| `slib.hatching.yara.list` / `.get` / `.add` / `.del` | Manage Yara rules (`.add` takes `it:app:yara:rule` nodes, `.get --yield` creates them, `.add --rename` renames one). |
+| `slib.hatching.yara.list`, `slib.hatching.yara.get`, `slib.hatching.yara.add`, `slib.hatching.yara.del` | Manage Yara rules (`yara.add` takes `it:app:yara:rule` nodes, `yara.get --yield` creates them, `yara.add --name <new> --rename <old>` renames one). |
 | `slib.hatching.apikey` | Set or clear your own API key. |
 | `slib.hatching.admin.apikey` | Set or clear the service-wide API key. |
-| `slib.hatching.admin.tags` | Change the tag prefix or turn tagging off. |
+| `slib.hatching.admin.tags` | Change the tag prefix (a valid tag name) or turn tagging off. |
 | `slib.hatching.admin.request` | Send a raw request to any Triage endpoint. |
-| `slib.hatching.admin.users` / `.user.add` / `.user.del` | Manage your organization's users (by email or username, with a `--role`). |
-| `slib.hatching.admin.user.keys` / `.user.key.add` / `.user.key.del` | Manage users' API keys. |
+| `slib.hatching.admin.users`, `slib.hatching.admin.user.add`, `slib.hatching.admin.user.del` | Manage your organization's users (by email or username, with a `--role`). |
+| `slib.hatching.admin.user.keys`, `slib.hatching.admin.user.key.add`, `slib.hatching.admin.user.key.del` | Manage users' API keys (`user.key.add` masks the new key unless `--show` is used). |
 | `slib.hatching.admin.org` | Print the organization's settings or `--stats`, or turn `--magic` links on or off. |
 
 The `admin.user*` and `admin.org` commands need a Triage key with the `manage_company` permission.
+
+`--sample`, `--url`, and `--name` (on `enrich`, `download`, `submit`, and `yara.add`) run once per
+query, not once per inbound node. The inbound nodes pass through, or `--yield` replaces them with
+the resulting nodes.
 
 ## Modeling
 
@@ -132,7 +141,9 @@ With `--tasks`, each behavioral task adds, linked to the sample with `:sandbox:f
   task ran).
 - `inet:flow` nodes with the client and server, the process, byte and packet counts, and
   `-(refs)>` the domain and TLS server name, plus `inet:tls:ja3:sample` and
-  `inet:tls:ja3s:sample` nodes for its TLS fingerprints.
+  `inet:tls:ja3s:sample` nodes for its TLS fingerprints. A client with a private (ex. the sandbox
+  VM's) address isn't modeled, so it doesn't link unrelated analyses together; neither is its
+  JA3 sample, which needs the client.
 - `inet:dns:request` nodes (with the query type and server), and `inet:dns:a`/`aaaa`/`cname`.
 - `inet:http:request` nodes with the method, URL, headers, server, and the response's code,
   reason, and headers.
@@ -140,7 +151,8 @@ With `--tasks`, each behavioral task adds, linked to the sample with `:sandbox:f
 - Triage's ASN and country (`:asn`, `:loc`) for the IPs, when the graph doesn't have them yet.
 
 Every node is linked to the service's `meta:source` (`hatching triage`) with a `-(seen)>` edge.
-Modeling a sample again updates the same nodes. Failures Triage reports in an analysis (ex. a
+Modeling a sample again updates the same nodes. A `file:bytes` keeps the `:name` and `:mime` it
+already has. Failures Triage reports in an analysis (ex. a
 task that couldn't run) are printed as warnings.
 
 ### Not modeled
@@ -149,7 +161,8 @@ task that couldn't run) are printed as warnings.
   config `keys`, `webinject`, `command_lines`, and `attr` (they stay in the config's `:raw`).
 - Dropper source code, ransom note text, and signature indicators and descriptions.
 - Relative timestamps (process start, flow first/last seen, request times): they're offsets into
-  the analysis, not times.
+  the task, and task reports don't say when the task started (only when the sample was submitted
+  and reported), so they can't be turned into times without guessing.
 - The static report beyond the sample's MIME type (the overview report covers its tags and
   signatures), kernel monitor events (print them with `slib.hatching.kernel`), and UrlScan
   reports (Triage documents their shape as subject to change, print them with

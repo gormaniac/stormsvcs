@@ -1,15 +1,18 @@
 init {
     $hatching = $lib.import(slib.hatching.lib)
     $model = $lib.import(slib.hatching.model)
+
+    // --sample is modeled once here (init runs once per query), not once per inbound node.
+    $made = ([])
+    for $sid in $cmdopts.sample {
+        $n = $hatching.model($sid, tasks=$cmdopts.tasks)
+        if $n { $made.append($n) }
+    }
 }
 
 if $cmdopts.sample {
-    // --sample ignores inbound nodes.
-    spin |
-    for $sid in $cmdopts.sample {
-        $n = $hatching.model($sid, tasks=$cmdopts.tasks)
-        if ($cmdopts.yield and $n) { yield $n }
-    }
+    // Inbound nodes pass through, unless --yield replaces them with the samples' nodes.
+    if $cmdopts.yield { spin }  // noqa: P001
 }
 else {
     switch $node.form() {
@@ -20,9 +23,13 @@ else {
         "hash:sha512": { }
         "inet:url": { }
         *: {
-            $lib.warn("slib.hatching.enrich: The node form {form} is not supported.", form=$node.form())
-            spin
+            $lib.warn(`slib.hatching.enrich: The node form {$node.form()} is not supported.`)
+            spin  // noqa: P001 - drop the node it can't be used with
         }
     }
     divert $cmdopts.yield $model.nodes(($hatching.enrich($node, tasks=$cmdopts.tasks),))
+}
+
+fini {
+    if $cmdopts.yield { for $n in $made { yield $n } }
 }

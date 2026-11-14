@@ -3,24 +3,16 @@
 
 init {
     $svc = $lib.service.get("slib.hatching")
+    $userKey = $lib.import(slib.hatching.util).userKey
 }
 
-// Only reads the calling user's own vault, see slib.hatching.priv.user.
-function userKey() {
-    $vault = $lib.vault.bytype(hatching, scope=user)
-    if ($vault = $lib.null) { return($lib.null) }
-    $secrets = $vault.secrets
-    if ($secrets = $lib.null) { return($lib.null) }
-    return($secrets.apikey)
-}
-
-function addProfile(name, tags=$lib.null, timeout=$lib.null, network=$lib.null, geolocation=$lib.null) {
+function addProfile(name, tags=(null), timeout=(null), network=(null), geolocation=(null)) {
     return($svc.addProfile($name, tags=$tags, timeout=$timeout, network=$network, geolocation=$geolocation,
                            apikey=$userKey()))
 }
 
-function editProfile(profile, name=$lib.null, tags=$lib.null, timeout=$lib.null, network=$lib.null,
-                     geolocation=$lib.null) {
+function editProfile(profile, name=(null), tags=(null), timeout=(null), network=(null),
+                     geolocation=(null)) {
     return($svc.editProfile($profile, name=$name, tags=$tags, timeout=$timeout, network=$network,
                             geolocation=$geolocation, apikey=$userKey()))
 }
@@ -29,7 +21,7 @@ function delProfile(profile) { return($svc.delProfile($profile, apikey=$userKey(
 
 function addRule(name, text) { return($svc.addRule($name, $text, apikey=$userKey())) }
 function editRule(name, text) { return($svc.editRule($name, $text, apikey=$userKey())) }
-function renameRule(name, newname, text=$lib.null) {
+function renameRule(name, newname, text=(null)) {
     return($svc.renameRule($name, $newname, text=$text, apikey=$userKey()))
 }
 function delRule(name) { return($svc.delRule($name, apikey=$userKey())) }
