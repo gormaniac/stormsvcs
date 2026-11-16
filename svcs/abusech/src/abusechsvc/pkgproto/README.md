@@ -57,8 +57,9 @@ connections only for requests that are safe to repeat (not submissions, uploads,
 deletes, or `slib.abusech.admin.request`). Downloads of the exports and blocklists are retried
 until their first byte arrives.
 
-The ThreatFox JSON exports are parsed in memory, so the `full` export (with or without `--bulk`)
-needs an `abusech:maxsize` larger than its unzipped size.
+The ThreatFox JSON exports are parsed in memory. Without `--bulk` they're capped at
+`abusech:maxsize`, which the `full` export unzips to more than by default, so import it with
+`--bulk`, which caps it at `abusech:bulk:maxsize` instead.
 
 ## Auth-Keys
 

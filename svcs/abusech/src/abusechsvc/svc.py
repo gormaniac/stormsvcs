@@ -1196,8 +1196,19 @@ class AbuseChSvc(s_cell.Cell):
             raise AbuseChApiError(f"Unknown ThreatFox export: {kind}")
         # A few MB (capped at abusech:maxsize), downloaded with a read timeout only, since slow
         # links take longer than the request timeout.
-        byts = await self._downloadBytes("threatfox:export", THREATFOX_EXPORTS[kind], apikey=apikey)
-        iocs = await asyncio.to_thread(parseThreatfox, byts, kind, self.maxsize)
+        try:
+            byts = await self._downloadBytes(
+                "threatfox:export", THREATFOX_EXPORTS[kind], apikey=apikey
+            )
+            iocs = await asyncio.to_thread(parseThreatfox, byts, kind, self.maxsize)
+        except AbuseChApiError as err:
+            if "larger than the max" not in err.mesg:
+                raise
+            # Ex. the full export, which unzips to more than the default abusech:maxsize.
+            raise AbuseChApiError(
+                f"{err.mesg} Import large exports with --bulk (capped at abusech:bulk:maxsize), "
+                "or raise abusech:maxsize."
+            ) from err
         for count, ioc in enumerate(iocs, start=1):
             yield ioc
             if limitReached(count, limit):
@@ -1774,10 +1785,13 @@ class AbuseChSvc(s_cell.Cell):
         plat = job["plat"]
 
         # ThreatFox exports are one JSON document, parsed in a thread to keep the service
-        # responsive.
+        # responsive. --bulk is for exports too big for abusech:maxsize (ex. the ThreatFox full
+        # export), so the staged copy is capped like the download, at abusech:bulk:maxsize.
         iocs = None
         if plat == "threatfox":
-            iocs = await asyncio.to_thread(_readThreatfox, job["source"], job["kind"], self.maxsize)
+            iocs = await asyncio.to_thread(
+                _readThreatfox, job["source"], job["kind"], self.bulkmaxsize
+            )
 
         with open(job["nodes"], "wb") as out:  # noqa: ASYNC230 - written a batch at a time
 

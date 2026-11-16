@@ -297,7 +297,7 @@ def unzip(
                     )
                 if maxsize and total > maxsize:
                     raise AbuseChApiError(
-                        f"The zip's files are over {maxsize} bytes, larger than the max of "
+                        f"The zip's files are over {total} bytes, larger than the max of "
                         f"{maxsize}."
                     )
                 retn.append((info.filename, zfd.read(info)))

@@ -191,13 +191,21 @@ class TestBulkSvc(s_tests.SynTest):
             assert new in svc.bulkjobs
             await svc.bulkDone(new)
 
-            # ThreatFox exports, zipped or not, build from the staged JSON.
+            # ThreatFox exports, zipped or not, build from the staged JSON. --bulk is for exports
+            # bigger than abusech:maxsize, so it's capped at abusech:bulk:maxsize instead.
+            maxsize, svc.maxsize = svc.maxsize, 10
             byts = b"".join([b async for b in svc.bulkPull("threatfox", "full")])
             jobid = await svc.bulkStart("threatfox", "full", hashlib.sha256(byts).hexdigest())
             await svc.bulkStage(jobid, byts)
             done = [i async for i in svc.bulkBuild(jobid, prefix="rep.abusech")][-1]
             assert done["rows"] > 0 and done["nodes"] > done["rows"]
             await svc.bulkDone(jobid)
+
+            # Without --bulk it's capped at abusech:maxsize, and the error says to use --bulk.
+            with self.raises(AbuseChApiError) as cm:
+                [i async for i in svc.threatfoxExport("full")]
+            assert "--bulk" in cm.exception.mesg
+            svc.maxsize = maxsize
 
 
 class TestBulkStorm(s_tests.SynTest):
