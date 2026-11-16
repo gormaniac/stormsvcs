@@ -1,6 +1,9 @@
 """Pytests for the slib.hatching service's Python code (HatchingSvc, its Telepath API, and norm)."""
 
+import asyncio
 import copy
+import datetime
+import os
 import pathlib
 from unittest import mock
 
@@ -20,12 +23,30 @@ async def _running():
     yield {"status": "running"}
 
 
+SVCDIR = pathlib.Path(__file__).parents[1]
+
+
 class TestVersions(s_tests.SynTest):
+
+    def test_readmes_match(self):
+        # The package's README (shown in the Cortex) is a copy of the service's README.
+        pkgreadme = SVCDIR / "src" / "hatchingsvc" / "pkgproto" / "README.md"
+        assert pkgreadme.read_text() == (SVCDIR / "README.md").read_text(), (
+            "Copy README.md to src/hatchingsvc/pkgproto/README.md"
+        )
+
+    def test_readme_commands(self):
+        # The README names every command.
+        from hatchingsvc.defs import PKGDEFS
+
+        readme = (SVCDIR / "README.md").read_text()
+        missing = [c["name"] for c in PKGDEFS[0]["commands"] if f"`{c['name']}`" not in readme]
+        assert not missing, missing
 
     def test_versions_match(self):
         # The version lives in pyproject.toml (the image tag), __init__.py, the package yaml,
         # and the service's uv.lock entry.
-        assert assertVersionsMatch(pathlib.Path(__file__).parents[1]) == __version__
+        assert assertVersionsMatch(SVCDIR) == __version__
 
     def test_main_help(self):
         assertMainHelp("hatchingsvc")
@@ -621,8 +642,18 @@ class TestHatchingSvc(s_tests.SynTest):
             assert await svc.renameRule("a.yara", "b.yara")
             assert fake.last("put")["json"] == {"name": "b.yara", "rule": "rule a { condition: false }"}
             assert fake.last("put")["path"].endswith("/v0/yara/a.yara")
-            # FakeTriage doesn't rename rules.
-            assert await svc.delRule("a.yara")
+            assert "b.yara" in fake.rules and "a.yara" not in fake.rules
+            # Renaming a rule that doesn't exist, or with text that doesn't compile, fails.
+            with self.raises(HatchingApiError) as cm:
+                await svc.renameRule("a.yara", "c.yara")
+            assert cm.exception.error == "NOT_FOUND"
+            with self.raises(HatchingApiError) as cm:
+                await svc.renameRule("a.yara", "c.yara", text="rule c { condition: true }")
+            assert cm.exception.error == "NOT_FOUND" and cm.exception.status == 404
+            with self.raises(HatchingApiError) as cm:
+                await svc.renameRule("b.yara", "c.yara", text="rule c {")
+            assert cm.exception.error == "COMPILE_ERROR" and "b.yara" in fake.rules
+            assert await svc.delRule("b.yara")
 
             assert (await svc.users())[0]["username"] == "analyst"
             assert len(await svc.users(limit=1)) == 1
@@ -641,3 +672,193 @@ class TestHatchingSvc(s_tests.SynTest):
             assert [k["name"] for k in await svc.userKeys(user["id"])] == ["ci"] and key["key"]
             assert await svc.delUserKey(user["id"], "ci")
             assert await svc.delUser(user["id"])
+
+    async def test_submit_spools_to_disk(self):
+        async with hatchingSvc(self) as (core, svc, fake):
+            # An upload's chunks are written to a file, not held in memory, and the file is
+            # deleted once it's submitted (or fails to be).
+            upload = await svc.submitFileInit()
+            path = svc.uploads[upload]["path"]
+            assert os.path.dirname(path) == svc.uploaddir
+            await svc.submitFileChunk(upload, b"MZ on disk")
+            with open(path, "rb") as fd:
+                assert fd.read() == b"MZ on disk"
+            await svc.submitFile(upload, "disk.exe")
+            assert fake.last("post", "/samples")["files"]["file"] == ("disk.exe", b"MZ on disk")
+            assert not os.path.exists(path)
+
+            upload = await svc.submitFileInit()
+            path = svc.uploads[upload]["path"]
+            await svc.submitFileChunk(upload, b"MZ")
+            with self.raises(HatchingApiError) as cm:
+                await svc.submitFile(upload, "a.exe", timeout=4000)
+            assert "between 1 and" in cm.exception.mesg
+            assert not os.path.exists(path) and upload not in svc.uploads
+
+            # Empty, expired, and evicted uploads are deleted too.
+            empty = await svc.submitFileInit()
+            path = svc.uploads[empty]["path"]
+            with self.raises(HatchingApiError):
+                await svc.submitFile(empty, "empty")
+            assert not os.path.exists(path)
+            stale = await svc.submitFileInit()
+            path = svc.uploads[stale]["path"]
+            svc.uploads[stale]["time"] -= 7200
+            await svc.submitFileInit()
+            assert not os.path.exists(path)
+            for _ in range(20):
+                await svc.submitFileInit()
+            assert len(os.listdir(svc.uploaddir)) == len(svc.uploads) == 16
+
+        async with hatchingSvc(self, conf={"hatching:maxsize": 4}) as (core, svc, fake):
+            upload = await svc.submitFileInit()
+            path = svc.uploads[upload]["path"]
+            with self.raises(HatchingApiError):
+                await svc.submitFileChunk(upload, b"12345")
+            assert not os.path.exists(path)
+
+    async def test_upload_leftovers(self):
+        # Uploads a previous run left behind are deleted when the service starts.
+        with self.getTestDir() as dirn:
+            leftover = os.path.join(dirn, "tmp", "uploads", "old")
+            os.makedirs(os.path.dirname(leftover))
+            with open(leftover, "wb") as fd:
+                fd.write(b"old")
+            async with await svc_mod.HatchingSvc.anit(dirn) as svc:
+                assert not os.path.exists(leftover) and os.path.isdir(svc.uploaddir)
+                upload = await svc.submitFileInit()
+                path = svc.uploads[upload]["path"]
+                assert os.path.exists(path)
+            # And the open ones when it stops.
+            assert not os.path.exists(path)
+
+
+class TestErrorPaths(s_tests.SynTest):
+
+    async def test_request_errors(self):
+        # A failed connection (not an API error) is still a HatchingApiError.
+        async with hatchingSvc(self, conf={"hatching:url": "http://127.0.0.1:1"}) as (core, svc, fake):
+            with self.raises(HatchingApiError) as cm:
+                await svc.sample(ft.SAMPLE_ID)
+            assert cm.exception.mesg.startswith("Hatching Triage: Error making an HTTP request")
+            assert cm.exception.status is None
+
+        async with hatchingSvc(self) as (core, svc, fake):
+            client = await svc.getClient()
+
+            # An error response whose body isn't a JSON object.
+            class Resp:
+                status = 418
+
+            async def request(*args, **kwargs):
+                return Resp(), ["not", "a", "dict"]
+
+            with mock.patch.object(client, "_request", request):
+                with self.raises(HatchingApiError) as cm:
+                    await svc.rawRequest("get", "/v0/teapot")
+            assert cm.exception.mesg == "Hatching Triage: HTTP 418" and cm.exception.status == 418
+
+    async def test_argument_errors(self):
+        async with hatchingSvc(self) as (core, svc, fake):
+            # A profile, a pick, or auto is required.
+            with self.raises(HatchingApiError) as cm:
+                await svc.setProfile(ft.SAMPLE_ID)
+            assert "Pick at least one profile" in cm.exception.mesg
+
+            # A submission pyhatching won't build (tags must be strings).
+            with self.raises(HatchingApiError) as cm:
+                await svc.submitUrl("https://a.com/", tags=[1])
+            assert cm.exception.mesg.startswith("Invalid submission:")
+            assert fake.last("post", "/samples") is None
+
+            # Triage returning no magic link token.
+            with mock.patch.object(svc, "_call", mock.AsyncMock(return_value="")):
+                with self.raises(HatchingApiError) as cm:
+                    await svc.magicLink(ft.SAMPLE_ID)
+            assert "no magic link token" in cm.exception.mesg
+
+    async def test_report_errors(self):
+        async with hatchingSvc(self) as (core, svc, fake):
+            orig = svc._call
+
+            # A static report error other than "not available" isn't hidden.
+            async def static500(apikey, meth, *args, **kwargs):
+                if meth == "static_report":
+                    raise HatchingApiError("Hatching Triage: INTERNAL", error="INTERNAL", status=500)
+                return await orig(apikey, meth, *args, **kwargs)
+
+            with mock.patch.object(svc, "_call", static500):
+                with self.raises(HatchingApiError) as cm:
+                    await svc.normSample(ft.SAMPLE_ID)
+            assert cm.exception.error == "INTERNAL"
+
+            # An unexpected error getting a task report isn't turned into a warning.
+            async def taskboom(apikey, meth, *args, **kwargs):
+                if meth == "task_report":
+                    raise RuntimeError("boom")
+                return await orig(apikey, meth, *args, **kwargs)
+
+            with mock.patch.object(svc, "_call", taskboom):
+                with self.raises(RuntimeError):
+                    await svc.normSample(ft.SAMPLE_ID, tasks=True)
+                with self.raises(RuntimeError):
+                    await svc.dumpedFiles(ft.SAMPLE_ID)
+
+    async def test_events_timeout(self):
+        async with hatchingSvc(self) as (core, svc, fake):
+            # A stream that never sends anything ends at the timeout.
+            async def stalled(apikey, meth, *args, **kwargs):
+                await asyncio.sleep(60)
+                yield {}  # pragma: no cover
+
+            with mock.patch.object(svc, "_genr", stalled):
+                assert [e async for e in svc.sampleEvents(ft.SAMPLE_ID, timeout=0.1)] == []
+                assert [e async for e in svc.sampleEvents(timeout=0)] == []
+
+            # A stream that keeps sending ends at the timeout too.
+            async def chatty(apikey, meth, *args, **kwargs):
+                while True:
+                    await asyncio.sleep(0.01)
+                    yield {"status": "running"}
+
+            with mock.patch.object(svc, "_genr", chatty):
+                events = [e async for e in svc.sampleEvents(ft.SAMPLE_ID, limit=0, timeout=0.2)]
+            assert events and all(e["status"] == "running" for e in events)
+
+    def test_norm_edges(self):
+        assert norm.tagPart(None) is None and norm.tagName("") is None
+        assert norm.toMsecs(datetime.datetime(2026, 10, 31, 12)) == 1793448000000
+        assert norm.toMsecs(5) is None
+        assert norm.ipVersion("") is None
+        assert norm.c2Url(":443") is None
+        assert norm.urlHost("http://[nope") is None
+        assert norm.decoyUrl("??") is None
+
+        report = copy.deepcopy(ft.TASK_REPORT)
+        # Signatures without a name are skipped, and a higher score of a repeated one wins.
+        report["signatures"] = [
+            {"score": 9},
+            {"name": "Thing", "score": 3},
+            {"name": "thing", "score": 8, "tags": ["evasion"]},
+            {"name": "thing", "score": 1},
+        ]
+        report["processes"].append({"pid": 1})
+        report["network"]["flows"].append({"id": 9, "src": "10.0.0.1:1"})
+        report["network"]["ips"]["198.51.100.8"] = "x"
+        report["network"]["ips"]["not-an-ip"] = {"asn": "AS1"}
+        reqs = report["network"]["requests"]
+        reqs[0]["dns_request"] = {"domains": ["fallback.example.com"]}
+        reqs[3]["http_response"]["status"] = "OK"
+        overview = copy.deepcopy(ft.OVERVIEW)
+        overview["signatures"] = []
+        for target in overview.get("targets") or []:
+            target["signatures"] = []
+        data = norm.normSample(copy.deepcopy(ft.SAMPLE), overview, None, {"behavioral1": report})
+        (sig,) = [s for s in data["signatures"] if s["key"] == "thing"]
+        assert sig["score"] == 8 and sig["verdict"] == 40 and sig["categories"] == ["evasion"]
+        (task,) = data["tasks"]
+        assert [p["pid"] for p in task["procs"]] == [2044, 3120]
+        assert [f["id"] for f in task["flows"]] == [1, 2]
+        assert [i["ip"] for i in task["ips"]] == ["198.51.100.7"]
+        assert [(d["name"], d["type"]) for d in task["dns"]] == [("fallback.example.com", None)]
+        assert task["http"][0]["code"] is None and task["http"][0]["reason"] == "OK"
