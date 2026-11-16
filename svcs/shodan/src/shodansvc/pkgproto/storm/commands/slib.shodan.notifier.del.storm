@@ -5,7 +5,7 @@ init {
     for $nid in $cmdopts.ids {
         $retn = $privalert.notifierDelete($nid)
         if (not $util.failed($retn, `Deleting notifier {$nid}`)) {
-            $lib.print("slib.shodan.notifier.del: Deleted notifier {nid}.", nid=$nid)
+            $lib.print(`slib.shodan.notifier.del: Deleted notifier {$nid}.`)
         }
     }
 }

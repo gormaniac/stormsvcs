@@ -19,12 +19,12 @@ init {
 }
 
 // Inbound nodes are collected and scanned together in the fini block.
-switch $node.form() {
+switch $node.form() {  // noqa: R002 (a method on Synapse 2.x)
     "inet:ipv4": { $addTarget($node.repr()) }
     "inet:ipv6": { $addTarget($node.repr()) }
     "inet:cidr4": { $addTarget($node.repr()) }
     "inet:cidr6": { $addTarget($node.repr()) }
-    *: { $lib.warn("slib.shodan.scan: The node form {form} is not supported.", form=$node.form()) }
+    *: { $lib.warn(`slib.shodan.scan: The node form {$node.form()} is not supported.`) }  // noqa: R002 (a method on Synapse 2.x)
 }
 
 function doScan(targets) {
@@ -37,13 +37,12 @@ function doScan(targets) {
     if $util.failed($retn, "Submitting the scan") { return() }
 
     $scanid = $retn.data.id
-    $lib.print("slib.shodan.scan: Submitted scan {id} for {count} IPs, {left} scan credits left.",
-        id=$scanid, count=$retn.data.count, left=$retn.data.credits_left)
+    $lib.print(`slib.shodan.scan: Submitted scan {$scanid} for {$retn.data.count} IPs, {$retn.data.credits_left} scan credits left.`)
 
     if ($cmdopts.wait <= 0) { return() }
 
     // Polls every 10 seconds, the last time at the deadline, and stops at a final status.
-    $status = $lib.null
+    $status = (null)
     $deadline = ($lib.time.now() + ($cmdopts.wait * 1000))
     while (true) {
         $sretn = $privscan.scanStatus($scanid)
@@ -61,16 +60,14 @@ function doScan(targets) {
         return()
     }
     if ($status != "DONE") {
-        $lib.warn("slib.shodan.scan: Scan {id} is still {status}, check it with slib.shodan.scan.status.",
-            id=$scanid, status=$status)
+        $lib.warn(`slib.shodan.scan: Scan {$scanid} is still {$status}, check it with slib.shodan.scan.status.`)
         return()
     }
 
-    $lib.print("slib.shodan.scan: Scan {id} is done, ingesting results.", id=$scanid)
+    $lib.print(`slib.shodan.scan: Scan {$scanid} is done, ingesting results.`)
     for $target in $targets {
         if ($target ~= "/") {
-            $lib.warn("slib.shodan.scan: Not ingesting netblock {target}, use slib.shodan.search \"net:{target}\".",
-                target=$target)
+            $lib.warn(`slib.shodan.scan: Not ingesting netblock {$target}, use slib.shodan.search "net:{$target}".`)
             continue
         }
         $shodan.host($target)

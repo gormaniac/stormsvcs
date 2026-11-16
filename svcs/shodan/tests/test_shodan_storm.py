@@ -60,6 +60,19 @@ class TestShodanStormPkg(s_tests.SynTest):
         assert PKGDEFS[0]["synapse_version"] == ">=2.256.0,<3.0.0"
         assert "synapse_minversion" not in PKGDEFS[0]
 
+    def test_readmes_match(self):
+        # The package's README (shown in the Cortex) is a copy of the service's README.
+        svcdir = pathlib.Path(__file__).parents[1]
+        pkgreadme = svcdir / "src" / "shodansvc" / "pkgproto" / "README.md"
+        assert pkgreadme.read_text() == (svcdir / "README.md").read_text(), (
+            "Copy README.md to src/shodansvc/pkgproto/README.md"
+        )
+
+    def test_readme_names_every_command(self):
+        readme = (pathlib.Path(__file__).parents[1] / "README.md").read_text()
+        missing = [cmd for cmd in CMDS if f"`{cmd}`" not in readme]
+        assert not missing, f"README.md doesn't name these commands: {missing}"
+
     def test_main_help(self):
         assertMainHelp("shodansvc")
 
@@ -1205,6 +1218,9 @@ class TestShodanStormHistory(s_tests.SynTest):
             assert len(tls) == 1
             assert tls[0].get("title") == f"Shodan history: {HISTORY_IP}"
             assert tls[0].get("type") == "svc.shodan.host.history."
+            # The guid is the same as $lib.guid(slib.shodan, history, <ip>) made before 0.17.0.
+            guid = await core.callStorm("return($lib.guid(slib.shodan, history, $ip))", opts={"vars": {"ip": HISTORY_IP}})
+            assert tls[0].ndef[1] == guid
             assert "90 days" in tls[0].get("summary")
             assert await nodeset(core, "meta:timeline -(refs)> *") == {("inet:ipv4", HISTORY_IP)}
             assert len(await core.nodes(f"meta:timeline <(seen)- meta:source={SVC_GUID}")) == 1

@@ -11,9 +11,9 @@ init {
 
 function userKey() {
     $vault = $lib.vault.bytype(shodan, scope=user)
-    if ($vault = $lib.null) { return($lib.null) }
+    if ($vault = null) { return() }
     $secrets = $vault.secrets
-    if ($secrets = $lib.null) { return($lib.null) }
+    if ($secrets = null) { return() }
     return($secrets.apikey)
 }
 
@@ -23,10 +23,10 @@ function hasKey() {
 }
 
 function tagPrefix() {
-    if $lib.globals.get("slib:shodan:tag:enabled") {
-        return($lib.globals.get("slib:shodan:tag:prefix"))
+    if $lib.globals.get("slib:shodan:tag:enabled") {  // noqa: R005 (no 3.x replacement on Synapse 2.x)
+        return($lib.globals.get("slib:shodan:tag:prefix"))  // noqa: R005 (no 3.x replacement on Synapse 2.x)
     }
-    return($lib.null)
+    return()
 }
 
 // Search
@@ -35,15 +35,15 @@ function host(ip, history=(false), minify=(false)) {
     return($svc.normHost($ip, history=$history, minify=$minify, apikey=$userKey()))
 }
 
-function count(query, facets=$lib.null) {
+function count(query, facets=(null)) {
     return($svc.count($query, facets=$facets, apikey=$userKey()))
 }
 
-function countIps(query, size=$lib.null, facets=$lib.null) {
+function countIps(query, size=(null), facets=(null)) {
     return($svc.countIps($query, size=$size, facets=$facets, apikey=$userKey()))
 }
 
-function search(query, page=(1), facets=$lib.null, minify=(false)) {
+function search(query, page=(1), facets=(null), minify=(false)) {
     return($svc.search($query, page=$page, facets=$facets, minify=$minify, apikey=$userKey()))
 }
 
@@ -78,7 +78,7 @@ function httpHeaders() { return($svc.httpHeaders(apikey=$userKey())) }
 
 // DNS
 
-function dnsDomain(domain, history=(false), rtype=$lib.null, maxpages=(10)) {
+function dnsDomain(domain, history=(false), rtype=(null), maxpages=(10)) {
     return($svc.dnsDomainAll($domain, history=$history, rtype=$rtype, maxpages=$maxpages, apikey=$userKey()))
 }
 
@@ -97,7 +97,7 @@ function queriesTags(size=(10)) { return($svc.queriesTags(size=$size, apikey=$us
 
 // Trends
 
-function trendsSearch(query, facets=$lib.null) {
+function trendsSearch(query, facets=(null)) {
     return($svc.trendsSearch($query, facets=$facets, apikey=$userKey()))
 }
 function trendsFacets() { return($svc.trendsFacets(apikey=$userKey())) }
@@ -110,8 +110,8 @@ function internetdb(ip) { return($svc.normInternetDb($ip)) }
 // Look up a CVE, GHSA, or EUVD ID.
 function vuln(vulnid) { return($svc.normVuln($vulnid)) }
 
-function cves(cpe23=$lib.null, product=$lib.null, kev=(false), epss=(false), limit=(100), start=$lib.null,
-              end=$lib.null, count=(false)) {
+function cves(cpe23=(null), product=(null), kev=(false), epss=(false), limit=(100), start=(null),
+              end=(null), count=(false)) {
     return($svc.cves(cpe23=$cpe23, product=$product, is_kev=$kev, sort_by_epss=$epss,
         limit=$limit, start_date=$start, end_date=$end, count=$count))
 }
@@ -125,11 +125,11 @@ function cpes(product, limit=(100), count=(false)) {
 // These don't need an API key, the URLs never include one.
 function apiUrl(path, base=api) { return($svc.apiUrl($path, base=$base).data) }
 
-function streamUrl(kind=banners, values=$lib.null, query=$lib.null, aid=$lib.null) {
+function streamUrl(kind=banners, values=(null), query=(null), aid=(null)) {
     return($svc.streamUrl(kind=$kind, values=$values, query=$query, aid=$aid))
 }
 
-function stream(kind=banners, values=$lib.null, query=$lib.null, aid=$lib.null, limit=(100), timeout=(60)) {
+function stream(kind=banners, values=(null), query=(null), aid=(null), limit=(100), timeout=(60)) {
     for $retn in $svc.stream(kind=$kind, values=$values, query=$query, aid=$aid,
                              limit=$limit, timeout=$timeout, apikey=$userKey()) {
         emit $retn

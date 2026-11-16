@@ -21,8 +21,8 @@ init {
 // With timeline, each banner is also added to the IP's Shodan history meta:timeline as a meta:event
 // (see slib.shodan.model.timelineNode). It defaults to history. Lookups without banners (minify,
 // InternetDB) have nothing to add.
-function host(ip, history=(false), minify=(false), internetdb=(false), timeline=$lib.null) {
-    if ($timeline = $lib.null) { $timeline = $history }
+function host(ip, history=(false), minify=(false), internetdb=(false), timeline=(null)) {
+    if ($timeline = null) { $timeline = $history }
     $ip = $lib.cast(str, $ip)
     $tagPrefix = $priv.tagPrefix()
 
@@ -40,17 +40,17 @@ function host(ip, history=(false), minify=(false), internetdb=(false), timeline=
     }
 
     if ($timeline and ($internetdb or $minify)) {
-        $lib.warn("slib.shodan: {what} has no banners to add to a timeline.", what=$what)
+        $lib.warn(`slib.shodan: {$what} has no banners to add to a timeline.`)
     }
 
-    $ipnode = $lib.null
+    $ipnode = (null)
     if (not $util.failed($retn, $what)) { $ipnode = $model.host($retn.data, $tagPrefix, timeline=$timeline) }
 
     if ($history and not $internetdb) {
         $hretn = $priv.host($ip, history=(true), minify=$minify)
         if (not $util.failed($hretn, `History lookup of {$ip}`)) {
             $hnode = $model.historyBanners($hretn.data, $tagPrefix, timeline=$timeline)
-            if ($ipnode = $lib.null) { $ipnode = $hnode }
+            if ($ipnode = null) { $ipnode = $hnode }
         }
     }
     return($ipnode)
@@ -68,9 +68,9 @@ function searchUrl() { return($priv.apiUrl("/shodan/host/search")) }
 // Emits ({"query": <it:exec:query>, "ip": <inet:ipv4/6 or null>}) for each banner, then a final
 // ({"query": <it:exec:query>, "ip": null, "done": (true)}). The query node is only created once the
 // query has succeeded, so failed queries (reported as warnings) leave nothing behind and emit nothing.
-function ingest(retns, what, text, apiurl, opts, ref=$lib.null) {
+function ingest(retns, what, text, apiurl, opts, ref=(null)) {
     $tagPrefix = $priv.tagPrefix()
-    $qnode = $lib.null
+    $qnode = (null)
     $nread = (0)
     $failed = (false)
 
@@ -79,7 +79,7 @@ function ingest(retns, what, text, apiurl, opts, ref=$lib.null) {
             $failed = (true)
             break
         }
-        if ($qnode = $lib.null) { $qnode = $model.queryNode($text, $apiurl, $opts, $ref) }
+        if ($qnode = null) { $qnode = $model.queryNode($text, $apiurl, $opts, $ref) }
 
         $nread = ($nread + 1)
         $res = $model.bannerNodes($retn.data, $tagPrefix)
@@ -90,23 +90,23 @@ function ingest(retns, what, text, apiurl, opts, ref=$lib.null) {
     }
 
     // A failure after some results still records the results that were ingested.
-    if ($failed and $qnode = $lib.null) { stop }
+    if ($failed and $qnode = null) { stop }
 
     // A query that matched nothing is still a run worth recording.
-    if ($qnode = $lib.null) { $qnode = $model.queryNode($text, $apiurl, $opts, $ref) }
+    if ($qnode = null) { $qnode = $model.queryNode($text, $apiurl, $opts, $ref) }
     $model.setOffset($qnode, $nread)
-    emit ({"query": $qnode, "ip": $lib.null, "done": (true)})
+    emit ({"query": $qnode, "ip": null, "done": true})
 }
 
 // Search Shodan, model every matching banner, and record the run as an it:exec:query.
 // ref is the node the query was built from, if any. Returns ({"query": <it:exec:query>,
 // "ips": [<inet:ipv4/6>, ...]}), or null if the search failed (reported as a warning).
-function search(query, limit=(100), minify=(false), page=(1), ref=$lib.null) {
+function search(query, limit=(100), minify=(false), page=(1), ref=(null)) {
     $query = $lib.cast(str, $query)
     $opts = ({"command": "slib.shodan.lib.search", "limit": $limit, "page": $page, "minify": $minify})
     $genr = $priv.searchGenr($query, limit=$limit, minify=$minify, page=$page)
 
-    $qnode = $lib.null
+    $qnode = (null)
     $ips = ([])
     $seen = ({})
     for $res in $ingest($genr, "Search", $query, $searchUrl(), $opts, ref=$ref) {
@@ -119,7 +119,7 @@ function search(query, limit=(100), minify=(false), page=(1), ref=$lib.null) {
             }
         }
     }
-    if ($qnode = $lib.null) { return($lib.null) }
+    if ($qnode = null) { return() }
     return(({"query": $qnode, "ips": $ips}))
 }
 
@@ -136,15 +136,14 @@ function countUrl() { return($priv.apiUrl("/shodan/host/count")) }
 // Returns ({"query": <it:exec:query>, "ips": [<inet:ipv4/6>, ...], "size": <n>, "full": <bool>,
 // "facets": {...}}), or null if the count failed (reported as a warning). full is true when the IPs
 // fill the size asked for, so the query likely matches more IPs than were returned.
-function count(query, size=$lib.null, facets=$lib.null, ref=$lib.null) {
+function count(query, size=(null), facets=(null), ref=(null)) {
     $query = $lib.cast(str, $query)
     $retn = $priv.countIps($query, size=$size, facets=$facets)
-    if $util.failed($retn, `Counting {$query}`) { return($lib.null) }
+    if $util.failed($retn, `Counting {$query}`) { return() }
     $data = $retn.data
 
     if $data.lowered {
-        $lib.warn("slib.shodan: Your plan returns at most {size} IPs per count, asked for {asked}.",
-                  size=$data.size, asked=$size)
+        $lib.warn(`slib.shodan: Your plan returns at most {$data.size} IPs per count, asked for {$size}.`)
     }
 
     $opts = ({"command": "slib.shodan.lib.count", "size": $data.size, "facets": $facets, "full": $data.full})
@@ -154,21 +153,18 @@ function count(query, size=$lib.null, facets=$lib.null, ref=$lib.null) {
     for $ip in $data.ips {
         $ipnode = $model.ipNode($ip)
         if $ipnode { $ips.append($ipnode) }
-        else { $lib.warn("slib.shodan: Skipping {ip} from the count of {query}, it isn't an IP.", ip=$ip, query=$query) }
+        else { $lib.warn(`slib.shodan: Skipping {$ip} from the count of {$query}, it isn't an IP.`) }
     }
     $model.found($qnode, $ips)
     $model.setOffset($qnode, $ips.size())
 
     if $data.full {
-        if ($data.limit != $lib.null and $data.size >= $data.limit) {
-            $lib.warn("slib.shodan: {query} returned {size} IPs, the most your plan allows in one call. It likely matches more, narrow the query (ex. add country: or asn:) to get the rest.",
-                      query=$query, size=$data.size)
-        } elif ($size != $lib.null) {
-            $lib.warn("slib.shodan: {query} returned {size} IPs, the size asked for. It likely matches more, ask for more to get the rest.",
-                      query=$query, size=$data.size)
+        if ($data.limit != null and $data.size >= $data.limit) {
+            $lib.warn(`slib.shodan: {$query} returned {$data.size} IPs, the most your plan allows in one call. It likely matches more, narrow the query (ex. add country: or asn:) to get the rest.`)
+        } elif ($size != null) {
+            $lib.warn(`slib.shodan: {$query} returned {$data.size} IPs, the size asked for. It likely matches more, ask for more to get the rest.`)
         } else {
-            $lib.warn("slib.shodan: {query} returned {size} IPs, the most one call can return. It likely matches more, narrow the query (ex. add country: or asn:) to get the rest.",
-                      query=$query, size=$data.size)
+            $lib.warn(`slib.shodan: {$query} returned {$data.size} IPs, the most one call can return. It likely matches more, narrow the query (ex. add country: or asn:) to get the rest.`)
         }
     }
 
@@ -176,7 +172,7 @@ function count(query, size=$lib.null, facets=$lib.null, ref=$lib.null) {
 }
 
 // Retrieve and model the DNS records for a domain. Returns a list of the subdomain inet:fqdn nodes.
-function domain(domain, history=(false), rtype=$lib.null, maxpages=(10)) {
+function domain(domain, history=(false), rtype=(null), maxpages=(10)) {
     $domain = $lib.cast(str, $domain)
     $retn = $priv.dnsDomain($domain, history=$history, rtype=$rtype, maxpages=$maxpages)
     if $util.failed($retn, `DNS lookup of {$domain}`) { return(([])) }
@@ -194,7 +190,7 @@ function domain(domain, history=(false), rtype=$lib.null, maxpages=(10)) {
     }
 
     if $data.more {
-        $lib.warn("slib.shodan: {domain} has more DNS results than were retrieved, increase --pages.", domain=$domain)
+        $lib.warn(`slib.shodan: {$domain} has more DNS results than were retrieved, increase --pages.`)
     }
 
     return($nodes)
@@ -204,10 +200,10 @@ function domain(domain, history=(false), rtype=$lib.null, maxpages=(10)) {
 function resolve(fqdn) {
     $fqdn = $lib.cast(str, $fqdn)
     $retn = $priv.dnsResolve(($fqdn,))
-    if $util.failed($retn, `DNS resolution of {$fqdn}`) { return($lib.null) }
+    if $util.failed($retn, `DNS resolution of {$fqdn}`) { return() }
 
     $ip = $retn.data.$fqdn
-    if (not $ip) { return($lib.null) }
+    if (not $ip) { return() }
 
     $model.dnsNode($fqdn, $ip)
     return($model.ipNode($ip))
@@ -241,13 +237,13 @@ function reverse(ip) {
 function cve(vulnid, cpes=(false)) {
     $vulnid = $lib.cast(str, $vulnid).upper()
     $retn = $priv.vuln($vulnid)
-    if $util.failed($retn, `CVEDB lookup of {$vulnid}`) { return($lib.null) }
+    if $util.failed($retn, `CVEDB lookup of {$vulnid}`) { return() }
     return($model.cve($retn.data, $priv.tagPrefix(), $cpes))
 }
 
 // Search CVEDB for CVEs affecting a CPE or product. Returns a list of risk:vuln nodes.
-function cves(cpe23=$lib.null, product=$lib.null, kev=(false), epss=(false), limit=(100),
-              start=$lib.null, end=$lib.null, cpes=(false)) {
+function cves(cpe23=(null), product=(null), kev=(false), epss=(false), limit=(100),
+              start=(null), end=(null), cpes=(false)) {
 
     $retn = $priv.cves(cpe23=$cpe23, product=$product, kev=$kev, epss=$epss,
                        limit=$limit, start=$start, end=$end)
@@ -263,9 +259,9 @@ function cves(cpe23=$lib.null, product=$lib.null, kev=(false), epss=(false), lim
 }
 
 // Count the CVEDB CVEs affecting a CPE or product. Returns the count, or null on error.
-function countCves(cpe23=$lib.null, product=$lib.null, kev=(false), start=$lib.null, end=$lib.null) {
+function countCves(cpe23=(null), product=(null), kev=(false), start=(null), end=(null)) {
     $retn = $priv.cves(cpe23=$cpe23, product=$product, kev=$kev, start=$start, end=$end, count=(true))
-    if $util.failed($retn, "CVEDB count") { return($lib.null) }
+    if $util.failed($retn, "CVEDB count") { return() }
     return($retn.data.total)
 }
 
@@ -275,17 +271,17 @@ function countCves(cpe23=$lib.null, product=$lib.null, kev=(false), start=$lib.n
 // The hash is calculated from the text, so it works for banners from any source.
 function bannerHash(banner) {
     $text = $banner
-    if ($lib.vars.type($banner) = "node") {
+    if ($lib.vars.type($banner) = "node") {  // noqa: R005 (no 3.x replacement on Synapse 2.x)
         if ($banner.form() != "inet:banner") {
-            $lib.warn("slib.shodan: Only inet:banner nodes have a banner hash, not {form}.", form=$banner.form())
-            return($lib.null)
+            $lib.warn(`slib.shodan: Only inet:banner nodes have a banner hash, not {$banner.form()}.`)
+            return()
         }
         $text = $banner.props.text
     }
-    if ($text = $lib.null) { return($lib.null) }
+    if ($text = null) { return() }
 
     $retn = $priv.bannerHash($lib.cast(str, $text))
-    if $util.failed($retn, "Calculating the banner hash") { return($lib.null) }
+    if $util.failed($retn, "Calculating the banner hash") { return() }
     return($retn.data)
 }
 
@@ -299,10 +295,10 @@ function maxFileHashSize() { return((16777216)) }
 //
 // The bytes must be in the Axon, and the user needs axon.has and axon.get.
 // Returns ({"kind": <kind>, "hash": <n>}), or null.
-function fileHash(file, kind=$lib.null) {
+function fileHash(file, kind=(null)) {
     if ($file.form() != "file:bytes") {
-        $lib.warn("slib.shodan: Only file:bytes nodes have a file hash, not {form}.", form=$file.form())
-        return($lib.null)
+        $lib.warn(`slib.shodan: Only file:bytes nodes have a file hash, not {$file.form()}.`)
+        return()
     }
 
     if (not $kind) {
@@ -310,27 +306,26 @@ function fileHash(file, kind=$lib.null) {
         if ($mime and $mime.startswith("image/")) { $kind = favicon }
         elif ($mime = "text/html" or $mime = "application/xhtml+xml") { $kind = html }
         else {
-            $lib.warn("slib.shodan: Unable to tell if file:bytes {file} is a favicon or HTML from its :mime ({mime}), use --file-hash.",
-                      file=$file.repr(), mime=$mime)
-            return($lib.null)
+            $lib.warn(`slib.shodan: Unable to tell if file:bytes {$file.repr()} is a favicon or HTML from its :mime ({$mime}), use --file-hash.`)
+            return()
         }
     }
 
     $sha256 = $file.props.sha256
     if (not $sha256) {
-        $lib.warn("slib.shodan: file:bytes {file} has no :sha256 to read it from the Axon.", file=$file.repr())
-        return($lib.null)
+        $lib.warn(`slib.shodan: file:bytes {$file.repr()} has no :sha256 to read it from the Axon.`)
+        return()
     }
 
     try {
         $size = $lib.axon.size($sha256)
-        if ($size = $lib.null) {
-            $lib.warn("slib.shodan: file:bytes {file} isn't in the Axon.", file=$file.repr())
-            return($lib.null)
+        if ($size = null) {
+            $lib.warn(`slib.shodan: file:bytes {$file.repr()} isn't in the Axon.`)
+            return()
         }
         if ($size > $maxFileHashSize()) {
-            $lib.warn("slib.shodan: file:bytes {file} is too large to hash ({size} bytes).", file=$file.repr(), size=$size)
-            return($lib.null)
+            $lib.warn(`slib.shodan: file:bytes {$file.repr()} is too large to hash ({$size} bytes).`)
+            return()
         }
 
         $chunks = ([])
@@ -340,12 +335,12 @@ function fileHash(file, kind=$lib.null) {
             $offs = ($offs + 1048576)
         }
     } catch AuthDeny as err {
-        $lib.warn("slib.shodan: Unable to read file:bytes {file} from the Axon: {error}", file=$file.repr(), error=$err.mesg)
-        return($lib.null)
+        $lib.warn(`slib.shodan: Unable to read file:bytes {$file.repr()} from the Axon: {$err.mesg}`)
+        return()
     }
 
     $retn = $priv.fileHash($chunks, $kind)
-    if $util.failed($retn, "Calculating the file hash") { return($lib.null) }
+    if $util.failed($retn, "Calculating the file hash") { return() }
     return(({"kind": $kind, "hash": $retn.data}))
 }
 
@@ -363,8 +358,8 @@ function certQuery(cert) {
         $serial = $lib.regex.replace("^0+(?=.)", "", $cert.props.serial)
         return(`ssl.cert.serial:0x{$serial}`)
     }
-    $lib.warn("slib.shodan: crypto:x509:cert {cert} has no :sha1 or :serial to search for.", cert=$cert.repr())
-    return($lib.null)
+    $lib.warn(`slib.shodan: crypto:x509:cert {$cert.repr()} has no :sha1 or :serial to search for.`)
+    return()
 }
 
 function cpeQuery(cpe) {
@@ -392,17 +387,17 @@ function liftCpe(cpe) {
 // See slib.shodan.search's help for every supported form and the query it becomes.
 //
 // filehash sets which hash a file:bytes is searched for (favicon or html), see fileHash().
-function searchQuery(n, filehash=$lib.null) {
+function searchQuery(n, filehash=(null)) {
     $props = $n.props
     switch $n.form() {
         "inet:banner": {
             $texthash = $bannerHash($n)
-            if ($texthash = $lib.null) { return($lib.null) }
+            if ($texthash = null) { return() }
             return(`hash:{$texthash}`)
         }
         "file:bytes": {
             $info = $fileHash($n, $filehash)
-            if (not $info) { return($lib.null) }
+            if (not $info) { return() }
             if ($info.kind = "favicon") { return(`http.favicon.hash:{$info.hash}`) }
             return(`http.html_hash:{$info.hash}`)
         }
@@ -436,8 +431,8 @@ function searchQuery(n, filehash=$lib.null) {
         "inet:cidr6": { return(`net:{$n.repr()}`) }
         "inet:fqdn": { return(`hostname:{$quote($n.repr())}`) }
         "inet:server": {
-            $ip = $lib.null
-            if ($props.ipv4 != $lib.null) { $ip = $lib.repr(inet:ipv4, $props.ipv4) }
+            $ip = (null)
+            if ($props.ipv4 != null) { $ip = $lib.repr(inet:ipv4, $props.ipv4) }
             elif $props.ipv6 { $ip = $props.ipv6 }
             if $ip { return(`ip:{$quote($ip)} port:{$props.port}`) }
         }
@@ -451,20 +446,18 @@ function searchQuery(n, filehash=$lib.null) {
             if $isQueryRule($n) {
                 if $props.text { return($props.text) }
             } else {
-                $lib.warn("slib.shodan: meta:rule {rule} isn't a Shodan query, its :type must be svc.shodan.query.local. or svc.shodan.query.community.",
-                          rule=$n.repr())
-                return($lib.null)
+                $lib.warn(`slib.shodan: meta:rule {$n.repr()} isn't a Shodan query, its :type must be svc.shodan.query.local. or svc.shodan.query.community.`)
+                return()
             }
         }
         *: {
-            $lib.warn("slib.shodan: The node form {form} is not supported.", form=$n.form())
-            return($lib.null)
+            $lib.warn(`slib.shodan: The node form {$n.form()} is not supported.`)
+            return()
         }
     }
 
-    $lib.warn("slib.shodan: {form} {repr} is missing the props needed to search for it.",
-              form=$n.form(), repr=$n.repr())
-    return($lib.null)
+    $lib.warn(`slib.shodan: {$n.form()} {$n.repr()} is missing the props needed to search for it.`)
+    return()
 }
 
 // ---- Saved queries (see slib.shodan.model's "Saved queries") ----
@@ -483,7 +476,7 @@ function isCommunityRule(rule) {
 
 // Yield the saved Shodan queries stored in the Cortex (community and local). With match, only
 // those whose :name, :text, or :desc contain it (ignoring case, not a regex).
-function storedQueries(match=$lib.null) {
+function storedQueries(match=(null)) {
     meta:rule:type^=svc.shodan.query
     +$isQueryRule($node)
 
@@ -493,17 +486,16 @@ function storedQueries(match=$lib.null) {
     if :name { $hay = `{$hay}\n{:name}` }
     if :text { $hay = `{$hay}\n{:text}` }
     if :desc { $hay = `{$hay}\n{:desc}` }
-    +$($match = $lib.null or $hay.lower().find($lib.cast(str, $match).lower()) != $lib.null)
+    +$($match = null or $hay.lower().find($lib.cast(str, $match).lower()) != null)
 }
 
 // Save a query in the Cortex as a local meta:rule (never sent to Shodan). Returns the node.
-function saveQuery(query, name, desc=$lib.null) {
+function saveQuery(query, name, desc=(null)) {
     $query = $lib.cast(str, $query).strip()
     if (not $query) { $lib.raise(BadArg, "slib.shodan: A saved query can't be empty.") }
     $existing = $localRule($query)
     if $existing {
-        $lib.warn("slib.shodan: {query} is already a local saved query ({name}).",
-                  query=$query, name=$existing.props.name)
+        $lib.warn(`slib.shodan: {$query} is already a local saved query ({$existing.props.name}).`)
         return($existing)
     }
     return($model.localRule($query, $lib.cast(str, $name), desc=$desc))
@@ -519,7 +511,7 @@ function localRule(text) {
 
 // Whether a query from Shodan's directory is already stored as a community meta:rule.
 function isStored(q) {
-    return(($model.liftRule($model.communityGuid($lib.cast(str, $q.query))) != $lib.null))
+    return(($model.liftRule($model.communityGuid($lib.cast(str, $q.query))) != null))
 }
 
 // The IP to look up in Shodan for a node, as a string. Returns null (with a warning) for
@@ -532,8 +524,8 @@ function isStored(q) {
 //     inet:dns:rev/inet:dns:rev6  :ipv4 / :ipv6
 function hostIp(n) {
     $props = $n.props
-    $ipv4 = $lib.null
-    $ipv6 = $lib.null
+    $ipv4 = (null)
+    $ipv6 = (null)
     switch $n.form() {
         "inet:ipv4": { return($n.repr()) }
         "inet:ipv6": { return($n.repr()) }
@@ -550,14 +542,14 @@ function hostIp(n) {
         "inet:dns:rev": { $ipv4 = $props.ipv4 }
         "inet:dns:rev6": { $ipv6 = $props.ipv6 }
         *: {
-            $lib.warn("slib.shodan: The node form {form} is not supported.", form=$n.form())
-            return($lib.null)
+            $lib.warn(`slib.shodan: The node form {$n.form()} is not supported.`)
+            return()
         }
     }
-    if ($ipv4 != $lib.null) { return($lib.repr(inet:ipv4, $ipv4)) }
+    if ($ipv4 != null) { return($lib.repr(inet:ipv4, $ipv4)) }
     if $ipv6 { return($ipv6) }
-    $lib.warn("slib.shodan: {form} {repr} has no IP to look up.", form=$n.form(), repr=$n.repr())
-    return($lib.null)
+    $lib.warn(`slib.shodan: {$n.form()} {$n.repr()} has no IP to look up.`)
+    return()
 }
 
 // The search filters the Trends API supports (https://developer.shodan.io/api/trends).
@@ -575,9 +567,9 @@ function trendsFilters() {
 
 // The Trends query for a node: the searchQuery() for it, if Trends supports all of its filters.
 // Returns null (with a warning) otherwise.
-function trendsQuery(n, filehash=$lib.null) {
+function trendsQuery(n, filehash=(null)) {
     $query = $searchQuery($n, filehash=$filehash)
-    if ($query = $lib.null) { return($lib.null) }
+    if ($query = null) { return() }
 
     $supported = $trendsFilters()
     // Filters are "name:value", optionally negated with "-" or "!". Quoted values are removed
@@ -585,9 +577,8 @@ function trendsQuery(n, filehash=$lib.null) {
     $unquoted = $lib.regex.replace('"(?:\\.|[^"\\])*"', '""', $query)
     for $name in $lib.regex.findall("(?:^|[\\s(])[-!]?([A-Za-z0-9_.]+):", $unquoted) {
         if (not $supported.has($name.lower())) {
-            $lib.warn("slib.shodan: Trends doesn't support the {name} filter, skipping {form} {repr}.",
-                      name=$name, form=$n.form(), repr=$n.repr())
-            return($lib.null)
+            $lib.warn(`slib.shodan: Trends doesn't support the {$name} filter, skipping {$n.form()} {$n.repr()}.`)
+            return()
         }
     }
     return($query)
@@ -613,26 +604,24 @@ function streamTarget(n) {
         }
         "meta:rule": {
             if (not $isQueryRule($n)) {
-                $lib.warn("slib.shodan: meta:rule {rule} isn't a Shodan query, its :type must be svc.shodan.query.local. or svc.shodan.query.community.",
-                          rule=$n.repr())
-                return($lib.null)
+                $lib.warn(`slib.shodan: meta:rule {$n.repr()} isn't a Shodan query, its :type must be svc.shodan.query.local. or svc.shodan.query.community.`)
+                return()
             }
             if $props.text { return(({"kind": "custom", "value": $props.text})) }
         }
         *: {
-            $lib.warn("slib.shodan: The node form {form} is not supported.", form=$n.form())
-            return($lib.null)
+            $lib.warn(`slib.shodan: The node form {$n.form()} is not supported.`)
+            return()
         }
     }
-    $lib.warn("slib.shodan: {form} {repr} is missing the props needed to stream it.",
-              form=$n.form(), repr=$n.repr())
-    return($lib.null)
+    $lib.warn(`slib.shodan: {$n.form()} {$n.repr()} is missing the props needed to stream it.`)
+    return()
 }
 
 // The lookup enrich() makes for a node, ex. "cve:CVE-2021-44228", so commands can make each lookup
 // once. Returns null for nodes enrich() doesn't support (or that are missing the needed props).
 function enrichKey(node) {
-    switch $node.form() {
+    switch $node.form() {  // noqa: R002 (a method on Synapse 2.x)
         "inet:ipv4": { return(`host:{$node.repr()}`) }
         "inet:ipv6": { return(`host:{$node.repr()}`) }
         "inet:fqdn": { return(`domain:{$node.repr()}`) }
@@ -642,24 +631,24 @@ function enrichKey(node) {
         "it:sec:cve": { return(`cve:{$node.repr().upper()}`) }
         "it:sec:cpe": { return(`cpe:{$node.repr()}`) }
     }
-    return($lib.null)
+    return()
 }
 
 // Enrich any supported node with the best matching Shodan API. Returns a list of the resulting nodes.
 function enrich(node) {
-    switch $node.form() {
+    switch $node.form() {  // noqa: R002 (a method on Synapse 2.x)
         "inet:ipv4": { return(($host($node.repr()),)) }
         "inet:ipv6": { return(($host($node.repr()),)) }
         "inet:fqdn": { return($domain($node.repr())) }
         "risk:vuln": {
             $cveid = $node.props.cve
             if $cveid { return(($cve($cveid),)) }
-            $lib.warn("slib.shodan: risk:vuln {iden} has no :cve to enrich.", iden=$node.iden())
+            $lib.warn(`slib.shodan: risk:vuln {$node.repr()} has no :cve to enrich.`)
         }
         "it:sec:cve": { return(($cve($node.repr()),)) }
         "it:sec:cpe": { return($cves(cpe23=$node.repr())) }
         *: {
-            $lib.warn("slib.shodan: The node form {form} is not supported.", form=$node.form())
+            $lib.warn(`slib.shodan: The node form {$node.form()} is not supported.`)  // noqa: R002 (a method on Synapse 2.x)
         }
     }
     return(([]))

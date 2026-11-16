@@ -51,7 +51,7 @@ function shodanZone(domain) {
 // hostname are replaced, the rest are kept.
 function keepReason(n, ipform, ip, fqdn) {
     if (not $shodanSeen($ipform, $ip)) { return("the IP isn't from slib.shodan, it may be a DNS domain record") }
-    if ($n.props.".seen" = (null)) { return("it has no .seen, it may be a DNS lookup or an InternetDB hostname") }
+    if ($n.props.".seen" = null) { return("it has no .seen, it may be a DNS lookup or an InternetDB hostname") }
     if $shodanSeen(inet:fqdn, $fqdn) { return("the hostname is a slib.shodan subdomain or reverse DNS name, it may be a DNS domain record") }
     if $zoneRecord($fqdn) { return("slib.shodan has DNS domain records for the zone") }
     return()
@@ -74,7 +74,7 @@ function replace(n, ipform, ip, fqdn) {
 }
 
 function revNode(ipform, ip, fqdn, seen) {
-    if ($ipform = "inet:ipv6") { [ inet:dns:rev6=($ip, $fqdn) ] }
+    if ($ipform = "inet:ipv6") { [ inet:dns:rev6=($ip, $fqdn) ] }  // noqa: M001 (the 2.x form, the package requires Synapse <3.0.0)
     else { [ inet:dns:rev=($ip, $fqdn) ] }
     [ .seen?=$seen <(seen)+ { meta:source=$sourceGuid } ]  // noqa: M004
     return($node)
@@ -106,7 +106,7 @@ function liftCandidates() {
 }
 
 function cleanup() {
-    $counts = ({"delete": (0), "unlink": (0), "keep": (0)})
+    $counts = ({"delete": 0, "unlink": 0, "keep": 0})
     for $n in $candidates() {
         $fqdn = $n.props.fqdn
         if ($n.form() = "inet:dns:aaaa") {  // noqa: R002

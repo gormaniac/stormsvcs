@@ -14,7 +14,7 @@ function lookup(n) {
 
 if $cmdopts.domain {
     // --domain ignores inbound nodes.
-    spin |
+    spin |  // noqa: P001 (drops inbound nodes on purpose)
     $seen = ([])
     for $domain in $cmdopts.domain {
         if $seen.has($domain) { continue }
@@ -26,10 +26,10 @@ if $cmdopts.domain {
 else {
     // NOTE: The form check is in here, not an "elif", which would make the if around --domain
     // depend on $node, so it wouldn't run without inbound nodes.
-    if ($node.form() != "inet:fqdn") {
-        $lib.warn("slib.shodan.dns.domain: The node form {form} is not supported.", form=$node.form())
+    if ($node.form() != "inet:fqdn") {  // noqa: R002 (a method on Synapse 2.x)
+        $lib.warn(`slib.shodan.dns.domain: The node form {$node.form()} is not supported.`)  // noqa: R002 (a method on Synapse 2.x)
         // Without --yield, unsupported nodes pass through.
-        if $cmdopts.yield { spin }
+        if $cmdopts.yield { spin }  // noqa: P001 (drops inbound nodes on purpose)
     }
     // By default, every inbound node is read before any lookup runs, so the nodes a lookup creates
     // can't come back in from a lift that's still running (ex. "inet:fqdn | slib.shodan.dns.domain"
@@ -39,11 +39,11 @@ else {
         divert $cmdopts.yield $model.nodes($lookup($node))
     } else {
         $pending.append($node)
-        spin
+        spin  // noqa: P001 (drops inbound nodes on purpose)
     }
 }
 
-| if $pending {
+| if $pending {  // noqa: S008 (the guard passes nodes through in --stream-inbound mode)
     for $n in $pending {
         if $cmdopts.yield { yield $model.nodes($lookup($n)) }
         else {

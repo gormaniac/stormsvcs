@@ -5,14 +5,14 @@ init {
     for $user in $cmdopts.add {
         $retn = $privadmin.orgMemberAdd($user, notify=$cmdopts.notify)
         if (not $util.failed($retn, `Adding {$user}`)) {
-            $lib.print("slib.shodan.admin.org: Added {user}.", user=$user)
+            $lib.print(`slib.shodan.admin.org: Added {$user}.`)
         }
     }
 
     for $user in $cmdopts.remove {
         $retn = $privadmin.orgMemberDel($user)
         if (not $util.failed($retn, `Removing {$user}`)) {
-            $lib.print("slib.shodan.admin.org: Removed {user}.", user=$user)
+            $lib.print(`slib.shodan.admin.org: Removed {$user}.`)
         }
     }
 

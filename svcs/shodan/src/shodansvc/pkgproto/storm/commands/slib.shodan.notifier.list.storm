@@ -8,7 +8,7 @@ init {
     } else {
         $retn = $privalert.notifiers()
         if (not $util.failed($retn, "Listing notifiers")) {
-            $lib.print("Total notifiers: {total}", total=$retn.data.total)
+            $lib.print(`Total notifiers: {$retn.data.total}`)
             $rows = ([])
             for $notifier in $retn.data.matches {
                 $rows.append(($notifier.id, $notifier.provider, $notifier.description))

@@ -4,27 +4,27 @@ init {
     // --text ignores inbound nodes, ex. text from a response captured outside of Shodan.
     for $text in $cmdopts.text {
         $texthash = $shodan.bannerHash($text)
-        if ($texthash != $lib.null) { $lib.print("hash:{texthash}", texthash=$texthash) }
+        if ($texthash != null) { $lib.print(`hash:{$texthash}`) }
     }
 }
 
-if $cmdopts.text { spin }
+if $cmdopts.text { spin }  // noqa: P001 (drops inbound nodes on purpose)
 
-switch $node.form() {
+switch $node.form() {  // noqa: R002 (a method on Synapse 2.x)
     "inet:banner": {
         $texthash = $shodan.bannerHash($node)
-        if ($texthash != $lib.null) {
-            $lib.print("hash:{texthash} (the banner from {server})", texthash=$texthash, server=:server)
+        if ($texthash != null) {
+            $lib.print(`hash:{$texthash} (the banner from {:server})`)
         }
     }
     "file:bytes": {
         $info = $shodan.fileHash($node, kind=$cmdopts.file_hash)
         if $info {
             if ($info.kind = "favicon") { $filter = "http.favicon.hash" } else { $filter = "http.html_hash" }
-            $lib.print("{filter}:{texthash} (file:bytes {file})", filter=$filter, texthash=$info.hash, file=$node.repr())
+            $lib.print(`{$filter}:{$info.hash} (file:bytes {$node.repr()})`)
         }
     }
     *: {
-        $lib.warn("slib.shodan.hash: The node form {form} is not supported.", form=$node.form())
+        $lib.warn(`slib.shodan.hash: The node form {$node.form()} is not supported.`)  // noqa: R002 (a method on Synapse 2.x)
     }
 }

@@ -5,7 +5,7 @@ init {
 
     // What inbound nodes add to the stream (see slib.shodan.lib.streamTarget). The type is the
     // type given, or the first inbound node's, when no type is given (the default, banners).
-    $state = ({"kind": $lib.null, "values": ([]), "query": $lib.null, "nodes": (false)})
+    $state = ({"kind": null, "values": [], "query": null, "nodes": false})
     if ($cmdopts.type != "banners") { $state.kind = $cmdopts.type }
 }
 
@@ -14,17 +14,15 @@ if $node {
     $state.nodes = (true)
     $target = $shodan.streamTarget($node)
     if $target {
-        if ($state.kind = $lib.null) { $state.kind = $target.kind }
+        if ($state.kind = null) { $state.kind = $target.kind }
 
         if ($target.kind != $state.kind) {
-            $lib.warn("slib.shodan.stream: Skipping {form} {repr}, it's for a {kind} stream, not {stream}.",
-                      form=$node.form(), repr=$node.repr(), kind=$target.kind, stream=$state.kind)
+            $lib.warn(`slib.shodan.stream: Skipping {$node.form()} {$node.repr()}, it's for a {$target.kind} stream, not {$state.kind}.`)  // noqa: R002 (a method on Synapse 2.x)
         } elif ($target.kind = "custom") {
             // A custom stream takes a single query.
-            if (($state.query = $lib.null) and ($cmdopts.query = $lib.null)) { $state.query = $target.value }
+            if (($state.query = null) and ($cmdopts.query = null)) { $state.query = $target.value }
             else {
-                $lib.warn("slib.shodan.stream: A custom stream takes one query, skipping {form} {repr}.",
-                          form=$node.form(), repr=$node.repr())
+                $lib.warn(`slib.shodan.stream: A custom stream takes one query, skipping {$node.form()} {$node.repr()}.`)  // noqa: R002 (a method on Synapse 2.x)
             }
         } elif (not $state.values.has($target.value)) {
             $state.values.append($target.value)
@@ -32,17 +30,17 @@ if $node {
     }
 }
 
-spin |
+spin |  // noqa: P001 (drops inbound nodes on purpose)
 
 // Inbound nodes that couldn't be streamed (all warned about) mean nothing to stream, not the
 // unfiltered banners stream.
-if ($state.nodes and $state.kind = $lib.null) {
+if ($state.nodes and $state.kind = null) {
     $lib.warn("slib.shodan.stream: None of the inbound nodes could be streamed.")
     stop
 }
 
 $kind = $state.kind
-if ($kind = $lib.null) { $kind = banners }
+if ($kind = null) { $kind = banners }
 
 $values = $state.values
 for $valu in $cmdopts.value {
@@ -50,7 +48,7 @@ for $valu in $cmdopts.value {
 }
 
 $query = $cmdopts.query
-if ($query = $lib.null) { $query = $state.query }
+if ($query = null) { $query = $state.query }
 
 // The it:exec:query :text, ex. "ports:443,53", the custom query, or "alert:<id>".
 if ($kind = "custom") { $text = $query }
@@ -58,7 +56,7 @@ elif $values { $text = `{$kind}:{(",").join($values)}` }
 elif $cmdopts.alert { $text = `{$kind}:{$cmdopts.alert}` }
 else { $text = $kind }
 
-$apiurl = $lib.null
+$apiurl = (null)
 $retn = $priv.streamUrl(kind=$kind, values=$values, query=$query, aid=$cmdopts.alert)
 if $retn.status { $apiurl = $retn.data }
 

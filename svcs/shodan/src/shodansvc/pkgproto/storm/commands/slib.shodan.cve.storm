@@ -11,13 +11,13 @@ init {
 // Look up a CVE once, returning its risk:vuln (or null).
 function lookup(cveid) {
     $cveid = $cveid.upper()
-    if ($done.$cveid = $lib.null) { $done.$cveid = ({"node": $shodan.cve($cveid, cpes=$cmdopts.cpes)}) }
+    if ($done.$cveid = null) { $done.$cveid = ({"node": $shodan.cve($cveid, cpes=$cmdopts.cpes)}) }
     return($done.$cveid.node)
 }
 
 if ($cmdopts.cve or $search) {
     // --cve/--cpe/--product ignore inbound nodes.
-    spin |
+    spin |  // noqa: P001 (drops inbound nodes on purpose)
     for $cveid in $cmdopts.cve {
         $vuln = $lookup($cveid)
         if ($cmdopts.yield and $vuln) { yield $vuln }
@@ -25,18 +25,18 @@ if ($cmdopts.cve or $search) {
     if ($search and $cmdopts.count) {
         $total = $shodan.countCves(cpe23=$cmdopts.cpe, product=$cmdopts.product, kev=$cmdopts.kev,
                                    start=$cmdopts.start, end=$cmdopts.end)
-        if ($total != $lib.null) { $lib.print("slib.shodan.cve: {total} matching CVEs.", total=$total) }
+        if ($total != null) { $lib.print(`slib.shodan.cve: {$total} matching CVEs.`) }
     }
     elif $search {
         $vulns = $shodan.cves(cpe23=$cmdopts.cpe, product=$cmdopts.product, kev=$cmdopts.kev,
                               epss=$cmdopts.epss, limit=$cmdopts.limit, start=$cmdopts.start,
                               end=$cmdopts.end, cpes=$cmdopts.cpes)
-        $lib.print("slib.shodan.cve: Found {count} CVEs.", count=$lib.len($vulns))
+        $lib.print(`slib.shodan.cve: Found {$lib.len($vulns)} CVEs.`)
         if $cmdopts.yield { yield $model.nodes($vulns) }
     }
 }
 else {
-    switch $node.form() {
+    switch $node.form() {  // noqa: R002 (a method on Synapse 2.x)
         "risk:vuln": {
             if :cve { $results = ($lookup(:cve),) }
             else { $results = ([]) }
@@ -49,7 +49,7 @@ else {
         }
         *: {
             $results = ([])
-            $lib.warn("slib.shodan.cve: The node form {form} is not supported.", form=$node.form())
+            $lib.warn(`slib.shodan.cve: The node form {$node.form()} is not supported.`)  // noqa: R002 (a method on Synapse 2.x)
         }
     }
     divert $cmdopts.yield $model.nodes($results)

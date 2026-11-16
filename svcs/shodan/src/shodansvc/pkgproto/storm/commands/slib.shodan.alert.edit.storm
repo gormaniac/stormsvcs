@@ -25,22 +25,21 @@ function editAlert(aid, ips) {
         }
         $retn = $privalert.alertEdit($aid, $ips)
         if (not $util.failed($retn, "Updating the alert's IPs")) {
-            $lib.print("slib.shodan.alert.edit: Alert {aid} now monitors {count} IPs/netblocks.",
-                aid=$aid, count=$lib.len($ips))
+            $lib.print(`slib.shodan.alert.edit: Alert {$aid} now monitors {$lib.len($ips)} IPs/netblocks.`)
         }
     }
 
     for $trigger in $cmdopts.enable {
         $retn = $privalert.alertTriggerEnable($aid, $trigger)
         if (not $util.failed($retn, `Enabling trigger {$trigger}`)) {
-            $lib.print("slib.shodan.alert.edit: Enabled trigger {trigger}.", trigger=$trigger)
+            $lib.print(`slib.shodan.alert.edit: Enabled trigger {$trigger}.`)
         }
     }
 
     for $trigger in $cmdopts.disable {
         $retn = $privalert.alertTriggerDisable($aid, $trigger)
         if (not $util.failed($retn, `Disabling trigger {$trigger}`)) {
-            $lib.print("slib.shodan.alert.edit: Disabled trigger {trigger}.", trigger=$trigger)
+            $lib.print(`slib.shodan.alert.edit: Disabled trigger {$trigger}.`)
         }
     }
 
@@ -49,7 +48,7 @@ function editAlert(aid, ips) {
         if $parts {
             $retn = $privalert.alertTriggerIgnore($aid, $parts.0, $parts.1)
             if (not $util.failed($retn, `Ignoring {$valu}`)) {
-                $lib.print("slib.shodan.alert.edit: Ignoring {valu}.", valu=$valu)
+                $lib.print(`slib.shodan.alert.edit: Ignoring {$valu}.`)
             }
         }
     }
@@ -59,7 +58,7 @@ function editAlert(aid, ips) {
         if $parts {
             $retn = $privalert.alertTriggerUnignore($aid, $parts.0, $parts.1)
             if (not $util.failed($retn, `Unignoring {$valu}`)) {
-                $lib.print("slib.shodan.alert.edit: No longer ignoring {valu}.", valu=$valu)
+                $lib.print(`slib.shodan.alert.edit: No longer ignoring {$valu}.`)
             }
         }
     }
@@ -67,14 +66,14 @@ function editAlert(aid, ips) {
     for $nid in $cmdopts.notifier {
         $retn = $privalert.alertNotifierAdd($aid, $nid)
         if (not $util.failed($retn, `Adding notifier {$nid}`)) {
-            $lib.print("slib.shodan.alert.edit: Added notifier {nid}.", nid=$nid)
+            $lib.print(`slib.shodan.alert.edit: Added notifier {$nid}.`)
         }
     }
 
     for $nid in $cmdopts.rm_notifier {
         $retn = $privalert.alertNotifierDel($aid, $nid)
         if (not $util.failed($retn, `Removing notifier {$nid}`)) {
-            $lib.print("slib.shodan.alert.edit: Removed notifier {nid}.", nid=$nid)
+            $lib.print(`slib.shodan.alert.edit: Removed notifier {$nid}.`)
         }
     }
 }
@@ -97,12 +96,12 @@ init {
 }
 
 // Inbound nodes are collected and applied to the alert in the fini block.
-switch $node.form() {
+switch $node.form() {  // noqa: R002 (a method on Synapse 2.x)
     "inet:ipv4": { $addTarget($node.repr()) }
     "inet:ipv6": { $addTarget($node.repr()) }
     "inet:cidr4": { $addTarget($node.repr()) }
     "inet:cidr6": { $addTarget($node.repr()) }
-    *: { $lib.warn("slib.shodan.alert.edit: The node form {form} is not supported.", form=$node.form()) }
+    *: { $lib.warn(`slib.shodan.alert.edit: The node form {$node.form()} is not supported.`) }  // noqa: R002 (a method on Synapse 2.x)
 }
 
 fini { $editAlert($cmdopts.id, $ips) }

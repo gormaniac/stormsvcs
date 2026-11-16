@@ -13,8 +13,8 @@ init {
 // Enrich a node, once per lookup. Returns a list of the resulting nodes.
 function process(n) {
     $key = $shodan.enrichKey($n)
-    if ($key = $lib.null) { return($shodan.enrich($n)) }
-    if ($done.$key = $lib.null) { $done.$key = $shodan.enrich($n) }
+    if ($key = null) { return($shodan.enrich($n)) }
+    if ($done.$key = null) { $done.$key = $shodan.enrich($n) }
     return($done.$key)
 }
 
@@ -26,10 +26,10 @@ if $cmdopts.stream_inbound {
     divert $cmdopts.yield $model.nodes($process($node))
 } else {
     $pending.append($node)
-    spin
+    spin  // noqa: P001 (drops inbound nodes on purpose)
 }
 
-| if $pending {
+| if $pending {  // noqa: S008 (the guard passes nodes through in --stream-inbound mode)
     for $n in $pending {
         if $cmdopts.yield { yield $model.nodes($process($n)) }
         else {

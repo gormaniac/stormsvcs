@@ -12,10 +12,10 @@ SVC_EVTS = {
     "add": {
         "storm": (
             f'[(meta:source={SVC_GUID} :name="shodan" :type=slib.shodan :url=https://www.shodan.io)] | spin | '
-            'if ($lib.globals.get("slib:shodan:tag:enabled") = $lib.null) { '
+            'if ($lib.globals.get("slib:shodan:tag:enabled") = null) { '
             '    $lib.globals.set("slib:shodan:tag:enabled", (true)) '
             "} "
-            'if ($lib.globals.get("slib:shodan:tag:prefix") = $lib.null) { '
+            'if ($lib.globals.get("slib:shodan:tag:prefix") = null) { '
             '    $lib.globals.set("slib:shodan:tag:prefix", "rep.shodan") '
             "}"
         )

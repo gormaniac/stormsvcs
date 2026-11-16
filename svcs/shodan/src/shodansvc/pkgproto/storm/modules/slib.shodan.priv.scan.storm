@@ -7,9 +7,9 @@ init {
 // Only reads the calling user's own vault, see slib.shodan.priv.user.
 function userKey() {
     $vault = $lib.vault.bytype(shodan, scope=user)
-    if ($vault = $lib.null) { return($lib.null) }
+    if ($vault = null) { return() }
     $secrets = $vault.secrets
-    if ($secrets = $lib.null) { return($lib.null) }
+    if ($secrets = null) { return() }
     return($secrets.apikey)
 }
 

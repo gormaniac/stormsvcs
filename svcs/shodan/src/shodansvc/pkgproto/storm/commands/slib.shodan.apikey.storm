@@ -11,7 +11,7 @@ init {
     }
     elif (not $cmdopts.apikey) {
         if $vault {
-            $lib.print("slib.shodan: Your Shodan API key is set in vault {name}.", name=$vault.name)
+            $lib.print(`slib.shodan: Your Shodan API key is set in vault {$vault.name}.`)
         } else {
             $lib.print("slib.shodan: You don't have a Shodan API key set.")
         }
@@ -21,8 +21,8 @@ init {
         $lib.print("slib.shodan: Updated your Shodan API key.")
     }
     else {
-        $name = `shodan:{$lib.user.name()}`
-        $lib.vault.add($name, shodan, user, $lib.user.iden, ({"apikey": $cmdopts.apikey}), ({}))
-        $lib.print("slib.shodan: Saved your Shodan API key in vault {name}.", name=$name)
+        $name = `shodan:{$lib.auth.users.get().get(name)}`
+        $lib.vault.add($name, shodan, user, $lib.auth.users.get().iden, ({"apikey": $cmdopts.apikey}), ({}))
+        $lib.print(`slib.shodan: Saved your Shodan API key in vault {$name}.`)
     }
 }
