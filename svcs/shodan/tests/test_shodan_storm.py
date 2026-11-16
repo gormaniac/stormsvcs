@@ -4,6 +4,7 @@ import base64
 import copy
 import hashlib
 import pathlib
+import time
 from unittest import mock
 
 import synapse.exc as s_exc
@@ -1878,6 +1879,29 @@ class TestShodanStormScanAlerts(s_tests.SynTest):
             msgs = await core.stormlist("slib.shodan.scan")
             self.stormIsInWarn("Nothing to scan", msgs)
 
+    async def test_scan_wait(self):
+        # SHODAN-08: --wait doesn't overshoot (it sleeps at most until the deadline, then checks
+        # one last time), and a FAILED scan stops waiting right away.
+        async with shodanSvc(self) as (core, svc, fake):
+            statuses = lambda: [r for r in fake.requests if r["path"] == "/api/shodan/scan/SCAN1"]
+            route = ("GET", "/api/shodan/scan/SCAN1")
+
+            fake.routes[route] = (200, {"id": "SCAN1", "status": "PROCESSING"})
+            start = time.monotonic()
+            msgs = await core.stormlist("slib.shodan.scan --ip 9.9.9.9 --wait 1")
+            assert time.monotonic() - start < 5
+            self.stormIsInWarn("Scan SCAN1 is still PROCESSING", msgs)
+            assert len(statuses()) == 2
+
+            fake.requests.clear()
+            fake.routes[route] = (200, {"id": "SCAN1", "status": "FAILED"})
+            start = time.monotonic()
+            msgs = await core.stormlist("slib.shodan.scan --ip 9.9.9.9 --wait 300")
+            assert time.monotonic() - start < 5
+            self.stormIsInWarn("Scan SCAN1 failed, nothing to ingest", msgs)
+            assert len(statuses()) == 1
+            assert not [r for r in fake.requests if r["path"].startswith("/api/shodan/host/")]
+
     async def test_alerts(self):
         async with shodanSvc(self) as (core, svc, fake):
             await core.nodes("[ inet:cidr4=1.2.3.0/24 inet:ipv4=5.6.7.8 ]")
@@ -2013,6 +2037,18 @@ class TestShodanStormAdmin(s_tests.SynTest):
 
             msgs = await core.stormlist("slib.shodan.admin.tags --enable --disable")
             self.stormIsInErr("not both", msgs)
+
+            # SHODAN-11: an invalid prefix is refused, and the old one is kept.
+            for prefix in ("bad prefix", "", "rep..shodan", "#rep.shodan"):
+                msgs = await core.stormlist("slib.shodan.admin.tags --prefix $p", opts={"vars": {"p": prefix}})
+                self.stormIsInErr("isn't a valid tag name", msgs)
+            # Case is normalized, like tags.
+            msgs = await core.stormlist("slib.shodan.admin.tags --prefix My.Shodan")
+            self.stormIsInPrint("prefix=my.shodan", msgs)
+            msgs = await core.stormlist("slib.shodan.admin.tags --prefix 'bad prefix'")
+            self.stormIsInErr("isn't a valid tag name", msgs)
+            msgs = await core.stormlist("slib.shodan.admin.tags")
+            self.stormIsInPrint("prefix=my.shodan", msgs)
 
 
 class TestShodanStormDnsCleanup(s_tests.SynTest):

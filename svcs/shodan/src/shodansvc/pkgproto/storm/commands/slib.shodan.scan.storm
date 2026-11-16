@@ -42,16 +42,24 @@ function doScan(targets) {
 
     if ($cmdopts.wait <= 0) { return() }
 
+    // Polls every 10 seconds, the last time at the deadline, and stops at a final status.
     $status = $lib.null
     $deadline = ($lib.time.now() + ($cmdopts.wait * 1000))
-    while ($lib.time.now() < $deadline) {
+    while (true) {
         $sretn = $privscan.scanStatus($scanid)
         if $util.failed($sretn, `Checking scan {$scanid}`) { return() }
         $status = $sretn.data.status
-        if ($status = "DONE") { break }
-        $lib.time.sleep(10)
+        if ($status = "DONE" or $status = "FAILED") { break }
+        $left = ($deadline - $lib.time.now())
+        if ($left <= 0) { break }
+        if ($left > 10000) { $left = 10000 }
+        $lib.time.sleep(($lib.cast(float, $left) / 1000))
     }
 
+    if ($status = "FAILED") {
+        $lib.warn(`slib.shodan.scan: Scan {$scanid} failed, nothing to ingest.`)
+        return()
+    }
     if ($status != "DONE") {
         $lib.warn("slib.shodan.scan: Scan {id} is still {status}, check it with slib.shodan.scan.status.",
             id=$scanid, status=$status)
