@@ -1,6 +1,6 @@
 """The slib.capa Synapse Service."""
 
-__version__ = "0.3.1"
+__version__ = "0.4.0"
 
 
 from .svc import CapaSvc
