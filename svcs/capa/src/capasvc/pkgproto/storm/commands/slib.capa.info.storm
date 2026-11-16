@@ -2,35 +2,37 @@ init {
     $priv = $lib.import(slib.capa.priv.user)
     $util = $lib.import(slib.capa.util)
 
-    $info = $lib.null
+    $info = (null)
     $retn = $priv.rulesInfo()
     if (not $util.failed($retn, "Getting the capa rules info")) {
         $info = $retn.data
         $state = $priv.syncState()
         $tags = $priv.tagSettings()
 
-        $lib.print("capa: {capa}", capa=$info.capa)
-        $lib.print("rules: {version} ({rules} rules, {lib} library rules, {ns} namespaces)",
-                   version=$info.version, rules=$info.rules, lib=$info.lib, ns=$info.namespaces)
-        $lib.print("rules sha256: {sha256}", sha256=$info.sha256)
-        $lib.print("rules imported: {done}", done=($state.rules = $info.key))
-        $lib.print("tags: enabled={enabled} prefix={prefix}", enabled=$tags.enabled, prefix=$tags.prefix)
-        $lib.print("tag docs imported: {done}", done=($state.tags = `{$tags.prefix}:{$info.key}`))
+        $lib.print(`capa: {$info.capa}`)
+        $counts = `{$info.rules} rules, {$info.lib} library rules, {$info.namespaces} namespaces`
+        $lib.print(`rules: {$info.version} ({$counts})`)
+        $lib.print(`rules sha256: {$info.sha256}`)
+        $lib.print(`rules imported: {($state.rules = $info.key)}`)
+        $lib.print(`tags: enabled={$tags.enabled} prefix={$tags.prefix}`)
+        $tagkey = `{$tags.prefix}:{$info.key}`
+        $lib.print(`tag docs imported: {($state.tags = $tagkey)}`)
 
         // Also warns about the custom rules that are skipped.
         $custom = $lib.import(slib.capa.lib).customInfo()
-        if ($custom = $lib.null) {
+        if ($custom = null) {
             $lib.print("custom rules: 0")
         } else {
-            $lib.print("custom rules: {n} ({skipped} skipped)", n=$custom.rules.size(),
-                       skipped=($custom.errors.size() + $custom.shadowed.size()))
+            $skipped = ($custom.errors.size() + $custom.shadowed.size())
+            $lib.print(`custom rules: {$custom.rules.size()} ({$skipped} skipped)`)
             for $rule in $custom.rules {
-                $lib.print("    {name} (meta:rule={guid})", name=$rule.name, guid=$rule.guid)
+                $lib.print(`    {$rule.name} (meta:rule={$rule.guid})`)
             }
         }
     }
 }
 
-if ($cmdopts.yield and $info != $lib.null) {
-    spin | meta:ruleset=$info.ruleset
+if ($cmdopts.yield and $info != null) {
+    // The command yields the ruleset, not its inbound nodes.
+    spin | meta:ruleset=$info.ruleset  // noqa: P001
 }

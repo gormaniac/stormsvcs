@@ -3,5 +3,6 @@ init {
     $set = $sync.sync(force=$cmdopts.force, reload=$cmdopts.reload)
 }
 
-spin |
-if ($set != $lib.null) { yield $set }
+// The command yields the ruleset, not its inbound nodes.
+spin |  // noqa: P001
+if ($set != null) { yield $set }

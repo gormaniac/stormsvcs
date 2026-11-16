@@ -1,5 +1,5 @@
 name: slib.capa
-version: 0.4.0
+version: 0.5.0
 guid: debecd104d154eed9c8bec53a6b2531f
 
 synapse_version: ">=2.145.0,<3.0.0"
@@ -65,8 +65,8 @@ commands:
       Custom capa rules (meta:rule nodes with :type=capa.custom and the rule's YAML in :text)
       in the view are used too. An official rule with the same name wins.
 
-      Files already scanned with the same capa rules, custom rules, --format, and --os are
-      skipped unless --force is used.
+      Files already scanned with the same capa rules, custom rules, --format, --os, and tag
+      settings (see slib.capa.admin.tags) are skipped unless --force is used.
 
       Examples:
 
@@ -87,7 +87,7 @@ commands:
       - - --force
         - default: false
           action: store_true
-          help: Scan files that were already scanned with the same capa rules.
+          help: Scan files that were already scanned with the same capa rules and options.
       - - --yield
         - default: false
           action: store_true
@@ -143,11 +143,22 @@ commands:
       Configure the tags slib.capa applies, "<prefix>.<namespace>". The default prefix is
       "rep.capa". Changing the prefix imports the tag docs under the new prefix. Prints the
       settings without options.
+
+      Files keep their old tags until they're scanned again. After a prefix change (or turning
+      tagging on or off) the next scan of a file isn't skipped, it moves the file's tags to the
+      new settings. The syn:tag nodes under the old prefix are left in place.
+
+      Examples:
+
+        slib.capa.admin.tags --prefix my.capa
+
+        // Move the files tagged under the old prefix.
+        file:bytes#rep.capa | slib.capa.scan
     cmdargs:
       - - --prefix
         - type: str
           default: null
-          help: The tag prefix to use.
+          help: The tag prefix to use, a valid tag name.
       - - --enable
         - default: false
           action: store_true

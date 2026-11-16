@@ -3,7 +3,7 @@
 // Warn about a failed service call. Returns true if the call failed.
 function failed(retn, what) {
     if $retn.status { return((false)) }
-    $lib.warn("slib.capa: {what} failed: {err}", what=$what, err=$retn.mesg)
+    $lib.warn(`slib.capa: {$what} failed: {$retn.mesg}`)
     return((true))
 }
 
