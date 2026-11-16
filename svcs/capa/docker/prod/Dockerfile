@@ -1,4 +1,5 @@
-# CI passes the base image it just built (see _service.yml); the default is the published one.
+# The base image to build on; the default is the published one. Override it (--build-arg) to
+# build against a base image that isn't published yet.
 # Declared before the first FROM so the service stage's FROM below can use it.
 ARG BASE_IMAGE=ghcr.io/gormaniac/stormsvcs/base:latest
 
