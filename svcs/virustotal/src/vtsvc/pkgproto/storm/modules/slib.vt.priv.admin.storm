@@ -7,9 +7,9 @@ init {
 // Only reads the calling user's own vault, see slib.vt.priv.user.
 function userKey() {
     $vault = $lib.vault.bytype(virustotal, scope=user)
-    if ($vault = $lib.null) { return($lib.null) }
+    if ($vault = null) { return() }
     $secrets = $vault.secrets
-    if ($secrets = $lib.null) { return($lib.null) }
+    if ($secrets = null) { return() }
     return($secrets.apikey)
 }
 
@@ -18,20 +18,20 @@ function hasApiKey() { return($svc.hasApiKey()) }
 
 function tagSettings() {
     return(({
-        "enabled": $lib.globals.get("slib:vt:tag:enabled"),
-        "prefix": $lib.globals.get("slib:vt:tag:prefix"),
+        "enabled": $lib.globals.get("slib:vt:tag:enabled"),  // noqa: R005 - the 2.x API, the package needs 2.x
+        "prefix": $lib.globals.get("slib:vt:tag:prefix"),  // noqa: R005 - the 2.x API, the package needs 2.x
     }))
 }
 
 // Set the tag prefix. Raises BadArg if it isn't a valid tag.
 function setTagPrefix(prefix) {
     $norm = $lib.cast(syn:tag, $prefix)
-    $lib.globals.set("slib:vt:tag:prefix", $norm)
+    $lib.globals.set("slib:vt:tag:prefix", $norm)  // noqa: R005 - the 2.x API, the package needs 2.x
     return($norm)
 }
 
-function setTagsEnabled(enabled) { $lib.globals.set("slib:vt:tag:enabled", $enabled) }
+function setTagsEnabled(enabled) { $lib.globals.set("slib:vt:tag:enabled", $enabled) }  // noqa: R005 - the 2.x API, the package needs 2.x
 
-function rawRequest(path, method=get, params=$lib.null, json=$lib.null) {
+function rawRequest(path, method=get, params=(null), json=(null)) {
     return($svc.rawRequest($method, $path, params=$params, json_data=$json, apikey=$userKey()))
 }

@@ -12,7 +12,7 @@ init {
     $srcguid = "176fcd24cf1f42bfa5d95a013eec1487"
     $scanner = virustotal
     // The tag prefix (null when tagging is disabled), set by slib.vt.lib with setPrefix().
-    $state = ({"prefix": $lib.null})
+    $state = ({"prefix": null})
 }
 
 function setPrefix(prefix) {
@@ -23,28 +23,28 @@ function setPrefix(prefix) {
 // ---- Generic helpers, each returns a single node (or null) ----
 
 function seen(n) {
-    if ($n = $lib.null) { return($n) }
+    if ($n = null) { return($n) }
     yield $n
     [ <(seen)+ { meta:source=$srcguid } ]
     return($n)
 }
 
 function edge(n, verb, m) {
-    if ($n = $lib.null or $m = $lib.null) { return($n) }
+    if ($n = null or $m = null) { return($n) }
     yield $n
     [ +($verb)> $m ]
     return($n)
 }
 
 function addTag(n, tagname) {
-    if ($n = $lib.null) { return($n) }
+    if ($n = null) { return($n) }
     yield $n
     [ +?#$tagname ]
     return($n)
 }
 
 function delTag(n, tagname) {
-    if ($n = $lib.null) { return($n) }
+    if ($n = null) { return($n) }
     yield $n
     [ -#$tagname ]
     return($n)
@@ -52,60 +52,60 @@ function delTag(n, tagname) {
 
 // Apply VirusTotal tags (relative to the prefix, see norm.objTags), replacing the verdict tag.
 function tags(n, vtags) {
-    if ($state.prefix = $lib.null or $n = $lib.null) { return($n) }
+    if ($state.prefix = null or $n = null) { return($n) }
     $delTag($n, `{$state.prefix}.verdict`)
     for $t in $vtags { $addTag($n, `{$state.prefix}.{$t}`) }
     return($n)
 }
 
 function setSeen(n, time) {
-    if ($n = $lib.null or $time = $lib.null) { return($n) }
+    if ($n = null or $time = null) { return($n) }
     yield $n
-    [ .seen ?= $time ]
+    [ .seen ?= $time ]  // noqa: M004 - 3.x model, the package needs 2.x
     return($n)
 }
 
 function contact(name) {
-    if (not $name) { return($lib.null) }
-    [ ps:contact?=$lib.guid(slib.vt, contact, $name) :name?=$name ]
+    if (not $name) { return() }
+    [ ps:contact?=(slib.vt, contact, $name) :name?=$name ]  // noqa: M001 - 3.x model, the package needs 2.x
     return($seen($node))
 }
 
 // ---- Simple nodes ----
 
 function fqdnNode(fqdn) {
-    if (not $fqdn) { return($lib.null) }
+    if (not $fqdn) { return() }
     [ inet:fqdn?=$fqdn ]
     return($seen($node))
 }
 
 function ipNode(ip) {
-    if (not $ip) { return($lib.null) }
+    if (not $ip) { return() }
     ($ok, $v4) = $lib.trycast(inet:ipv4, $ip)
-    if $ok { [ inet:ipv4=$v4 ] }
-    else { [ inet:ipv6?=$ip ] }
+    if $ok { [ inet:ipv4=$v4 ] }  // noqa: M001 - 3.x model, the package needs 2.x
+    else { [ inet:ipv6?=$ip ] }  // noqa: M001 - 3.x model, the package needs 2.x
     return($seen($node))
 }
 
 function urlNode(url) {
-    if (not $url) { return($lib.null) }
+    if (not $url) { return() }
     [ inet:url?=$url ]
     return($seen($node))
 }
 
 function serverNode(server) {
-    if (not $server) { return($lib.null) }
+    if (not $server) { return() }
     [ inet:server?=$server ]
     return($seen($node))
 }
 
 function sha256Node(sha256) {
-    if (not $sha256) { return($lib.null) }
+    if (not $sha256) { return() }
     [ file:bytes?=`sha256:{$sha256}` :sha256?=$sha256 ]
     return($seen($node))
 }
 
-function dnsNode(fqdn, rtype, valu, time=$lib.null, email=$lib.null) {
+function dnsNode(fqdn, rtype, valu, time=(null), email=(null)) {
     switch $rtype {
         A: { [ inet:dns:a?=($fqdn, $valu) ] }
         AAAA: { [ inet:dns:aaaa?=($fqdn, $valu) ] }
@@ -113,10 +113,10 @@ function dnsNode(fqdn, rtype, valu, time=$lib.null, email=$lib.null) {
         MX: { [ inet:dns:mx?=($fqdn, $valu) ] }
         NS: { [ inet:dns:ns?=($fqdn, $valu) ] }
         TXT: { [ inet:dns:txt?=($fqdn, $valu) ] }
-        SOA: { [ inet:dns:soa?=$lib.guid(slib.vt, soa, $fqdn, $valu, $email) :fqdn?=$fqdn :ns?=$valu :email?=$email ] }
-        *: { return($lib.null) }
+        SOA: { [ inet:dns:soa?=(slib.vt, soa, $fqdn, $valu, $email) :fqdn?=$fqdn :ns?=$valu :email?=$email ] }
+        *: { return() }
     }
-    if $time { [ .seen ?= $time ] }
+    if $time { [ .seen ?= $time ] }  // noqa: M004 - 3.x model, the package needs 2.x
     return($seen($node))
 }
 
@@ -128,7 +128,7 @@ function objNode(obj) {
         ip_address: { return($ipNode($obj.ip)) }
         url: { return($urlNode($obj.url)) }
     }
-    return($lib.null)
+    return()
 }
 
 // The it:av:scan:result target prop for a node.
@@ -140,22 +140,22 @@ function targetProp(n) {
         "inet:ipv6": { return("target:ipv6") }
         "inet:url": { return("target:url") }
     }
-    return($lib.null)
+    return()
 }
 
 // ---- Scans ----
 
 // The overall multi-engine scan as an it:av:scan:result, with an it:av:scan:result per
 // engine (engines is detected, all, or none) under it with :multi:scan. Returns the overall one.
-function scan(n, scan, engines=detected, signame=$lib.null, categories=$lib.null) {
-    if ($n = $lib.null or $scan = $lib.null) { return($lib.null) }
+function scan(n, scan, engines=detected, signame=(null), categories=(null)) {
+    if ($n = null or $scan = null) { return() }
     $prop = $targetProp($n)
-    if ($prop = $lib.null) { return($lib.null) }
+    if ($prop = null) { return() }
     $time = $scan.time
-    if ($time = $lib.null) { $time = latest }
+    if ($time = null) { $time = latest }
 
     $c = $scan.counts
-    if ($c = $lib.null) { $c = ({}) }
+    if ($c = null) { $c = ({}) }
     $top = $scanNode($n, $prop, $time, $scan, $c, $signame, $categories)
 
     if ($engines = "none") { return($top) }
@@ -166,7 +166,7 @@ function scan(n, scan, engines=detected, signame=$lib.null, categories=$lib.null
 }
 
 function scanNode(n, prop, time, scan, c, signame, categories) {
-    [ it:av:scan:result=$lib.guid(slib.vt, scan, $n.form(), $n.repr(), $time)
+    [ it:av:scan:result=(slib.vt, scan, $n.form(), $n.repr(), $time)
         :scanner:name=$scanner :$prop=$n.repr() :time?=$scan.time :verdict?=$scan.verdict
         :signame?=$signame :categories?=$categories
         :multi:count?=$c.total :multi:count:malicious?=$c.malicious
@@ -176,7 +176,7 @@ function scanNode(n, prop, time, scan, c, signame, categories) {
 }
 
 function engineNode(n, prop, time, top, eng) {
-    [ it:av:scan:result=$lib.guid(slib.vt, scan, $n.form(), $n.repr(), $time, $eng.name)
+    [ it:av:scan:result=(slib.vt, scan, $n.form(), $n.repr(), $time, $eng.name)
         :scanner:name?=$eng.name :$prop=$n.repr() :time?=$top.props.time :verdict?=$eng.verdict
         :signame?=$eng.signame :multi:scan=$top ]
     return($seen($node))
@@ -187,7 +187,7 @@ function engineNode(n, prop, time, top, eng) {
 // Model a normalized file (norm.normFile). Returns its file:bytes node.
 function file(f, engines=detected) {
     $n = $fileNode($f)
-    if ($n = $lib.null) { return($n) }
+    if ($n = null) { return($n) }
     $tags($n, $f.vtags)
     $scan($n, $f.scan, $engines, $f.threat.label, $f.threat.categories)
     for $sb in $f.sandboxes { $sandbox($n, $f.sha256, $sb) }
@@ -198,21 +198,21 @@ function file(f, engines=detected) {
 }
 
 function fileNode(f) {
-    if (not $f.sha256) { return($lib.null) }
+    if (not $f.sha256) { return() }
     [ file:bytes=`sha256:{$f.sha256}`
         :sha256=$f.sha256 :md5?=$f.md5 :sha1?=$f.sha1 :size?=$f.size :name?=$f.name
-        :mime:pe:imphash?=$f.imphash :mime:pe:compiled?=$f.compiled ]
+        :mime:pe:imphash?=$f.imphash :mime:pe:compiled?=$f.compiled ]  // noqa: M003 - 3.x model, the package needs 2.x
     if $f.ssdeep { [ :ssdeeps?+=$f.ssdeep ] }
-    if $f.first_seen { [ .seen ?= $f.first_seen ] }
-    if $f.last_seen { [ .seen ?= $f.last_seen ] }
+    if $f.first_seen { [ .seen ?= $f.first_seen ] }  // noqa: M004 - 3.x model, the package needs 2.x
+    if $f.last_seen { [ .seen ?= $f.last_seen ] }  // noqa: M004 - 3.x model, the package needs 2.x
     return($seen($node))
 }
 
 function sandbox(n, sha256, sb) {
-    $cats = $lib.null
+    $cats = (null)
     if $sb.categories { $cats = $sb.categories }
-    [ it:av:scan:result=$lib.guid(slib.vt, sandbox, $sha256, $sb.name)
-        :scanner:name?=$sb.name :target:file=$n :verdict?=$sb.verdict :signame?=$sb.signame
+    [ it:av:scan:result=(slib.vt, sandbox, $sha256, $sb.name)
+        :scanner:name?=$sb.name :target:file=$n :verdict?=$sb.verdict :signame?=$sb.signame  // noqa: M003 - 3.x model, the package needs 2.x
         :categories?=$cats ]
     return($seen($node))
 }
@@ -220,13 +220,13 @@ function sandbox(n, sha256, sb) {
 function yara(n, r) {
     $rule = $yaraRule($r)
     [ it:app:yara:match=($rule, $n) ]
-    if $r.time { [ .seen ?= $r.time ] }
+    if $r.time { [ .seen ?= $r.time ] }  // noqa: M004 - 3.x model, the package needs 2.x
     return($seen($node))
 }
 
 function yaraRule(r) {
     $author = $contact($r.author)
-    [ it:app:yara:rule=$lib.guid(slib.vt, yara, $r.ruleset_id, $r.name)
+    [ it:app:yara:rule=(slib.vt, yara, $r.ruleset_id, $r.name)
         :name=$r.name :ext:id?=$r.ruleset_id :url?=$r.url ]
     if $author { [ :author=$author ] }
     return($seen($node))
@@ -234,8 +234,8 @@ function yaraRule(r) {
 
 function ids(n, r) {
     $id = $r.id
-    if ($id = $lib.null) { $id = $r.name }
-    [ it:app:snort:rule=$lib.guid(slib.vt, ids, $id)
+    if ($id = null) { $id = $r.name }
+    [ it:app:snort:rule=(slib.vt, ids, $id)
         :id?=$r.id :name?=$r.name :desc?=$r.category :text?=$r.text ]
     $rule = $seen($node)
     return($edge($rule, matches, $n))
@@ -243,7 +243,7 @@ function ids(n, r) {
 
 function sigma(n, r) {
     $author = $contact($r.author)
-    [ it:app:sigma:rule=$lib.guid(slib.vt, sigma, $r.id) :id=$r.id :name?=$r.name :desc?=$r.desc ]
+    [ it:app:sigma:rule=(slib.vt, sigma, $r.id) :id=$r.id :name?=$r.name :desc?=$r.desc ]
     if $author { [ :author=$author ] }
     $rule = $seen($node)
     return($edge($rule, matches, $n))
@@ -251,7 +251,7 @@ function sigma(n, r) {
 
 // Model a file's normalized behaviour summary (norm.normBehaviour) on its file:bytes node.
 function behaviour(n, b) {
-    if ($n = $lib.null or $b = $lib.null) { return($n) }
+    if ($n = null or $b = null) { return($n) }
     $tags($n, $b.vtags)
     for $d in $b.dns {
         $fqdn = $fqdnNode($d.fqdn)
@@ -287,7 +287,7 @@ function mutexNode(name) {
 // Model a normalized domain (norm.normDomain). Returns its inet:fqdn node.
 function domain(d, engines=detected) {
     $n = $fqdnNode($d.fqdn)
-    if ($n = $lib.null) { return($n) }
+    if ($n = null) { return($n) }
     $tags($n, $d.vtags)
     $setSeen($n, $d.first_seen)
     $scan($n, $d.scan, $engines)
@@ -299,28 +299,28 @@ function domain(d, engines=detected) {
 
 // A domain's whois as an inet:whois:rec, also used for historical_whois objects.
 function whois(fqdn, w) {
-    if ($w = $lib.null or $w.asof = $lib.null) { return($lib.null) }
-    [ inet:whois:rec?=($fqdn, $w.asof) :text?=$w.text :registrar?=$w.registrar
+    if ($w = null or $w.asof = null) { return() }
+    [ inet:whois:rec?=($fqdn, $w.asof) :text?=$w.text :registrar?=$w.registrar  // noqa: M001 - 3.x model, the package needs 2.x
         :created?=$w.created :expires?=$w.expires :updated?=$w.updated ]
     return($seen($node))
 }
 
 function cert(c) {
-    if ($c = $lib.null) { return($lib.null) }
+    if ($c = null) { return() }
     [ crypto:x509:cert=({"sha256": $c.sha256})
         :sha1?=$c.sha1 :serial?=$c.serial :subject?=$c.subject :issuer?=$c.issuer
         :validity:notbefore?=$c.notbefore :validity:notafter?=$c.notafter
         :selfsigned?=$c.selfsigned ]
     if $c.sans { [ :identities:fqdns?=$c.sans ] }
     if $c.crls { [ :crl:urls?=$c.crls ] }
-    if $c.time { [ .seen ?= $c.time ] }
+    if $c.time { [ .seen ?= $c.time ] }  // noqa: M004 - 3.x model, the package needs 2.x
     return($seen($node))
 }
 
 // Model a normalized IP (norm.normIp). Returns its inet:ipv4/inet:ipv6 node.
 function ip(i, engines=detected) {
     $n = $ipNode($i.ip)
-    if ($n = $lib.null) { return($n) }
+    if ($n = null) { return($n) }
     $asn = $asnNode($i.asn, $i.as_owner)
     $setIpProps($n, $asn, $i.country)
     $tags($n, $i.vtags)
@@ -335,19 +335,19 @@ function ip(i, engines=detected) {
 }
 
 function serverCert(srv, c) {
-    if ($c = $lib.null) { return($lib.null) }
+    if ($c = null) { return() }
     [ inet:tls:servercert?=($srv, $c) ]
     return($seen($node))
 }
 
 function jarm(srv, hash) {
-    if (not $hash) { return($lib.null) }
+    if (not $hash) { return() }
     [ inet:ssl:jarmsample?=($srv, $hash) ]
     return($seen($node))
 }
 
 function asnNode(asn, owner) {
-    if ($asn = $lib.null) { return($lib.null) }
+    if ($asn = null) { return() }
     [ inet:asn?=$asn :name?=$owner ]
     return($seen($node))
 }
@@ -361,8 +361,8 @@ function setIpProps(n, asn, country) {
 
 // An IP's whois as an inet:whois:iprec, also used for historical_whois objects.
 function ipWhois(i, w) {
-    if ($w = $lib.null) { return($lib.null) }
-    [ inet:whois:iprec=$lib.guid(slib.vt, iprec, $i.ip, $w.asof, $w.text)
+    if ($w = null) { return() }
+    [ inet:whois:iprec=(slib.vt, iprec, $i.ip, $w.asof, $w.text)  // noqa: M001 - 3.x model, the package needs 2.x
         :text?=$w.text :asof?=$w.asof :created?=$w.created :updated?=$w.updated
         :asn?=$i.asn :country?=$i.country ]
     if $i.network {
@@ -375,7 +375,7 @@ function ipWhois(i, w) {
 // Model a normalized URL (norm.normUrl). Returns its inet:url node.
 function url(u, engines=detected) {
     $n = $urlNode($u.url)
-    if ($n = $lib.null) { return($n) }
+    if ($n = null) { return($n) }
     $tags($n, $u.vtags)
     $setSeen($n, $u.first_seen)
     $setSeen($n, $u.last_seen)
@@ -391,7 +391,7 @@ function url(u, engines=detected) {
 
     if $u.content_sha256 {
         $last = $u.final
-        if ($last = $lib.null) { $last = $u.url }
+        if ($last = null) { $last = $u.url }
         $content = $sha256Node($u.content_sha256)
         $setSize($content, $u.content_size)
         $urlFile($last, $content)
@@ -400,7 +400,7 @@ function url(u, engines=detected) {
 }
 
 function setSize(n, size) {
-    if ($n = $lib.null or $size = $lib.null) { return($n) }
+    if ($n = null or $size = null) { return($n) }
     yield $n
     [ :size?=$size ]
     return($n)
@@ -413,7 +413,7 @@ function redir(src, dst) {
 }
 
 function urlFile(url, file) {
-    if ($file = $lib.null) { return($lib.null) }
+    if ($file = null) { return() }
     [ inet:urlfile?=($url, $file) ]
     return($seen($node))
 }
@@ -428,7 +428,7 @@ function resolution(r) {
 
 // A comment as a meta:note -(about)> the node it's on.
 function comment(n, c) {
-    [ meta:note=$lib.guid(slib.vt, comment, $c.id)
+    [ meta:note=(slib.vt, comment, $c.id)
         :text=$c.text :created?=$c.time :type=virustotal.comment ]
     $note = $seen($node)
     $edge($note, about, $n)
@@ -437,20 +437,20 @@ function comment(n, c) {
 
 // Model an analysis's results (norm.normAnalysis) on the analyzed node.
 function analysis(a, engines=detected) {
-    $n = $lib.null
+    $n = (null)
     if $a.sha256 {
         $n = $fileNode(({"sha256": $a.sha256, "md5": $a.md5, "sha1": $a.sha1, "size": $a.size}))
     } elif $a.url {
         $n = $urlNode($a.url)
     }
-    if ($n = $lib.null) { return($n) }
+    if ($n = null) { return($n) }
     $scan($n, $a.scan, $engines)
     return($n)
 }
 
 // Model any normalized object. Returns the node it's about (or null). n is the node the
 // object is related to (for comments and whois), if any.
-function obj(o, engines=detected, n=$lib.null) {
+function obj(o, engines=detected, n=(null)) {
     switch $o.type {
         file: { return($file($o, $engines)) }
         domain: { return($domain($o, $engines)) }
@@ -459,29 +459,29 @@ function obj(o, engines=detected, n=$lib.null) {
         resolution: { return($resolution($o)) }
         ssl_cert: { return($sslCert($n, $o)) }
         comment: {
-            if ($n = $lib.null) { return($lib.null) }
+            if ($n = null) { return() }
             return($comment($n, $o))
         }
         whois: { return($histWhois($n, $o)) }
     }
-    return($lib.null)
+    return()
 }
 
 function sslCert(n, c) {
     $certnode = $cert($c)
-    if ($n = $lib.null or $certnode = $lib.null) { return($certnode) }
+    if ($n = null or $certnode = null) { return($certnode) }
     if ($n.form() = "inet:ipv4") { $serverCert(`tcp://{$n.repr()}:443`, $certnode) }
     elif ($n.form() = "inet:ipv6") { $serverCert(`tcp://[{$n.repr()}]:443`, $certnode) }
     return($certnode)
 }
 
 function histWhois(n, w) {
-    if ($n = $lib.null) { return($lib.null) }
+    if ($n = null) { return() }
     if ($n.form() = "inet:fqdn") { return($whois($n.repr(), $w)) }
     if ($n.form() = "inet:ipv4" or $n.form() = "inet:ipv6") {
         $ver = (4)
         if ($n.form() = "inet:ipv6") { $ver = (6) }
         return($ipWhois(({"ip": $n.repr(), "version": $ver}), $w))
     }
-    return($lib.null)
+    return()
 }

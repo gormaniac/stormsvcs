@@ -6,7 +6,7 @@ init {
     if (not $util.failed($retn, "Getting the quota")) {
         $q = $retn.data
         if $q.enforced { $mode = "enforced (vt:community)" } else { $mode = "not enforced" }
-        $lib.print("slib.vt: VirusTotal request limits are {mode}.", mode=$mode)
+        $lib.print(`slib.vt: VirusTotal request limits are {$mode}.`)
         $rows = ([])
         for $period in (minute, day, month) {
             $limit = $q.limits.$period
@@ -14,8 +14,7 @@ init {
             $rows.append(($period, $q.used.$period, $limit))
         }
         $util.table(([["period", 8], ["used", 8], ["limit", 8]]), $rows)
-        $lib.print("Next request can be sent in {wait}s. The daily count resets at {resets}. {cached} responses are cached.",
-            wait=$q.wait, resets=$util.when($q.resets), cached=$q.cached)
+        $lib.print(`Next request can be sent in {$q.wait}s. The daily count resets at {$util.when($q.resets)}. {$q.cached} responses are cached.`)
         if $q.remote {
             $lib.print("VirusTotal's counts for the key:")
             $rows = ([])

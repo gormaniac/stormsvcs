@@ -4,12 +4,12 @@ init {
 }
 
 $tgt = $util.target($node)
-if ($tgt = $lib.null) {
-    $lib.warn("slib.vt.comment: Can't comment on {repr}, it has no hash.", repr=$node.repr())
+if ($tgt = null) {
+    $lib.warn(`slib.vt.comment: Can't comment on {$node.repr()}, it has no hash.`)
 } else {
     ($kind, $ident) = $tgt
     $retn = $submit.addComment($kind, $ident, $cmdopts.text)
     if (not $util.failed($retn, `Commenting on {$ident}`)) {
-        $lib.print("slib.vt.comment: Added comment {cid} to {ident}.", cid=$retn.data.id, ident=$ident)
+        $lib.print(`slib.vt.comment: Added comment {$retn.data.id} to {$ident}.`)
     }
 }

@@ -11,7 +11,7 @@ init {
     }
     elif (not $cmdopts.apikey) {
         if $vault {
-            $lib.print("slib.vt: Your VirusTotal API key is set in vault {name}.", name=$vault.name)
+            $lib.print(`slib.vt: Your VirusTotal API key is set in vault {$vault.name}.`)
         } else {
             $lib.print("slib.vt: You don't have a VirusTotal API key set.")
         }
@@ -21,8 +21,8 @@ init {
         $lib.print("slib.vt: Updated your VirusTotal API key.")
     }
     else {
-        $name = `virustotal:{$lib.user.name()}`
-        $lib.vault.add($name, virustotal, user, $lib.user.iden, ({"apikey": $cmdopts.apikey}), ({}))
-        $lib.print("slib.vt: Saved your VirusTotal API key in vault {name}.", name=$name)
+        $name = `virustotal:{$lib.auth.users.get().name}`
+        $lib.vault.add($name, virustotal, user, $lib.auth.users.get().iden, ({"apikey": $cmdopts.apikey}), ({}))
+        $lib.print(`slib.vt: Saved your VirusTotal API key in vault {$name}.`)
     }
 }
