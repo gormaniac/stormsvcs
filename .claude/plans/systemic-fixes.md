@@ -26,16 +26,15 @@ The fix: put the contract in code (StormLib++), and check every service against 
 
 | Phase | What | Status |
 | --- | --- | --- |
-| 1 | StormLib++: `stormlibpp.svc`, `stormlibpp.testing` | Done on `claude/epic-shannon-fqihq0` in stormlibpp, needs a PR, merge, and release (0.13.0) |
-| 2 | stormsvcs: contract check, CI job, Storm lint step, pin fixes | Done on `claude/epic-shannon-fqihq0`, needs a PR |
-| 3 | Migrate each service onto the shared pieces | Blocked on the 0.13.0 release |
-| 4 | Enforce the rules, trim the prose docs | After phase 3 |
+| 1 | StormLib++: `stormlibpp.svc`, `stormlibpp.testing` | Done: gormaniac/stormlibpp#51, released in stormlibpp 1.0.0 |
+| 2 | stormsvcs: contract check, CI job, Storm lint step, pin fixes | Done, in gormaniac/stormsvcs#41 |
+| 3 | Migrate each service onto the shared pieces | Done for all 10 services, in gormaniac/stormsvcs#41 (ip_api is exempt: #40 retires it) |
+| 4 | Enforce the rules, trim the prose docs | Every rule enforced in #41; trimming the prose docs is left |
 | 5 | Shared Storm code, base image testing, scaffold | Not started |
 
-## Phase 1: StormLib++ (done, unreleased)
+## Phase 1: StormLib++ (done, released in 1.0.0)
 
-In stormlibpp, under `## Unreleased` in its CHANGELOG. Release it with the Prepare Release
-action (it bumps the version, so it isn't bumped by hand).
+Merged in gormaniac/stormlibpp#51 and released in stormlibpp 1.0.0.
 
 - `stormlibpp.svc`:
   - `RetnApi`: a `CellApi` mixin. `RETN_METHS`/`GENR_METHS` generate wrapped methods, and every
@@ -64,14 +63,14 @@ action (it bumps the version, so it isn't bumped by hand).
 
 Run `python3 scripts/check_svcs.py` to see what's left. `--strict` shows it as failures.
 
-## Phase 3: migrate each service (after 0.13.0 is on PyPI)
+## Phase 3: migrate each service (done, on stormlibpp 1.0.0)
 
 One PR per service (or a few small ones together), each a **minor** bump, since error messages
 returned to Storm change. Skip ip_api: gormaniac/stormsvcs#40 retires it.
 
 Per service:
 
-1. `pyproject.toml`: `stormlibpp[testing]>=0.13.0` (or `stormlibpp>=0.13.0` in deps and
+1. `pyproject.toml`: `stormlibpp>=1.0.0` in deps (pytest is already a dev dependency; or
    `stormlibpp[testing]` in the dev group), then `uv lock --upgrade-package stormlibpp`.
 2. `api.py`: replace the hand-rolled wrappers with `RetnApi`. crtsh was trialled this way
    against a local stormlibpp; all 68 of its tests passed with one log assertion updated,

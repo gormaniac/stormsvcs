@@ -8,6 +8,17 @@ name = "Ip API"
 src = "svcs/ip_api/"
 workflow = ".github/workflows/ip_api.yml"
 
+# ip_api is being retired (moved to StormLib++ as the slib.ipapi Rapid Power-Up, see PR #40),
+# so it isn't migrated onto the shared StormLib++ pieces. Remove this entry with the service.
+[stormsvcs.ip-api.exempt]
+pins = "Retired in PR #40, not migrated to stormlibpp 1.0.0."
+docker-base-arg = "Retired in PR #40."
+docker-tests = "Retired in PR #40."
+test-plugin = "Retired in PR #40."
+version-test = "Retired in PR #40."
+main-test = "Retired in PR #40."
+retn-api = "Retired in PR #40."
+
 [stormsvcs.shodan]
 name = "Shodan"
 src = "svcs/shodan/"
@@ -65,4 +76,17 @@ workflow = ".github/workflows/virustotal.yml"
 # The Synapse every service's uv.lock must have, and the lowest StormLib++ it may have.
 synapse = "2.256.0"
 stormlibpp = "1.0.0"
-enforce = ["registered", "workflow-paths", "versions"]
+enforce = [
+    "registered",
+    "workflow-paths",
+    "versions",
+    "pins",
+    "pkg-keys",
+    "pytest-warnings",
+    "docker-base-arg",
+    "docker-tests",
+    "test-plugin",
+    "version-test",
+    "main-test",
+    "retn-api",
+]
