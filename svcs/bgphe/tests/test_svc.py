@@ -3,6 +3,7 @@
 import base64
 import datetime
 import json
+import pathlib
 
 import synapse.tests.utils as s_tests
 
@@ -18,7 +19,17 @@ async def collect(genr):
     return [i["cert"] for i in items if i["type"] == "cert"], items[-1]
 
 
+SVCDIR = pathlib.Path(__file__).parents[1]
+
+
 class TestBgpHeSvc(s_tests.SynTest):
+    def test_readmes_match(self):
+        # The package's README (shown in the Cortex) is a copy of the service's README.
+        pkgreadme = SVCDIR / "src" / "bgphesvc" / "pkgproto" / "README.md"
+        assert pkgreadme.read_text() == (SVCDIR / "README.md").read_text(), (
+            "Copy README.md to src/bgphesvc/pkgproto/README.md"
+        )
+
     async def test_certs(self):
         async with fb.bgpheSvc(self) as (core, svc, fake):
             certs, summary = await collect(svc.certs("GORMO.co."))

@@ -105,3 +105,20 @@ The service's cell config:
 | `bgphe:backoff` | `2.0` | The base, in seconds, of the exponential backoff between retries. |
 
 bgp.he.net is a free resource, please keep the interval polite. Requests are serialized, identify the service in their `User-Agent`, and HTTP 429/5xx responses are retried (honoring `Retry-After`).
+
+## Deployment
+
+The service is built from `docker/prod/Dockerfile` and published as `ghcr.io/gormaniac/stormsvcs/bgphe`. It needs outbound HTTPS to bgp.he.net and no secrets. Add it to a Cortex like any Storm service:
+
+```
+service.add slib.bgphe tcp://<user>:<passwd>@<host>:27492/*
+```
+
+## Development
+
+```
+uv sync
+uv run pytest
+```
+
+Tests run against a fake bgp.he.net (`tests/fakebgphe.py`) serving trimmed copies of real responses (`tests/data/`). `tests/test_live.py` makes one request to each real endpoint, and is skipped unless `SLIB_BGPHE_LIVE=1` is set.
