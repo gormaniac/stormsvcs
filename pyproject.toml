@@ -7,11 +7,10 @@ version = "0.0.1"
 description = "A monorepo of independent custom Synapse Advanced Power-Ups"
 readme = "README.md"
 license = "LICENSE"
-requires-python = ">=3.14"
-dependencies = [
-    "stormlibpp>=0.12.1",
-    "synapse>=2.248.0,<3",
-]
+# The root project only holds the repo's development tools (ruff and its config, below). Each
+# service under svcs/ is its own project, with its own Python (3.11), dependencies and uv.lock.
+requires-python = ">=3.11"
+dependencies = []
 
 [dependency-groups]
 dev = [
@@ -22,10 +21,9 @@ dev = [
 ]
 
 [tool.ruff]
-# The services run on Python 3.11 (the Synapse base image, see svcs/*/pyproject.toml), not the
-# Python above. Without this, ruff infers 3.14 from requires-python, and its fixes and formatting
-# use syntax that fails on 3.11 (ex. `except A, B:`). The services don't have their own ruff
-# config, so this applies to them too.
+# The services run on Python 3.11 (the Synapse base image, see svcs/*/pyproject.toml). Pin the
+# target so ruff's fixes and formatting never use newer syntax (ex. `except A, B:`), whatever
+# Python runs ruff. The services don't have their own ruff config, so this applies to them too.
 target-version = "py311"
 # The line limit from .github/copilot-instructions.md.
 line-length = 100
