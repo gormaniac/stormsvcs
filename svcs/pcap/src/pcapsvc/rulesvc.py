@@ -26,6 +26,7 @@ from typing import Any
 import synapse.common as s_common
 import synapse.lib.coro as s_coro
 import synapse.lib.msgpack as s_msgpack
+from stormlibpp.svc import SvcError
 
 from . import feeds as p_feeds
 from . import rules as p_rules
@@ -40,12 +41,8 @@ FEED_BATCH = 500
 """How many rule records ``feedChanges`` yields at a time."""
 
 
-class RuleSvcError(Exception):
+class RuleSvcError(SvcError):
     """Raised for invalid rule and feed requests."""
-
-    def __init__(self, mesg: str) -> None:
-        super().__init__(mesg)
-        self.mesg = mesg
 
 
 def _prepare(entries: dict[str, tuple[str, str]]) -> dict[str, Any]:

@@ -19,6 +19,7 @@ from collections.abc import Callable, Iterable
 from typing import Any
 
 import synapse.lib.coro as s_coro
+from stormlibpp.svc import SvcError
 
 from . import rules as s_rules
 from . import sandbox as p_sandbox
@@ -71,12 +72,8 @@ def _luaString(valu: str) -> str:
     return "'" + str(valu).replace("\\", "\\\\").replace("'", "\\'") + "'"
 
 
-class SnortError(Exception):
+class SnortError(SvcError):
     """Raised when Snort can't be run, or fails for a reason other than a bad rule."""
-
-    def __init__(self, mesg: str) -> None:
-        super().__init__(mesg)
-        self.mesg = mesg
 
 
 def precheck(text: str) -> str | None:
