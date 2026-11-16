@@ -29,8 +29,8 @@ The fix: put the contract in code (StormLib++), and check every service against 
 | 1 | StormLib++: `stormlibpp.svc`, `stormlibpp.testing` | Done: gormaniac/stormlibpp#51, released in stormlibpp 1.0.0 |
 | 2 | stormsvcs: contract check, CI job, Storm lint step, pin fixes | Done, in gormaniac/stormsvcs#41 |
 | 3 | Migrate each service onto the shared pieces | Done for all 10 services, in gormaniac/stormsvcs#41 (ip_api is exempt: #40 retires it) |
-| 4 | Enforce the rules, trim the prose docs | Every rule enforced in #41; trimming the prose docs is left |
-| 5 | Shared Storm code, base image testing, scaffold | Not started |
+| 4 | Enforce the rules, trim the prose docs | Done: every rule enforced in #41; README and copilot-instructions updated on the repo-level branch |
+| 5 | Shared Storm code, base image testing, scaffold | Base image testing done (repo-level branch); shared Storm code and a scaffold not started |
 
 ## Phase 1: StormLib++ (done, released in 1.0.0)
 
@@ -126,11 +126,18 @@ stale lines the audit found there (REPO-14).
   cross-cutting tag prefix rows), a source node getter that works in any view (the
   `meta:source` row), and a command skeleton that does value/flag driven work once in
   `init {}` (CRTSH-01, HATCH-01). Needs a design pass first.
-- **Base image changes tested in PRs** (REPO-06): once every prod Dockerfile takes
-  `BASE_IMAGE`, build the base in the PR run and pass it in, or push the base only after the
-  services build.
+- **Base image changes tested in PRs** (REPO-06): done. A PR that changes the base image
+  builds every service's prod image on it (`_base-image.yml`'s services job, via a job-local
+  registry), and `_main.yml` rebuilds everything weekly.
 - **Service scaffold**: a template (copier, or a `stormlibpp new-svc` command) that starts a
   service passing every enforced rule.
 - Cleanups the check can then cover: dead `SVC_SYN_MIN_VER` constants (abusech, capa,
   shodan), `.dockerignore` and entrypoint shebangs (REPO-19), consistent `source-include`
   (REPO-11), the root `requires-python` (REPO-18), ruff on tests (REPO-17).
+
+## Audit follow-up
+
+The audit's remaining per-service findings are tracked in the audit doc's Status tab and fixed
+on one branch per service (`claude/epic-shannon-fqihq0-<svc>`), plus the repo-level branch.
+REPO-11 (dead `source-include` globs) and REPO-17 (ruff on tests) are left for a last cleanup
+PR after the service PRs merge, since they touch every service.

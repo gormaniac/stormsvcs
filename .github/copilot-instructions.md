@@ -7,12 +7,11 @@ The stormsvcs repo is a monorepo containing a collection of "Advanced Power-Ups"
 ### Core Components and Project Structure
 
 As a monorepo, the stormsvcs repo contains multiple services, each with its own directory. Each service is considered self-contained and is expected to be able to run independently of the other services. The monorepo provides convenient organization, but it does not expose shared code for all services to rely on. Shared library code should be implemented in the StormLib++ project, a dependency all services must rely on. With that said, the monorepo does the following:
-- A `services.toml` file for service metadata registration.
-- A docker base image in `docker/` that all services must use as a starting point for their own Dockerfile.
-  - Also enforces a shared Synapse and StormLib++ version across all services without comingling all the services' dependencies.
-- A global `pyproject.toml` and `uv.lock` file for build/test dependencies.
+- A `services.toml` file for service metadata registration. Its `[contract]` table also sets the Synapse and StormLib++ versions every service must lock, and which contract rules CI enforces.
+- `scripts/check_svcs.py`, which checks every service against the service contract (registration, versions, pins, Docker and CI setup, and use of the shared StormLib++ pieces). The Service Contract workflow runs it on every PR; run `python3 scripts/check_svcs.py` before opening one.
+- A docker base image in `docker/` that all services must use as a starting point for their own Dockerfile (`FROM ${BASE_IMAGE}`, see the root README). It installs uv and system packages, not Synapse or StormLib++; each service locks its own.
+- A global `pyproject.toml` and `uv.lock` file for the repo's development tools (ruff and its config).
 - GitHub Actions workflows for building, testing, and publishing all services.
-- A shared GitHub Pages documentation site for all services, built from the `doc/` directory.
 - All services located under the `svcs/` directory, with each service in its own subdirectory.
 
 Each service in the stormsvcs repo typically consists of the following core components:
@@ -33,25 +32,27 @@ Each service in the stormsvcs repo typically consists of the following core comp
   - Located in the `tests/` directory.
 - Extras:
   - A service specific `pyproject.toml` and `uv.lock` file for service dependencies.
-  - A `README.md` file for service specific documentation. Can also be broken out into a `doc/` directory for more extensive documentation. This can be bundled into the global documentation site for all services and also packaged into the service's Storm Package and exposed to the Storm user.
+  - A `README.md` file for service specific documentation, which names every Storm command. A copy lives at `src/<service_name>/pkgproto/README.md` so it's packaged into the service's Storm Package and shown to the Storm user; a test checks the two match.
 
 ## Key Patterns and Conventions
 
 ### Error Handling
-- Python library code should raise exceptions and let the caller handle them. However, the service's Cell implementation should catch exceptions and return a `TelepathRetn` object with the error message to the caller. This allows the Storm code to handle errors gracefully and provide meaningful feedback to the user.
-- Storm code can raise exceptions where it makes sense, especially in library code, but should handle exceptions gracefully in user-facing code. 
+- Python library code should raise exceptions and let the caller handle them. The service's `CellApi` must subclass `stormlibpp.svc.RetnApi`, which turns every exception into a `status=False` `TelepathRetn` so the Storm code can always report it. List the cell's methods in `RETN_METHS`/`GENR_METHS`, and the error types whose message is meant for the user in `RETN_ERRORS` (or subclass `stormlibpp.svc.SvcError`). Anything else is logged with its traceback and returned as "Unexpected error: ...". Override `_retnRedact()` to scrub secrets from error messages.
+- Validate values from Storm that end up in a file path with `stormlibpp.svc.safeJoin()`, `checkName()` or `checkGuid()`.
+- Storm code can raise exceptions where it makes sense, especially in library code, but should handle exceptions gracefully in user-facing code.
   - Errors should be logged via the Storm `$lib` functions, these allow for both user facing and application facing logging in one message.
   - Storm code should check for the `$lib.debug` flag and log additional information when it is set. This allows for more verbose logging in development and debugging scenarios without cluttering the logs in production.
 
 ### Coupling with StormLib++
 - The `stormsvcs` repo should be thought as the "Advanced Power-Ups" extension of the StormLib++ project. All services should rely on StormLib++ for shared functionality and code reuse.
 - Storm code that's better suited to be in a library should be implemented in the StormLib++ project's `slib.utils` Storm Package and imported into the service's storm package. This allows for a more modular design and encourages code reuse.
-- Each service should be importing the `stormlibpp.stormpkg` and `stormlibpp.telepath` Python modules at minimum. These primitives were designed to make Storm Service development easier.
+- Each service uses `stormlibpp.svc.RetnApi` for its Telepath API, `stormlibpp.telepath`'s `TelepathRetn` types for its return values, and the `stormlibpp.testing` pytest plugin in its tests. These primitives were designed to make Storm Service development easier.
 - Since this is an extension of the StormLib++ project, all Storm Services and Storm Packages should rely on the `slib` prefix for names exposed to Synapse. 
 
 ### Storm Considerations
 - Packages should be configurable by users via Storm command options. This allows for more flexibility and customization of the service's functionality. 
   - Such as tag prefixes, default values, and other options that can be set by the admin.
+  - Validate settings when they're set, ex. a tag prefix with `$lib.trycast(syn:tag, $prefix)`, instead of letting every later use fail.
   - These should be gated behind an admin check to ensure only authorized users can modify them.
   - Sane defaults should be provided for all options, so the service can be used out of the box without requiring configuration.
 - Storm is a custom language designed for the Synapse framework. While its primary purpose is as a query language, it's a fully featured programming language with functions, variables, control flow, and a limited built-in standard library. Storm code should be written in a way that is idiomatic to the language and takes advantage of its features. 
@@ -80,10 +81,10 @@ This concept was introduced in Synapse example code and old "how-tos" but is now
 - All code paths should have unit tests. This includes both Python and Storm code. The goal is to have a high level of test coverage to ensure the code is reliable and maintainable.
 - No tests should call out to external services or APIs unless explicitly gated behind a test flag. This is to ensure that the tests are reliable and do not fail due to external factors.
 - Mock data should be used for testing external service calls.
-  - The Synapse framework's `synapse.tests.utils.StormPkgTest` class uses the `vcr` package to record and replay HTTP requests for testing. This allows for reliable and repeatable tests without relying on external services.
-  - `vcr` should be reused for Storm Service testing as well, although it's not builtin to any test framework in Synapse. This allows for full test coverage without relying on external services. The `vcr` package is already a dependency of the Synapse framework and is available in the stormsvcs repo.
+  - Most services test against a fake upstream server in `tests/` (ex. `tests/fakevt.py`) that serves the API's real response shapes on localhost; keep the fakes as strict as the real API, since a forgiving fake hides bugs. `vcr` (record and replay) is another option, but it isn't a Synapse dependency, so a service that uses it must declare `vcrpy` in its dev dependencies.
 - Storm code is fully testable via the `synapse.tests.utils.StormPkgTest` class. This allows for testing Storm code in isolation without requiring a full Synapse runtime. The `StormPkgTest` class provides a way to load and execute Storm code in a controlled environment, allowing for reliable and repeatable tests.
-- Tests fail when they use a deprecated Synapse API. Synapse logs its deprecations (deprecated Storm libs like `$lib.dict()`, deprecated model props, package keys, Python APIs) instead of raising Python warnings, so each service's `tests/conftest.py` collects them per test and fails the test. Every new service must copy that conftest. Use `({})`/`([])` literals, `synapse_version` (not `synapse_minversion`), and `cmdinputs` (not `forms`) in Storm packages.
+- Tests fail when they use a deprecated Synapse API. Synapse logs its deprecations (deprecated Storm libs like `$lib.dict()`, deprecated model props, package keys, Python APIs) instead of raising Python warnings, so StormLib++'s test plugin collects them per test and fails the test, and fails the run for deprecations logged outside of a test (ex. at import time). Every service's `tests/conftest.py` enables it with `pytest_plugins = ["stormlibpp.testing"]`; don't copy the harness. Use `({})`/`([])` literals, `synapse_version` (not `synapse_minversion`), and `cmdinputs` (not `forms`) in Storm packages.
   - A test that has to exercise a deprecated API on purpose can opt out with `@pytest.mark.allow_synapse_deprecations`.
+  - Every service also calls `stormlibpp.testing`'s `assertVersionsMatch()` (the version in all four places, see CLAUDE.md) and `assertMainHelp()` (the entry point starts).
   - Each service's `[tool.pytest]` config also turns Python `DeprecationWarning`s raised from its own package into errors.
-  - Synapse's Storm linter reports deprecated and 3.x-incompatible Storm statically: `uv run python -m synapse.tools.storm.lint src/` (add `--v3-ready` for the 3.x migration rules).
+  - Synapse's Storm linter reports deprecated and 3.x-incompatible Storm statically: `uv run python -m synapse.tools.storm.lint src/` (add `--v3-ready` for the 3.x migration rules). CI runs it for every service; a service that lints clean sets `storm_lint: block` in its workflow so it stays clean.
