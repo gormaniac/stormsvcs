@@ -199,6 +199,16 @@ def _dockerBaseArg(svc: Svc, contract: dict) -> list[str]:
             re.search(r"^ARG BASE_IMAGE", text, re.MULTILINE) and "FROM ${BASE_IMAGE}" in text
         ):
             probs.append(f"{rel} doesn't take a BASE_IMAGE build arg.")
+        else:
+            # A FROM can only use an ARG declared before the first FROM (in the global scope).
+            # Declared later, it's scoped to the stage above and ${BASE_IMAGE} is blank.
+            arg = re.search(r"^ARG BASE_IMAGE", text, re.MULTILINE).start()
+            first = re.search(r"^FROM\s", text, re.MULTILINE).start()
+            if arg > first:
+                probs.append(
+                    f"{rel} declares ARG BASE_IMAGE after its first FROM, so FROM can't use it;"
+                    " move it above the first FROM."
+                )
     return probs
 
 

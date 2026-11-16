@@ -1,3 +1,7 @@
+# CI passes the base image it just built (see _service.yml); the default is the published one.
+# Declared before the first FROM so the service stage's FROM below can use it.
+ARG BASE_IMAGE=ghcr.io/gormaniac/stormsvcs/base:latest
+
 # Fetch the capa rules and FLIRT signatures that match the version of capa in uv.lock.
 # The release tag and commits are pinned, tests/test_rules.py checks CAPA_VERSION matches.
 FROM alpine:3.22 AS capa-data
@@ -20,8 +24,6 @@ RUN git clone --quiet --depth 1 --branch "${CAPA_VERSION}" --filter=blob:none --
     mv /tmp/capa/sigs /capa/sigs && \
     rm -rf /tmp/capa
 
-# CI passes the base image it just built (see _service.yml); the default is the published one.
-ARG BASE_IMAGE=ghcr.io/gormaniac/stormsvcs/base:latest
 FROM ${BASE_IMAGE}
 
 # Copy all the service files into a build dir.
