@@ -1,8 +1,8 @@
 name: slib.abusech
-version: 0.3.0
+version: 0.4.0
 guid: e95841a657444e3691de476861eb2a94
 
-synapse_version: ">=2.145.0,<3.0.0"
+synapse_version: ">=2.256.0,<3.0.0"
 
 genopts:
     dotstorm: true
