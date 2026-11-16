@@ -5,9 +5,15 @@ init {
     $svc = $lib.service.get("slib.crtsh")
 }
 
+// The tag prefix to apply, or null when tagging is off. A prefix stored before
+// slib.crtsh.admin.tags validated it, that isn't a valid tag, turns tagging off with a warning
+// instead of failing every node edit.
 function tagPrefix() {
-    if $lib.globals.get("slib:crtsh:tag:enabled") {
-        return($lib.globals.get("slib:crtsh:tag:prefix"))
+    if $lib.globals.get("slib:crtsh:tag:enabled") {  // noqa: R005 - $lib.globals.<name> is 3.x only
+        $prefix = $lib.globals.get("slib:crtsh:tag:prefix")  // noqa: R005
+        ($ok, $norm) = $lib.trycast(syn:tag, $prefix)
+        if $ok { return($norm) }
+        $lib.warn(`slib.crtsh: The tag prefix {$prefix} isn't a valid tag name, no tags are applied. Fix it with slib.crtsh.admin.tags --prefix.`)
     }
     return()
 }
@@ -15,9 +21,9 @@ function tagPrefix() {
 // Lookups
 
 function lookup(kind, valus, limit=(100)) { return($svc.lookup($kind, $valus, limit=$limit)) }
-function chain(valu, kind=$lib.null) { return($svc.chain($valu, kind=$kind)) }
+function chain(valu, kind=(null)) { return($svc.chain($valu, kind=$kind)) }
 
-function cas(name=$lib.null, caids=$lib.null, certs=(false), limit=(100)) {
+function cas(name=(null), caids=(null), certs=(false), limit=(100)) {
     return($svc.cas(name=$name, caids=$caids, certs=$certs, limit=$limit))
 }
 
@@ -34,15 +40,15 @@ function search(opts) {
     }
 }
 
-function issued(caids=$lib.null, valu=$lib.null, kind=$lib.null, valid=(false), since=$lib.null,
-                until=$lib.null, precerts=(true), limit=(100)) {
+function issued(caids=(null), valu=(null), kind=(null), valid=(false), since=(null),
+                until=(null), precerts=(true), limit=(100)) {
     for $retn in $svc.issuedGenr(caids=$caids, valu=$valu, kind=$kind, valid=$valid, since=$since,
                                  until=$until, precerts=$precerts, limit=$limit) {
         emit $retn
     }
 }
 
-function pivot(valu, by, kind=$lib.null, valid=(false), precerts=(true), limit=(100)) {
+function pivot(valu, by, kind=(null), valid=(false), precerts=(true), limit=(100)) {
     for $retn in $svc.pivotGenr($valu, $by, kind=$kind, valid=$valid, precerts=$precerts, limit=$limit) {
         emit $retn
     }
