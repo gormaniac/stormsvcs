@@ -109,6 +109,29 @@ class TestPkg(s_tests.SynTest):
             # The rules are built again once an engine is there, even though they didn't change.
             assert svc._needsBuild()
 
+    async def test_yield_with_inbound(self):
+        # With inbound nodes, --yield yields the command's nodes once (not once per inbound
+        # node), and without it the inbound nodes pass through.
+        conf = {"snort:bin": "/nonexistent/snort", "suricata:bin": "/nonexistent/suricata"}
+        async with snortSvc(self, conf=conf) as (core, _, _):
+            await core.nodes("[ inet:fqdn=a.vertex.link inet:fqdn=b.vertex.link ]")
+            two = "inet:fqdn=a.vertex.link inet:fqdn=b.vertex.link"
+            # A feed's meta:ruleset, for slib.pcap.feed.list.
+            await core.nodes(f"slib.pcap.sync --no-push --feed {S3}")
+            text = "alert tcp any any -> any any ( sid:1; )"
+            for cmd, form in (
+                (f"slib.pcap.rule.add '{text}'", "it:app:snort:rule"),
+                ("slib.pcap.rule.errors", "it:app:snort:rule"),
+                ("slib.pcap.feed.list", "meta:ruleset"),
+            ):
+                nodes = await core.nodes(f"{cmd} --yield")
+                assert nodes and {n.form.name for n in nodes} == {form}, cmd
+                want = sorted(n.ndef for n in nodes)
+                nodes = await core.nodes(f"{two} | {cmd} --yield")
+                assert sorted(n.ndef for n in nodes) == want, cmd
+                nodes = await core.nodes(f"{two} | {cmd}")
+                assert sorted(n.ndef[1] for n in nodes) == ["a.vertex.link", "b.vertex.link"], cmd
+
 
 class TestFeedSync(s_tests.SynTest):
     """Syncing the feeds into the Cortex (no push, so no Snort needed)."""

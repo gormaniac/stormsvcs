@@ -93,7 +93,7 @@ commands:
       - - sha256s
         - type: str
           nargs: "*"
-          help: SHA-256s of PCAPs in the Axon to analyze instead of the inbound nodes.
+          help: SHA-256s of PCAPs in the Axon to analyze (once) instead of the inbound nodes, which pass through.
       - - --timeout
         - type: int
           default: null

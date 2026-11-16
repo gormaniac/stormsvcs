@@ -126,6 +126,19 @@ class TestPcapStorm(s_tests.SynTest):
             nodes = await core.nodes("inet:flow:dst:port=80")
             assert {n.get("src:handshake") for n in nodes} == {"GET"}
 
+            # With inbound nodes, the SHA-256s are analyzed once (not once per inbound node),
+            # and the inbound nodes pass through.
+            await core.nodes("[ inet:fqdn=a.vertex.link inet:fqdn=b.vertex.link ]")
+            msgs = await core.stormlist(f"inet:fqdn=a.vertex.link inet:fqdn=b.vertex.link | slib.pcap.flows {shas[0]}")
+            self.stormHasNoWarnErr(msgs)
+            prints = [m[1]["mesg"] for m in msgs if m[0] == "print" and "Modeled" in m[1]["mesg"]]
+            self.len(1, prints)
+            nodes = [m[1] for m in msgs if m[0] == "node"]
+            assert sorted(n[0][0] for n in nodes) == ["inet:flow"] * 4 + ["inet:fqdn"] * 2
+            # Not even when nothing is yielded (ex. every inbound node is filtered out after).
+            msgs = await core.stormlist(f"inet:fqdn=a.vertex.link inet:fqdn=b.vertex.link | slib.pcap.flows {shas[0]} | spin")
+            self.len(1, [m for m in msgs if m[0] == "print" and "Modeled" in m[1]["mesg"]])
+
             # --limit
             msgs = await core.stormlist(f"slib.pcap.flows {shas[0]} --limit 2")
             self.stormIsInPrint("Modeled 2 flows", msgs)

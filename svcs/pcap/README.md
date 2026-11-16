@@ -118,7 +118,7 @@ it (the capture may be malicious), and counted (with the latest ones) in `slib.p
 | `crash` | An engine died of a crash signal (SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGABRT, SIGTRAP), often what an exploit attempt looks like. |
 | `unconfined` | The kernel's view of the running engine (`/proc/<pid>/status`: its uids and gids, supplementary groups, capabilities, `NoNewPrivs`, `Seccomp`) doesn't match the layers its wrapper reported applying. |
 | `leftover` | Processes of the run's process group were still running after the engine exited. They're killed. |
-| `escaped` | A process that left its run's process group (ex. `setsid`), or that was orphaned to the service, is still running. The service is a child subreaper, so orphans become its children, and engine descendants are told apart from its other children by the seccomp filter and `no_new_privs` they inherit (and can't drop). They're killed. |
+| `escaped` | A process that left its run's process group (ex. `setsid`), or that was orphaned to the service, is still running. The service is a child subreaper, so orphans become its children, and engine descendants are told apart from its other children by the seccomp filter and `no_new_privs` they inherit (and can't drop). They're killed. An orphan still in a running engine's process group is that run's, and a `leftover` if it outlives the engine. |
 | `file` | A file the sandbox user owns outside the engines' directories (`/tmp`, `/var/tmp`, `/dev/shm`, and the storage directory are swept every 10 minutes). |
 
 On kernels with Landlock ABI 7 (Linux 6.15+) the service also asks the kernel to log every
@@ -224,7 +224,7 @@ file:bytes=sha256:<sha256> -(refs)> (it:app:snort:hit, it:app:suricata:matched)
 
 | Option | Default | Description |
 |---|---|---|
-| `sha256s` | | SHA-256s of captures to analyze instead of the inbound `file:bytes` nodes. |
+| `sha256s` | | SHA-256s of captures to analyze instead of the inbound `file:bytes` nodes. They're analyzed once, after the inbound nodes, which pass through (unchanged and not analyzed). |
 | `--timeout` | `pcap:timeout` | Seconds a flow can be idle before a new flow starts, `0` to never time out. |
 | `--limit` | `pcap:limit` | The max number of flows to model per capture (capped by `pcap:limit`). |
 | `--handshake` | `pcap:handshake` | The max characters kept from each side's first text payload. |

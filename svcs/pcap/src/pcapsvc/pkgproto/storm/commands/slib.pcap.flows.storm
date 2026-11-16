@@ -13,23 +13,23 @@ init {
     $yieldit = $cmdopts.yield
 }
 
-if $cmdopts.sha256s {
-    // SHA-256s ignore inbound nodes, spin drops them on purpose (P001 is ignored).
-    // NOTE: $node.form is a gtor in Synapse 3.x, 2.x needs the call, this package requires
-    // Synapse <3.0.0 so R002 is ignored here and in the slib.pcap.rule.* commands.
-    spin |  // noqa: P001
-    for $sha256 in $cmdopts.sha256s {
-        for $n in $pcap.ingest($sha256, opts=$opts, hits=$cmdopts.hits) {
-            yield $n
-        }
-    }
-}
-else {
+// SHA-256s ignore inbound nodes (they pass through), the SHA-256s are analyzed once in the
+// fini block. NOTE: $node.form is a gtor in Synapse 3.x, 2.x needs the call, this package
+// requires Synapse <3.0.0 so R002 is ignored here and in the slib.pcap.rule.* commands.
+if (not $cmdopts.sha256s) {
     if ($node.form() = "file:bytes" and :sha256) {  // noqa: R002
         divert $yieldit $pcap.nodes($pcap.ingest(:sha256, opts=$opts, file=$node, hits=$cmdopts.hits))
     } else {
         $lib.warn(`slib.pcap.flows: Unable to analyze {$node.form()} {$node.repr()}, it needs to be a file:bytes with a :sha256.`)  // noqa: R002
         // Drop the node that can't be analyzed.
         spin  // noqa: P001
+    }
+}
+
+fini {
+    for $sha256 in $cmdopts.sha256s {
+        for $n in $pcap.ingest($sha256, opts=$opts, hits=$cmdopts.hits) {
+            yield $n
+        }
     }
 }

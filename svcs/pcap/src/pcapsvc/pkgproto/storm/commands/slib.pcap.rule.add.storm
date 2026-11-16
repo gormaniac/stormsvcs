@@ -36,4 +36,12 @@ init {
     }
 }
 
-divert $cmdopts.yield $model.nodes($nodes)
+// The nodes are yielded once, in the fini block (not once per inbound node), and the inbound
+// nodes pass through without --yield.
+-$cmdopts.yield
+
+fini {
+    if $cmdopts.yield {
+        for $n in $model.nodes($nodes) { yield $n }
+    }
+}
