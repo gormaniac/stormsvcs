@@ -30,8 +30,8 @@ init {
 
 // With --name, inbound nodes pass through untouched.
 if (not $cmdopts.name) {
-    if ($node.form() != "it:app:yara:rule") {
-        $lib.warn(`slib.hatching.yara.add: The node form {$node.form()} is not supported.`)
+    if ($node.form() != "it:app:yara:rule") {  // noqa: R002 - $node.form is a method on 2.x
+        $lib.warn(`slib.hatching.yara.add: The node form {$node.form()} is not supported.`)  // noqa: R002 - $node.form is a method on 2.x
         spin  // noqa: P001 - drop the node it can't be used with
     }
     else {

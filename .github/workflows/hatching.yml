@@ -21,4 +21,6 @@ jobs:
       service: hatching
       # Also run the tests in the test image built on the new production image.
       docker_tests: true
+      # The Storm code lints clean, keep it that way.
+      storm_lint: block
     secrets: inherit

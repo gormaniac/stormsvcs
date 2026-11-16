@@ -16,10 +16,10 @@ SVC_EVTS = {
         "storm": (
             f'[(meta:source={SOURCE_GUID} :name="hatching triage" :type=slib.hatching '
             ":url=https://tria.ge)] | spin | "
-            'if ($lib.globals.get("slib:hatching:tag:enabled") = $lib.null) { '
+            'if ($lib.globals.get("slib:hatching:tag:enabled") = (null)) { '
             '    $lib.globals.set("slib:hatching:tag:enabled", (true)) '
             "} "
-            'if ($lib.globals.get("slib:hatching:tag:prefix") = $lib.null) { '
+            'if ($lib.globals.get("slib:hatching:tag:prefix") = (null)) { '
             '    $lib.globals.set("slib:hatching:tag:prefix", "rep.hatching") '
             "}"
         )

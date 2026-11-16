@@ -15,7 +15,7 @@ if $cmdopts.sample {
     if $cmdopts.yield { spin }  // noqa: P001
 }
 else {
-    switch $node.form() {
+    switch $node.form() {  // noqa: R002 - $node.form is a method on 2.x
         "file:bytes": { }
         "hash:md5": { }
         "hash:sha1": { }
@@ -23,7 +23,7 @@ else {
         "hash:sha512": { }
         "inet:url": { }
         *: {
-            $lib.warn(`slib.hatching.enrich: The node form {$node.form()} is not supported.`)
+            $lib.warn(`slib.hatching.enrich: The node form {$node.form()} is not supported.`)  // noqa: R002 - $node.form is a method on 2.x
             spin  // noqa: P001 - drop the node it can't be used with
         }
     }

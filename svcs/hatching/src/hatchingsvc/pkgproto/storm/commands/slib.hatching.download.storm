@@ -58,7 +58,7 @@ if $cmdopts.sample {
 else {
     $hash = $util.nodeHash($node)
     if ($hash = null) {
-        $lib.warn(`slib.hatching.download: {$node.form()} {$node.repr()} has no hash to find a sample by.`)
+        $lib.warn(`slib.hatching.download: {$node.form()} {$node.repr()} has no hash to find a sample by.`)  // noqa: R002 - $node.form is a method on 2.x
         spin  // noqa: P001 - drop the node it can't be used with
     }
     $retn = $priv.resolve($hash)

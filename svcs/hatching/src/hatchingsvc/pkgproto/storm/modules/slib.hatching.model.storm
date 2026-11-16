@@ -52,8 +52,8 @@ function ipNode(ip, ver=(null)) {
     if ($ver = null) {
         if ($lib.cast(str, $ip) ~= ":") { $ver = ipv6 } else { $ver = ipv4 }
     }
-    if ($ver = "ipv6") { [ inet:ipv6?=$ip ] }
-    else { [ inet:ipv4?=$ip ] }
+    if ($ver = "ipv6") { [ inet:ipv6?=$ip ] }  // noqa: M001 - a 2.x form name, the package requires Synapse <3.0.0
+    else { [ inet:ipv4?=$ip ] }  // noqa: M001 - a 2.x form name, the package requires Synapse <3.0.0
     return($seen($node))
 }
 
@@ -203,7 +203,7 @@ function family(fam, prefix) {
     $famtag = (null)
     $part = $lib.regex.replace("[^a-z0-9_]+", "_", $fam.lower()).strip("_")
     if ($prefix and $part) { $famtag = `{$prefix}.{$part}` }
-    [ risk:tool:software=(slib.hatching, family, $fam)
+    [ risk:tool:software=(slib.hatching, family, $fam)  // noqa: M001 - a 2.x form name, the package requires Synapse <3.0.0
         :soft:name?=$fam :reporter:name=$scanner :tag?=$famtag ]
     return($seen($node))
 }
