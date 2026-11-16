@@ -1858,6 +1858,27 @@ class TestShodanStormScanAlerts(s_tests.SynTest):
             body = fake.last("/api/shodan/alert/ALERT1", "POST")["json"]
             assert sorted(body["filters"]["ip"]) == ["1.2.3.0/24", "9.9.9.0/24"]
 
+            # SHODAN-07: an ignored service can't add path segments to reach other endpoints.
+            fake.requests.clear()
+            for valu in (
+                "new_service/1.2.3.4:80/../../../../org/member/visi",
+                "new_service/../../org/member/visi",
+                "new_service/1.2.3.4:80?x=1",
+                "new_service/notanip:80",
+                "new_service/1.2.3.4:99999",
+                "/1.2.3.4:80",
+            ):
+                msgs = await core.stormlist(f"slib.shodan.alert.edit ALERT1 --ignore '{valu}' --unignore '{valu}'")
+                self.stormIsInWarn(f"{valu} is not in the format", msgs)
+            assert not fake.requests
+            fake.routes[("PUT", "/api/shodan/alert/ALERT1/trigger/open_database/ignore/[2001:db8::1]:443")] = (
+                200,
+                {"success": True},
+            )
+            msgs = await core.stormlist("slib.shodan.alert.edit ALERT1 --ignore 'open_database/[2001:db8::1]:443'")
+            self.stormHasNoWarnErr(msgs)
+            assert fake.last()["path"] == "/api/shodan/alert/ALERT1/trigger/open_database/ignore/[2001:db8::1]:443"
+
             msgs = await core.stormlist("slib.shodan.alert.del ALERT1")
             self.stormIsInPrint("Deleted alert ALERT1", msgs)
 

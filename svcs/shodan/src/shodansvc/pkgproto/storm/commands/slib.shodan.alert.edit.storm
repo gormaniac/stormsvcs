@@ -1,11 +1,18 @@
-// Split a "<trigger>/<ip>:<port>" value. Returns null (and warns) if it is malformed.
+// Split a "<trigger>/<ip>:<port>" value. Returns null (and warns) if it is malformed: the
+// service must be an IP and a port, so it can't add path segments to the request (the service
+// checks it too).
 function splitService(valu) {
     $parts = $valu.split("/", maxsplit=(1))
-    if ($lib.len($parts) != 2) {
-        $lib.warn("slib.shodan.alert.edit: {valu} is not in the format <trigger>/<ip>:<port>.", valu=$valu)
-        return($lib.null)
+    if ($lib.len($parts) = 2 and $parts.0 and not ($parts.1 ~= "[/?#]|\\.\\.")) {
+        $hostport = $parts.1.rsplit(":", maxsplit=(1))
+        if ($lib.len($hostport) = 2) {
+            ($isport, $port) = $lib.trycast(inet:port, $hostport.1)
+            ($isip, $ip) = $lib.trycast(inet:ipv6, $hostport.0.strip("[]"))
+            if ($isport and $isip) { return($parts) }
+        }
     }
-    return($parts)
+    $lib.warn(`slib.shodan.alert.edit: {$valu} is not in the format <trigger>/<ip>:<port>.`)
+    return()
 }
 
 function editAlert(aid, ips) {

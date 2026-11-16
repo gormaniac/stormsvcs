@@ -905,6 +905,38 @@ class TestShodanSvc(s_tests.SynTest):
             with self.raises(ShodanApiError):
                 await svc.countIps("product:nginx", size=0)
 
+    async def test_alert_ignore_service(self):
+        # SHODAN-07: the ignored service is a single "<ip>:<port>" path segment, so it can't
+        # reach another endpoint (ex. /org/member/...) with the service's API key.
+        async with shodanSvc(self) as (core, svc, fake):
+            fake.routes[("PUT", "/api/shodan/alert/ALERT1/trigger/new_service/ignore/2001:db8::1:443")] = (
+                200,
+                {"success": True},
+            )
+            await svc.alertTriggerIgnore("ALERT1", "new_service", "2001:db8::1:443")
+            assert fake.last()["path"] == "/api/shodan/alert/ALERT1/trigger/new_service/ignore/2001:db8::1:443"
+
+            bad = (
+                "1.2.3.4:80/../../../../org/member/visi",
+                "../../../org/member/visi",
+                "1.2.3.4/80",
+                "1.2.3.4",
+                "1.2.3.4:",
+                "1.2.3.4:99999",
+                "1.2.3.4:8a",
+                "notanip:80",
+                "1.2.3.4:80?x=1",
+                "1.2.3.4:80#x",
+                "..:80",
+            )
+            for meth in (svc.alertTriggerIgnore, svc.alertTriggerUnignore):
+                for service in bad:
+                    fake.requests.clear()
+                    with self.raises(ShodanApiError) as cm:
+                        await meth("ALERT1", "new_service", service)
+                    assert "Invalid service" in cm.exception.mesg, service
+                    assert not fake.requests, service
+
     async def test_scans_no_apikey(self):
         async with shodanSvc(self) as (core, svc, fake):
             fake.routes[("GET", "/api/shodan/scans")] = (

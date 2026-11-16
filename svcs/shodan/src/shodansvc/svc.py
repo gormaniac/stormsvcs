@@ -7,6 +7,7 @@ Shodan's data as-is (or normalized, for the ``norm*`` variants) and raise
 """
 
 import hashlib
+import ipaddress
 import json
 import re
 import time
@@ -84,6 +85,26 @@ def _seg(valu: Any) -> str:
     """Quote a value for use as a single URL path segment."""
 
     return quote(str(valu), safe="")
+
+
+def _service(valu: Any) -> str:
+    """Validate an alert's ignored ``<ip>:<port>`` service and quote it as one URL path segment.
+
+    Only an IP and a port are allowed, so a value can never change the path it's sent to (ex.
+    ``1.2.3.4:80/../../../org/member/x`` would otherwise reach another endpoint with the key).
+    """
+
+    text = str(valu)
+    host, sep, port = text.rpartition(":")
+    ok = bool(sep) and port.isascii() and port.isdigit() and int(port) <= 65535
+    if ok:
+        try:
+            ipaddress.ip_address(host[1:-1] if host.startswith("[") and host.endswith("]") else host)
+        except ValueError:
+            ok = False
+    if not ok:
+        raise ShodanApiError(f"Invalid service {text!r}, expected <ip>:<port> (ex. 1.2.3.4:9200).")
+    return quote(text, safe=":")
 
 
 def _directoryText(q: dict) -> str:
@@ -447,16 +468,12 @@ class ShodanSvc(s_cell.Cell):
 
     async def alertTriggerIgnore(self, aid: str, trigger: str, service: str, apikey=None) -> dict:
         """PUT /shodan/alert/{id}/trigger/{trigger}/ignore/{ip:port}"""
-        path = (
-            f"/shodan/alert/{_seg(aid)}/trigger/{_seg(trigger)}/ignore/{quote(service, safe=':/,')}"
-        )
+        path = f"/shodan/alert/{_seg(aid)}/trigger/{_seg(trigger)}/ignore/{_service(service)}"
         return await self._api("put", path, apikey)
 
     async def alertTriggerUnignore(self, aid: str, trigger: str, service: str, apikey=None) -> dict:
         """DELETE /shodan/alert/{id}/trigger/{trigger}/ignore/{ip:port}"""
-        path = (
-            f"/shodan/alert/{_seg(aid)}/trigger/{_seg(trigger)}/ignore/{quote(service, safe=':/,')}"
-        )
+        path = f"/shodan/alert/{_seg(aid)}/trigger/{_seg(trigger)}/ignore/{_service(service)}"
         return await self._api("delete", path, apikey)
 
     async def alertNotifierAdd(self, aid: str, nid: str, apikey=None) -> dict:
