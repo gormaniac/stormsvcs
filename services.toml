@@ -64,5 +64,5 @@ workflow = ".github/workflows/virustotal.yml"
 [contract]
 # The Synapse every service's uv.lock must have, and the lowest StormLib++ it may have.
 synapse = "2.256.0"
-stormlibpp = "0.12.1"
+stormlibpp = "1.0.0"
 enforce = ["registered", "workflow-paths", "versions"]
