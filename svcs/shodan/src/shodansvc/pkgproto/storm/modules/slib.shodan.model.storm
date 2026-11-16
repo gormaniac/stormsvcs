@@ -48,13 +48,21 @@ function fqdnNode(fqdn, time=$lib.null) {
     return($seen($node, $time))
 }
 
-function asnNode(asn, org=$lib.null) {
+function asnNode(asn, org=$lib.null, time=$lib.null) {
     $num = $lib.regex.replace("(?i)^AS", "", $lib.cast(str, $asn))
+    // Made before the inet:asn, so no node is in the pipeline when orgNode() runs.
+    $orgnode = $lib.null
+    if $org { $orgnode = $orgNode($org, $time) }
     [ inet:asn?=$num ]
-    if $org {
-        [ :owner ?= { yield $lib.gen.orgByName($org) } ]
-    }
-    return($node)
+    if $orgnode { [ :owner ?= $orgnode.value() ] }
+    return($seen($node, $time))
+}
+
+// The ou:org of an organization name (via $lib.gen.orgByName), or null.
+function orgNode(name, time=$lib.null) {
+    $orgnode = $lib.gen.orgByName($name, try=(true))
+    if ($orgnode = $lib.null) { return($lib.null) }
+    return($seen($orgnode, $time))
 }
 
 // A forward DNS record (inet:dns:a/aaaa), only for real resolutions (DNS domain records, and
@@ -234,7 +242,7 @@ function httpNodes(server, banner, http, time=$lib.null, tagPrefix=$lib.null) {
 
 // Create an it:prod:softver from a CPE (preferred) or a product name/version,
 // and link the node that runs it with a -(uses)> edge.
-function softverNode(user, cpe=$lib.null, product=$lib.null, version=$lib.null) {
+function softverNode(user, cpe=$lib.null, product=$lib.null, version=$lib.null, time=$lib.null) {
     $props = $lib.null
     if $cpe {
         ($ok, $normcpe) = $lib.trycast(it:sec:cpe, $cpe)
@@ -249,8 +257,8 @@ function softverNode(user, cpe=$lib.null, product=$lib.null, version=$lib.null) 
     [ it:prod:softver=$props ]
     if $product { [ :name ?= $product ] }
     if $version { [ :vers ?= $version ] }
-    if $user { [ <(uses)+ { yield $user } ] }
-    return($node)
+    if $user { [ <(uses)+ $user ] }
+    return($seen($node, $time))
 }
 
 function vulnNode(cve) {
@@ -263,6 +271,7 @@ function vulnerableNode(n, vuln, time=$lib.null) {
     if ($vulnnode = $lib.null) { return($lib.null) }
 
     if $vuln.summary { $setDesc($vulnnode, $vuln.summary) }
+    $seen($vulnnode, $time)
 
     [ risk:vulnerable=({"node": [$n.form(), $n.value()], "vuln": $vulnnode.value()}) ]
     return($seen($node, $time))
@@ -314,8 +323,8 @@ function ja3sNode(server, ja3s, time=$lib.null) {
     return($seen($node, $time))
 }
 
-function setAsn(n, asn, org=$lib.null) {
-    $asnnode = $asnNode($asn, $org)
+function setAsn(n, asn, org=$lib.null, time=$lib.null) {
+    $asnnode = $asnNode($asn, $org, $time)
     if ($asnnode = $lib.null) { return($n) }
     yield $n
     [ :asn ?= $asnnode.value() ]
@@ -359,7 +368,7 @@ function bannerNodes(b, tagPrefix=$lib.null, historical=(false)) {
     if ($srv = $lib.null) { return($lib.null) }
 
     $ipnode = $ipNode($b.ip, $b.timestamp)
-    if ((not $historical) and $b.asn and $ipnode) { $setAsn($ipnode, $b.asn, $b.org) }
+    if ((not $historical) and $b.asn and $ipnode) { $setAsn($ipnode, $b.asn, $b.org, $b.timestamp) }
 
     $bannernode = $lib.null
     if $b.data {
@@ -378,7 +387,7 @@ function bannerNodes(b, tagPrefix=$lib.null, historical=(false)) {
     if $b.http { $httpNodes($srv, $bannernode, $b.http, $b.timestamp, $tagPrefix) }
 
     // See shodansvc.norm.normSoftvers for how CPEs are paired with the product/version.
-    for $sv in $b.softvers { $softverNode($srv, $sv.cpe, $sv.product, $sv.version) }
+    for $sv in $b.softvers { $softverNode($srv, $sv.cpe, $sv.product, $sv.version, $b.timestamp) }
 
     if (not $historical) {
         for $vuln in $b.vulns { $vulnerableNode($srv, $vuln, $b.timestamp) }
@@ -587,7 +596,7 @@ function host(h, tagPrefix=$lib.null, timeline=(false)) {
     $ipnode = $ipNode($h.ip, $h.last_update)
     if ($ipnode = $lib.null) { return($lib.null) }
 
-    if $h.asn { $setAsn($ipnode, $h.asn, $h.org) }
+    if $h.asn { $setAsn($ipnode, $h.asn, $h.org, $h.last_update) }
     if $h.location { $setLocation($ipnode, $h.location) }
 
     $applyTags($ipnode, $tagPrefix, $h.tags)
@@ -598,7 +607,7 @@ function host(h, tagPrefix=$lib.null, timeline=(false)) {
 
     // InternetDB results have CPEs at the host level.
     if $h.cpes {
-        for $cpe in $h.cpes { $softverNode($ipnode, $cpe) }
+        for $cpe in $h.cpes { $softverNode($ipnode, $cpe, time=$h.last_update) }
     }
 
     if $h.banners {
@@ -634,7 +643,8 @@ function cve(c, tagPrefix=$lib.null, cpes=(false)) {
     for $alias in $c.aliases { $addArrayValu($vulnnode, names, $alias) }
     for $cwe in $c.cwes { $addArrayValu($vulnnode, cwes, $cwe) }
     if $c.kev { $applyTags($vulnnode, $tagPrefix, (kev,)) }
-    $seen($vulnnode, $c.published)
+    // :timeline:published is when it was published, not when Shodan saw it, so it isn't the .seen.
+    $seen($vulnnode)
 
     if $cpes {
         for $cpe in $c.cpes {
@@ -686,12 +696,12 @@ function addArrayValu(n, prop, valu) {
 function cveNode(c) {
     // it:sec:cve:desc/references are deprecated, the details live on the risk:vuln.
     [ it:sec:cve?=$c.cve ]
-    return($seen($node, $c.published))
+    return($seen($node))
 }
 
 function softverCve(cpe, cve) {
     [ it:prod:softver=({"cpe": $cpe}) :cves += $cve ]
-    return($node)
+    return($seen($node))
 }
 
 // Yield the given non-null nodes. Lets commands divert to nodes returned by the functions above.

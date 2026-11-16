@@ -176,6 +176,10 @@ class TestShodanStormHost(s_tests.SynTest):
             # Everything is linked back to the service's meta:source.
             assert len(await core.nodes(f"meta:source={SVC_GUID} -(seen)> inet:ipv4")) == 1
             assert len(await core.nodes(f"meta:source={SVC_GUID} -(seen)> inet:server")) == 2
+            # SHODAN-10: including the ASN, its owner, the software, and the vulns.
+            for form, count in (("inet:asn", 1), ("ou:org", 1), ("it:prod:softver", 2), ("risk:vuln", 1)):
+                assert len(await core.nodes(f"meta:source={SVC_GUID} -(seen)> {form}")) == count, form
+            assert (await core.nodes("inet:asn=15169"))[0].get(".seen") is not None
 
             # Running it again doesn't duplicate guid nodes.
             await core.nodes("slib.shodan.host --ip 8.8.8.8")
@@ -1709,12 +1713,17 @@ class TestShodanStormVulns(s_tests.SynTest):
             )
             assert vuln.get("timeline:published") is not None
             assert "rep.shodan.kev" in vuln.tags
+            # SHODAN-10: the publish date isn't when Shodan saw it.
+            assert vuln.get(".seen") is None
+            assert (await core.nodes("it:sec:cve=cve-2021-44228"))[0].get(".seen") is None
+            assert len(await core.nodes(f"meta:source={SVC_GUID} -(seen)> risk:vuln")) == 1
 
             assert len(await core.nodes("it:sec:cve=cve-2021-44228")) == 1
 
             nodes = await core.nodes("it:prod:softver:cpe")
             assert len(nodes) == 1
             assert nodes[0].get("cves") == ("cve-2021-44228",)
+            assert len(await core.nodes(f"meta:source={SVC_GUID} -(seen)> it:prod:softver:cves")) == 1
 
     async def test_cve_inbound_and_search(self):
         async with shodanSvc(self) as (core, svc, fake):

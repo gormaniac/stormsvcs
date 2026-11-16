@@ -287,8 +287,10 @@ the full list:
 | CVEDB | `risk:vuln` `:cve:desc`, `:cve:references`, `:cvss:v2_0:score`, `:cvss:v3_0:score` or `:cvss:v3_1:score` (picked by CVEDB's `cvss_version`, or a GHSA's CVSS vector; a score without a version, or a v4.0 one, is left unset), `:timeline:published`, GHSA/EUVD IDs in `:names`, GHSA CWEs in `:cwes`; `it:prod:softver:cves` with `--cpes`. Advisories without a CVE are deconflicted by `risk:vuln:id`. |
 | Shodan tags, CISA KEV | Tags under the prefix, ex. `#rep.shodan.cloud`, `#rep.shodan.honeypot`, `#rep.shodan.kev` |
 
-Every node is linked to the service's `meta:source` with a `-(seen)>` edge, and has `.seen`
-updated from Shodan's timestamps.
+Every node is linked to the service's `meta:source` with a `-(seen)>` edge (including the
+`inet:asn`, its `ou:org` owner, `it:prod:softver`, and `risk:vuln` nodes), and has `.seen`
+updated from Shodan's timestamps, when Shodan saw it. CVEDB's publish dates are only
+`:timeline:published`, never the `.seen` of a `risk:vuln` or `it:sec:cve`.
 
 ## Cleaning up hostname DNS records
 
