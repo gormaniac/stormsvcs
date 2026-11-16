@@ -67,7 +67,7 @@ commands:
     descr: |
       Look up IP addresses in Shodan and model everything Shodan knows about them.
 
-      Models the IP's ASN, owner, location, hostnames (inet:dns:a/aaaa), tags, and
+      Models the IP's ASN, owner, location, hostnames (inet:dns:rev/rev6), tags, and
       vulnerabilities (risk:vulnerable), plus every service banner Shodan has seen
       (inet:server, inet:banner, it:prod:softver, crypto:x509:cert, inet:tls:servercert), and
       the HTTP response headers in HTTP banners, except Date (inet:http:response:header, linked
@@ -168,6 +168,10 @@ commands:
       - form: inet:dns:a
         help: Their :ipv4 is looked up.
       - form: inet:dns:aaaa
+        help: Their :ipv6 is looked up.
+      - form: inet:dns:rev
+        help: Their :ipv4 is looked up.
+      - form: inet:dns:rev6
         help: Their :ipv6 is looked up.
 
   - name: slib.shodan.enrich

@@ -330,10 +330,22 @@ class TestNorm(s_tests.SynTest):
         ]
         assert norm.normSoftvers([], None, None) == []
 
+    def test_tcp_ports(self):
+        assert norm.tcpPorts([22, 53, 80, 123, 161, 443, 1900, 5353, "8080", None, "x", 70000, 22]) == [
+            22,
+            80,
+            443,
+            8080,
+        ]
+        assert norm.tcpPorts(None) == []
+        assert norm.normInternetDb({"ip": "1.1.1.1", "ports": [53, 80]})["tcp_ports"] == [80]
+
     def test_norm_host(self):
         host = norm.normHost(HOST_8888)
         assert host["ip"] == "8.8.8.8"
         assert host["ports"] == [53, 443]
+        # SHODAN-04: bare ports have no transport, so ports Shodan crawls over UDP aren't TCP.
+        assert host["tcp_ports"] == [443]
         assert host["location"]["country_code"] == "us"
         assert host["location"]["latlong"] == (37.4056, -122.0775)
         # The banner's detailed vuln replaces the host's bare CVE ID.
@@ -676,6 +688,25 @@ class TestNorm(s_tests.SynTest):
         assert cve["kev"] is True
         assert cve["cpes"] == ["cpe:2.3:a:apache:log4j:2.0:-:*:*:*:*:*:*"]
         assert cve["aliases"] == []
+        assert cve["cvss_scores"] == {"v2_0": 9.3, "v3_1": 10.0}
+
+    def test_cvss_scores(self):
+        # SHODAN-06: cvss_v3 is v3.0 or v3.1, and cvss is cvss_version's score, so cvss_version
+        # picks the prop. Unversioned (and v4.0) scores are left out.
+        scores = norm.cvssScores
+        assert scores({"cvss": 9.8, "cvss_version": 3.0, "cvss_v3": 9.8}) == {"v3_0": 9.8}
+        assert scores({"cvss": 9.8, "cvss_version": "3.1", "cvss_v3": 9.8}) == {"v3_1": 9.8}
+        assert scores({"cvss": 7.5, "cvss_version": 2, "cvss_v2": 7.5}) == {"v2_0": 7.5}
+        assert scores({"cvss": 7.5, "cvss_version": 2.0}) == {"v2_0": 7.5}
+        # A v4.0 primary score: v3's minor version is unknown, and 2.x has no v4.0 prop.
+        assert scores({"cvss": 9.3, "cvss_version": 4.0, "cvss_v3": 9.8, "cvss_v4": 9.3, "cvss_v2": 5.0}) == {
+            "v2_0": 5.0
+        }
+        assert scores({"cvss": 9.8, "cvss_v3": 9.8}) == {}
+        assert scores({"cvss": 9.8, "cvss_version": "nope"}) == {}
+        assert scores({"cvss": 9.8, "cvss_version": True}) == {}
+        assert scores({"cvss": None, "cvss_version": 3.1}) == {}
+        assert scores({}) == {}
 
     def test_norm_advisory(self):
         ghsa = norm.normAdvisory(GHSA_LOG4SHELL)
@@ -683,6 +714,8 @@ class TestNorm(s_tests.SynTest):
         assert ghsa["aliases"] == ["EUVD-2021-34768", "GHSA-JFH8-C2JP-5V3Q"]
         assert ghsa["cwes"] == ["CWE-20", "CWE-502"]
         assert ghsa["cvss_v3"] == 10.0
+        # The CVE CVEDB linked the GHSA to says its scores are v3.0.
+        assert ghsa["cvss_scores"] == {"v2_0": 9.3, "v3_0": 10.0}
         # GHSA references are {"type", "url"} dicts.
         assert "https://nvd.nist.gov/vuln/detail/CVE-2021-44228" in ghsa["references"]
 
@@ -691,6 +724,19 @@ class TestNorm(s_tests.SynTest):
         assert euvd["aliases"] == ["EUVD-2099-0001"]
         assert euvd["summary"] == "A made up advisory without a CVE."
         assert euvd["cvss"] == 7.5
+        assert euvd["cvss_scores"] == {"v3_1": 7.5}
+
+        # An advisory without a CVE or a cvss_version: its CVSS vector says which version it is.
+        ghsa = norm.normAdvisory(
+            {
+                "id": "GHSA-xxxx-xxxx-xxxx",
+                "cvss": 8.1,
+                "severity": [{"type": "CVSS_V3", "score": "CVSS:3.0/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H"}],
+            }
+        )
+        assert ghsa["cvss_scores"] == {"v3_0": 8.1}
+        # Without either, the score is unversioned and left out.
+        assert norm.normAdvisory({"id": "GHSA-yyyy-yyyy-yyyy", "cvss": 8.1})["cvss_scores"] == {}
 
 
 class TestClient(s_tests.SynTest):

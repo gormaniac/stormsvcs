@@ -343,6 +343,23 @@ def normCert(ssl: dict | None) -> dict | None:
     }
 
 
+def normTls(ssl: dict | None) -> dict | None:
+    """The TLS server fingerprints of a banner's ``ssl`` field (JARM and JA3S), or None.
+
+    A JARM of all zeros means the server didn't answer JARM's probes, so it's left out.
+    """
+
+    if not ssl:
+        return None
+    jarm = str(ssl.get("jarm") or "").strip().lower() or None
+    if jarm and not jarm.strip("0"):
+        jarm = None
+    ja3s = str(ssl.get("ja3s") or "").strip().lower() or None
+    if jarm is None and ja3s is None:
+        return None
+    return {"jarm": jarm, "ja3s": ja3s}
+
+
 def _certTime(valu: str | None) -> str | None:
     """Convert an ASN.1 time (``20240101000000Z``) into ``2024/01/01 00:00:00``."""
 
@@ -691,6 +708,7 @@ def normBanner(banner: dict) -> dict:
         "isp": banner.get("isp"),
         "location": normLocation(banner.get("location")),
         "cert": normCert(banner.get("ssl")),
+        "tls": normTls(banner.get("ssl")),
         "http": normHttp(banner, text),
         "ssh": {
             "type": ssh.get("type"),
@@ -701,6 +719,58 @@ def normBanner(banner: dict) -> dict:
         if ssh
         else None,
     }
+
+
+# Ports Shodan crawls over UDP (some over TCP too). A bare port, from a minified host lookup or
+# InternetDB, has no transport, so no inet:server is modeled for these: guessing TCP would make a
+# false server, ex. tcp://8.8.8.8:53 for DNS over UDP. See tcpPorts().
+UDP_PORTS = frozenset(
+    (
+        53,  # DNS
+        67,  # DHCP
+        69,  # TFTP
+        123,  # NTP
+        137,  # NetBIOS
+        161,  # SNMP
+        500,  # IKE
+        520,  # RIP
+        623,  # IPMI
+        1194,  # OpenVPN
+        1434,  # MS SQL Monitor
+        1604,  # Citrix
+        1900,  # UPnP
+        3283,  # Apple Remote Desktop
+        3478,  # STUN
+        3702,  # WS-Discovery
+        4500,  # IKE NAT-T
+        5060,  # SIP
+        5351,  # NAT-PMP
+        5353,  # mDNS
+        5683,  # CoAP
+        10001,  # Ubiquiti Discovery
+        11211,  # Memcached
+        17185,  # VxWorks WDB
+        47808,  # BACnet
+    )
+)
+
+
+def tcpPorts(ports: Any) -> list[int]:
+    """The bare ports (with no transport) that are modeled as TCP servers.
+
+    Minified host lookups and InternetDB only list port numbers. Most are TCP, but the ports
+    Shodan crawls over UDP (``UDP_PORTS``) are left out, since their transport is unknown.
+    """
+
+    retn = set()
+    for port in _list(ports):
+        try:
+            port = int(port)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= port <= 65535 and port not in UDP_PORTS:
+            retn.add(port)
+    return sorted(retn)
 
 
 def normHost(host: dict) -> dict:
@@ -726,6 +796,7 @@ def normHost(host: dict) -> dict:
         "domains": [d.lower() for d in _list(host.get("domains"))],
         "tags": _list(host.get("tags")),
         "ports": sorted(set(_list(host.get("ports")))),
+        "tcp_ports": tcpPorts(host.get("ports")),
         "cpes": [],
         "vulns": list(vulns.values()),
         "location": normLocation(host),
@@ -747,6 +818,7 @@ def normInternetDb(data: dict) -> dict:
         "domains": [],
         "tags": _list(data.get("tags")),
         "ports": sorted(set(_list(data.get("ports")))),
+        "tcp_ports": tcpPorts(data.get("ports")),
         "cpes": normCpes(data.get("cpes")),
         "vulns": normVulns(data.get("vulns")),
         "location": None,
@@ -780,6 +852,45 @@ def _refs(refs: Any) -> list[str]:
     return [u for u in urls if isinstance(u, str) and "://" in u]
 
 
+# The risk:vuln score prop (cvss:<prop>:score) of each CVSS version. Synapse 2.x has no prop for
+# CVSS v4.0 scores.
+CVSS_PROPS = {"2.0": "v2_0", "3.0": "v3_0", "3.1": "v3_1"}
+
+
+def _cvssVersion(valu: Any) -> str | None:
+    """Normalize a CVSS version (ex. 3.1, "3.1", 2, "CVSS:3.1/AV:N/...") to "<major>.<minor>"."""
+
+    if valu is None or isinstance(valu, bool):
+        return None
+    text = str(valu).strip()
+    if text.upper().startswith("CVSS:"):
+        text = text[5:].split("/", 1)[0]
+    try:
+        vers = float(text)
+    except ValueError:
+        return None
+    return f"{vers:.1f}"
+
+
+def cvssScores(data: dict) -> dict[str, float]:
+    """The CVSS scores of a CVEDB CVE/advisory, keyed by their risk:vuln prop (see CVSS_PROPS).
+
+    ``cvss_v2`` is always v2.0. ``cvss_v3`` covers both v3.0 and v3.1, and ``cvss`` is the score
+    of ``cvss_version``, so both are only used when ``cvss_version`` says which version they are.
+    An unversioned score (or a v4.0 one, which Synapse 2.x has no prop for) is left out.
+    """
+
+    retn = {}
+    vers = _cvssVersion(data.get("cvss_version"))
+    if data.get("cvss_v2") is not None:
+        retn["v2_0"] = data["cvss_v2"]
+    if data.get("cvss_v3") is not None and vers in ("3.0", "3.1"):
+        retn[CVSS_PROPS[vers]] = data["cvss_v3"]
+    if data.get("cvss") is not None and vers in CVSS_PROPS:
+        retn.setdefault(CVSS_PROPS[vers], data["cvss"])
+    return retn
+
+
 def normCve(data: dict) -> dict:
     """Normalize a CVEDB CVE (``/cve/{id}`` or an item from ``/cves``).
 
@@ -803,6 +914,7 @@ def normCve(data: dict) -> dict:
         "cvss_v2": data.get("cvss_v2"),
         "cvss_v3": data.get("cvss_v3"),
         "cvss_v4": data.get("cvss_v4"),
+        "cvss_scores": cvssScores(data),
         "epss": data.get("epss"),
         "ranking_epss": data.get("ranking_epss"),
         "kev": bool(data.get("kev")),
@@ -828,10 +940,18 @@ def normAdvisory(data: dict) -> dict:
     if data.get("cve"):
         retn = normCve(data["cve"])
     else:
+        # A GHSA has no cvss_version, its CVSS vectors (ex. "CVSS:3.1/AV:N/...") say which it is.
+        vectors = [
+            sev.get("score")
+            for sev in _list(data.get("severity"))
+            if isinstance(sev, dict) and str(sev.get("score") or "").upper().startswith("CVSS:")
+        ]
+        version = data.get("cvss_version") or (vectors[0] if len(vectors) == 1 else None)
         retn = normCve(
             {
                 "summary": data.get("summary") or data.get("description"),
                 "cvss": data.get("cvss"),
+                "cvss_version": version,
                 "epss": data.get("epss"),
                 "published_time": data.get("published_time"),
             }

@@ -49,7 +49,9 @@ class TestLiveKeyless(s_tests.SynTest):
             msgs = await core.stormlist("slib.shodan.host --ip 8.8.8.8 --yield")
             self.stormHasNoErr(msgs)
             self.stormIsInWarn("falling back to InternetDB", msgs)
-            assert len(await core.nodes("inet:server=tcp://8.8.8.8:53")) == 1
+            # 53 is crawled over UDP, and InternetDB has no transport, so it isn't a TCP server.
+            assert len(await core.nodes("inet:server=tcp://8.8.8.8:53")) == 0
+            assert len(await core.nodes("inet:ipv4=8.8.8.8 -> inet:dns:rev")) >= 1
 
             # IPs InternetDB hasn't seen are a 404, reported as a warning.
             msgs = await core.stormlist("slib.shodan.host --ip 192.0.2.1 --internetdb")
@@ -62,7 +64,8 @@ class TestLiveKeyless(s_tests.SynTest):
             msgs = await core.stormlist("slib.shodan.cve --cve CVE-2021-44228 --yield")
             self.stormHasNoErr(msgs)
             vuln = (await core.nodes("risk:vuln:cve=cve-2021-44228"))[0]
-            assert vuln.get("cvss:v3_1:score") == 10.0
+            # CVEDB's cvss_version says whether its v3 score is v3.0 or v3.1.
+            assert 10.0 in (vuln.get("cvss:v3_0:score"), vuln.get("cvss:v3_1:score"))
             assert vuln.get("cve:references")
             assert vuln.get("timeline:published") is not None
             assert "rep.shodan.kev" in vuln.tags

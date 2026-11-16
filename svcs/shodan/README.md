@@ -267,8 +267,8 @@ the full list:
 | Shodan data | Synapse |
 |---|---|
 | IP, ASN, org, location | `inet:ipv4`/`inet:ipv6` (`:asn`, `:latlong`, `:loc`), `inet:asn:owner` → `ou:org` |
-| Hostnames | `inet:dns:a`/`inet:dns:aaaa` |
-| Services and banners | `inet:server`, `inet:banner` (the full banner text, never truncated) |
+| Hostnames | `inet:dns:rev`/`inet:dns:rev6` (the IP, the hostname). Shodan's hostnames come from reverse DNS and TLS/HTTP observations, not forward lookups, so they aren't `inet:dns:a`/`aaaa` records (those come only from `slib.shodan.dns.domain` and `slib.shodan.dns.lookup` of a hostname). `slib.shodan.dns.lookup` of an IP also sets the IP's `:dns:rev`. Before 0.17.0 they were modeled as `inet:dns:a`/`aaaa`, see `slib.shodan.admin.dns.cleanup`. |
+| Services and banners | `inet:server`, `inet:banner` (the full banner text, never truncated). Minified host lookups and InternetDB only list port numbers, without a transport: they're modeled as `tcp://` servers, except the ports Shodan crawls over UDP (ex. 53, 123, 161, 500, 1900, 5353, see `shodansvc.norm.UDP_PORTS`), which aren't modeled since their transport is unknown. |
 | HTTP response headers | `inet:http:response:header`, with `inet:banner -(refs)> inet:http:response:header`. Parsed from HTTP banners, except `Date` headers (they change every scan). |
 | SSH host keys | `file:bytes` of the key as OpenSSH saves it (`<algo> <base64 key>\n`), served by the server via `inet:servfile`, both tagged `#rep.shodan.banner`. The bytes are saved in the Axon for users with `axon.upload`. |
 | HTTP requests | `inet:http:request` for each response Shodan got from a web server (`:server`, `:time`, `:url`, `:path`, `:header:host`, `:response:code`, `:response:reason`, `:response:headers`, `:response:body`). Each redirect Shodan followed to reach the page is another one. Pivot with `inet:server -> inet:http:request`. |
@@ -278,8 +278,9 @@ the full list:
 | Products and CPEs | `it:prod:softver` (`:cpe`, `:name`, `:vers`), with `inet:server -(uses)> it:prod:softver` |
 | Vulnerabilities | `risk:vuln` (via `$lib.gen.vulnByCve`), `risk:vulnerable` for the IP and the server |
 | TLS certificates | `crypto:x509:cert` (deconflicted by `:sha256`), `inet:tls:servercert` |
+| TLS fingerprints | `inet:ssl:jarmsample` (the server's JARM, skipped when it's all zeros) and `inet:tls:ja3s:sample` (its JA3S) |
 | DNS records | `inet:dns:a/aaaa/cname/mx/ns/txt/soa` |
-| CVEDB | `risk:vuln` `:cve:desc`, `:cve:references`, `:cvss:v3_1:score`, `:cvss:v2_0:score`, `:timeline:published`, GHSA/EUVD IDs in `:names`, GHSA CWEs in `:cwes`; `it:prod:softver:cves` with `--cpes`. Advisories without a CVE are deconflicted by `risk:vuln:id`. |
+| CVEDB | `risk:vuln` `:cve:desc`, `:cve:references`, `:cvss:v2_0:score`, `:cvss:v3_0:score` or `:cvss:v3_1:score` (picked by CVEDB's `cvss_version`, or a GHSA's CVSS vector; a score without a version, or a v4.0 one, is left unset), `:timeline:published`, GHSA/EUVD IDs in `:names`, GHSA CWEs in `:cwes`; `it:prod:softver:cves` with `--cpes`. Advisories without a CVE are deconflicted by `risk:vuln:id`. |
 | Shodan tags, CISA KEV | Tags under the prefix, ex. `#rep.shodan.cloud`, `#rep.shodan.honeypot`, `#rep.shodan.kev` |
 
 Every node is linked to the service's `meta:source` with a `-(seen)>` edge, and has `.seen`

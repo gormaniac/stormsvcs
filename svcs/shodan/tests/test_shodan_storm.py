@@ -1,6 +1,7 @@
 """Pytests for the slib.shodan Storm package (commands, modules, modeling, and perms)."""
 
 import base64
+import copy
 import hashlib
 import pathlib
 from unittest import mock
@@ -16,6 +17,7 @@ from .fakeshodan import (
     FAVICON_B64,
     HISTORY_IP,
     FAVICON_HASH,
+    HOST_8888,
     HOST_HTTP,
     HOST_SSH,
     HTTP_IP,
@@ -137,7 +139,9 @@ class TestShodanStormHost(s_tests.SynTest):
             assert nodes[0].get(".seen") is not None
             query = f"meta:source={SVC_GUID} -(seen)> inet:http:response:header"
             assert len(await core.nodes(query)) == 2
-            assert len(await core.nodes("inet:dns:a=(dns.google, 8.8.8.8)")) == 1
+            # SHODAN-05: Shodan's hostnames are reverse DNS names, never forward A records.
+            assert len(await core.nodes("inet:dns:rev=(8.8.8.8, dns.google)")) == 1
+            assert len(await core.nodes("inet:dns:a")) == 0
 
             nodes = await core.nodes(
                 "inet:server=tcp://8.8.8.8:443 -(uses)> it:prod:softver +:name"
@@ -225,13 +229,50 @@ class TestShodanStormHost(s_tests.SynTest):
 
             nodes = await core.nodes("inet:ipv4=1.1.1.1")
             assert "rep.shodan.cdn" in nodes[0].tags
+            # SHODAN-04: InternetDB ports have no transport, so 53 (crawled over UDP) isn't
+            # guessed as a TCP server.
             assert await nodeset(core, "inet:ipv4=1.1.1.1 -> inet:server") == {
-                ("inet:server", "tcp://1.1.1.1:53"),
                 ("inet:server", "tcp://1.1.1.1:80"),
             }
             assert len(await core.nodes("inet:ipv4=1.1.1.1 -(uses)> it:prod:softver")) == 1
-            assert len(await core.nodes("inet:dns:a=(one.one.one.one, 1.1.1.1)")) == 1
+            assert len(await core.nodes("inet:dns:rev=(1.1.1.1, one.one.one.one)")) == 1
+            assert len(await core.nodes("inet:dns:a")) == 0
             assert len(await core.nodes("risk:vulnerable:node=(inet:ipv4, 1.1.1.1)")) == 1
+
+    async def test_host_minify(self):
+        # SHODAN-04: a minified lookup only has bare ports. The ones Shodan crawls over UDP aren't
+        # guessed as TCP servers, the others are TCP.
+        async with shodanSvc(self) as (core, svc, fake):
+            minified = {"ip_str": "8.8.8.8", "ports": [53, 123, 443], "hostnames": ["dns.google"]}
+            fake.routes[("GET", "/api/shodan/host/8.8.8.8")] = (200, minified)
+            msgs = await core.stormlist("slib.shodan.host --ip 8.8.8.8 --minify")
+            self.stormHasNoWarnErr(msgs)
+            assert await nodeset(core, "inet:server") == {("inet:server", "tcp://8.8.8.8:443")}
+            assert len(await core.nodes("inet:dns:rev=(8.8.8.8, dns.google)")) == 1
+
+    async def test_host_tls_fingerprints(self):
+        # SHODAN-14: a TLS banner's JARM and JA3S are modeled, an all-zero JARM (no answer) isn't.
+        async with shodanSvc(self) as (core, svc, fake):
+            jarm = "29d29d00029d29d00041d41d0000005ef3b1d2b3dba6f6c3a4d3e7c8f1a2b3c"[:62]
+            host = copy.deepcopy(HOST_8888)
+            host["data"][0]["ssl"]["jarm"] = jarm.upper()
+            host["data"][0]["ssl"]["ja3s"] = "ec74a5c51106f0419184d0dd08fb05bc"
+            fake.routes[("GET", "/api/shodan/host/8.8.8.8")] = (200, host)
+            msgs = await core.stormlist("slib.shodan.host --ip 8.8.8.8")
+            self.stormHasNoErr(msgs)
+            nodes = await core.nodes("inet:server=tcp://8.8.8.8:443 -> inet:ssl:jarmsample")
+            assert [n.get("jarmhash") for n in nodes] == [jarm]
+            nodes = await core.nodes("inet:server=tcp://8.8.8.8:443 -> inet:tls:ja3s:sample")
+            assert [n.get("ja3s") for n in nodes] == ["ec74a5c51106f0419184d0dd08fb05bc"]
+            assert len(await core.nodes(f"meta:source={SVC_GUID} -(seen)> inet:ssl:jarmsample")) == 1
+
+            host["data"][0]["ssl"]["jarm"] = "0" * 62
+            host["data"][0]["ssl"]["ja3s"] = None
+            host["data"][0]["ip_str"] = host["ip_str"] = "8.8.4.4"
+            fake.routes[("GET", "/api/shodan/host/8.8.4.4")] = (200, host)
+            await core.nodes("slib.shodan.host --ip 8.8.4.4")
+            assert not await core.nodes("inet:server=tcp://8.8.4.4:443 -> inet:ssl:jarmsample")
+            assert not await core.nodes("inet:server=tcp://8.8.4.4:443 -> inet:tls:ja3s:sample")
 
     async def test_host_no_key_falls_back(self):
         async with shodanSvc(self, apikey=None) as (core, svc, fake):
@@ -274,12 +315,16 @@ class TestShodanStormHost(s_tests.SynTest):
             model = "$model = $lib.import(slib.shodan.model)"
             await core.nodes(f"{model} $model.ipNode(8.8.8.8)")
             await core.nodes(f"{model} $model.dnsNode(vertex.link, 8.8.8.8)")
+            await core.nodes(f"{model} $model.revNode(8.8.8.8, vertex.link)")
             await core.nodes(f"{model} $model.serverNode(8.8.8.8, (80))")
             assert len(await core.nodes("inet:ipv4=8.8.8.8")) == 1
             assert len(await core.nodes("inet:dns:a=(vertex.link, 8.8.8.8)")) == 1
             assert len(await core.nodes("inet:server=tcp://8.8.8.8:80")) == 1
             assert len(await core.nodes("inet:ipv6")) == 0
             assert len(await core.nodes("inet:dns:aaaa")) == 0
+            assert len(await core.nodes("inet:dns:rev=(8.8.8.8, vertex.link)")) == 1
+            await core.nodes(f"{model} $model.revNode(2001:db8::1, v6.vertex.link)")
+            assert len(await core.nodes("inet:dns:rev6=(2001:db8::1, v6.vertex.link)")) == 1
 
 
 class TestShodanStormHttp(s_tests.SynTest):
@@ -1640,7 +1685,9 @@ class TestShodanStormDns(s_tests.SynTest):
                 ("inet:fqdn", "dns.google"),
             }
             assert len(await core.nodes("inet:dns:a=(vertex.link, 1.2.3.4)")) == 1
-            assert len(await core.nodes("inet:dns:a=(dns.google, 8.8.8.8)")) == 1
+            # A reverse lookup is a reverse DNS record, not a forward one.
+            assert len(await core.nodes("inet:dns:rev=(8.8.8.8, dns.google)")) == 1
+            assert len(await core.nodes("inet:dns:a:fqdn=dns.google")) == 0
             assert (await core.nodes("inet:ipv4=8.8.8.8"))[0].get("dns:rev") == "dns.google"
 
 
@@ -1715,6 +1762,10 @@ class TestShodanStormVulns(s_tests.SynTest):
             assert vuln.get("names") == ("euvd-2021-34768", "ghsa-jfh8-c2jp-5v3q")
             assert vuln.get("cwes") == ("CWE-20", "CWE-502")
             assert "https://nvd.nist.gov/vuln/detail/CVE-2021-44228" in vuln.get("cve:references")
+            # SHODAN-06: CVEDB says this CVE's v3 score is v3.0, so it isn't labeled v3.1.
+            assert vuln.get("cvss:v3_0:score") == 10.0
+            assert vuln.get("cvss:v3_1:score") is None
+            assert vuln.get("cvss:v2_0:score") == 9.3
 
             # An advisory without a CVE is deconflicted by its ID.
             nodes = await core.nodes("risk:vuln:id=EUVD-2099-0001")
@@ -1724,6 +1775,16 @@ class TestShodanStormVulns(s_tests.SynTest):
 
             await core.nodes("slib.shodan.cve --cve EUVD-2099-0001")
             assert len(await core.nodes("risk:vuln:id=EUVD-2099-0001")) == 1
+
+            # An advisory with an unversioned score leaves the score props unset.
+            fake.routes[("GET", "/cvedb/euvd/EUVD-2099-0002")] = (
+                200,
+                {"euvd_id": "EUVD-2099-0002", "description": "No version.", "cvss": 9.0, "cve": None},
+            )
+            await core.nodes("slib.shodan.cve --cve EUVD-2099-0002")
+            nodes = await core.nodes("risk:vuln:id=EUVD-2099-0002")
+            assert len(nodes) == 1
+            assert not [p for p in nodes[0].props if p.startswith("cvss:")]
 
     async def test_cve_count(self):
         async with shodanSvc(self) as (core, svc, fake):

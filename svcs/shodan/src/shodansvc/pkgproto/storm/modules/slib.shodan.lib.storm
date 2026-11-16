@@ -225,7 +225,7 @@ function reverse(ip) {
 
     $ipnode = $model.ipNode($ip)
     for $hostname in $hostnames {
-        $model.dnsNode($hostname, $ip)
+        $model.revNode($ip, $hostname)
         $fqdnnode = $model.fqdnNode($hostname)
         if $fqdnnode { $nodes.append($fqdnnode) }
     }
@@ -529,6 +529,7 @@ function isStored(q) {
 //     inet:server                 :ipv4 or :ipv6
 //     inet:banner                 :server:ipv4 or :server:ipv6
 //     inet:dns:a/inet:dns:aaaa    :ipv4 / :ipv6
+//     inet:dns:rev/inet:dns:rev6  :ipv4 / :ipv6
 function hostIp(n) {
     $props = $n.props
     $ipv4 = $lib.null
@@ -546,6 +547,8 @@ function hostIp(n) {
         }
         "inet:dns:a": { $ipv4 = $props.ipv4 }
         "inet:dns:aaaa": { $ipv6 = $props.ipv6 }
+        "inet:dns:rev": { $ipv4 = $props.ipv4 }
+        "inet:dns:rev6": { $ipv6 = $props.ipv6 }
         *: {
             $lib.warn("slib.shodan: The node form {form} is not supported.", form=$n.form())
             return($lib.null)

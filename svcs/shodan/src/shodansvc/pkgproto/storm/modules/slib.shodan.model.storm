@@ -57,9 +57,19 @@ function asnNode(asn, org=$lib.null) {
     return($node)
 }
 
+// A forward DNS record (inet:dns:a/aaaa), only for real resolutions (DNS domain records, and
+// slib.shodan.dns.lookup of a hostname).
 function dnsNode(fqdn, ip, time=$lib.null) {
     if $util.isIpv6($ip) { [ inet:dns:aaaa?=($fqdn, $ip) ] }
     else { [ inet:dns:a?=($fqdn, $ip) ] }
+    return($seen($node, $time))
+}
+
+// A hostname Shodan has for an IP (inet:dns:rev/rev6). Shodan's hostnames come from reverse DNS
+// (PTR) lookups and TLS/HTTP observations, not forward resolutions, so they aren't inet:dns:a/aaaa.
+function revNode(ip, fqdn, time=$lib.null) {
+    if $util.isIpv6($ip) { [ inet:dns:rev6?=($ip, $fqdn) ] }
+    else { [ inet:dns:rev?=($ip, $fqdn) ] }
     return($seen($node, $time))
 }
 
@@ -287,6 +297,23 @@ function certNode(server, cert, time=$lib.null) {
     return($certnode)
 }
 
+// Model a TLS server's JARM (inet:ssl:jarmsample) and JA3S (inet:tls:ja3s:sample) fingerprints
+// (see shodansvc.norm.normTls). Invalid values are skipped.
+function tlsNodes(server, tls, time=$lib.null) {
+    if $tls.jarm { $jarmNode($server, $tls.jarm, $time) }
+    if $tls.ja3s { $ja3sNode($server, $tls.ja3s, $time) }
+}
+
+function jarmNode(server, jarm, time=$lib.null) {
+    [ inet:ssl:jarmsample?=($server, $jarm) ]
+    return($seen($node, $time))
+}
+
+function ja3sNode(server, ja3s, time=$lib.null) {
+    [ inet:tls:ja3s:sample?=($server, $ja3s) ]
+    return($seen($node, $time))
+}
+
 function setAsn(n, asn, org=$lib.null) {
     $asnnode = $asnNode($asn, $org)
     if ($asnnode = $lib.null) { return($n) }
@@ -359,7 +386,9 @@ function bannerNodes(b, tagPrefix=$lib.null, historical=(false)) {
 
     if $b.cert { $certNode($srv.repr(), $b.cert, $b.timestamp) }
 
-    for $hostname in $b.hostnames { $dnsNode($hostname, $b.ip, $b.timestamp) }
+    if $b.tls { $tlsNodes($srv.repr(), $b.tls, $b.timestamp) }
+
+    for $hostname in $b.hostnames { $revNode($b.ip, $hostname, $b.timestamp) }
 
     return(({"server": $srv, "banner": $bannernode, "ip": $ipnode}))
 }
@@ -563,7 +592,7 @@ function host(h, tagPrefix=$lib.null, timeline=(false)) {
 
     $applyTags($ipnode, $tagPrefix, $h.tags)
 
-    for $hostname in $h.hostnames { $dnsNode($hostname, $h.ip, $h.last_update) }
+    for $hostname in $h.hostnames { $revNode($h.ip, $hostname, $h.last_update) }
 
     for $vuln in $h.vulns { $vulnerableNode($ipnode, $vuln, $h.last_update) }
 
@@ -580,8 +609,9 @@ function host(h, tagPrefix=$lib.null, timeline=(false)) {
             if ($tl and $res) { $eventNode($tl, $b, $res) }
         }
     } else {
-        // Minified host lookups and InternetDB only give us open ports.
-        for $port in $h.ports { $serverNode($h.ip, $port, tcp, $h.last_update) }
+        // Minified host lookups and InternetDB only give us open ports, without a transport. Only
+        // the ones Shodan doesn't crawl over UDP are modeled, as TCP (see shodansvc.norm.tcpPorts).
+        for $port in $h.tcp_ports { $serverNode($h.ip, $port, tcp, $h.last_update) }
     }
 
     return($ipnode)
@@ -624,10 +654,13 @@ function setVulnProps(n, c) {
     }
     if $c.references { [ :cve:references ?= $c.references ] }
     if $c.published { [ :timeline:published ?= $c.published ] }
-    if ($c.cvss_v3 != $lib.null) { [ :cvss:v3_1:score ?= $c.cvss_v3 ] }
-    if ($c.cvss_v2 != $lib.null) { [ :cvss:v2_0:score ?= $c.cvss_v2 ] }
-    // Advisories without a CVE only have an unversioned score.
-    if ($c.cve = "" and $c.cvss != $lib.null) { [ :cvss:v3_1:score ?= $c.cvss ] }
+    // Each score goes in the prop of its CVSS version, unversioned scores are left unset (see
+    // shodansvc.norm.cvssScores).
+    // No loop here, the node is in the pipeline (see the NOTE at the top).
+    $scores = $c.cvss_scores
+    if ($scores.v2_0 != $lib.null) { [ :cvss:v2_0:score ?= $scores.v2_0 ] }
+    if ($scores.v3_0 != $lib.null) { [ :cvss:v3_0:score ?= $scores.v3_0 ] }
+    if ($scores.v3_1 != $lib.null) { [ :cvss:v3_1:score ?= $scores.v3_1 ] }
     return($n)
 }
 
