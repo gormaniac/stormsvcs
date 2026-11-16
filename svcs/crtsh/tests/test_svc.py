@@ -513,11 +513,11 @@ class TestCrtshSvc(s_tests.SynTest):
 
                 svc.db.certs = boom
                 svc.db.certsByIdentity = boom
-                with self.getLoggerStream("crtshsvc.api") as stream:
+                with self.getLoggerStream("stormlibpp.svc") as stream:
                     retn = await prox.get(10)
                 stream.seek(0)
                 logs = stream.read()
-                assert "Unexpected slib.crtsh error" in logs and "driver exploded" in logs
+                assert "Unexpected error in CrtshCellApi.get" in logs and "driver exploded" in logs
                 assert retn == {
                     "status": False,
                     "mesg": "Unexpected error: RuntimeError: driver exploded",

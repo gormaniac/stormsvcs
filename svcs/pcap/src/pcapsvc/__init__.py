@@ -1,6 +1,6 @@
 """The slib.pcap Synapse Service."""
 
-__version__ = "0.9.0"
+__version__ = "0.10.0"
 
 
 from .svc import PcapSvc

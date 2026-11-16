@@ -22,6 +22,7 @@ from typing import Any
 
 import synapse.lib.coro as s_coro
 import yaml
+from stormlibpp.svc import SvcError
 
 from . import rules as p_rules
 from . import sandbox as p_sandbox
@@ -127,12 +128,8 @@ _RULE_ERROR = re.compile(
 _ERROR_MESG = re.compile(r"^E: (?P<mod>[\w-]+): (?P<mesg>.*)$")
 
 
-class SuricataError(Exception):
+class SuricataError(SvcError):
     """Raised when Suricata can't be run, or fails for a reason other than a bad rule."""
-
-    def __init__(self, mesg: str) -> None:
-        super().__init__(mesg)
-        self.mesg = mesg
 
 
 def _errTail(text: str, lines: int = 10) -> str:

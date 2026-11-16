@@ -19,4 +19,6 @@ jobs:
     uses: ./.github/workflows/_service.yml
     with:
       service: virustotal
+      # Also run the tests in the test image built on the new production image.
+      docker_tests: true
     secrets: inherit

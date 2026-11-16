@@ -2,14 +2,20 @@
 
 import synapse.lib.cell as s_cell
 import synapse.lib.stormsvc as s_stormsvc
+from stormlibpp.svc import RetnApi
 from stormlibpp.telepath import BoolRetn, ListRetn, TelepathRetn
 from stormlibpp.utils import normver
 
 from .defs import ADMIN_PERM, PKGDEFS, SVC_EVTS, SVC_NAME, SVC_VER
 
 
-class YaraApi(s_cell.CellApi, s_stormsvc.StormSvc):
+class YaraApi(RetnApi, s_cell.CellApi, s_stormsvc.StormSvc):
     """The Telepath API endpoints for the yarastorm service.
+
+    Every method returns (or yields) a ``TelepathRetn``. Errors are returned as
+    ``status=False``, never raised, so Storm can always report them (see
+    ``stormlibpp.svc.RetnApi``). The methods are hand-written, since they check permissions
+    or call cell methods that build their own TelepathRetns.
 
     Methods that change the service's rules require the service user that the Cortex
     connects with to have the ``slib.yara.admin`` permission on the service (the service's

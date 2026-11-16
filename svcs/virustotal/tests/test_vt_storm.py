@@ -1,9 +1,9 @@
 """Pytests for the slib.vt Storm package (commands, modules, modeling, and perms)."""
 
 import pathlib
-import tomllib
 
 import synapse.tests.utils as s_tests
+from stormlibpp.testing import assertMainHelp, assertVersionsMatch
 
 from vtsvc import __version__
 from vtsvc.defs import PKGDEFS, SVC_GUID, SVC_NAME
@@ -22,13 +22,26 @@ class TestVtStormPkg(s_tests.SynTest):
     def test_versions_match(self):
         # The version lives in pyproject.toml (the image tag), __init__.py, the package yaml,
         # and the service's uv.lock entry.
-        root = pathlib.Path(__file__).parent.parent
-        with (root / "pyproject.toml").open("rb") as fd:
-            assert tomllib.load(fd)["project"]["version"] == __version__
-        assert PKGDEFS[0]["version"] == __version__
-        with (root / "uv.lock").open("rb") as fd:
-            pkgs = tomllib.load(fd)["package"]
-        assert [p["version"] for p in pkgs if p["name"] == "vtsvc"] == [__version__]
+        assert assertVersionsMatch(pathlib.Path(__file__).parents[1]) == __version__
+
+    def test_main_help(self):
+        assertMainHelp("vtsvc")
+
+    async def test_api_unexpected_error(self):
+        # An error that isn't a VtApiError or VtQuotaError reaches Storm as status=False, not as
+        # a raw exception.
+        async with fv.vtSvc(self) as (core, svc, fake):
+
+            async def boom(*args, **kwargs):
+                raise RuntimeError("boom")
+
+            svc.lookup = boom
+            async with svc.getLocalProxy() as prox:
+                retn = await prox.lookup("file", "a" * 64)
+            self.eq(
+                {"status": False, "mesg": "Unexpected error: RuntimeError: boom", "data": None},
+                retn,
+            )
 
     async def test_pkg(self):
         async with fv.vtSvc(self) as (core, svc, fake):

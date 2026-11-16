@@ -44,6 +44,7 @@ import synapse.exc as s_exc
 import synapse.lib.cell as s_cell
 import synapse.lib.coro as s_coro
 import synapse.telepath as s_telepath
+from stormlibpp.svc import SvcError
 from stormlibpp.telepath import TelepathRetn
 
 from . import communityid as p_communityid
@@ -92,12 +93,8 @@ def normSha256(valu) -> str:
     return sha256
 
 
-class PcapSvcError(Exception):
+class PcapSvcError(SvcError):
     """An error that is returned to Storm as a failed ``TelepathRetn``."""
-
-    def __init__(self, mesg: str) -> None:
-        super().__init__(mesg)
-        self.mesg = mesg
 
 
 class DecompressedSizeError(Exception):

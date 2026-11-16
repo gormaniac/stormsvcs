@@ -1,6 +1,6 @@
 [project]
 name = "malpediasvc"
-version = "0.1.0"
+version = "0.2.0"
 description = "A Malpedia Storm Service"
 readme = "README.md"
 license-files = ["LICENSE"]
@@ -11,7 +11,7 @@ authors = [
 # Stick with 3.11 until Synapse's base image changes
 requires-python = ">=3.11,<3.12"
 dependencies = [
-    "stormlibpp>=0.12.1",
+    "stormlibpp>=1.0.0",
 ]
 
 [build-system]
@@ -31,7 +31,7 @@ testpaths = [
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 # Python deprecations raised from the service's own code fail the tests. Synapse's
-# deprecations are logged instead, tests/conftest.py fails the tests for those.
+# deprecations are logged instead, the stormlibpp.testing plugin fails the tests for those.
 filterwarnings = [
     "error::DeprecationWarning:malpediasvc",
 ]

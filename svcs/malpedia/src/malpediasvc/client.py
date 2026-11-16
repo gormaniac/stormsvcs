@@ -24,6 +24,7 @@ from typing import Any
 from urllib.parse import quote
 
 import aiohttp
+from stormlibpp.svc import SvcError
 
 # The base URL of Malpedia's REST API.
 BASE_URL = "https://malpedia.caad.fkie.fraunhofer.de/api"
@@ -57,12 +58,11 @@ _REQUESTS: contextvars.ContextVar[list[int] | None] = contextvars.ContextVar(
 )
 
 
-class MalpediaApiError(Exception):
+class MalpediaApiError(SvcError):
     """Malpedia returned an error, or could not be reached."""
 
     def __init__(self, mesg: str, code: int | None = None):
         super().__init__(mesg)
-        self.mesg = mesg
         self.code = code
 
 

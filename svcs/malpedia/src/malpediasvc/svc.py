@@ -29,6 +29,7 @@ import aiohttp
 import synapse.common as s_common
 import synapse.lib.cell as s_cell
 import synapse.lib.coro as s_coro
+from stormlibpp.svc import SvcError
 
 from . import norm
 from .api import MalpediaCellApi
@@ -59,12 +60,8 @@ SHRINK_MIN = 20
 _GUARDED = ("news", "actor", "family", "yara")
 
 
-class MalpediaSvcError(Exception):
-    """A service operation failed."""
-
-    def __init__(self, mesg: str):
-        super().__init__(mesg)
-        self.mesg = mesg
+class MalpediaSvcError(SvcError):
+    """A service operation failed. Its ``mesg`` is returned to Storm."""
 
 
 def _today() -> datetime.date:

@@ -1,69 +1,49 @@
 """The CellApi implementation for slib.vt."""
 
-from collections.abc import Awaitable
-
 import synapse.lib.cell as s_cell
 import synapse.lib.stormsvc as s_stormsvc
-from stormlibpp.telepath import BoolRetn, TelepathRetn
+from stormlibpp.svc import RetnApi
+from stormlibpp.telepath import BoolRetn
 from stormlibpp.utils import normver
 
 from .client import VtApiError
 from .defs import PKGDEFS, SVC_EVTS, SVC_NAME, SVC_VER
 from .quota import VtQuotaError
 
-# The errors a call can fail with, which are returned to Storm instead of raised.
-ERRORS = (VtApiError, VtQuotaError)
 
-# VtSvc methods that are exposed over Telepath as-is, wrapped in a TelepathRetn.
-# See VtSvc for each method's arguments and the VirusTotal endpoint it calls.
-RETN_METHS = (
-    "rawRequest",
-    "quota",
-    "getObject",
-    "lookup",
-    "rels",
-    "getRelated",
-    "related",
-    "comments",
-    "addComment",
-    "addVote",
-    "rescan",
-    "submitUrl",
-    "submitFile",
-    "analysis",
-    "waitAnalysis",
-    "behaviour",
-    "search",
-    "threatCategories",
-    "attackTechnique",
-)
-
-
-async def _retn(coro: Awaitable) -> TelepathRetn:
-    """Await a VtSvc call and wrap the result (or error) in a TelepathRetn."""
-
-    try:
-        data = await coro
-    except ERRORS as err:
-        return TelepathRetn(status=False, mesg=err.mesg, data=None)
-    return TelepathRetn(status=True, mesg="", data=data)
-
-
-def _retnMeth(name: str):
-    async def meth(self, *args, **kwargs) -> TelepathRetn:
-        return await _retn(getattr(self.cell, name)(*args, **kwargs))
-
-    meth.__name__ = name
-    meth.__qualname__ = f"VtCellApi.{name}"
-    meth.__doc__ = f"Call VtSvc.{name}() and return a TelepathRetn."
-    return meth
-
-
-class VtCellApi(s_cell.CellApi, s_stormsvc.StormSvc):
+class VtCellApi(RetnApi, s_cell.CellApi, s_stormsvc.StormSvc):
     """The Telepath API endpoints for the slib.vt service.
 
-    Every method returns a ``TelepathRetn``.
+    Every method returns a ``TelepathRetn``. Errors are returned as ``status=False``, never
+    raised, so Storm can always report them (see ``stormlibpp.svc.RetnApi``).
     """
+
+    # VtSvc methods exposed over Telepath as-is, wrapped in a TelepathRetn.
+    # See VtSvc for each method's arguments and the VirusTotal endpoint it calls.
+    RETN_METHS = (
+        "rawRequest",
+        "quota",
+        "getObject",
+        "lookup",
+        "rels",
+        "getRelated",
+        "related",
+        "comments",
+        "addComment",
+        "addVote",
+        "rescan",
+        "submitUrl",
+        "submitFile",
+        "analysis",
+        "waitAnalysis",
+        "behaviour",
+        "search",
+        "threatCategories",
+        "attackTechnique",
+    )
+    # Errors returned to Storm with their own message. Anything else is logged and returned
+    # as an "Unexpected error".
+    RETN_ERRORS = (VtApiError, VtQuotaError)
 
     _storm_svc_name = SVC_NAME
     _storm_svc_vers = normver(SVC_VER)[1]
@@ -86,7 +66,3 @@ class VtCellApi(s_cell.CellApi, s_stormsvc.StormSvc):
         """Whether the service enforces the Public API's limits (vt:community)."""
 
         return BoolRetn(status=True, mesg="", data=self.cell.community)
-
-
-for _name in RETN_METHS:
-    setattr(VtCellApi, _name, _retnMeth(_name))

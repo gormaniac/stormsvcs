@@ -3,11 +3,11 @@
 import base64
 import hashlib
 import pathlib
-import tomllib
 from unittest import mock
 
 import synapse.exc as s_exc
 import synapse.tests.utils as s_tests
+from stormlibpp.testing import assertMainHelp, assertVersionsMatch
 
 from shodansvc import __version__, norm
 from shodansvc.defs import PKGDEFS, SVC_GUID, SVC_NAME
@@ -45,11 +45,35 @@ class TestShodanStormPkg(s_tests.SynTest):
     """The package loads and the service registers with the Cortex."""
 
     def test_versions_match(self):
-        # The version lives in pyproject.toml (the image tag), __init__.py, and the package yaml.
-        pyproject = pathlib.Path(__file__).parent.parent / "pyproject.toml"
-        with pyproject.open("rb") as fd:
-            assert tomllib.load(fd)["project"]["version"] == __version__
-        assert PKGDEFS[0]["version"] == __version__
+        # The version lives in pyproject.toml (the image tag), __init__.py, the package yaml,
+        # and the service's uv.lock entry.
+        assert assertVersionsMatch(pathlib.Path(__file__).parents[1]) == __version__
+
+    def test_main_help(self):
+        assertMainHelp("shodansvc")
+
+    async def test_api_unexpected_error(self):
+        # An error that isn't a ShodanApiError reaches Storm as status=False, not as a raw
+        # exception, for both plain calls and generators.
+        async with shodanSvc(self) as (core, svc, fake):
+
+            async def boom(*args, **kwargs):
+                raise RuntimeError("boom")
+
+            async def boomGenr(*args, **kwargs):
+                raise RuntimeError("boom")
+                yield  # pragma: no cover
+
+            svc.host = boom
+            svc.stream = boomGenr
+            mesg = {"status": False, "mesg": "Unexpected error: RuntimeError: boom", "data": None}
+            async with svc.getLocalProxy() as prox:
+                with self.getLoggerStream("stormlibpp.svc") as stream:
+                    retn = await prox.host("1.2.3.4")
+                stream.seek(0)
+                assert "Unexpected error in ShodanCellApi.host" in stream.read()
+                self.eq(mesg, retn)
+                self.eq([mesg], [i async for i in prox.stream("banners", limit=1)])
 
     async def test_pkg(self):
         assert len(CMDS) == 32

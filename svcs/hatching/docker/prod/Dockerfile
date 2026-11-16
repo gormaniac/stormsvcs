@@ -1,4 +1,7 @@
-FROM ghcr.io/gormaniac/stormsvcs/base:latest
+# The base image to build on; the default is the published one. Override it (--build-arg) to
+# build against a base image that isn't published yet.
+ARG BASE_IMAGE=ghcr.io/gormaniac/stormsvcs/base:latest
+FROM ${BASE_IMAGE}
 
 # Copy all the service files into a build dir.
 COPY pyproject.toml /opt/stormsvcs/hatching/pyproject.toml

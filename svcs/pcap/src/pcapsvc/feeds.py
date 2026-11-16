@@ -23,16 +23,13 @@ from typing import Any, TypedDict
 
 import aiohttp
 import synapse.common as s_common
+from stormlibpp.svc import SvcError
 
 from . import rules as s_rules
 
 
-class FeedError(Exception):
+class FeedError(SvcError):
     """Raised when a feed can't be downloaded or unpacked."""
-
-    def __init__(self, mesg: str) -> None:
-        super().__init__(mesg)
-        self.mesg = mesg
 
 
 class FeedDef(TypedDict):

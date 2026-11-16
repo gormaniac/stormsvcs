@@ -120,6 +120,28 @@ def isNotFound(status: str | None) -> bool:
     return status.startswith(("no_result", "unknown_")) or status.endswith("not_found")
 
 
+def scrubKey(text: str, apikey: str | None) -> str:
+    """Replace an Auth-Key in ``text``, raw or URL-quoted, with ``<auth-key>``.
+
+    The export APIs take the key in the URL path, and abuse.ch's error pages and HTTP
+    libraries' errors can echo the URL back.
+    """
+
+    if not apikey:
+        return text
+    for valu in sorted({apikey, quote(apikey, safe="")}, key=len, reverse=True):
+        text = text.replace(valu, "<auth-key>")
+    return text
+
+
+def scrubError(err: AbuseChApiError, apikey: str | None) -> AbuseChApiError:
+    """Scrub an Auth-Key out of an ``AbuseChApiError``'s message, in place, and return it."""
+
+    err.mesg = scrubKey(err.mesg, apikey)
+    err.args = (err.mesg, *err.args[1:])
+    return err
+
+
 def checkStatus(base: str, code: int, data: Any, text: str, notfound: bool) -> bool:
     """Raise for an error response. Returns True if the response means "not found".
 
@@ -358,7 +380,7 @@ class AbuseChClient:
                     ctype = resp.headers.get("Content-Type", "")
             except (TimeoutError, aiohttp.ClientError) as err:
                 # Some errors include the URL, which has the Auth-Key for the exports.
-                mesg = str(err).replace(apikey, "<auth-key>") if apikey else str(err)
+                mesg = scrubKey(str(err), apikey)
                 raise AbuseChApiError(f"Unable to connect to abuse.ch ({base}): {mesg}") from err
 
             if code in (429, 503) and attempt < MAX_RETRIES:
@@ -366,7 +388,9 @@ class AbuseChClient:
                 continue
             return code, body, ctype
 
-        raise AbuseChApiError(f"Gave up on {url} after {MAX_RETRIES} retries")  # pragma: no cover
+        raise AbuseChApiError(  # pragma: no cover
+            scrubKey(f"Gave up on {url} after {MAX_RETRIES} retries", apikey)
+        )
 
     async def query(
         self,
@@ -411,8 +435,11 @@ class AbuseChClient:
             if code < 400:
                 raise AbuseChApiError(f"Unable to parse the JSON response from {base}", code=code)
 
-        if checkStatus(base, code, data, text, notfound):
-            return None
+        try:
+            if checkStatus(base, code, data, text, notfound):
+                return None
+        except AbuseChApiError as err:
+            raise scrubError(err, apikey) from None
         return data
 
     async def stream(
@@ -444,15 +471,18 @@ class AbuseChClient:
                         data = json.loads(body) if body.strip() else None
                     except ValueError:
                         pass
-                    checkStatus(
-                        base, resp.status, data, body.decode("utf-8", "replace"), notfound=False
-                    )
+                    try:
+                        checkStatus(
+                            base, resp.status, data, body.decode("utf-8", "replace"), notfound=False
+                        )
+                    except AbuseChApiError as err:
+                        raise scrubError(err, apikey) from None
                     yield body
                     return
                 async for byts in resp.content.iter_chunked(chunk):
                     yield byts
         except (TimeoutError, aiohttp.ClientError) as err:
-            mesg = str(err).replace(apikey, "<auth-key>") if apikey else str(err)
+            mesg = scrubKey(str(err), apikey)
             raise AbuseChApiError(f"Unable to download from abuse.ch ({base}): {mesg}") from err
 
     async def download(self, base: str, path: str, fd: Any, *, apikey: str | None = None) -> None:
@@ -490,6 +520,9 @@ class AbuseChClient:
             except ValueError:
                 data = None
 
-        if checkStatus(base, code, data, body.decode("utf-8", "replace"), notfound=True):
-            return b"", ctype
+        try:
+            if checkStatus(base, code, data, body.decode("utf-8", "replace"), notfound=True):
+                return b"", ctype
+        except AbuseChApiError as err:
+            raise scrubError(err, apikey) from None
         return body, ctype

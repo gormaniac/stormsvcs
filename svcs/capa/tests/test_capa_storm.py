@@ -1,9 +1,9 @@
 """Pytests for the slib.capa Storm package (commands, modules, modeling, the rule import, perms)."""
 
 import pathlib
-import tomllib
 
 import synapse.tests.utils as s_tests
+from stormlibpp.testing import assertMainHelp, assertVersionsMatch
 
 from capasvc import __version__
 from capasvc.defs import PKGDEFS, SVC_GUID, SVC_NAME
@@ -31,10 +31,39 @@ def leafTags(node) -> set[str]:
 
 class TestCapaStormPkg(s_tests.SynTest):
     def test_versions_match(self):
-        pyproject = pathlib.Path(__file__).parent.parent / "pyproject.toml"
-        with pyproject.open("rb") as fd:
-            assert tomllib.load(fd)["project"]["version"] == __version__
-        assert PKGDEFS[0]["version"] == __version__
+        # The version lives in pyproject.toml (the image tag), __init__.py, the package yaml,
+        # and the service's uv.lock entry.
+        assert assertVersionsMatch(pathlib.Path(__file__).parents[1]) == __version__
+
+    def test_main_help(self):
+        assertMainHelp("capasvc")
+
+    async def test_api_unexpected_error(self):
+        # An error that isn't a CapaSvcError or CapaRulesError reaches Storm as status=False,
+        # not as a raw exception.
+        async with capaSvc(self) as (core, svc, axon):
+
+            async def boom(*args, **kwargs):
+                raise RuntimeError("boom")
+
+            async def boomgenr(*args, **kwargs):
+                raise RuntimeError("boom")
+                yield  # pragma: no cover
+
+            svc.rulesInfo = boom
+            svc.rules = boomgenr
+            unexpected = {
+                "status": False,
+                "mesg": "Unexpected error: RuntimeError: boom",
+                "data": None,
+            }
+            async with svc.getLocalProxy() as prox:
+                with self.getLoggerStream("stormlibpp.svc") as stream:
+                    self.eq(unexpected, await prox.rulesInfo())
+                stream.seek(0)
+                self.isin("Unexpected error in CapaCellApi.rulesInfo.", stream.read())
+
+                self.eq([unexpected], [r async for r in prox.rules()])
 
     async def test_pkg(self):
         async with capaSvc(self) as (core, svc, axon):

@@ -37,6 +37,14 @@ on:
         required: false
         type: boolean
         default: false
+      storm_lint:
+        description: >-
+          How Synapse's Storm linter treats the service's Storm code: report (default) shows its
+          findings without failing the job, block fails the job on any finding, off skips it.
+          Move a service to block once it lints clean, so it stays clean.
+        required: false
+        type: string
+        default: report
 
 permissions:
   contents: read
@@ -87,6 +95,18 @@ jobs:
 
       - name: Install the project
         run: uv sync --locked --all-extras --dev
+
+      - name: Storm lint
+        # Synapse's Storm linter (synapse>=2.256.0) over every .storm file under src/. Its
+        # settings come from a [tool.stormlint] table in the service's pyproject.toml, if any.
+        # Run `uv run python -m synapse.tools.storm.lint src` locally.
+        if: inputs.storm_lint != 'off'
+        continue-on-error: ${{ inputs.storm_lint != 'block' }}
+        env:
+          MODE: ${{ inputs.storm_lint }}
+        run: |
+          case "$MODE" in report|block) ;; *) echo "::error::storm_lint must be report, block or off, not $MODE"; exit 2;; esac
+          uv run python -m synapse.tools.storm.lint src
 
       - name: Run tests
         run: uv run pytest tests
