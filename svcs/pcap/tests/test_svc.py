@@ -4,10 +4,9 @@
 import gzip
 import hashlib
 import pathlib
-import tomllib
 
 import synapse.tests.utils as s_tests
-import yaml
+from stormlibpp.testing import assertMainHelp, assertVersionsMatch
 
 import pcapsvc
 from pcapsvc import PcapSvc
@@ -83,14 +82,46 @@ class TestPcapSvc(s_tests.SynTest):
             "Copy README.md to src/pcapsvc/pkgproto/README.md"
 
     def test_versions_match(self):
-        pyproj = tomllib.loads((SVCDIR / "pyproject.toml").read_text())
-        pkg = yaml.safe_load((SVCDIR / "src/pcapsvc/pkgproto/slib.pcap.yaml").read_text())
-        lock = tomllib.loads((SVCDIR / "uv.lock").read_text())
-        locked = [p["version"] for p in lock["package"] if p["name"] == "pcapsvc"]
+        # The version lives in pyproject.toml (the image tag), __init__.py, the package yaml,
+        # and the service's uv.lock entry.
+        assert assertVersionsMatch(SVCDIR) == pcapsvc.__version__
 
-        assert pyproj["project"]["version"] == pcapsvc.__version__
-        assert pkg["version"] == pcapsvc.__version__
-        assert locked == [pcapsvc.__version__]
+    def test_main_help(self):
+        assertMainHelp("pcapsvc")
+
+    async def test_api_unexpected_error(self):
+        # An error that isn't one of the service's own reaches Storm as status=False, not as a
+        # raw exception, from wrapped methods, wrapped generators, and hand-written methods.
+        async with self.getTestCell(PcapSvc, conf=NOENGINES) as svc:
+
+            async def boom(*args, **kwargs):
+                raise RuntimeError("boom")
+
+            async def boomGenr(*args, **kwargs):
+                raise RuntimeError("boom")
+                yield None
+
+            def boomSync(*args, **kwargs):
+                raise RuntimeError("boom")
+
+            svc.status = boom
+            svc.feedChanges = boomGenr
+            svc.flows = boomGenr
+            svc.checkNetVars = boomSync
+            prox = SvcProx(svc)
+            want = {"status": False, "mesg": "Unexpected error: RuntimeError: boom", "data": None}
+            with self.getLoggerStream("stormlibpp.svc") as stream:
+                self.eq(want, await prox.call("status"))
+            stream.seek(0)
+            assert "Unexpected error in PcapCellApi.status." in stream.read()
+            async with svc.getLocalProxy() as tprox:
+                self.eq([want], await collect(tprox.feedChanges("x", "0" * 32)))
+            self.eq([want], await collect(prox.flows("0" * 64)))
+            self.eq(want, await prox.call("checkNetVars", {}))
+
+            # The service's own errors still keep their message.
+            retn = await prox.call("feedDel", "nope")
+            self.eq({"status": False, "mesg": "Unknown feed: nope", "data": None}, retn)
 
     async def test_svc_starts(self):
         async with self.getTestCoreProxSvc(PcapSvc) as (core, _, svc):

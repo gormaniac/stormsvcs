@@ -1,5 +1,5 @@
 name: slib.bgphe
-version: 0.1.0
+version: 0.2.0
 guid: 48c4db1f7420428e87085030a45b3205
 
 synapse_version: ">=2.234.0,<3.0.0"

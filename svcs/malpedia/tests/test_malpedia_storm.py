@@ -2,9 +2,9 @@
 
 import asyncio
 import pathlib
-import tomllib
 
 import synapse.tests.utils as s_tests
+from stormlibpp.testing import assertMainHelp, assertVersionsMatch
 
 from malpediasvc import __version__
 from malpediasvc.defs import PKGDEFS, SVC_GUID, SVC_NAME
@@ -42,13 +42,32 @@ class TestMalpediaStormPkg(s_tests.SynTest):
     def test_versions_match(self):
         # The version lives in pyproject.toml (the image tag), __init__.py, the package yaml,
         # and the service's uv.lock entry.
-        root = pathlib.Path(__file__).parent.parent
-        with (root / "pyproject.toml").open("rb") as fd:
-            assert tomllib.load(fd)["project"]["version"] == __version__
-        assert PKGDEFS[0]["version"] == __version__
-        with (root / "uv.lock").open("rb") as fd:
-            pkgs = tomllib.load(fd)["package"]
-        assert [p["version"] for p in pkgs if p["name"] == "malpediasvc"] == [__version__]
+        assert assertVersionsMatch(pathlib.Path(__file__).parents[1]) == __version__
+
+    def test_main_help(self):
+        assertMainHelp("malpediasvc")
+
+    async def test_api_unexpected_error(self):
+        # An error that isn't a MalpediaApiError or MalpediaSvcError reaches Storm as
+        # status=False, not as a raw exception.
+        async with fm.malpediaSvc(self) as (core, svc, fake):
+
+            async def boom(*args, **kwargs):
+                raise RuntimeError("boom")
+
+            async def boomGenr(*args, **kwargs):
+                raise RuntimeError("boom")
+                yield  # pragma: no cover
+
+            svc.status = boom
+            svc.changes = boomGenr
+            errretn = {"status": False, "mesg": "Unexpected error: RuntimeError: boom", "data": None}
+            async with svc.getLocalProxy() as prox:
+                with self.getLoggerStream("stormlibpp.svc") as stream:
+                    self.eq(errretn, await prox.status())
+                stream.seek(0)
+                assert "Unexpected error in MalpediaCellApi.status." in stream.read()
+                self.eq([errretn], [b async for b in prox.changes("a" * 32, "actor")])
 
     async def test_pkg(self):
         assert len(CMDS) == 7

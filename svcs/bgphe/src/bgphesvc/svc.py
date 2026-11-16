@@ -18,6 +18,7 @@ from collections.abc import AsyncIterator
 
 import aiohttp
 import synapse.lib.cell as s_cell
+from stormlibpp.svc import SvcError
 
 from . import certs, norm, rdap, whois
 from .api import BgpHeCellApi
@@ -29,12 +30,8 @@ MAX_CERTS = 10_000
 """The most certificates a single certificate lookup returns (50 pages)."""
 
 
-class BgpHeSvcError(Exception):
-    """A service operation failed."""
-
-    def __init__(self, mesg: str):
-        super().__init__(mesg)
-        self.mesg = mesg
+class BgpHeSvcError(SvcError):
+    """A service operation failed. Its ``mesg`` is returned to Storm."""
 
 
 def _now() -> int:

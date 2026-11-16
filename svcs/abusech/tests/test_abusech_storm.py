@@ -2,11 +2,12 @@
 
 import json
 import pathlib
-import tomllib
 
 import synapse.tests.utils as s_tests
+from stormlibpp.testing import assertMainHelp, assertVersionsMatch
 
 from abusechsvc import __version__
+from abusechsvc.client import AbuseChApiError
 from abusechsvc.defs import EXT_PROPS, PKGDEFS, SOURCES, SVC_NAME
 
 from . import fakeabusech as fd
@@ -38,10 +39,64 @@ class TestStormPkg(s_tests.SynTest):
     """The package loads and the service registers with the Cortex."""
 
     def test_versions_match(self):
-        pyproject = pathlib.Path(__file__).parent.parent / "pyproject.toml"
-        with pyproject.open("rb") as fd_:
-            assert tomllib.load(fd_)["project"]["version"] == __version__
-        assert PKGDEFS[0]["version"] == __version__
+        # The version lives in pyproject.toml (the image tag), __init__.py, the package yaml,
+        # and the service's uv.lock entry.
+        assert assertVersionsMatch(pathlib.Path(__file__).parents[1]) == __version__
+
+    def test_main_help(self):
+        assertMainHelp("abusechsvc")
+
+    async def test_api_unexpected_error(self):
+        # An error that isn't an AbuseChApiError reaches Storm as status=False, not as a raw
+        # exception.
+        async with abusechSvc(self) as (core, svc, fake):
+
+            async def boom(*args, **kwargs):
+                raise RuntimeError("boom")
+
+            svc.bazaarInfo = boom
+            async with svc.getLocalProxy() as prox:
+                retn = await prox.bazaarInfo(SHA256)
+            self.eq(
+                {"status": False, "mesg": "Unexpected error: RuntimeError: boom", "data": None},
+                retn,
+            )
+
+    async def test_api_redacts_apikey(self):
+        # The service's Auth-Keys never reach Storm in an error message (ABUSE-PY-02), ex. from
+        # an HTTP error that includes an export's URL, which has the key in its path.
+        async with abusechSvc(self, apikey="confkey/123") as (core, svc, fake):
+
+            async def boom(*args, **kwargs):
+                raise RuntimeError(f"bad url http://x/{svc.getApiKey()}/a and confkey%2F123")
+
+            async def apierr(*args, **kwargs):
+                raise AbuseChApiError(f"Unable to connect to abuse.ch: {svc.getApiKey()}")
+
+            svc.bazaarInfo = boom
+            svc.urlhausUrl = apierr
+            async with svc.getLocalProxy() as prox:
+                retn = await prox.bazaarInfo(SHA256)
+                self.eq(
+                    "Unexpected error: RuntimeError: bad url http://x/<redacted>/a and <redacted>",
+                    retn["mesg"],
+                )
+
+                # The stored key, which takes over from the configured one.
+                await prox.setApiKey("storedkey")
+                retn = await prox.urlhausUrl(url="http://a")
+                self.eq("Unable to connect to abuse.ch: <redacted>", retn["mesg"])
+                retn = await prox.bazaarInfo(SHA256)
+                assert "storedkey" not in retn["mesg"] and "<redacted>" in retn["mesg"]
+
+            # Messages that don't have a key are left alone.
+            async def plain(*args, **kwargs):
+                raise AbuseChApiError("abuse.ch bazaar: hash_not_found")
+
+            svc.bazaarInfo = plain
+            async with svc.getLocalProxy() as prox:
+                retn = await prox.bazaarInfo(SHA256)
+            self.eq("abuse.ch bazaar: hash_not_found", retn["mesg"])
 
     async def test_pkg(self):
         assert len(CMDS) == 32

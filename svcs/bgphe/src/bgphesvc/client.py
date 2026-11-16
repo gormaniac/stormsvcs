@@ -33,6 +33,7 @@ from typing import Any
 from urllib.parse import quote, urlencode
 
 import aiohttp
+from stormlibpp.svc import SvcError
 
 BASE_URL = "https://bgp.he.net"
 """The base URL of bgp.he.net."""
@@ -60,12 +61,11 @@ CERT_PAGE_SIZE = 200
 """The number of certificates in each page of ``/certs/api/domain`` (fixed by bgp.he.net)."""
 
 
-class BgpHeApiError(Exception):
+class BgpHeApiError(SvcError):
     """bgp.he.net returned an error, or could not be reached."""
 
     def __init__(self, mesg: str, code: int | None = None):
         super().__init__(mesg)
-        self.mesg = mesg
         self.code = code
 
 

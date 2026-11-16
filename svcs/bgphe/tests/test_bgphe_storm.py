@@ -3,10 +3,10 @@
 import base64
 import hashlib
 import pathlib
-import tomllib
 
 import synapse.lib.time as s_time
 import synapse.tests.utils as s_tests
+from stormlibpp.testing import assertMainHelp, assertVersionsMatch
 
 from bgphesvc import __version__, norm
 from bgphesvc.defs import PKGDEFS, SVC_GUID, SVC_NAME
@@ -35,13 +35,10 @@ class TestBgpHeStormPkg(s_tests.SynTest):
     def test_versions_match(self):
         # The version lives in pyproject.toml (the image tag), __init__.py, the package yaml,
         # and the service's uv.lock entry.
-        root = pathlib.Path(__file__).parent.parent
-        with (root / "pyproject.toml").open("rb") as fd:
-            assert tomllib.load(fd)["project"]["version"] == __version__
-        assert PKGDEFS[0]["version"] == __version__
-        with (root / "uv.lock").open("rb") as fd:
-            pkgs = tomllib.load(fd)["package"]
-        assert [p["version"] for p in pkgs if p["name"] == "bgphesvc"] == [__version__]
+        assert assertVersionsMatch(pathlib.Path(__file__).parents[1]) == __version__
+
+    def test_main_help(self):
+        assertMainHelp("bgphesvc")
 
     async def test_pkg(self):
         assert len(CMDS) == 6

@@ -2,15 +2,14 @@
 
 import copy
 import pathlib
-import tomllib
 from unittest import mock
 
 import synapse.tests.utils as s_tests
 from pyhatching import testing as ft
+from stormlibpp.testing import assertMainHelp, assertVersionsMatch
 
 import hatchingsvc.svc as svc_mod
 from hatchingsvc import __version__, norm
-from hatchingsvc.defs import PKGDEFS
 from hatchingsvc.errors import HatchingApiError
 
 from .helpers import hatchingSvc
@@ -24,13 +23,12 @@ async def _running():
 class TestVersions(s_tests.SynTest):
 
     def test_versions_match(self):
-        root = pathlib.Path(__file__).parent.parent
-        with (root / "pyproject.toml").open("rb") as fd:
-            assert tomllib.load(fd)["project"]["version"] == __version__
-        assert PKGDEFS[0]["version"] == __version__
-        with (root / "uv.lock").open("rb") as fd:
-            pkgs = {p["name"]: p for p in tomllib.load(fd)["package"]}
-        assert pkgs["hatchingsvc"]["version"] == __version__
+        # The version lives in pyproject.toml (the image tag), __init__.py, the package yaml,
+        # and the service's uv.lock entry.
+        assert assertVersionsMatch(pathlib.Path(__file__).parents[1]) == __version__
+
+    def test_main_help(self):
+        assertMainHelp("hatchingsvc")
 
 
 class TestNorm(s_tests.SynTest):
@@ -368,11 +366,18 @@ class TestHatchingSvc(s_tests.SynTest):
                     raise AttributeError("'NoneType' object has no attribute 'lower'")
 
                 svc.sample = boom
-                with self.getLoggerStream("hatchingsvc.api") as stream:
+                with self.getLoggerStream("stormlibpp.svc") as stream:
                     retn = await prox.sample(ft.SAMPLE_ID)
                 stream.seek(0)
-                assert "Unexpected slib.hatching error" in stream.read()
-                assert not retn["status"] and retn["mesg"].startswith("Unexpected error (AttributeError)")
+                assert "Unexpected error in HatchingCellApi.sample." in stream.read()
+                self.eq(
+                    {
+                        "status": False,
+                        "mesg": "Unexpected error: AttributeError: 'NoneType' object has no attribute 'lower'",
+                        "data": None,
+                    },
+                    retn,
+                )
                 svc.sample = orig
 
                 orig = svc.downloadSample
@@ -383,7 +388,7 @@ class TestHatchingSvc(s_tests.SynTest):
 
                 svc.downloadSample = boomgenr
                 items = [r async for r in prox.downloadSample(ft.SAMPLE_ID)]
-                assert len(items) == 1 and items[0]["mesg"].startswith("Unexpected error (KeyError)")
+                assert len(items) == 1 and items[0]["mesg"] == "Unexpected error: KeyError: 'x'"
                 svc.downloadSample = orig
 
                 assert (await prox.maxSize())["data"] == 104857600

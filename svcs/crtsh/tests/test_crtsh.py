@@ -2,13 +2,13 @@
 
 import datetime
 import pathlib
-import tomllib
 
 import synapse.tests.utils as s_tests
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
+from stormlibpp.testing import assertMainHelp, assertVersionsMatch
 
 from crtshsvc import CrtshSvc, __version__, norm
 from crtshsvc.defs import PKGDEFS, SVC_GUID, SVC_NAME
@@ -75,10 +75,12 @@ class TestCrtshNorm:
 
 class TestCrtshStormPkg(s_tests.SynTest):
     def test_versions_match(self):
-        pyproject = pathlib.Path(__file__).parent.parent / "pyproject.toml"
-        with pyproject.open("rb") as fd:
-            assert tomllib.load(fd)["project"]["version"] == __version__
-        assert PKGDEFS[0]["version"] == __version__
+        # The version lives in pyproject.toml (the image tag), __init__.py, the package yaml,
+        # and the service's uv.lock entry.
+        assert assertVersionsMatch(pathlib.Path(__file__).parents[1]) == __version__
+
+    def test_main_help(self):
+        assertMainHelp("crtshsvc")
 
     async def test_pkg(self):
         async with self.getTestCoreProxSvc(CrtshSvc) as (core, prox, svc):

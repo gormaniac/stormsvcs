@@ -1,6 +1,6 @@
 [project]
 name = "crtshsvc"
-version = "0.3.0"
+version = "0.4.0"
 description = "A crt.sh Storm Service backed by the crt.sh certwatch database"
 readme = "README.md"
 license-files = ["LICENSE"]
@@ -13,7 +13,7 @@ requires-python = ">=3.11,<3.12"
 dependencies = [
     "asyncpg>=0.30.0",
     "cryptography>=43.0.0",
-    "stormlibpp>=0.12.1",
+    "stormlibpp>=1.0.0",
 ]
 
 [build-system]
@@ -34,7 +34,7 @@ testpaths = [
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 # Python deprecations raised from the service's own code fail the tests. Synapse's
-# deprecations are logged instead, tests/conftest.py fails the tests for those.
+# deprecations are logged instead, the stormlibpp.testing plugin fails the tests for those.
 filterwarnings = [
     "error::DeprecationWarning:crtshsvc",
 ]

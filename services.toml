@@ -52,3 +52,25 @@ workflow = ".github/workflows/virustotal.yml"
 # name = "Report Ingest"
 # src = "svcs/report-ingest/"
 # workflow = ".github/workflows/report-ingest.yml"
+
+# The service contract scripts/check_svcs.py checks every service against. Each rule there is
+# reported for every service; a rule listed in enforce also fails CI. Move a rule into enforce
+# once every service passes it, so a service that regresses (or a new one) can't merge.
+[contract]
+# The Synapse every service's uv.lock must have, and the lowest StormLib++ it may have.
+synapse = "2.256.0"
+stormlibpp = "1.0.0"
+enforce = [
+    "registered",
+    "workflow-paths",
+    "versions",
+    "pins",
+    "pkg-keys",
+    "pytest-warnings",
+    "docker-base-arg",
+    "docker-tests",
+    "test-plugin",
+    "version-test",
+    "main-test",
+    "retn-api",
+]
