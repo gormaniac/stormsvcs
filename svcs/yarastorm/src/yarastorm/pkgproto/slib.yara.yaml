@@ -1,8 +1,9 @@
 name: slib.yara
-version: 0.5.1
+version: 0.6.0
 guid: f418c8589b13201801b9a4bf2b4f7842
 
-synapse_version: ">=2.145.0,<3.0.0"
+# Only tested against the Synapse version in uv.lock.
+synapse_version: ">=2.248.0,<3.0.0"
 
 genopts:
     dotstorm: true
@@ -12,6 +13,11 @@ author:
   name: John Gorman
 
 desc: Dispatch Yara scans on files in an Axon.
+
+perms:
+  - perm: [ slib, yara, admin ]
+    gate: cortex
+    desc: Enable, disable, and sync the Yara rules that the slib.yara service scans with.
 
 modules:
   - name: slib.yara.lib
@@ -23,16 +29,77 @@ modules:
 commands:
   - name: slib.yara.scan
     descr: |
-      Scan files with Yara.
+      Scan file:bytes nodes with every Yara rule saved in the slib.yara service.
+
+      The file's bytes are pulled from the service's Axon by :sha256, so file:bytes
+      nodes without a :sha256 can't be scanned. Each match is modeled as an
+      it:app:yara:match node, linked to the service's meta:source with a seen edge.
+
+      Examples:
+
+        // Scan a file
+        file:bytes=sha256:... | slib.yara.scan
+
+      With $lib.debug set, the rules that didn't match the file are also printed.
+    cmdinputs:
+      - form: file:bytes
 
   - name: slib.yara.check
     descr: |
       Check if a Yara rule is valid and print compile errors, if any.
 
+      The rule is only compiled, it is not saved to the service.
+
+      Examples:
+
+        it:app:yara:rule:name=myrule | slib.yara.check
+    cmdinputs:
+      - form: it:app:yara:rule
+
   - name: slib.yara.enable
     descr: |
-      Enable yara rules in the scanning system.
+      Enable Yara rules in the scanning system.
+
+      Compiles the rule's :text into the slib.yara service, so scans use it, and sets
+      :enabled=(true). A rule that doesn't compile is not enabled. Run this again after
+      changing a rule's :text so the service compiles the new version.
+
+      Requires the slib.yara.admin permission.
+
+      Examples:
+
+        it:app:yara:rule:name=myrule | slib.yara.enable
+    cmdinputs:
+      - form: it:app:yara:rule
 
   - name: slib.yara.disable
     descr: |
-      Disable yara rules in the scanning system.
+      Disable Yara rules in the scanning system.
+
+      Removes the rule from the slib.yara service, so scans skip it, and sets
+      :enabled=(false).
+
+      Requires the slib.yara.admin permission.
+
+      Examples:
+
+        it:app:yara:rule:name=myrule | slib.yara.disable
+    cmdinputs:
+      - form: it:app:yara:rule
+
+  - name: slib.yara.sync
+    descr: |
+      Sync the slib.yara service's rules with the Cortex.
+
+      Compiles every it:app:yara:rule:enabled=(true) node into the service (picking up
+      any :text changes) and removes rules from the service that aren't enabled in the
+      Cortex. Run this after enabling rules by setting :enabled directly, after editing
+      enabled rules' :text, or after the service's rule_dir was reset.
+
+      Enabled rules that fail to compile are reported and left as they are in the service.
+
+      Requires the slib.yara.admin permission.
+
+      Examples:
+
+        slib.yara.sync

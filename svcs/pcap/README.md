@@ -42,8 +42,12 @@ docker run -d --name slib-pcap \
     -v /srv/slib-pcap:/vertex/storage \
     -e SYN_PCAPSVC_AXON_URL="aha://axon..." \
     -p 27492:27492 \
+    --pids-limit 1024 \
     ghcr.io/gormaniac/stormsvcs/pcap:latest
 ```
+
+`--pids-limit` caps the processes of the whole container, a backstop for the engines' own
+`nproc` limit (see [Sandbox](#sandbox)).
 
 ```
 service.add slib.pcap tcp://<user>:<passwd>@<host>:27492/*
@@ -68,7 +72,10 @@ capture had files that couldn't be saved.
 
 Captures, extracted files, and engine output are spooled to a temp directory under the service's
 storage directory (not held in memory) and deleted once a capture is analyzed. `pcap:workers`
-captures are analyzed at once, the rest wait.
+captures are analyzed at once, the rest wait. A gzip compressed capture may decompress to at most
+`pcap:maxsize:decompressed` bytes. When a run fails, Storm removes the captures and key logs it
+streamed for it, so they don't count against `pcap:uploads`. When the Storm query running an
+analysis is killed, the analysis stops too.
 
 ### Sandbox
 
@@ -81,18 +88,21 @@ of one is sandboxed:
   loader and libc config in `/etc`, not the rest of it), write the run's directory, and run
   their own binary. TCP connects and binds are refused too on kernels
   with Landlock ABI 4 or later.
-- **seccomp.** IPv4, IPv6, and packet sockets are refused (the engine is killed and the try
-  reported, see below).
-- **no_new_privs, resource limits** (`sandbox:rlimits`: memory, CPU time, file size, open files,
-  no core dumps), **a clean environment, a new process group** that is killed on timeout, and
-  **capped output**.
+- **seccomp.** Engines may only open Unix sockets. IPv4, IPv6, and packet sockets kill the
+  engine (and the try is reported, see below), other families (ex. netlink) fail with `EPERM`.
+- **no_new_privs, resource limits** (`sandbox:rlimits`: 4 GiB address space, CPU time, file size,
+  open files, no core dumps, and 256 processes of the sandbox user when engines run as it),
+  **a clean environment, a new process group** that is killed on timeout, and **capped
+  output**. An engine that times out is given up on even when a process it left behind holds
+  its output open.
 
 Landlock and seccomp are features of the host's kernel (Landlock needs Linux 5.13 or later), not
 the image. With Landlock the service gives the engine's user search permission on the
 directories above an engine's files (ex. a 0700 storage directory) when it needs it. Without
 Landlock it doesn't, since that would let a compromised engine open any file it can name in
 them, like `cell.yaml`: keep the storage directory's files that hold secrets `0600`, and make
-the directories searchable yourself if the engines can't get to their files. `sandbox:mode` `best-effort` (the default) applies every layer the host supports,
+the directories searchable yourself if the engines can't get to their files. The directories it
+opens up get their modes back when the service stops. `sandbox:mode` `best-effort` (the default) applies every layer the host supports,
 `strict` refuses to run engines without all of them, and `off` runs them directly.
 `slib.pcap.status` shows what the host supports.
 
@@ -154,6 +164,7 @@ engine user's processes.
 | `pcap:limit` | `100000` | The max number of flows for one capture. Packets for any more flows are dropped (and counted). |
 | `pcap:handshake` | `1024` | The default max characters kept from each side's first text payload, `0` for none. |
 | `pcap:maxsize` | `1073741824` | The max capture size in bytes (1 GiB), `0` for no limit. |
+| `pcap:maxsize:decompressed` | `4294967296` | The max size, in bytes, a gzip compressed capture may decompress to (4 GiB), `0` for no limit. |
 | `pcap:workers` | `2` | The max number of captures analyzed at once. |
 | `pcap:uploads` | `16` | The max number of captures and key logs streamed to the service at once (without an Axon). |
 | `pcap:files` | `true` | Extract the files sent in flows by default. |
@@ -181,12 +192,12 @@ engine user's processes.
 | `tshark:path` | `tshark` | The tshark binary. |
 | `tshark:args` | `[]` | Extra tshark arguments for every run (operator only, see [Engine settings](#engine-settings)). |
 | `tshark:protocols` | the dissectors the service reads | The only dissectors tshark runs (`--only-protocols`), `null` for all of them. Fewer dissectors is less attack surface. |
-| `tshark:keylog:maxsize` | `16777216` | The largest TLS key log read for a run (16 MiB), `0` for no limit. |
+| `tshark:keylog:maxsize` | `16777216` | The max size of a run's TLS key logs, together (16 MiB), `0` for no limit. |
 | `tshark:timeout` | `600` | Seconds a tshark run may take, `0` for no limit. |
 | `sandbox:mode` | `best-effort` | `best-effort`, `strict`, or `off`, see [Sandbox](#sandbox). |
 | `sandbox:user` | `slib-pcap-engine` | The user engines run as when the service runs as root. |
-| `sandbox:rlimits` | 8 GiB memory, 1 hour CPU, 4 GiB files, 4096 files, no cores | Resource limits of an engine run (`as`, `cpu`, `fsize`, `nofile`, `core`), `0` is unlimited. |
-| `sandbox:seccomp` | `true` | Refuse engines network sockets with seccomp. |
+| `sandbox:rlimits` | 4 GiB memory, 1 hour CPU, 4 GiB files, 4096 files, no cores, 256 processes | Resource limits of an engine run (`as`, `cpu`, `fsize`, `nofile`, `core`, `nproc`), `0` is unlimited. `nproc` only applies when engines run as `sandbox:user`. |
+| `sandbox:seccomp` | `true` | Allow engines only Unix sockets with seccomp. |
 
 ## Usage
 
@@ -217,7 +228,7 @@ file:bytes=sha256:<sha256> -(refs)> (it:app:snort:hit, it:app:suricata:matched)
 | `--timeout` | `pcap:timeout` | Seconds a flow can be idle before a new flow starts, `0` to never time out. |
 | `--limit` | `pcap:limit` | The max number of flows to model per capture (capped by `pcap:limit`). |
 | `--handshake` | `pcap:handshake` | The max characters kept from each side's first text payload. |
-| `--tag` | | A tag to add to every flow. |
+| `--tag` | | A tag to add to every flow. `--tag`, `--host`, and `--sandbox-file` are checked before the capture is analyzed. |
 | `--host` | | The `it:host` that captured the traffic: each flow's `:capture:host` and each hit's `:sensor`. |
 | `--sandbox-file` | | The `file:bytes` a sandbox ran to make the capture, set as `:sandbox:file`. |
 | `--keylog` | | The SHA-256 of a TLS key log (SSLKEYLOGFILE) to decrypt TLS with. May be used multiple times. |
@@ -356,8 +367,9 @@ license and your subscription, check its terms before adding it.
 ### Syncing
 
 `slib.pcap.sync` keeps the Cortex and the service in sync. It runs as a cron job created when
-the service is added (hourly, at 17 past), as the admin that added the service, in their default
-view. Change it with `slib.pcap.admin.schedule`. Each run:
+the service is added (hourly, at 17 past). That job is created by the service's add event, which
+runs as root, so it runs as root in the Cortex's default view. `slib.pcap.admin.schedule
+--period` replaces it with a job that runs as you, in your current view. Each run:
 
 1. **Syncs every enabled feed** (unless `--no-feeds`). A feed is downloaded when it's due (every
    `pcap:feeds:interval` hours, with `If-None-Match`/`If-Modified-Since`), its rules are parsed
@@ -384,8 +396,13 @@ view. Change it with `slib.pcap.admin.schedule`. Each run:
 
 Syncing edits nodes as root (in the job's view), so `slib.pcap.sync` holders don't need
 permissions for the rulesets, references, and edges it makes. They do need permission to add
-`it:app:snort:rule` and `it:app:suricata:rule` nodes to the view's layer, since a sync edits that
-view and replaces the service's rules with the view's (the last push wins).
+`it:app:snort:rule` and `it:app:suricata:rule` nodes to the view's layer.
+
+The service has one set of rules, so they come from one view: the view the add event ran in (the
+default view), or the view of the last `slib.pcap.admin.schedule --period`. Pushes from any other
+view (`slib.pcap.sync`, `slib.pcap.rule.add`, `.enable`, and `.disable` in a fork, for example)
+are refused, so a fork can't replace or disable the rules everyone's analyses use. Feeds can still
+be synced into other views with `slib.pcap.sync --no-push`.
 
 ### Matches
 
@@ -493,10 +510,13 @@ updates the same nodes instead of creating duplicates.
 - **DNS** queries are `inet:dns:request` nodes (`:query`, `:query:name`, `:query:type`,
   `:server`, `:time`, and the response's `:reply:code`), linked with
   `inet:flow -(refs)> inet:dns:request`, and their answers `inet:dns:answer` nodes (`:a`,
-  `:aaaa`, `:cname`, `:ns`, `:mx`, `:txt`, and `:ttl`). Needs Suricata.
+  `:aaaa`, `:cname`, `:ns`, `:mx`, `:txt`, `:rev`/`:rev6` for PTR answers, `:soa` with an
+  `inet:dns:soa`, and `:ttl`). Answers of other types (ex. SRV) have no `inet:dns:answer` prop,
+  so they aren't modeled. Needs Suricata.
 - **TLS certificates** are modeled like `slib.crtsh` models them: `crypto:x509:cert` nodes
   deconflicted by SHA-256 with their subject, issuer, serial, validity, signature, SANs, and
-  identities, and `:file` pointing at the DER (uploaded to the Axon). The rest of the chain a
+  identities, and `:file` pointing at the DER when it was uploaded to the Axon (not without
+  an Axon, or with `--no-files`). The rest of the chain a
   side sent is linked with `inet:flow -(refs)> crypto:x509:cert`. TLS 1.3 encrypts certificates,
   so TLS 1.3 handshakes only have them with a key log.
 - **TLS and QUIC server names** (SNI) clients asked for are linked with
@@ -505,7 +525,9 @@ updates the same nodes instead of creating duplicates.
   blob (the hash OpenSSH fingerprints), with the blob as `:public`, its SHA-1 and MD5, and the
   key type as `:algorithm`. The service rebuilds the blob from tshark's fields for RSA, DSA,
   ECDSA, Ed25519, and Ed448 keys and checks it against the length on the wire.
-- **RDP** client details are only in cleartext with standard RDP security. With TLS or
+- **RDP** client details are only in cleartext with standard RDP security. They're only modeled
+  on `:src` (`inet:flow` has no `:dst:rdp:*` props), so a capture that starts mid-connection can
+  miss them. With TLS or
   CredSSP (NLA), the default on modern Windows, they're encrypted. The keyboard layout is its
   locale (ex. `en_us`), or its 8 digit KLID (ex. `00010409`, US Dvorak) when it isn't one.
 - **Software names** are the whole value each side sent, lowercased and single spaced, ex.
@@ -544,6 +566,12 @@ updates the same nodes instead of creating duplicates.
 - Packets on different VLANs are different flows, even with the same addresses and ports.
   Community IDs don't include VLANs, so engine records without a frame number are matched by
   their VLANs too.
+- ICMP Community IDs are computed the way Suricata computes them: an ICMP type without a
+  counterpart (ex. 3, destination unreachable) is hashed with 0 instead of its code, and its
+  endpoints are ordered like any other flow's. The Community ID spec hashes those types
+  differently, so for them the ID matches Suricata's, not other tools'.
+- Engine output is untrusted: a record an engine wrote that can't be read (ex. a certificate
+  that isn't hex) is skipped and counted, and `slib.pcap.flows` warns about it.
 - libpcap (which Suricata and Snort read captures with) can't read a pcapng with interfaces of
   different link types, so the service splits those into a pcap per link type for them and
   maps their packet numbers back to the capture's frames.

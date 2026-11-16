@@ -1,4 +1,11 @@
-function yara_match(rule, file) {
-    [( it:app:yara:match=($rule, $file) )]
-    return($lib.null)
+// The guid of the service's meta:source node, created by the service's add event.
+// Must match SVC_GUID in yarastorm/defs.py.
+$srcguid = "12bc0c8c1a37a29808d97972875d3913"
+
+// Model a Yara match of a rule on a file.
+// rule is the it:app:yara:rule guid, file is the file:bytes node's value (its repr).
+function yaraMatch(rule, file) {
+    [ it:app:yara:match=($rule, $file) .seen=now ]
+    [ <(seen)+ { [ meta:source=$srcguid :name=slib.yara ] } ]
+    return()
 }

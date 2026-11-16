@@ -4,20 +4,17 @@ init {
 
 switch $node.form() {
     "it:app:yara:rule": {
-        $retn = $yaralib.compile($node, $lib.true)
+        $retn = $yaralib.compile($node, (true))
+        $guid = $node.repr()
 
         if $retn.status {
-            $lib.print(
-                "it:app:yara:rule={guid} is a valid Yara rule!",
-                guid=$node.value()
-            )
+            $lib.print(`it:app:yara:rule={$guid} is a valid Yara rule!`)
         }
         else {
-            $lib.warn(
-                "it:app:yara:rule={guid} is not a valid Yara rule: {err}",
-                guid=$node.value(),
-                err=$retn.mesg
-            )
+            $lib.warn(`it:app:yara:rule={$guid} is not a valid Yara rule: {$retn.mesg}`)
         }
+    }
+    *: {
+        $lib.warn(`slib.yara.check only supports it:app:yara:rule nodes, skipping {$node.form()}.`)
     }
 }

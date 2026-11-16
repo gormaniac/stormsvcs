@@ -94,6 +94,9 @@ class TestCrtshStormCert(s_tests.SynTest):
             assert {"rep.crtsh.ca", "rep.crtsh.root"} <= set(root.tags)
             assert root.get("selfsigned") == 1
             assert root.get("rsa:key")[1] == 65537
+            rsakey = await core.nodes(f"{CERT[1]} :rsa:key -> rsa:key")
+            assert len(rsakey) == 1 and rsakey[0].get("bits") == PKI.certs[1].public_key().key_size
+            assert len(await core.nodes(f"meta:source={SVC_GUID} -(seen)> rsa:key")) == 1
 
             inter = (await core.nodes(CERT[2]))[0]
             assert "rep.crtsh.ca" in inter.tags and "rep.crtsh.root" not in inter.tags
@@ -130,7 +133,7 @@ class TestCrtshStormCert(s_tests.SynTest):
             assert junk.get("subject") is None and junk.get("serial") is None
             assert (await junk.getData("slib:crtsh"))["error"]
             # Unparsed certificates have no chain to build.
-            assert fake.called("caCerts") == 0
+            assert fake.called("chain") == 0
 
     async def test_model_edges(self):
         async with crtshSvc(self) as (core, svc, fake):
@@ -219,13 +222,16 @@ class TestCrtshStormSearch(s_tests.SynTest):
                 10,
                 9,
             ]
-            assert await certIds(core, "slib.crtsh.search --cn old --org vertex --ou '' ") == [11]
+            assert await certIds(core, "slib.crtsh.search --cn old.vertex.link --org vertex --ou '' ") == [11]
             assert await certIds(core, "slib.crtsh.search --ou Engineering") == [10, 9, 15]
-            assert await certIds(core, "slib.crtsh.search --email visi") == [10, 9]
+            assert await certIds(core, "slib.crtsh.search --email visi@vertex.link") == [10, 9]
             assert await certIds(core, "slib.crtsh.search --ip 1.2.3.4") == [10, 9]
             assert await certIds(core, "slib.crtsh.search --uri vertex.link/") == [10, 9]
             assert await certIds(core, "slib.crtsh.search --subject 'O=Example Inc'") == [14]
-            assert await certIds(core, "slib.crtsh.search --identity shop") == [14]
+            assert await certIds(core, "slib.crtsh.search --identity shop.example.com") == [14]
+            # Values match whole words, domains, and addresses, like crt.sh's full text search.
+            assert await certIds(core, "slib.crtsh.search --cn old") == []
+            assert await certIds(core, "slib.crtsh.search --email visi") == []
 
             # Issuers, by name or crt.sh CA ID.
             assert await certIds(core, "slib.crtsh.search --issuer 'Root R1'") == [2, 1]
@@ -275,7 +281,7 @@ class TestCrtshStormSearch(s_tests.SynTest):
             assert len([m for m in msgs if m[0] == "node"]) == 1
 
             # Options ignore inbound nodes.
-            assert await certIds(core, "inet:fqdn | slib.crtsh.search --identity shop") == [14]
+            assert await certIds(core, "inet:fqdn | slib.crtsh.search --identity shop.example.com") == [14]
 
     async def test_search_failure(self):
         async with crtshSvc(self) as (core, svc, fake):
@@ -425,6 +431,14 @@ class TestCrtshStormAdmin(s_tests.SynTest):
             self.stormIsInPrint('"key": "0102"', msgs)
             assert fake.last("raw")["sql"] == "SELECT id FROM ca WHERE id = $1"
             assert list(fake.last("raw")["args"]) == [1]
+            assert fake.last("raw")["limit"] == 100
+
+            # Rows are capped by --limit (the fake always returns one row).
+            msgs = await core.stormlist("slib.crtsh.admin.sql 'SELECT 1' --limit 1")
+            self.stormIsInPrint("1 rows (the --limit, there may be more)", msgs)
+            assert fake.last("raw")["limit"] == 1
+            msgs = await core.stormlist("slib.crtsh.admin.sql 'SELECT 1' --limit 0")
+            self.stormIsInWarn("Invalid limit 0, it must be at least 1.", msgs)
 
             msgs = await core.stormlist("slib.crtsh.admin.sql 'SELECT * FROM nope'")
             self.stormIsInWarn('slib.crtsh: Query failed: relation "nope" does not exist', msgs)
@@ -466,3 +480,71 @@ class TestCrtshStormPerms(s_tests.SynTest):
                 '$lib.service.get("slib.crtsh").get(10)', opts={"user": user}
             )
             self.stormIsInErr("must have permission service.get", msgs)
+
+
+class TestCrtshStormInputs(s_tests.SynTest):
+    async def test_explicit_values_run_once(self):
+        """Explicit values are looked up once, however many nodes come in (CRTSH-01)."""
+
+        async with crtshSvc(self) as (core, svc, fake):
+            await core.nodes("[ inet:fqdn=a.vertex.link inet:fqdn=b.vertex.link inet:fqdn=c.vertex.link ]")
+            await core.nodes("slib.crtsh.cert 1 2 4 9 10 11 12")
+            assert len(await core.nodes("crypto:x509:cert")) == 7
+
+            fake.calls.clear()
+            nodes = await core.nodes("crypto:x509:cert | slib.crtsh.cert 10")
+            assert fake.called("certs") == 1
+            assert await crtshIds(nodes) == [10]
+
+            fake.calls.clear()
+            nodes = await core.nodes("inet:fqdn | slib.crtsh.search --identity shop.example.com")
+            assert fake.called("certsByIdentity") == 1
+            assert await crtshIds(nodes) == [14]
+
+            fake.calls.clear()
+            nodes = await core.nodes("crypto:x509:cert | slib.crtsh.pivot --cert 10 --by serial")
+            assert fake.called("related") == 1
+            assert await crtshIds(nodes) == [9]
+
+            fake.calls.clear()
+            await core.nodes("crypto:x509:cert | slib.crtsh.chain --cert 10")
+            assert fake.called("chain") == 1
+
+    async def test_no_input(self):
+        """Commands without values or inbound nodes warn instead of failing (CRTSH-05, CRTSH-11)."""
+
+        async with crtshSvc(self) as (core, svc, fake):
+            for query, mesg in (
+                ("slib.crtsh.cert", "slib.crtsh.cert: Nothing to look up"),
+                ("slib.crtsh.cert --yield", "slib.crtsh.cert: Nothing to look up"),
+                ("slib.crtsh.search", "slib.crtsh.search: Nothing to search for"),
+                ("slib.crtsh.search --valid --since 2020-01-01", "slib.crtsh.search: Nothing to search for"),
+                ("slib.crtsh.pivot --by key", "slib.crtsh.pivot: Nothing to pivot from"),
+                ("slib.crtsh.chain", "slib.crtsh.chain: Nothing to build the chain of"),
+            ):
+                msgs = await core.stormlist(query)
+                self.stormHasNoErr(msgs)
+                self.stormIsInWarn(mesg, msgs)
+            assert not fake.calls
+
+            # Inbound nodes that yield nothing don't warn about missing input.
+            await core.nodes("[ inet:fqdn=nothing.example ]")
+            msgs = await core.stormlist("inet:fqdn=nothing.example | slib.crtsh.search")
+            self.stormHasNoWarnErr(msgs)
+
+    async def test_caid_zero(self):
+        """CA ID 0 is a given option, not a missing one (CRTSH-11)."""
+
+        async with crtshSvc(self) as (core, svc, fake):
+            msgs = await core.stormlist("slib.crtsh.search --caid 0")
+            self.stormHasNoErr(msgs)
+            assert fake.last("certsByIssuer")["caids"] == [0]
+
+    async def test_lookup_string_warning(self):
+        """lib.lookup() with a single string names it whole in the warning (CRTSH-12)."""
+
+        async with crtshSvc(self) as (core, svc, fake):
+            msgs = await core.stormlist("for $n in $lib.import(slib.crtsh.lib).lookup('999') { }")
+            self.stormIsInWarn("crt.sh has no certificates for: 999", msgs)
+            msgs = await core.stormlist("for $n in $lib.import(slib.crtsh.lib).lookup((998, 999)) { }")
+            self.stormIsInWarn("crt.sh has no certificates for: 998, 999", msgs)

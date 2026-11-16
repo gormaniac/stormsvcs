@@ -7,19 +7,7 @@
 
 init {
     $svc = $lib.service.get("slib.hatching")
-}
-
-function userKey() {
-    $vault = $lib.vault.bytype(hatching, scope=user)
-    if ($vault = $lib.null) { return($lib.null) }
-    $secrets = $vault.secrets
-    if ($secrets = $lib.null) { return($lib.null) }
-    return($secrets.apikey)
-}
-
-function hasKey() {
-    if $userKey() { return((true)) }
-    return($svc.hasApiKey().data)
+    $userKey = $lib.import(slib.hatching.util).userKey
 }
 
 // Whether the service-wide API key (slib.hatching.admin.apikey) is set.
@@ -29,7 +17,7 @@ function tagPrefix() {
     if $lib.globals.get("slib:hatching:tag:enabled") {
         return($lib.globals.get("slib:hatching:tag:prefix"))
     }
-    return($lib.null)
+    return()
 }
 
 // Samples
@@ -42,7 +30,7 @@ function summary(sample) { return($svc.summary($sample, apikey=$userKey())) }
 function magicLink(sample) { return($svc.magicLink($sample, apikey=$userKey())) }
 function wait(sample, timeout=(600)) { return($svc.wait($sample, timeout=$timeout, apikey=$userKey())) }
 
-function events(sample=$lib.null, limit=(100), timeout=(600)) {
+function events(sample=(null), limit=(100), timeout=(600)) {
     for $retn in $svc.sampleEvents(sample=$sample, limit=$limit, timeout=$timeout, apikey=$userKey()) {
         emit $retn
     }
@@ -60,7 +48,7 @@ function normSample(sample, tasks=(false)) {
     return($svc.normSample($sample, tasks=$tasks, apikey=$userKey()))
 }
 
-function kernelReport(sample, task, log=$lib.null, limit=(1000)) {
+function kernelReport(sample, task, log=(null), limit=(1000)) {
     for $retn in $svc.kernelReport($sample, $task, log=$log, limit=$limit, apikey=$userKey()) {
         emit $retn
     }
@@ -92,9 +80,9 @@ function _upload(genr) {
     try {
         ($size, $sha256) = $lib.axon.upload($_bytes($genr))
     } catch HatchingError as err {
-        return(({"status": (false), "mesg": $err.mesg, "data": $lib.null}))
+        return(({"status": false, "mesg": $err.mesg, "data": null}))
     }
-    return(({"status": (true), "mesg": "", "data": ({"sha256": $sha256, "size": $size})}))
+    return(({"status": true, "mesg": "", "data": {"sha256": $sha256, "size": $size}}))
 }
 
 function downloadSample(sample) {

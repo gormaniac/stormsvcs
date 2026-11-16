@@ -20,26 +20,33 @@ init {
 
     function asNode(valu) {
         if ($lib.vars.type($valu) = "node") { return($valu) }
-        return($lib.null)
+        return()
+    }
+
+    // --url is submitted once here (init runs once per query), not once per inbound node.
+    $made = ([])
+    for $url in $cmdopts.url {
+        $n = $asNode($hatching.submitUrl($url, $opts))
+        if $n { $made.append($n) }
     }
 }
 
 if $cmdopts.url {
-    // --url ignores inbound nodes.
-    spin |
-    for $url in $cmdopts.url {
-        $n = $asNode($hatching.submitUrl($url, $opts))
-        if ($cmdopts.yield and $n) { yield $n }
-    }
+    // Inbound nodes pass through, unless --yield replaces them with the samples' nodes.
+    if $cmdopts.yield { spin }  // noqa: P001
 }
 else {
     switch $node.form() {
         "file:bytes": { }
         "inet:url": { }
         *: {
-            $lib.warn("slib.hatching.submit: The node form {form} is not supported.", form=$node.form())
-            spin
+            $lib.warn(`slib.hatching.submit: The node form {$node.form()} is not supported.`)
+            spin  // noqa: P001 - drop the node it can't be used with
         }
     }
     divert $cmdopts.yield $model.nodes(($asNode($hatching.submitNode($node, $opts)),))
+}
+
+fini {
+    if $cmdopts.yield { for $n in $made { yield $n } }
 }

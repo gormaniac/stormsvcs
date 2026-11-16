@@ -3,40 +3,30 @@
 
 init {
     $svc = $lib.service.get("slib.hatching")
+    $userKey = $lib.import(slib.hatching.util).userKey
 }
 
-// Only reads the calling user's own vault, see slib.hatching.priv.user.
-function userKey() {
-    $vault = $lib.vault.bytype(hatching, scope=user)
-    if ($vault = $lib.null) { return($lib.null) }
-    $secrets = $vault.secrets
-    if ($secrets = $lib.null) { return($lib.null) }
-    return($secrets.apikey)
-}
-
-// Read a file from the Axon as a list of (up to 1MiB) chunks for the service.
-function _chunks(sha256, size) {
-    $retn = ([])
-    $offs = (0)
-    while ($offs < $size) {
-        $byts = $lib.axon.read($sha256, offs=$offs, size=(1048576))
-        if (not $byts) { break }
-        $retn.append($byts)
-        $offs = ($offs + $lib.len($byts))
-    }
-    return($retn)
-}
-
-function _fail(mesg) { return(({"status": (false), "mesg": $mesg, "data": $lib.null})) }
+function _fail(mesg) { return(({"status": false, "mesg": $mesg, "data": null})) }
 
 // Submit a file from the Axon. opts are the slib.hatching.submit options.
-function submitFile(sha256, size, name, opts) {
+// The file is sent to the service 1MiB at a time, read until the Axon has no more bytes, so the
+// whole file is never held in Storm or sent in one Telepath call. The service enforces its max size.
+function submitFile(sha256, name, opts) {
     if (not $lib.axon.has($sha256)) { return($_fail(`The Axon doesn't have {$sha256}.`)) }
-    if ($size = $lib.null) { return($_fail("The file's size is unknown.")) }
-    $max = $svc.maxSize().data
-    if ($size > $max) { return($_fail(`The file is {$size} bytes, larger than the max of {$max}.`)) }
 
-    return($svc.submitFile($_chunks($sha256, $size), $name, interactive=$opts.interactive,
+    $retn = $svc.submitFileInit()
+    if (not $retn.status) { return($retn) }
+    $upload = $retn.data
+    $offs = (0)
+    while (true) {
+        $byts = $lib.axon.read($sha256, offs=$offs, size=(1048576))
+        if (not $byts) { break }
+        $retn = $svc.submitFileChunk($upload, $byts)
+        if (not $retn.status) { return($retn) }
+        $offs = ($offs + $lib.len($byts))
+    }
+
+    return($svc.submitFile($upload, $name, interactive=$opts.interactive,
                            password=$opts.password, profiles=$opts.profiles, tags=$opts.tags,
                            timeout=$opts.timeout, network=$opts.network, geolocation=$opts.geolocation,
                            apikey=$userKey()))
@@ -50,7 +40,7 @@ function submitUrl(url, opts) {
 
 function importSample(sample) { return($svc.importSample($sample, apikey=$userKey())) }
 
-function setProfile(sample, profiles=$lib.null, auto=(false), pick=$lib.null) {
+function setProfile(sample, profiles=(null), auto=(false), pick=(null)) {
     return($svc.setProfile($sample, profiles=$profiles, auto=$auto, pick=$pick, apikey=$userKey()))
 }
 

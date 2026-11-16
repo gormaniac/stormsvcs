@@ -2,8 +2,8 @@ init {
     // The sync edits nodes as root in this view, and replaces the service's rules with this
     // view's, so only users that can add rules to the view's layer may run it here.
     $layer = $lib.layer.get().iden
-    if (not ($lib.user.allowed("node.add.it:app:snort:rule", gateiden=$layer)
-             and $lib.user.allowed("node.add.it:app:suricata:rule", gateiden=$layer))) {
+    if (not ($lib.auth.users.get().allowed("node.add.it:app:snort:rule", gateiden=$layer)
+             and $lib.auth.users.get().allowed("node.add.it:app:suricata:rule", gateiden=$layer))) {
         $lib.raise(AuthDeny, "slib.pcap.sync edits the rules in the current view, it needs permission to add it:app:snort:rule and it:app:suricata:rule nodes to its layer.")
     }
     $sync = $lib.import(slib.pcap.priv.sync)
@@ -25,22 +25,20 @@ init {
 
             $s = $sync.syncFeed($feed, force=$cmdopts.force)
             if $s.error {
-                $lib.warn("slib.pcap.sync: Syncing the {name} feed failed: {err}", name=$s.name, err=$s.error)
+                $lib.warn(`slib.pcap.sync: Syncing the {$s.name} feed failed: {$s.error}`)
             } elif ($s.synced and $s.full) {
-                $lib.print("slib.pcap.sync: {name}: synced {count} rules ({added} added, {updated} updated, {removed} removed).",
-                    name=$s.name, count=$s.count, added=$s.added, updated=$s.updated, removed=$s.removed)
+                $lib.print(`slib.pcap.sync: {$s.name}: synced {$s.count} rules ({$s.added} added, {$s.updated} updated, {$s.removed} removed).`)
             } elif $s.synced {
-                $lib.print("slib.pcap.sync: {name}: synced the feed's changes ({added} added, {updated} updated, {removed} removed), it has {count} rules.",
-                    name=$s.name, count=$s.count, added=$s.added, updated=$s.updated, removed=$s.removed)
+                $lib.print(`slib.pcap.sync: {$s.name}: synced the feed's changes ({$s.added} added, {$s.updated} updated, {$s.removed} removed), it has {$s.count} rules.`)
             } elif $s.pulled {
-                $lib.print("slib.pcap.sync: {name}: downloaded, the feed is unchanged.", name=$s.name)
+                $lib.print(`slib.pcap.sync: {$s.name}: downloaded, the feed is unchanged.`)
             } else {
-                $lib.print("slib.pcap.sync: {name}: up to date (the feed isn't due to be downloaded yet).", name=$s.name)
+                $lib.print(`slib.pcap.sync: {$s.name}: up to date (the feed isn't due to be downloaded yet).`)
             }
         }
 
         for $name in $wanted {
-            if (not $found.has($name)) { $lib.warn("slib.pcap.sync: Unknown feed: {name}", name=$name) }
+            if (not $found.has($name)) { $lib.warn(`slib.pcap.sync: Unknown feed: {$name}`) }
         }
     }
 

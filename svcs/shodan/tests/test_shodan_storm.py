@@ -16,7 +16,13 @@ from .fakeshodan import (
     FAVICON_B64,
     HISTORY_IP,
     FAVICON_HASH,
+    HOST_HTTP,
     HOST_SSH,
+    HTTP_IP,
+    HTTP_REDIRECT_BODY,
+    HTTP_ROBOTS,
+    HTTP_SECURITYTXT,
+    HTTP_SITEMAP,
     SCANME_HTML,
     SCANME_HTML_HASH,
     SSH_KEY_B64,
@@ -94,11 +100,13 @@ class TestShodanStormHost(s_tests.SynTest):
             assert len(await core.nodes("inet:server -> inet:banner")) == 2
             assert len(await core.nodes("inet:asn=15169 :owner -> ou:org +:name='google llc'")) == 1
 
-            # HTTP response headers, without the Date header, are referenced by the banner.
+            # HTTP response headers, without the Date header, and the page's title are referenced
+            # by the banner.
             nodes = await core.nodes("inet:server=tcp://8.8.8.8:443 -> inet:banner -(refs)> *")
             assert {n.ndef for n in nodes} == {
                 ("inet:http:response:header", ("server", "nginx")),
                 ("inet:http:response:header", ("content-type", "text/html")),
+                ("it:dev:str", "Google DNS"),
             }
             assert len(await core.nodes("inet:http:response:header:name=date")) == 0
             nodes = await core.nodes("inet:http:response:header=(server, nginx)")
@@ -146,6 +154,7 @@ class TestShodanStormHost(s_tests.SynTest):
             assert len(await core.nodes("crypto:x509:cert")) == 1
             assert len(await core.nodes("it:prod:softver")) == 2
             assert len(await core.nodes("inet:http:response:header")) == 2
+            assert len(await core.nodes("inet:http:request")) == 1
 
     async def test_host_pipeline(self):
         async with shodanSvc(self) as (core, svc, fake):
@@ -247,6 +256,182 @@ class TestShodanStormHost(s_tests.SynTest):
             assert len(await core.nodes("inet:server=tcp://8.8.8.8:80")) == 1
             assert len(await core.nodes("inet:ipv6")) == 0
             assert len(await core.nodes("inet:dns:aaaa")) == 0
+
+
+class TestShodanStormHttp(s_tests.SynTest):
+    SERVER = f"tcp://{HTTP_IP}:8080"
+    HTML_SHA256 = hashlib.sha256(SCANME_HTML.encode()).hexdigest()
+    FAVICON = base64.b64decode(FAVICON_B64)
+    FAVICON_SHA256 = hashlib.sha256(FAVICON).hexdigest()
+
+    async def test_http_request(self):
+        async with shodanSvc(self) as (core, svc, fake):
+            msgs = await core.stormlist(f"slib.shodan.host --ip {HTTP_IP}")
+            self.stormHasNoErr(msgs)
+
+            # The final response, with the page as its body.
+            reqs = await core.nodes(f"inet:server={self.SERVER} -> inet:http:request +:response:code=200")
+            assert len(reqs) == 1
+            req = reqs[0]
+            assert req.get("url") == "http://www.example.com:8080/"
+            assert req.get("path") == "/"
+            assert req.get("header:host") == "www.example.com"
+            assert req.get("response:reason") == "OK"
+            assert req.repr("time") == "2026/10/30 17:18:58.000"
+            assert req.get("response:headers") == (
+                ("server", "Apache/2.4.7 (Ubuntu)"),
+                ("content-type", "text/html; charset=utf-8"),
+            )
+            assert req.get("response:body") == f"sha256:{self.HTML_SHA256}"
+            assert req.get(".seen") is not None
+            assert len(await core.nodes(f"iden {req.iden()} <(seen)- meta:source={SVC_GUID}")) == 1
+
+            # The title is referenced by the request and the banner.
+            assert await nodeset(core, f"iden {req.iden()} -(refs)> it:dev:str") == {("it:dev:str", "Go ahead and ScanMe!")}
+            q = f"inet:server={self.SERVER} -> inet:banner -(refs)> it:dev:str"
+            assert await nodeset(core, q) == {("it:dev:str", "Go ahead and ScanMe!")}
+
+            # The files and folders in the open directory the page lists.
+            listed = {
+                ("inet:url", "http://www.example.com:8080/linpeas.sh"),
+                ("inet:url", "http://www.example.com:8080/tools/"),
+                ("inet:url", "http://www.example.com:8080/notes%20%231.txt"),
+            }
+            assert await nodeset(core, f"iden {req.iden()} -(refs)> inet:url") == listed
+            q = "inet:url:path=/linpeas.sh <(refs)- inet:http:request :server -> inet:server"
+            assert await nodeset(core, q) == {("inet:server", self.SERVER)}
+            for node in await core.nodes(f"iden {req.iden()} -(refs)> inet:url"):
+                assert node.get(".seen") is not None
+                assert len(await core.nodes(f"iden {node.iden()} <(seen)- meta:source={SVC_GUID}")) == 1
+
+            # The redirect Shodan followed to get there, with its own body.
+            hops = await core.nodes(f"inet:server={self.SERVER} -> inet:http:request +:response:code=301")
+            assert len(hops) == 1
+            hop = hops[0]
+            assert hop.get("url") == f"http://{HTTP_IP}:8080/"
+            assert hop.get("header:host") is None
+            assert hop.get("response:reason") == "Moved Permanently"
+            assert ("location", "http://www.example.com:8080/") in hop.get("response:headers")
+            redirect = hashlib.sha256(HTTP_REDIRECT_BODY.encode()).hexdigest()
+            assert hop.get("response:body") == f"sha256:{redirect}"
+            assert not await core.nodes(f"iden {hop.iden()} -(refs)> *")
+
+            # The other server returned no page: no body or title, and its favicon is elsewhere.
+            other = await core.nodes(f"inet:server=tcp://{HTTP_IP}:80 -> inet:http:request")
+            assert len(other) == 1
+            assert other[0].get("url") == f"http://{HTTP_IP}/"
+            assert other[0].get("response:code") == 404
+            assert other[0].get("response:body") is None
+            assert not await core.nodes(f"iden {other[0].iden()} -(refs)> *")
+
+            # Modeling it again doesn't make more requests.
+            await core.nodes(f"slib.shodan.host --ip {HTTP_IP}")
+            assert len(await core.nodes("inet:http:request")) == 3
+            assert len(await core.nodes("it:dev:str='Go ahead and ScanMe!' <(refs)- *")) == 2
+
+    async def test_http_listing_bad_url(self):
+        # A listed URL Synapse can't parse is skipped, the rest are still modeled.
+        async with shodanSvc(self) as (core, svc, fake):
+            http = {"url": "http://1.2.3.4/", "path": "/", "headers": [], "files": [], "redirects": [],
+                    "listing": ["not a url", "http://1.2.3.4/a.sh"]}
+            q = "$m = $lib.import(slib.shodan.model) $srv = $m.serverNode(1.2.3.4, (80)) $m.httpNodes($srv, $lib.null, $http)"
+            msgs = await core.stormlist(q, opts={"vars": {"http": http}})
+            self.stormHasNoErr(msgs)
+            assert await nodeset(core, "inet:http:request -(refs)> *") == {("inet:url", "http://1.2.3.4/a.sh")}
+
+    async def test_http_files(self):
+        async with shodanSvc(self) as (core, svc, fake):
+            msgs = await core.stormlist(f"slib.shodan.host --ip {HTTP_IP}")
+            self.stormHasNoErr(msgs)
+
+            expected = {
+                SCANME_HTML.encode(): ("text/html", None, "http://www.example.com:8080/"),
+                HTTP_ROBOTS.encode(): ("text/plain", "robots.txt", "http://www.example.com:8080/robots.txt"),
+                HTTP_SECURITYTXT.encode(): (
+                    "text/plain",
+                    "security.txt",
+                    "http://www.example.com:8080/.well-known/security.txt",
+                ),
+                HTTP_SITEMAP.encode(): ("application/xml", "sitemap.xml", "http://www.example.com:8080/sitemap.xml"),
+                self.FAVICON: (
+                    "image/png",
+                    "tiny-eyeicon.png",
+                    "http://www.example.com:8080/shared/images/tiny-eyeicon.png",
+                ),
+                HTTP_REDIRECT_BODY.encode(): ("text/html", None, f"http://{HTTP_IP}:8080/"),
+            }
+
+            # Every file the server returned is an inet:servfile, the hash of the page among them.
+            files = await core.nodes(f"inet:server={self.SERVER} -> inet:servfile -> file:bytes")
+            assert {f.get("sha256") for f in files} == {hashlib.sha256(b).hexdigest() for b in expected}
+            for byts, (mime, name, url) in expected.items():
+                sha256 = hashlib.sha256(byts).hexdigest()
+                file = (await core.nodes(f"file:bytes=sha256:{sha256}"))[0]
+                assert file.get("size") == len(byts)
+                assert file.get("md5") == hashlib.md5(byts).hexdigest()
+                assert file.get("sha1") == hashlib.sha1(byts).hexdigest()
+                assert file.get("sha512") == hashlib.sha512(byts).hexdigest()
+                assert file.get("mime") == mime
+                assert file.get("name") == name
+                assert "rep.shodan.banner" in file.tags
+                # The bytes are in the Axon, so the file can be searched for by Shodan's hashes.
+                assert b"".join([b async for b in core.axon.get(bytes.fromhex(sha256))]) == byts
+                # And the URL it came from hosts it (the favicon is on another server's URL too).
+                urlfile = ("inet:urlfile", (url, f"sha256:{sha256}"))
+                assert urlfile in await nodeset(core, f"file:bytes=sha256:{sha256} -> inet:urlfile")
+
+            for form in ("inet:servfile", "inet:urlfile"):
+                for node in await core.nodes(form):
+                    assert "rep.shodan.banner" in node.tags
+                    assert node.get(".seen") is not None
+                    assert len(await core.nodes(f"iden {node.iden()} <(seen)- meta:source={SVC_GUID}")) == 1
+
+            # Shodan's html_hash and favicon hash of the files match theirs.
+            msgs = await core.stormlist(f"file:bytes=sha256:{self.HTML_SHA256} | slib.shodan.hash")
+            self.stormIsInPrint(f"http.html_hash:{SCANME_HTML_HASH}", msgs)
+            msgs = await core.stormlist(f"file:bytes=sha256:{self.FAVICON_SHA256} | slib.shodan.hash")
+            self.stormIsInPrint(f"http.favicon.hash:{FAVICON_HASH}", msgs)
+
+            # A favicon on another server is only an inet:urlfile, the port 80 server didn't return it.
+            assert not await core.nodes(f"inet:server=tcp://{HTTP_IP}:80 -> inet:servfile")
+            assert await nodeset(core, f"file:bytes=sha256:{self.FAVICON_SHA256} -> inet:urlfile :url -> inet:url") == {
+                ("inet:url", "http://www.example.com:8080/shared/images/tiny-eyeicon.png"),
+                ("inet:url", "https://cdn.example.net/favicon.ico"),
+            }
+
+    async def test_http_axon(self):
+        async with shodanSvc(self) as (core, svc, fake):
+
+            async def boom(*args, **kwargs):
+                raise s_exc.SynErr(mesg="the axon is down")
+
+            await core.getAxon()
+            with mock.patch.object(core.axon, "has", boom):
+                msgs = await core.stormlist(f"slib.shodan.host --ip {HTTP_IP}")
+            self.stormHasNoErr(msgs)
+            self.stormIsInWarn(
+                f"Unable to save the HTTP html file {self.HTML_SHA256} to the Axon: the axon is down", msgs
+            )
+            # The nodes are still made.
+            assert len(await core.nodes(f"inet:server={self.SERVER} -> inet:servfile")) == 6
+
+            # Without axon.upload the bytes aren't saved, but the files are still modeled.
+            await core.nodes("inet:http:request file:bytes inet:servfile inet:urlfile | delnode --force")
+            user = await core.auth.addUser("user")
+            await user.addRule((True, ("node",)))
+            await user.addRule((True, ("slib", "shodan", "user")))
+            msgs = await core.stormlist(f"slib.shodan.host --ip {HTTP_IP}", opts={"user": user.iden})
+            self.stormHasNoErr(msgs)
+            assert len(await core.nodes(f"inet:server={self.SERVER} -> inet:servfile")) == 6
+            assert not await core.axon.has(bytes.fromhex(self.HTML_SHA256))
+
+    async def test_http_tag_prefix(self):
+        async with shodanSvc(self) as (core, svc, fake):
+            await core.nodes("slib.shodan.admin.tags --disable")
+            await core.nodes(f"slib.shodan.host --ip {HTTP_IP}")
+            for form in ("file:bytes", "inet:servfile", "inet:urlfile"):
+                nodes = await core.nodes(form)
+                assert nodes and not any(n.tags for n in nodes), form
 
 
 class TestShodanStormSsh(s_tests.SynTest):
@@ -476,7 +661,7 @@ class TestShodanStormSearchInputs(s_tests.SynTest):
                 ('[ ou:org=* :name="github, inc." ]', 'org:"github\\, inc."'),
                 ("[ ou:name='say \"hi\"' ]", 'org:"say \\"hi\\""'),
                 ('[ it:dev:str="product:nginx port:8080" ]', "product:nginx port:8080"),
-                ('[ meta:rule=* :type=svc.shodan.query :text="http.title:test" ]', "http.title:test"),
+                ('[ meta:rule=* :type=svc.shodan.query.local. :text="http.title:test" ]', "http.title:test"),
             ):
                 queries, msgs = await self.countQuery(core, fake, storm)
                 assert queries == [expected], (storm, queries)
@@ -494,8 +679,10 @@ class TestShodanStormSearchInputs(s_tests.SynTest):
                 ("[ risk:vuln=* ]", "missing the props needed"),
                 ("[ it:prod:softver=* ]", "missing the props needed"),
                 ("[ ou:org=* ]", "missing the props needed"),
-                ("[ meta:rule=* :type=svc.shodan.query ]", "missing the props needed"),
-                ('[ meta:rule=* :type=yara :text="rule x {}" ]', "its :type must be svc.shodan.query"),
+                ("[ meta:rule=* :type=svc.shodan.query.local. ]", "missing the props needed"),
+                ('[ meta:rule=* :type=yara :text="rule x {}" ]', "its :type must be svc.shodan.query.local."),
+                # The bare parent type isn't a saved query.
+                ('[ meta:rule=* :type=svc.shodan.query :text="port:1" ]', "its :type must be svc.shodan.query.local."),
                 ("[ inet:email=visi@vertex.link ]", "The node form inet:email is not supported"),
             ):
                 queries, msgs = await self.countQuery(core, fake, storm)
@@ -564,10 +751,10 @@ class TestShodanStormSearchInputs(s_tests.SynTest):
 
     async def test_search_meta_rules(self):
         async with shodanSvc(self) as (core, svc, fake):
-            await core.nodes('[ meta:rule=* :type=svc.shodan.query :text="product:nginx" ]')
-            await core.nodes('[ meta:rule=* :type=svc.shodan.query :text="port:8080" ]')
+            await core.nodes('[ meta:rule=* :type=svc.shodan.query.local. :text="product:nginx" ]')
+            await core.nodes('[ meta:rule=* :type=svc.shodan.query.local. :text="port:8080" ]')
             before = len(fake.requests)
-            msgs = await core.stormlist("meta:rule:type=svc.shodan.query | slib.shodan.search")
+            msgs = await core.stormlist("meta:rule:type=svc.shodan.query.local. | slib.shodan.search")
             self.stormHasNoErr(msgs)
             searches = [
                 r["query"]["query"]
@@ -1060,8 +1247,8 @@ class TestShodanStormInputs(s_tests.SynTest):
             await core.nodes("pol:country | slib.shodan.stream --timeout 5")
             assert fake.last()["path"] == "/stream/shodan/countries/US"
 
-            await core.nodes('[ meta:rule=* :type=svc.shodan.query :text="port:22" ]')
-            await core.nodes('[ meta:rule=* :type=svc.shodan.query :text="port:80" ]')
+            await core.nodes('[ meta:rule=* :type=svc.shodan.query.local. :text="port:22" ]')
+            await core.nodes('[ meta:rule=* :type=svc.shodan.query.local. :text="port:80" ]')
             msgs = await core.stormlist("meta:rule | slib.shodan.stream --timeout 5")
             self.stormIsInWarn("A custom stream takes one query", msgs)
             assert fake.last()["path"] == "/stream/shodan/custom"
@@ -1276,11 +1463,13 @@ class TestShodanStormSavedQueries(s_tests.SynTest):
             assert len(await core.nodes("meta:rule:text=webcam")) == 2
             assert len(await core.nodes("meta:rule")) == 3
 
-            # An older rule, with the parent type, counts as local.
-            await core.nodes('[ meta:rule=* :type=svc.shodan.query :name="Old" :text="port:22" ]')
+            # A hand-made local rule (another guid) is found by its :text.
+            await core.nodes('[ meta:rule=* :type=svc.shodan.query.local. :name="Old" :text="port:22" ]')
             msgs = await core.stormlist('slib.shodan.query.save "port:22" --name "SSH"')
             self.stormIsInWarn("port:22 is already a local saved query (old)", msgs)
             await core.nodes('[ meta:rule=* :type=other :name="Not shodan" :text="port:23" ]')
+            # The bare parent type isn't a saved query.
+            await core.nodes('[ meta:rule=* :type=svc.shodan.query :name="Bare" :text="port:24" ]')
 
             msgs = await core.stormlist("slib.shodan.queries --source local --yield")
             self.stormHasNoErr(msgs)
@@ -1310,12 +1499,54 @@ class TestShodanStormSavedQueries(s_tests.SynTest):
             msgs = await core.stormlist("slib.shodan.queries --source local --tags")
             self.stormIsInWarn("--tags lists Shodan's directory tags", msgs)
             msgs = await core.stormlist("slib.shodan.queries --source local --page 2")
-            self.stormIsInWarn("--page, --sort, and --order only apply to Shodan's directory", msgs)
+            self.stormIsInWarn("--page, --pages, --sort, and --order only apply to Shodan's directory", msgs)
+
+    async def test_queries_search(self):
+        async with shodanSvc(self) as (core, svc, fake):
+            await core.nodes('slib.shodan.query.save "port:22" --name "Webcam SSH"')
+
+            # Shodan's directory search, when it works.
+            msgs = await core.stormlist("slib.shodan.queries --search webcam")
+            self.stormHasNoErr(msgs)
+            self.stormIsInPrint("Stored saved queries: 1", msgs)
+            self.stormIsInPrint("Total saved queries: 1", msgs)
+            self.stormNotInWarn("unavailable", msgs)
+            assert fake.last()["path"] == "/api/shodan/query/search"
+            assert fake.last()["query"] == {"query": "webcam", "page": "1", "key": "testkey"}
+
+            # Like the live API now, the search is unavailable: directory pages are matched instead.
+            unavailable = (503, {"error": "Query search unavailable at the moment"})
+            fake.routes[("GET", "/api/shodan/query/search")] = unavailable
+            fake.requests.clear()
+            msgs = await core.stormlist("slib.shodan.queries --search IOT --pages 3 --yield")
+            self.stormHasNoErr(msgs)
+            self.stormIsInWarn("Query search unavailable at the moment", msgs)
+            self.stormIsInWarn("only the 2 directory queries on the --pages listed (of 2) were searched", msgs)
+            self.stormIsInPrint("Stored saved queries: 0", msgs)
+            self.stormIsInPrint("Total saved queries: 1", msgs)
+            # Matched on the tag, and the directory ran out after one page.
+            assert [m[1][1]["props"]["text"] for m in msgs if m[0] == "node"] == ["webcam"]
+            assert [r["path"] for r in fake.requests] == ["/api/shodan/query/search", "/api/shodan/query"]
+
+            # Once copied, the stored search finds it too, without Shodan.
+            fake.requests.clear()
+            msgs = await core.stormlist("slib.shodan.queries --source local --search webcam")
+            self.stormIsInPrint("Stored saved queries: 2", msgs)
+            assert not fake.requests
+
+            # Other errors aren't hidden by the fallback.
+            fake.routes[("GET", "/api/shodan/query/search")] = (400, {"error": "Bad query"})
+            msgs = await core.stormlist("slib.shodan.queries --source shodan --search webcam")
+            self.stormIsInWarn("Listing saved queries failed", msgs)
+            self.stormNotInWarn("unavailable", msgs)
+
+            msgs = await core.stormlist("slib.shodan.queries --source shodan --pages 0")
+            self.stormIsInWarn("--pages must be at least 1", msgs)
 
     async def test_run_saved_queries(self):
         async with shodanSvc(self) as (core, svc, fake):
             await core.nodes('slib.shodan.query.save "product:nginx" --name nginx')
-            await core.nodes('[ meta:rule=* :type=svc.shodan.query :text="port:8080" ]')
+            await core.nodes('[ meta:rule=* :type=svc.shodan.query.local. :text="port:8080" ]')
             await core.nodes("slib.shodan.queries --source shodan --yield")
 
             msgs = await core.stormlist("meta:rule:type^=svc.shodan.query | slib.shodan.search --count")

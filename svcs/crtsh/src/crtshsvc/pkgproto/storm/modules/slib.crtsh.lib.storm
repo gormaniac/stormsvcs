@@ -22,7 +22,7 @@ function ingest(c, chain=(false), tagPrefix=$lib.null) {
 // Returns ({"data": <the chain>, "nodes": <sha256 -> node>}), or null.
 function chainOf(valu, kind=$lib.null, tagPrefix=$lib.null) {
     $retn = $priv.chain($valu, kind=$kind)
-    if $util.failed($retn, `Building the chain of {$valu}`) { return($lib.null) }
+    if $util.failed($retn, `Building the chain of {$valu}`) { return() }
     return(({"data": $retn.data, "nodes": $model.chain($retn.data, $tagPrefix)}))
 }
 
@@ -32,7 +32,9 @@ function lookup(valus, kind=$lib.null, limit=(100), chain=(false)) {
     $retn = $priv.lookup($kind, $valus, limit=$limit)
     if $util.failed($retn, "Lookup") { return() }
     if (not $retn.data) {
-        $lib.warn("slib.crtsh: crt.sh has no certificates for: {valus}", valus=(", ").join($valus))
+        $names = $valus
+        if ($lib.vars.type($valus) != "list") { $names = ($valus,) }
+        $lib.warn(`slib.crtsh: crt.sh has no certificates for: {(", ").join($names)}`)
     }
     for $c in $retn.data { emit $ingest($c, $chain, $tagPrefix) }
 }

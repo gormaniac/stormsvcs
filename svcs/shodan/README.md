@@ -162,19 +162,26 @@ Saved Shodan queries are `meta:rule` nodes (`:text` is the query) of two kinds, 
 | | Community queries | Local queries |
 |---|---|---|
 | From | Shodan's query directory, copied with `slib.shodan.queries --yield` | Saved with `slib.shodan.query.save` |
-| `:type` | `svc.shodan.query.community.` | `svc.shodan.query.local.` (or the older `svc.shodan.query.`) |
+| `:type` | `svc.shodan.query.community.` | `svc.shodan.query.local.` |
 | `:name` | `[Community] <title>` (Synapse lower-cases `:name`, so ex. `[community] webcams`) | The name given |
 | Updates | A snapshot. Directory changes only arrive by copying again, and removed queries are never deleted. | Never sent to Shodan, its API can't save to the directory. |
 
 The same query text is a separate node for each kind. Re-copying keeps edits to `:name` and `:desc`.
 `slib.shodan.queries` lists both (stored ones first), and `--source local` or `--source shodan`
 picks one. Pipe any saved query to `slib.shodan.search`, `slib.shodan.count`, or `slib.shodan.stream`
-to run it:
+to run it. Only the two types above are saved queries, not the bare parent type `svc.shodan.query.`.
+
+`--search` matches stored queries by `:name`, `:text`, or `:desc`, ignoring case. For the
+directory it uses Shodan's directory search, which returns a 503 at the moment (see
+[Known API quirks](#known-api-quirks)). Until that's fixed, the command warns and matches the
+directory pages it listed (`--page`, `--pages`, 10 queries a page) by title, query, description,
+or tags instead. The directory has ~7,000 queries, none newer than 2021, so the easiest way to
+search all of it is to copy it once (~700 requests) and search the copies:
 
 ```
 slib.shodan.query.save "http.favicon.hash:-1166125415" --name "Favicon"
-slib.shodan.queries --source shodan --search webcam --yield
-slib.shodan.queries --source local
+slib.shodan.queries --source shodan --pages 1000 --yield | count
+slib.shodan.queries --source local --search webcam
 meta:rule:type^=svc.shodan.query | slib.shodan.count
 ```
 
@@ -253,7 +260,7 @@ the full list:
 | `inet:asn`, `inet:cidr4/6`, `inet:fqdn`, `inet:server` | `asn:AS<n>`, `net:<cidr>`, `hostname:"<fqdn>"`, `ip:"<ip>" port:<port>` |
 | `ou:org`, `ou:name` | `org:"<name>"` |
 | `it:dev:str` | The string, as-is |
-| `meta:rule` (`:type` `svc.shodan.query`) | Its `:text` |
+| `meta:rule` (`:type` `svc.shodan.query.local.` or `svc.shodan.query.community.`) | Its `:text` |
 
 ## Data model
 
@@ -264,6 +271,10 @@ the full list:
 | Services and banners | `inet:server`, `inet:banner` (the full banner text, never truncated) |
 | HTTP response headers | `inet:http:response:header`, with `inet:banner -(refs)> inet:http:response:header`. Parsed from HTTP banners, except `Date` headers (they change every scan). |
 | SSH host keys | `file:bytes` of the key as OpenSSH saves it (`<algo> <base64 key>\n`), served by the server via `inet:servfile`, both tagged `#rep.shodan.banner`. The bytes are saved in the Axon for users with `axon.upload`. |
+| HTTP requests | `inet:http:request` for each response Shodan got from a web server (`:server`, `:time`, `:url`, `:path`, `:header:host`, `:response:code`, `:response:reason`, `:response:headers`, `:response:body`). Each redirect Shodan followed to reach the page is another one. Pivot with `inet:server -> inet:http:request`. |
+| HTTP page titles | `it:dev:str`, with `inet:banner -(refs)> it:dev:str` and `inet:http:request -(refs)> it:dev:str` |
+| Open directories | `inet:url` for each file and folder the page lists (Shodan's `open_dir`), with `inet:http:request -(refs)> inet:url`. The listing page itself is the request's `:response:body`. Ex. `inet:url:path=/linpeas.sh <(refs)- inet:http:request :server -> inet:server` |
+| Files web servers return | `file:bytes` for the page (`http.html`), `robots.txt`, `security.txt`, the sitemap, the favicon, and redirect bodies, with `:mime`, `:name`, and every hash. `inet:servfile` for each file the server returned and `inet:urlfile` for the URL it came from. A favicon on another server only gets the `inet:urlfile`. All are tagged `#rep.shodan.banner`, and the bytes are saved in the Axon for users with `axon.upload`, so `slib.shodan.hash` and `slib.shodan.search` find other servers with the same page or favicon. |
 | Products and CPEs | `it:prod:softver` (`:cpe`, `:name`, `:vers`), with `inet:server -(uses)> it:prod:softver` |
 | Vulnerabilities | `risk:vuln` (via `$lib.gen.vulnByCve`), `risk:vulnerable` for the IP and the server |
 | TLS certificates | `crypto:x509:cert` (deconflicted by `:sha256`), `inet:tls:servercert` |
@@ -377,12 +388,28 @@ Notes from verifying the service against the live APIs (2026-10):
   `ssl.cert.fingerprint` only matches a cert's SHA-1, never its SHA-256. The `cpe` filter
   ignores the CPE's version (a made up `openssh:99.9.9` matches every OpenSSH), so the version
   is searched with `version:`.
+- **HTTP banners.** A banner's `data` is the final response's status line and headers, and its
+  `http` field has the rest: the page (`html`, a string whose UTF-8 bytes are what `html_hash`
+  hashes), `robots`, `securitytxt`, `sitemap`, the favicon (`data` is base64 with newlines,
+  `location` is a full URL that can be on another server), and the `redirects` Shodan followed
+  (each with the hop's `host`, `location`, and raw response `data`). `location` is the page's
+  path, and `host` the Host header Shodan sent (the IP, or the name it was redirected to). An
+  empty page has `html: ""` and `html_hash: 0`. Search drops `html` with `minify=true`. Only
+  banners with an `ssl` field are HTTPS: the `https-simple-new` module scans plain HTTP ports too.
+  The `html_hash` of `html`'s UTF-8 bytes matched Shodan's for 12 of 13 real banners, the other
+  (1.1.1.1:80) didn't match any variant of the text, so Shodan's fields can disagree.
+- **Open directories.** `open_dir.data` maps each entry's name to its `type` (`file` or
+  `folder`, whose names end in `/`), `size`, and `timestamp`. It only has the directory Shodan
+  fetched (the page at `http.location`), not its subfolders, and listings can have hundreds of
+  entries. `open_dir.extensions` and `open_dir.hash` are search filters.
 - **SSH keys.** `ssh.key` is the base64 key blob with newlines every 76 characters. Its MD5 is
   Shodan's `ssh.fingerprint`. The algorithm is read from the blob, falling back to `ssh.type`.
 - **Host history.** `GET /shodan/host/{ip}?history=true` returned a 404 ("No information
   available for that IP.") for `8.8.8.8` and `1.1.1.1`, which have data without `history`.
 - **Unavailable endpoints.** `/shodan/query/search` and `/shodan/query/tags` returned a 503
-  ("unavailable at the moment").
+  ("unavailable at the moment"), checked again 2026-11-14. `slib.shodan.queries --search` falls
+  back to matching the directory pages it lists. `GET /shodan/query` still works, with 6,965
+  queries at 10 a page, none newer than 2021-05.
 - **InternetDB** returns a 404 for IPs it hasn't seen, but some private IPs (ex. `10.0.0.1`) do
   have data.
 - **CVEDB** returns shortened CPE 2.3 strings, IDs are case-insensitive, and GHSA references

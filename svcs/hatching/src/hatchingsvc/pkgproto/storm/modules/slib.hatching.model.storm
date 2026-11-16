@@ -21,15 +21,15 @@ init {
 
 // Link the node to the Hatching Triage meta:source.
 function seen(n) {
-    if ($n = $lib.null) { return($n) }
+    if ($n = null) { return($n) }
     yield $n
     [ <(seen)+ { meta:source=$source } ]
     return($n)
 }
 
 // Tag a node with "<prefix>.<name>", for the interval ival (a [min, max] list or null).
-function tag(n, prefix, name, ival=$lib.null) {
-    if ($n = $lib.null or $prefix = $lib.null or not $name) { return($n) }
+function tag(n, prefix, name, ival=(null)) {
+    if ($n = null or $prefix = null or not $name) { return($n) }
     $tagname = `{$prefix}.{$name}`
     yield $n
     if $ival { [ +?#$tagname=$ival ] }
@@ -39,17 +39,17 @@ function tag(n, prefix, name, ival=$lib.null) {
 
 // Link two nodes with a light edge, n1 -(verb)> n2.
 function edge(n1, verb, n2) {
-    if ($n1 = $lib.null or $n2 = $lib.null) { return($n1) }
+    if ($n1 = null or $n2 = null) { return($n1) }
     yield $n1
-    [ +($verb)> { yield $n2 } ]
+    [ +($verb)> $n2 ]
     return($n1)
 }
 
 // ---- Observables ----
 
-function ipNode(ip, ver=$lib.null) {
-    if ($ip = $lib.null) { return($lib.null) }
-    if ($ver = $lib.null) {
+function ipNode(ip, ver=(null)) {
+    if ($ip = null) { return() }
+    if ($ver = null) {
         if ($lib.cast(str, $ip) ~= ":") { $ver = ipv6 } else { $ver = ipv4 }
     }
     if ($ver = "ipv6") { [ inet:ipv6?=$ip ] }
@@ -59,7 +59,7 @@ function ipNode(ip, ver=$lib.null) {
 
 // An IP or FQDN node for a host.
 function hostNode(host) {
-    if ($host = $lib.null) { return($lib.null) }
+    if ($host = null) { return() }
     ($ok, $valu) = $lib.trycast(inet:ipv4, $host)
     if $ok { return($ipNode($host, ver=ipv4)) }
     if ($lib.cast(str, $host) ~= ":") { return($ipNode($host, ver=ipv6)) }
@@ -68,19 +68,19 @@ function hostNode(host) {
 }
 
 function urlNode(url) {
-    if ($url = $lib.null) { return($lib.null) }
+    if ($url = null) { return() }
     [ inet:url?=$url ]
     return($seen($node))
 }
 
 function emailNode(email) {
-    if ($email = $lib.null) { return($lib.null) }
+    if ($email = null) { return() }
     [ inet:email?=$email ]
     return($seen($node))
 }
 
 function mutexNode(mutex) {
-    if ($mutex = $lib.null) { return($lib.null) }
+    if ($mutex = null) { return() }
     [ it:dev:mutex?=$mutex ]
     return($seen($node))
 }
@@ -92,23 +92,27 @@ function techniqueNode(ttp) {
 
 // A file:bytes node from normalized hashes ({sha256, md5, sha1, sha512, ssdeep, size, name, mime}).
 function fileNode(file) {
-    if ($file = $lib.null or $file.sha256 = $lib.null) { return($lib.null) }
+    if ($file = null or $file.sha256 = null) { return() }
     [ file:bytes?=`sha256:{$file.sha256}`
         :sha256?=$file.sha256 :md5?=$file.md5 :sha1?=$file.sha1 :sha512?=$file.sha512
-        :size?=$file.size :name?=$file.name :mime?=$file.mime ]
+        :size?=$file.size ]
+    // Don't replace a name or MIME type the graph already has (ex. an analyst's), Triage's are
+    // often generic (ex. dump.pcap, or {sid}.tar).
+    if (not :name) { [ :name?=$file.name ] }
+    if (not :mime) { [ :mime?=$file.mime ] }
     if $file.ssdeep { [ :ssdeeps?+=$file.ssdeep ] }
     return($seen($node))
 }
 
 // A file:bytes node for a SHA256 the graph (or this analysis) already has, or null.
 function fileBySha256(sha256) {
-    if ($sha256 = $lib.null) { return($lib.null) }
+    if ($sha256 = null) { return() }
     [ file:bytes?=`sha256:{$sha256}` :sha256?=$sha256 ]
     return($node)
 }
 
 // A file:bytes node for a file saved in the Axon.
-function axonFile(sha256, size=$lib.null, name=$lib.null) {
+function axonFile(sha256, size=(null), name=(null)) {
     return($fileNode(({"sha256": $sha256, "size": $size, "name": $name})))
 }
 
@@ -116,10 +120,10 @@ function axonFile(sha256, size=$lib.null, name=$lib.null) {
 
 // Model a normalized sample (slib.hatching.priv.user.normSample). Returns the sample's node
 // (file:bytes, or inet:url for URL analyses), or null if it has nothing to model it by.
-function sample(data, prefix=$lib.null) {
+function sample(data, prefix=(null)) {
     if ($data.kind = "url") { $snode = $urlNode($data.url) }
     else { $snode = $fileNode($data.file) }
-    if ($snode = $lib.null) { return($lib.null) }
+    if ($snode = null) { return() }
 
     $ival = $data.ival
     for $name in $data.tags { $tag($snode, $prefix, $name, $ival) }
@@ -144,11 +148,11 @@ function sample(data, prefix=$lib.null) {
 
 // Triage's verdict on the sample.
 function scan(snode, data) {
-    if ($data.score = $lib.null) { return($lib.null) }
+    if ($data.score = null) { return() }
     if ($snode.form() = "inet:url") { $target = "target:url" } else { $target = "target:file" }
-    $signame = $lib.null
+    $signame = (null)
     if $data.families { $signame = $data.families.index(0) }
-    [ it:av:scan:result=$lib.guid(slib.hatching, $data.id, scan)
+    [ it:av:scan:result=(slib.hatching, $data.id, scan)
         :scanner:name=$scanner :$target=$snode.repr() :time?=$data.time :verdict?=$data.verdict
         :signame?=$signame :categories?=$data.categories ]
     return($seen($node))
@@ -156,7 +160,7 @@ function scan(snode, data) {
 
 // A Triage signature that matched, as an it:av:scan:result under the sample's verdict (:multi:scan).
 function sigResult(snode, data, result, sig) {
-    if ($result = $lib.null) { return($lib.null) }
+    if ($result = null) { return() }
     if ($snode.form() = "inet:url") { $target = "target:url" } else { $target = "target:file" }
     $n = $sigNode($snode, $data, $result, $sig, $target)
     for $ttp in $sig.ttps { $edge($n, uses, $techniqueNode($ttp)) }
@@ -164,9 +168,9 @@ function sigResult(snode, data, result, sig) {
 }
 
 function sigNode(snode, data, result, sig, target) {
-    $cats = $lib.null
+    $cats = (null)
     if $sig.categories { $cats = $sig.categories }
-    [ it:av:scan:result=$lib.guid(slib.hatching, $data.id, signature, $sig.key)
+    [ it:av:scan:result=(slib.hatching, $data.id, signature, $sig.key)
         :scanner:name=$scanner :$target=$snode.repr() :time?=$data.time :verdict?=$sig.verdict
         :signame?=$sig.name :categories?=$cats :multi:scan=$result.repr() ]
     return($seen($node))
@@ -174,9 +178,9 @@ function sigNode(snode, data, result, sig, target) {
 
 // A file in an archive (or other container sample) that Triage analyzed.
 function member(snode, data, item, prefix) {
-    if ($snode.form() != "file:bytes") { return($lib.null) }
+    if ($snode.form() != "file:bytes") { return() }
     $mnode = $fileNode($item)
-    if ($mnode = $lib.null) { return($lib.null) }
+    if ($mnode = null) { return() }
     for $name in $item.tags { $tag($mnode, $prefix, $name, $data.ival) }
     [ file:subfile?=($snode.repr(), $mnode.repr()) :path?=$item.path ]
     return($seen($node))
@@ -187,7 +191,7 @@ function credsNode(cred) {
     if $cred.email { $emailNode($cred.email) }
     if $cred.url { $urlNode($cred.url) }
     if $cred.emailto { $emailNode($cred.emailto) }
-    [ auth:creds=$lib.guid(slib.hatching, creds, $cred.url, $cred.username, $cred.password)
+    [ auth:creds=(slib.hatching, creds, $cred.url, $cred.username, $cred.password)
         :user?=$cred.username :passwd?=$cred.password :email?=$cred.email :website?=$cred.url ]
     $n = $seen($node)
     if $cred.emailto { $edge($n, refs, $emailNode($cred.emailto)) }
@@ -196,26 +200,26 @@ function credsNode(cred) {
 
 // A malware family as a risk:tool:software, with :tag set to its tag.
 function family(fam, prefix) {
-    $famtag = $lib.null
+    $famtag = (null)
     $part = $lib.regex.replace("[^a-z0-9_]+", "_", $fam.lower()).strip("_")
     if ($prefix and $part) { $famtag = `{$prefix}.{$part}` }
-    [ risk:tool:software=$lib.guid(slib.hatching, family, $fam)
+    [ risk:tool:software=(slib.hatching, family, $fam)
         :soft:name?=$fam :reporter:name=$scanner :tag?=$famtag ]
     return($seen($node))
 }
 
 // Tag the C2 servers of a malware config and model the config.
 function c2config(snode, data, config, prefix) {
-    $famtag = $lib.null
+    $famtag = (null)
     if $config.family { $famtag = $lib.regex.replace("[^a-z0-9_]+", "_", $config.family).strip("_") }
     for $url in $config.servers { $c2($urlNode($url), $prefix, $famtag, $data.ival) }
     for $host in $config.hosts { $c2($hostNode($host), $prefix, $famtag, $data.ival) }
     for $mutex in $config.mutexes { $edge($snode, refs, $mutexNode($mutex)) }
 
-    $file = $lib.null
+    $file = (null)
     if ($snode.form() = "file:bytes") { $file = $snode.repr() }
     // The config holds a single mutex, the rest are linked to the sample above.
-    $mutex = $lib.null
+    $mutex = (null)
     if $config.mutexes { $mutex = $config.mutexes.index(0) }
     for $url in $config.listens { $urlNode($url) }
     $c2node = $c2configNode($data, $config, $file, $mutex)
@@ -224,7 +228,7 @@ function c2config(snode, data, config, prefix) {
 }
 
 function c2configNode(data, config, file, mutex) {
-    [ it:sec:c2:config=$lib.guid(slib.hatching, $data.id, config, $config.family, $config.servers)
+    [ it:sec:c2:config=(slib.hatching, $data.id, config, $config.family, $config.servers)
         :family?=$config.family :file?=$file :servers?=$config.servers :mutex?=$mutex
         :decoys?=$config.decoys :listens?=$config.listens :dns:resolvers?=$config.resolvers
         :campaigncode?=$config.campaign :raw?=$config.raw ]
@@ -238,7 +242,7 @@ function c2(n, prefix, famtag, ival) {
 
 // The URLs a dropper downloads from.
 function dropperUrls(snode, data, dropper, prefix) {
-    $famtag = $lib.null
+    $famtag = (null)
     if $dropper.family { $famtag = $lib.regex.replace("[^a-z0-9_]+", "_", $dropper.family).strip("_") }
     for $url in $dropper.urls {
         $n = $urlNode($url)
@@ -251,7 +255,7 @@ function dropperUrls(snode, data, dropper, prefix) {
 
 // The email addresses and URLs in a ransom note.
 function ransomNote(snode, data, note, prefix) {
-    $famtag = $lib.null
+    $famtag = (null)
     if $note.family { $famtag = $lib.regex.replace("[^a-z0-9_]+", "_", $note.family).strip("_") }
     $nodes = ([])
     for $email in $note.emails { $nodes.append($emailNode($email)) }
@@ -269,15 +273,15 @@ function ransomNote(snode, data, note, prefix) {
 
 // The guid of a task's process, flow, etc.
 function taskGuid(data, task, kind, id) {
-    if ($id = $lib.null) { return($lib.null) }
+    if ($id = null) { return() }
     return($lib.guid(slib.hatching, $data.id, $task.name, $kind, $id))
 }
 
 // Model a behavioral task's processes, network activity, and dropped files, linked to the
 // sample with :sandbox:file (when the sample is a file).
 function taskNodes(snode, data, task) {
-    $sandbox = $lib.null
-    $exe = $lib.null
+    $sandbox = (null)
+    $exe = (null)
     if ($snode.form() = "file:bytes") {
         $sandbox = $snode.repr()
         // The file the task ran: the sample, or for archives, the member that was picked.
@@ -299,7 +303,7 @@ function taskNodes(snode, data, task) {
 }
 
 function procNode(data, task, proc, sandbox, exe) {
-    $pexe = $lib.null
+    $pexe = (null)
     if $proc.sample { $pexe = $exe }
     [ it:exec:proc=$taskGuid($data, $task, proc, $proc.procid)
         :sandbox:file?=$sandbox :exe?=$pexe :pid?=$proc.pid :cmd?=$proc.cmd :path?=$proc.path
@@ -308,7 +312,7 @@ function procNode(data, task, proc, sandbox, exe) {
 }
 
 function flowNode(data, task, flow, sandbox) {
-    $ipprop = $lib.null
+    $ipprop = (null)
     if $flow.ipver { $ipprop = `dst:{$flow.ipver}` $ipNode($flow.ip, ver=$flow.ipver) }
     $fnode = $flowProps($data, $task, $flow, $sandbox, $ipprop)
     // The domain the flow connected to, and the TLS server name it asked for.
@@ -322,14 +326,14 @@ function flowNode(data, task, flow, sandbox) {
 
 // The JA3 fingerprint of a flow's TLS client hello.
 function ja3Sample(client, ja3) {
-    if ((not $client) or (not $ja3)) { return($lib.null) }
+    if ((not $client) or (not $ja3)) { return() }
     [ inet:tls:ja3:sample?=($client, $ja3) ]
     return($seen($node))
 }
 
 // The JA3S fingerprint of a flow's TLS server hello.
 function ja3sSample(server, ja3s) {
-    if ((not $server) or (not $ja3s)) { return($lib.null) }
+    if ((not $server) or (not $ja3s)) { return() }
     [ inet:tls:ja3s:sample?=($server, $ja3s) ]
     return($seen($node))
 }
@@ -347,7 +351,7 @@ function flowProps(data, task, flow, sandbox, ipprop) {
 // Triage's ASN and country of an IP, only set when the graph doesn't already have them.
 function ipGeo(ip) {
     $n = $ipNode($ip.ip, ver=$ip.ipver)
-    if ($n = $lib.null) { return($lib.null) }
+    if ($n = null) { return() }
     yield $n
     if ($ip.asn and (not :asn)) { [ :asn?=$ip.asn ] }
     if ($ip.cc and (not :loc)) { [ :loc?=$ip.cc ] }
@@ -355,7 +359,7 @@ function ipGeo(ip) {
 }
 
 function dnsNode(data, task, req, sandbox) {
-    [ inet:dns:request=$lib.guid(slib.hatching, $data.id, $task.name, dns, $req.flow, $req.index, $req.name)
+    [ inet:dns:request=(slib.hatching, $data.id, $task.name, dns, $req.flow, $req.index, $req.name)
         :sandbox:file?=$sandbox :query:name?=$req.name :query:type?=$req.type :server?=$req.server ]
     return($seen($node))
 }
@@ -365,18 +369,18 @@ function answerNode(ans) {
         "a": { [ inet:dns:a?=($ans.name, $ans.value) ] }
         "aaaa": { [ inet:dns:aaaa?=($ans.name, $ans.value) ] }
         "cname": { [ inet:dns:cname?=($ans.name, $ans.value) ] }
-        *: { return($lib.null) }
+        *: { return() }
     }
     return($seen($node))
 }
 
 function httpNode(data, task, req, sandbox) {
     $urlNode($req.url)
-    $hdrs = $lib.null
+    $hdrs = (null)
     if $req.headers { $hdrs = $req.headers }
-    $rhdrs = $lib.null
+    $rhdrs = (null)
     if $req.rheaders { $rhdrs = $req.rheaders }
-    [ inet:http:request=$lib.guid(slib.hatching, $data.id, $task.name, http, $req.flow, $req.index, $req.url)
+    [ inet:http:request=(slib.hatching, $data.id, $task.name, http, $req.flow, $req.index, $req.url)
         :sandbox:file?=$sandbox :flow?=$taskGuid($data, $task, flow, $req.flow) :server?=$req.server
         :method?=$req.method :url?=$req.url :headers?=$hdrs
         :response:code?=$req.code :response:reason?=$req.reason :response:headers?=$rhdrs ]
@@ -388,8 +392,8 @@ function fileAdd(data, task, file, sandbox) {
     $fnode = $fileNode(({"sha256": $file.sha256, "md5": $file.md5, "sha1": $file.sha1,
                          "sha512": $file.sha512, "ssdeep": $file.ssdeep, "size": $file.size,
                          "name": $file.basename}))
-    if ($fnode = $lib.null) { return($lib.null) }
-    [ it:exec:file:add=$lib.guid(slib.hatching, $data.id, $task.name, file, $file.name, $file.sha256)
+    if ($fnode = null) { return() }
+    [ it:exec:file:add=(slib.hatching, $data.id, $task.name, file, $file.name, $file.sha256)
         :sandbox:file?=$sandbox :file=$fnode.repr() :path?=$file.path
         :proc?=$taskGuid($data, $task, proc, $file.procid) ]
     $seen($node)

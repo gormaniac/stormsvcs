@@ -1,23 +1,33 @@
 // Unprivileged helpers shared by the slib.hatching commands.
 
+// The calling user's own Hatching Triage API key (from a user scoped "hatching" vault), or null.
+// Only the user scope is read, so this never exposes another user's or role's secrets.
+function userKey() {
+    $vault = $lib.vault.bytype(hatching, scope=user)
+    if ($vault = null) { return() }
+    $secrets = $vault.secrets
+    if ($secrets = null) { return() }
+    return($secrets.apikey)
+}
+
 // Warn about a failed service call. Returns true if the call failed.
 function failed(retn, what) {
     if $retn.status { return((false)) }
-    $lib.warn("slib.hatching: {what} failed: {err}", what=$what, err=$retn.mesg)
+    $lib.warn(`slib.hatching: {$what} failed: {$retn.mesg}`)
     return((true))
 }
 
 // The type of a hex hash by its length (md5, sha1, sha256, sha512), or null.
 function hashType(valu) {
     $valu = $lib.cast(str, $valu)
-    if (not $lib.regex.matches("^[0-9a-fA-F]+$", $valu)) { return($lib.null) }
+    if (not $lib.regex.matches("^[0-9a-fA-F]+$", $valu)) { return() }
     switch $lib.len($valu) {
         "32": { return(md5) }
         "40": { return(sha1) }
         "64": { return(sha256) }
         "128": { return(sha512) }
     }
-    return($lib.null)
+    return()
 }
 
 // The best hash to look a file:bytes/hash:* node up by, preferring SHA256. Returns null if there isn't one.
@@ -28,14 +38,14 @@ function nodeHash(node) {
             if $node.props.sha1 { return($node.props.sha1) }
             if $node.props.md5 { return($node.props.md5) }
             if $node.props.sha512 { return($node.props.sha512) }
-            return($lib.null)
+            return()
         }
         "hash:md5": { return($node.repr()) }
         "hash:sha1": { return($node.repr()) }
         "hash:sha256": { return($node.repr()) }
         "hash:sha512": { return($node.repr()) }
     }
-    return($lib.null)
+    return()
 }
 
 // Print a table. columns is a list of (name, width) and rows is a list of lists.
@@ -67,10 +77,12 @@ function printSamples(samples) {
     $table((("id", 20), ("status", 16), ("kind", 6), ("target", 48), ("submitted", 22)), $rows)
 }
 
-// The names of a sample's behavioral tasks, from its metadata.
+// The names of a sample's reported behavioral tasks, from its metadata. Failed tasks are skipped,
+// they have no files to download.
 function behavioralTasks(sample) {
     $ret = ([])
     for $task in $sample.tasks {
+        if ($task.status != "reported") { continue }
         $name = $task.id
         if $name.startswith(`{$sample.id}-`) { $name = $name.slice($lib.len(`{$sample.id}-`)) }
         if $name.startswith("behavioral") { $ret.append($name) }
@@ -80,7 +92,7 @@ function behavioralTasks(sample) {
 
 // The last part of a file path (Windows or POSIX).
 function basename(path) {
-    if ($path = $lib.null) { return($lib.null) }
+    if ($path = null) { return() }
     $path = $lib.cast(str, $path).replace("\\", "/")
     $parts = $path.split("/")
     return($parts.index(-1))

@@ -9,7 +9,7 @@ function tagPrefix() {
     if $lib.globals.get("slib:crtsh:tag:enabled") {
         return($lib.globals.get("slib:crtsh:tag:prefix"))
     }
-    return($lib.null)
+    return()
 }
 
 // Lookups

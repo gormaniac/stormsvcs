@@ -514,8 +514,11 @@ Before committing:
 ## 9. Conclusion (2026-11-14)
 
 **Decision:**
-- **ip_api moves** to pure Storm. It's now the `slib.ipapi` 1.0.0 package in StormLib++, with the
+- **ip_api moves** to pure Storm. It's now the `slib.ipapi` package in StormLib++, with the
   shared ASN code in `slib.utils.inet`. The service is retired here.
+  - 1.0.0 was ported from the service's 0.2.3.
+  - 1.1.0 adds what the service's 0.3.0 audit fixes added before it was retired: `/batch`, pro
+    keys, reverse DNS, the WHOIS org and `-(seen)>` edges.
 - **bgphe, malpedia, virustotal and hatching stay services.**
 - **abusech** was already deferred (§7) and stays a service.
 - **`slib.utils.x509` is kept** in StormLib++, for any package that needs certificate details in

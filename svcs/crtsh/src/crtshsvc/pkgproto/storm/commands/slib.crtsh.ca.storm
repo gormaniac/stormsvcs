@@ -25,20 +25,23 @@ init {
     }
 }
 
-spin |
+// Inbound nodes are dropped, the CA results are yielded once in the fini block.
+-$(true)
 
-if $cmdopts.certs {
-    $tagPrefix = $priv.tagPrefix()
-    for $ca in $cas {
-        for $c in $ca.certs { yield $model.cert($c, $tagPrefix) }
+fini {
+    if $cmdopts.certs {
+        $tagPrefix = $priv.tagPrefix()
+        for $ca in $cas {
+            for $c in $ca.certs { yield $model.cert($c, $tagPrefix) }
+        }
     }
-}
 
-if ($cmdopts.issued and $caids) {
-    for $n in $crtsh.issued(caids=$caids, valid=$cmdopts.valid, since=$util.toTime($cmdopts.since),
-                            until=$util.toTime($cmdopts.until), precerts=(not $cmdopts.no_precerts),
-                            limit=$cmdopts.limit, chain=$cmdopts.chain) {
-        yield $n
+    if ($cmdopts.issued and $caids) {
+        for $n in $crtsh.issued(caids=$caids, valid=$cmdopts.valid, since=$util.toTime($cmdopts.since),
+                                until=$util.toTime($cmdopts.until), precerts=(not $cmdopts.no_precerts),
+                                limit=$cmdopts.limit, chain=$cmdopts.chain) {
+            yield $n
+        }
     }
 }
 

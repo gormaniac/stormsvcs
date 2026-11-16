@@ -4,7 +4,7 @@ init {
 
     $nodes = ([])
     $errs = $pcap.ruleErrors()
-    if ($errs != $lib.null) {
+    if ($errs != null) {
         if (not $errs) {
             $lib.print("slib.pcap.rule.errors: The engines loaded every rule.")
         } else {
@@ -18,10 +18,9 @@ init {
                 $nodes.append($rule)
             }
             for ($guid, $mesg) in $errs {
-                $lib.print("{form}={guid} (sid {id}): {err}", form=$forms.$guid, guid=$guid,
-                           id=$ids.$guid, err=$mesg)
+                $lib.print(`{$forms.$guid}={$guid} (sid {$ids.$guid}): {$mesg}`)
             }
-            $lib.print("slib.pcap.rule.errors: {count} rules couldn't be loaded.", count=$lib.len($guids))
+            $lib.print(`slib.pcap.rule.errors: {$lib.len($guids)} rules couldn't be loaded.`)
         }
     }
 
@@ -38,11 +37,10 @@ init {
             }
             for ($guid, $mesgs) in $warns {
                 for $mesg in $mesgs {
-                    $lib.print("{form}={guid} (sid {id}) warning: {warning}", form=$wforms.$guid,
-                               guid=$guid, id=$wids.$guid, warning=$mesg)
+                    $lib.print(`{$wforms.$guid}={$guid} (sid {$wids.$guid}) warning: {$mesg}`)
                 }
             }
-            $lib.print("slib.pcap.rule.errors: {count} loaded rules have warnings.", count=$lib.len($wguids))
+            $lib.print(`slib.pcap.rule.errors: {$lib.len($wguids)} loaded rules have warnings.`)
         }
     }
 }

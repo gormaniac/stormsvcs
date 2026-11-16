@@ -2,9 +2,14 @@ init {
     $privadmin = $lib.import(slib.crtsh.priv.admin)
     $util = $lib.import(slib.crtsh.util)
 
-    $retn = $privadmin.rawQuery($cmdopts.sql, args=$cmdopts.args)
+    $retn = $privadmin.rawQuery($cmdopts.sql, args=$cmdopts.args, limit=$cmdopts.limit)
     if (not $util.failed($retn, "Query")) {
-        $lib.print("{count} rows", count=$lib.len($retn.data))
+        $count = $lib.len($retn.data)
+        if ($count = $cmdopts.limit) {
+            $lib.print(`{$count} rows (the --limit, there may be more)`)
+        } else {
+            $lib.print(`{$count} rows`)
+        }
         $util.printJson($retn.data)
     }
 }

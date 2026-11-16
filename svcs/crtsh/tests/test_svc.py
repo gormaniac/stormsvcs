@@ -61,7 +61,13 @@ def test_helpers():
     )
     with pytest.raises(CrtshDbError, match="Invalid IP"):
         s_svc.identityQuery("ip", "nope")
-    assert s_svc.identityQuery("dns", "*.vertex_link") == ("*.vertex_link", "%vertex\\_link")
+    # Leading wildcards and dots are dropped from domains, they match subdomains anyway.
+    assert s_svc.identityQuery("dns", "*.vertex_link") == ("vertex_link", "%vertex\\_link")
+    assert s_svc.identityQuery("dns", ".vertex.link") == ("vertex.link", "%vertex.link")
+    assert s_svc.identityQuery("dns", "*.vertex.link", exact=True) == (
+        "*.vertex.link",
+        "vertex.link",
+    )
     assert s_svc.identityQuery("dns", "vertex.link", exact=True) == ("vertex.link", "vertex.link")
     assert s_svc.identityQuery("org", "Vertex") == ("Vertex", "%Vertex%")
 
@@ -184,9 +190,16 @@ class TestCrtshSvc(s_tests.SynTest):
     async def test_limit(self):
         async with svcCtx(self, conf={"crtsh:limit": 3}) as (svc, fake):
             assert svc._limit(None) == 3
-            assert svc._limit(-1) == 3
             assert svc._limit(2) == 2
+            assert svc._limit("2") == 2
             assert svc._limit(10) == 3
+            # 0 and negative limits are errors, not the max.
+            for limit in (0, -1):
+                with pytest.raises(CrtshDbError, match="at least 1"):
+                    svc._limit(limit)
+            for limit in ("zz", True, [1]):
+                with pytest.raises(CrtshDbError, match="Invalid limit"):
+                    svc._limit(limit)
 
     async def test_search(self):
         async with svcCtx(self) as (svc, fake):
@@ -205,13 +218,17 @@ class TestCrtshSvc(s_tests.SynTest):
             assert await ids(svc.searchGenr(dns="vertex.link", limit=2)) == [10, 9]
             assert await ids(svc.searchGenr(dns="vertex.link", org="vertex", cn="old")) == [11]
             assert await ids(svc.searchGenr(ip="2001:db8::1")) == [10, 9]
-            assert await ids(svc.searchGenr(email="visi")) == [10, 9]
+            assert await ids(svc.searchGenr(email="visi@vertex.link")) == [10, 9]
+            # crt.sh's full text search matches whole words, domains, and addresses (CRTSH-02).
+            assert await ids(svc.searchGenr(email="visi")) == []
+            assert await ids(svc.searchGenr(cn="old")) == []
+            assert await ids(svc.searchGenr(cn="vertex.link")) == [10, 9, 15, 11, 12]
             assert await ids(svc.searchGenr(uri="https://vertex.link/")) == [10, 9]
             assert await ids(svc.searchGenr(ou="Engineering")) == [10, 9, 15]
             assert await ids(svc.searchGenr(subject="O=Example Inc")) == [14]
             assert fake.last("certsByIdentity")["text"] == "Example Inc"
             assert fake.last("certsByIdentity")["like"] is None
-            assert await ids(svc.searchGenr(identity="shop")) == [14]
+            assert await ids(svc.searchGenr(identity="shop.example.com")) == [14]
 
             # Issuers by name are matched in the same query.
             assert await ids(svc.searchGenr(dns="vertex.link", issuer="Issuing CA")) == [
@@ -404,8 +421,15 @@ class TestCrtshSvc(s_tests.SynTest):
         async with svcCtx(self) as (svc, fake):
             rows = await svc.rawQuery("SELECT 1", [1])
             assert rows[0]["key"] == "0102" and rows[0]["ids"] == [1, "ff"]
+            assert fake.last("raw")["limit"] == 1000
+            await svc.rawQuery("SELECT 1", limit=5000)
+            assert fake.last("raw")["limit"] == 1000
+            await svc.rawQuery("SELECT 1", limit=5)
+            assert fake.last("raw")["limit"] == 5
             with pytest.raises(CrtshDbError, match="nope"):
                 await svc.rawQuery("SELECT * FROM nope")
+            with pytest.raises(CrtshDbError, match="Invalid args"):
+                await svc.rawQuery("SELECT $1", "x")
 
     async def test_api(self):
         async with svcCtx(self) as (svc, fake):
@@ -436,6 +460,74 @@ class TestCrtshSvc(s_tests.SynTest):
                     1,
                 ]
 
+    async def test_search_ip(self):
+        """IPs are matched in canonical form, and exactly (CRTSH-03)."""
+
+        async with svcCtx(self) as (svc, fake):
+            assert await ids(svc.searchGenr(ip="2001:0db8::1")) == [10, 9]
+            assert await ids(svc.searchGenr(ip="2001:db8:0:0:0:0:0:1")) == [10, 9]
+            assert await ids(svc.searchGenr(ip=" 1.2.3.4 ")) == [10, 9]
+            # A substring of an IP is a different IP.
+            assert await ids(svc.searchGenr(ip="1.2.3.4", dns="vertex.link")) == [10, 9]
+            assert await ids(svc.searchGenr(ip="1.2.3.40", dns="vertex.link")) == []
+            with pytest.raises(CrtshDbError, match="Invalid IP"):
+                await ids(svc.searchGenr(ip="nope", dns="vertex.link"))
+
+    async def test_search_leading_dot(self):
+        """A leading dot or wildcard on --dns matches like the bare domain (CRTSH-09)."""
+
+        async with svcCtx(self) as (svc, fake):
+            expect = await ids(svc.searchGenr(dns="vertex.link"))
+            assert expect
+            assert await ids(svc.searchGenr(dns=".vertex.link")) == expect
+            assert await ids(svc.searchGenr(dns="*.vertex.link")) == expect
+            assert fake.last("certsByIdentity")["text"] == "vertex.link"
+
+    async def test_bad_args(self):
+        """Bad argument types are CrtshDbErrors, and the API wraps any error (CRTSH-04)."""
+
+        async with svcCtx(self) as (svc, fake):
+            with pytest.raises(CrtshDbError, match="Invalid CA ID"):
+                await ids(svc.searchGenr(caids=["x"]))
+            with pytest.raises(CrtshDbError, match="Invalid limit"):
+                await svc.lookup(None, 10, limit="zz")
+            with pytest.raises(CrtshDbError, match="Invalid since"):
+                await ids(svc.searchGenr(dns="vertex.link", since="yesterday"))
+            with pytest.raises(CrtshDbError, match="Invalid CA ID"):
+                await svc.cas(caids=["x"])
+            with pytest.raises(CrtshDbError, match="Invalid maxdepth"):
+                await svc.chain(10, maxdepth="x")
+            # A single CA ID, even 0, is a list of one.
+            await ids(svc.searchGenr(caids=0))
+            assert fake.last("certsByIssuer")["caids"] == [0]
+
+            async with svc.getLocalProxy() as prox:
+                retn = await prox.lookup(None, 10, limit="zz")
+                assert retn == {"status": False, "mesg": "Invalid limit, expected an integer: zz", "data": None}
+                items = [i async for i in prox.searchGenr(caids=["x"])]
+                assert items == [{"status": False, "mesg": "Invalid CA ID, expected an integer: x", "data": None}]
+
+                # Unexpected errors (ex. from the database driver) are status=False too.
+                async def boom(*args, **kwargs):
+                    raise RuntimeError("driver exploded")
+
+                svc.db.certs = boom
+                svc.db.certsByIdentity = boom
+                with self.getLoggerStream("crtshsvc.api") as stream:
+                    retn = await prox.get(10)
+                stream.seek(0)
+                logs = stream.read()
+                assert "Unexpected slib.crtsh error" in logs and "driver exploded" in logs
+                assert retn == {
+                    "status": False,
+                    "mesg": "Unexpected error: RuntimeError: driver exploded",
+                    "data": None,
+                }
+                items = [i async for i in prox.searchGenr(dns="vertex.link")]
+                assert items == [
+                    {"status": False, "mesg": "Unexpected error: RuntimeError: driver exploded", "data": None}
+                ]
+
     async def test_db_conf(self):
         conf = {
             "crtsh:dsn": "postgresql://u@db.example:5433/certs",
@@ -446,6 +538,10 @@ class TestCrtshSvc(s_tests.SynTest):
             "crtsh:connect:timeout": 4,
             "crtsh:statement:timeout": 6,
         }
+        # The defaults bound every query, crt.sh cancels it before the client gives up.
+        async with self.getTestCell(CrtshSvc) as svc:
+            assert (svc.db.timeout, svc.db.statement_timeout) == (660, 600)
+
         async with self.getTestCell(CrtshSvc, conf=conf) as svc:
             db = svc.db
             assert (

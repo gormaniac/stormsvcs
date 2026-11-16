@@ -2,11 +2,11 @@ init {
     $padmin = $lib.import(slib.hatching.priv.admin)
     $util = $lib.import(slib.hatching.util)
 
-    if ($cmdopts.magic != $lib.null) {
+    if ($cmdopts.magic != null) {
         $enabled = ($cmdopts.magic = "on")
         $retn = $padmin.setMagicLinks($enabled)
         if (not $util.failed($retn, "Changing the magic link setting")) {
-            $lib.print("slib.hatching.admin.org: Turned magic links {state}.", state=$cmdopts.magic)
+            $lib.print(`slib.hatching.admin.org: Turned magic links {$cmdopts.magic}.`)
         }
     }
     elif $cmdopts.stats {
