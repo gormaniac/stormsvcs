@@ -1,3 +1,4 @@
+#!/bin/sh
 # The tests that need an engine (tshark, Suricata, Snort) fail instead of skipping, this image
 # always has them.
 export SLIB_PCAP_REQUIRE=1
