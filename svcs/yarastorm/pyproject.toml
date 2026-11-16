@@ -1,6 +1,6 @@
 [project]
 name = "yarastorm"
-version = "0.7.0"
+version = "0.8.0"
 description = "The yarastorm Python package"
 readme = "README.md"
 license-files = ["LICENSE"]
@@ -22,6 +22,7 @@ build-backend = "uv_build"
 [tool.uv.build-backend]
 source-include = [
     "pkgproto/*.yaml",
+    "pkgproto/*.md",
     "pkgproto/storm/*/*.storm",
 ]
 

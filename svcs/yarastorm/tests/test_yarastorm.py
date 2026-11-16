@@ -47,6 +47,13 @@ def packed(iden: str, text: str | None = TRUE_RULE, form: str = "it:app:yara:rul
 class TestYaraStorm(s_tests.SynTest):
     """Test suite for the yarastorm service."""
 
+    def test_readmes_match(self):
+        # The package's README (shown in the Cortex) is a copy of the service's README.
+        readme = (SVCDIR / "README.md").read_text()
+        pkgreadme = SVCDIR / "src" / "yarastorm" / "pkgproto" / "README.md"
+        assert pkgreadme.read_text() == readme, "Copy README.md to src/yarastorm/pkgproto/README.md"
+        assert [d["content"] for d in PKGDEFS[0]["docs"]] == [readme]
+
     def test_versions_match(self):
         # The version lives in pyproject.toml, __init__.py, the package yaml, and uv.lock.
         assert assertVersionsMatch(SVCDIR) == __version__
