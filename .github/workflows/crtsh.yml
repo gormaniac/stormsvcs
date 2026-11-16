@@ -21,6 +21,8 @@ jobs:
       service: crtsh
       # Also run the tests in the test image built on the new production image.
       docker_tests: true
+      # The Storm lints clean (default rules and --v3-ready), keep it that way.
+      storm_lint: block
     secrets: inherit
 
   # The other tests run against a fake database. These run the service's real SQL against a

@@ -16,7 +16,7 @@ init {
 // loops call helpers that yield/edit the node in their own runtime instead.
 
 // Link the node to the slib.crtsh meta:source and extend its .seen to cover the times.
-function seen(n, times=$lib.null) {
+function seen(n, times=(null)) {
     for $time in $times { $seenAt($n, $time) }
     yield $n
     [ <(seen)+ { [ meta:source=$sourceGuid :name="crt.sh" ] } ]
@@ -25,7 +25,7 @@ function seen(n, times=$lib.null) {
 
 function seenAt(n, time) {
     yield $n
-    [ .seen ?= $time ]
+    [ .seen ?= $time ]  // noqa: M004 - :seen is 3.x only
     return($n)
 }
 
@@ -75,7 +75,7 @@ function rsaKeyNode(key) {
 
 // The CRL a revoked certificate is listed on: its first CRL distribution point, or its issuer CA's.
 function crlNode(c) {
-    $url = $lib.null
+    $url = (null)
     for $crl in $c.crls { if (not $url) { $url = $crl } }
     if $url {
         [ crypto:x509:crl=({"url": $url}) ]
@@ -125,7 +125,7 @@ function revokedNode(c, n) {
 // Everything the Synapse model has a place for is set as props, the full details
 // (extensions, key usage, SCTs, CT log entries, revocation, crt.sh IDs, PEM, etc.)
 // are stored in the node's "slib:crtsh" node data.
-function cert(c, tagPrefix=$lib.null) {
+function cert(c, tagPrefix=(null)) {
     $n = $certNode($c)
 
     // .seen covers when the certificate was first and last logged to CT.
@@ -148,7 +148,7 @@ function cert(c, tagPrefix=$lib.null) {
 
     if $c.crtsh.revoked { $revokedNode($c, $n) }
 
-    if ($tagPrefix != $lib.null) {
+    if ($tagPrefix != null) {
         if $c.precert { $addTag($n, `{$tagPrefix}.precert`) }
         if $c.crtsh.revoked { $addTag($n, `{$tagPrefix}.revoked`) }
         if $c.ca { $addTag($n, `{$tagPrefix}.ca`) }
@@ -169,7 +169,7 @@ function setIssuer(child, parent) {
 //
 // Each certificate's :issuer:cert is set to its preferred parent. Every possible
 // parent (cross-signs, reissues) is in the chain's "links".
-function chain(data, tagPrefix=$lib.null) {
+function chain(data, tagPrefix=(null)) {
     $nodes = ({})
     for $c in $data.certs {
         $sha = $c.sha256

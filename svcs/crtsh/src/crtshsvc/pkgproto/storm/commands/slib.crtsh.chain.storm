@@ -3,8 +3,8 @@ init {
     $util = $lib.import(slib.crtsh.util)
     $priv = $lib.import(slib.crtsh.priv.user)
     $explicit = $util.given($cmdopts.cert)
-    // The inbound nodes seen, so the fini block can tell when there were none.
-    $inbound = ([])
+    // Whether any node came in, so the fini block can tell when there were none.
+    $state = ({"inbound": false})
 }
 
 // Print each path from the certificate to a root, preferred parents first.
@@ -25,7 +25,7 @@ function printPaths(chain) {
 // Model the chain(s) of a certificate and emit every certificate in them.
 function chainNodes(valu, kind, print) {
     $chain = $crtsh.chainOf($valu, $kind, $priv.tagPrefix())
-    if ($chain = $lib.null) { return() }
+    if ($chain = null) { return() }
     if $print { $printPaths($chain) }
     for ($sha, $n) in $chain.nodes { emit $n }
 }
@@ -33,12 +33,13 @@ function chainNodes(valu, kind, print) {
 // --cert ignores inbound nodes, its chains are built once in the fini block.
 -$explicit
 
-$inbound.append($node.iden())
+// In a subquery, so it only runs for inbound nodes (a runtsafe edit runs once without any).
+{ $state.inbound = (true) }
 $key = $util.certKeyOf($node)
-if ($key = $lib.null) {
-    $lib.warn(`slib.crtsh.chain: Unable to build the chain of {$node.form()} {$node.repr()}, it needs a crypto:x509:cert with a SHA-256 or SHA-1.`)
+if ($key = null) {
+    $lib.warn(`slib.crtsh.chain: Unable to build the chain of {$node.form()} {$node.repr()}, it needs a crypto:x509:cert with a SHA-256 or SHA-1.`)  // noqa: R002 - $node.form is a method on 2.x
 }
--$($key = $lib.null)
+-$($key = null)
 
 ($kind, $valu) = $key
 divert (true) $util.nodes($chainNodes($valu, $kind, $cmdopts.print))
@@ -46,9 +47,9 @@ divert (true) $util.nodes($chainNodes($valu, $kind, $cmdopts.print))
 fini {
     if $explicit {
         for $valu in $cmdopts.cert {
-            for $n in $chainNodes($valu, $lib.null, $cmdopts.print) { yield $n }
+            for $n in $chainNodes($valu, (null), $cmdopts.print) { yield $n }
         }
-    } elif ($lib.len($inbound) = 0) {
+    } elif (not $state.inbound) {
         $lib.warn("slib.crtsh.chain: Nothing to build the chain of, give --cert or inbound nodes.")
     }
 }

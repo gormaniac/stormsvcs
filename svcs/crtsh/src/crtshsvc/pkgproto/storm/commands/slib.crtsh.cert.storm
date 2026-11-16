@@ -3,19 +3,20 @@ init {
     $util = $lib.import(slib.crtsh.util)
     $opts = ({"kind": $cmdopts.type, "limit": $cmdopts.limit, "chain": $cmdopts.chain})
     $explicit = $util.given($cmdopts.valus)
-    // The inbound nodes seen, so the fini block can tell when there were none.
-    $inbound = ([])
+    // Whether any node came in, so the fini block can tell when there were none.
+    $state = ({"inbound": false})
 }
 
 // Values ignore inbound nodes, they're looked up once in the fini block.
 -$explicit
 
-$inbound.append($node.iden())
+// In a subquery, so it only runs for inbound nodes (a runtsafe edit runs once without any).
+{ $state.inbound = (true) }
 $key = $util.lookupKey($node)
-if ($key = $lib.null) {
-    $lib.warn(`slib.crtsh.cert: Unable to look up {$node.form()} {$node.repr()}, it needs a SHA-256 or SHA-1.`)
+if ($key = null) {
+    $lib.warn(`slib.crtsh.cert: Unable to look up {$node.form()} {$node.repr()}, it needs a SHA-256 or SHA-1.`)  // noqa: R002 - $node.form is a method on 2.x
 }
--$($key = $lib.null)
+-$($key = null)
 
 ($kind, $valu) = $key
 divert $cmdopts.yield $util.nodes($crtsh.lookup(($valu,), kind=$kind, limit=$opts.limit, chain=$opts.chain))
@@ -25,7 +26,7 @@ fini {
         for $n in $crtsh.lookup($cmdopts.valus, kind=$opts.kind, limit=$opts.limit, chain=$opts.chain) {
             yield $n
         }
-    } elif ($lib.len($inbound) = 0) {
+    } elif (not $state.inbound) {
         $lib.warn("slib.crtsh.cert: Nothing to look up, give values or inbound nodes.")
     }
 }

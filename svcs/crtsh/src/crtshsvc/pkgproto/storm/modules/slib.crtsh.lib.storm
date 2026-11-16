@@ -12,7 +12,7 @@ init {
 }
 
 // Model a certificate's details and, with chain, its chain up to the root(s). Returns the cert node.
-function ingest(c, chain=(false), tagPrefix=$lib.null) {
+function ingest(c, chain=(false), tagPrefix=(null)) {
     $n = $model.cert($c, $tagPrefix)
     if ($chain and not $c.error) { $chainOf($c.sha256, sha256, $tagPrefix) }
     return($n)
@@ -20,20 +20,20 @@ function ingest(c, chain=(false), tagPrefix=$lib.null) {
 
 // Model every chain from a certificate up to its root(s).
 // Returns ({"data": <the chain>, "nodes": <sha256 -> node>}), or null.
-function chainOf(valu, kind=$lib.null, tagPrefix=$lib.null) {
+function chainOf(valu, kind=(null), tagPrefix=(null)) {
     $retn = $priv.chain($valu, kind=$kind)
     if $util.failed($retn, `Building the chain of {$valu}`) { return() }
     return(({"data": $retn.data, "nodes": $model.chain($retn.data, $tagPrefix)}))
 }
 
 // Look up certificates by crt.sh ID, SHA-256, SHA-1, or any lookup kind. Emits cert nodes.
-function lookup(valus, kind=$lib.null, limit=(100), chain=(false)) {
+function lookup(valus, kind=(null), limit=(100), chain=(false)) {
     $tagPrefix = $priv.tagPrefix()
     $retn = $priv.lookup($kind, $valus, limit=$limit)
     if $util.failed($retn, "Lookup") { return() }
     if (not $retn.data) {
         $names = $valus
-        if ($lib.vars.type($valus) != "list") { $names = ($valus,) }
+        if ($lib.vars.type($valus) != "list") { $names = ($valus,) }  // noqa: R005 - $lib.utils.type() is 3.x only
         $lib.warn(`slib.crtsh: crt.sh has no certificates for: {(", ").join($names)}`)
     }
     for $c in $retn.data { emit $ingest($c, $chain, $tagPrefix) }
@@ -49,7 +49,7 @@ function search(opts, chain=(false)) {
 }
 
 // Emit the certificates related to a certificate (see slib.crtsh.pivot).
-function pivot(valu, by, kind=$lib.null, valid=(false), precerts=(true), limit=(100), chain=(false)) {
+function pivot(valu, by, kind=(null), valid=(false), precerts=(true), limit=(100), chain=(false)) {
     $tagPrefix = $priv.tagPrefix()
     for $retn in $priv.pivot($valu, $by, kind=$kind, valid=$valid, precerts=$precerts, limit=$limit) {
         if $util.failed($retn, `Pivot by {$by} from {$valu}`) { break }
@@ -58,8 +58,8 @@ function pivot(valu, by, kind=$lib.null, valid=(false), precerts=(true), limit=(
 }
 
 // Emit the certificates issued by crt.sh CAs, or the CA of a certificate.
-function issued(caids=$lib.null, valu=$lib.null, kind=$lib.null, valid=(false), since=$lib.null,
-                until=$lib.null, precerts=(true), limit=(100), chain=(false)) {
+function issued(caids=(null), valu=(null), kind=(null), valid=(false), since=(null),
+                until=(null), precerts=(true), limit=(100), chain=(false)) {
     $tagPrefix = $priv.tagPrefix()
     for $retn in $priv.issued(caids=$caids, valu=$valu, kind=$kind, valid=$valid, since=$since,
                               until=$until, precerts=$precerts, limit=$limit) {
@@ -69,8 +69,8 @@ function issued(caids=$lib.null, valu=$lib.null, kind=$lib.null, valid=(false), 
 }
 
 // Emit the nodes of every certificate in a certificate's chain(s), the certificate first.
-function chain(valu, kind=$lib.null) {
+function chain(valu, kind=(null)) {
     $chain = $chainOf($valu, $kind, $priv.tagPrefix())
-    if ($chain = $lib.null) { return() }
+    if ($chain = null) { return() }
     for ($sha, $n) in $chain.nodes { emit $n }
 }

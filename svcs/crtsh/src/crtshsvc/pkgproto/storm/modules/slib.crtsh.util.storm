@@ -27,7 +27,7 @@ function printJson(valu) {
 
 // Convert a time string (ex. 2024-01-01, "-30 days") to epoch millis, or null.
 function toTime(valu) {
-    if ($valu = $lib.null or $valu = "") { return() }
+    if ($valu = null or $valu = "") { return() }
     return($lib.cast(time, $valu))
 }
 
@@ -94,7 +94,7 @@ function nodes(items) {
 // Whether an option was given: not null, not an empty string, and not an empty list.
 // 0 and false count as given.
 function given(valu) {
-    if ($valu = $lib.null or $valu = "") { return((false)) }
-    if ($lib.vars.type($valu) = "list") { return(($lib.len($valu) > 0)) }
+    if ($valu = null or $valu = "") { return((false)) }
+    if ($lib.vars.type($valu) = "list") { return(($lib.len($valu) > 0)) }  // noqa: R005 - $lib.utils.type() is 3.x only
     return((true))
 }

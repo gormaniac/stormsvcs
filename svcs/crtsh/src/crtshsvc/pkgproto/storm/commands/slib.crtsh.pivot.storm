@@ -9,19 +9,20 @@ init {
         "chain": $cmdopts.chain,
     })
     $explicit = $util.given($cmdopts.cert)
-    // The inbound nodes seen, so the fini block can tell when there were none.
-    $inbound = ([])
+    // Whether any node came in, so the fini block can tell when there were none.
+    $state = ({"inbound": false})
 }
 
 // --cert ignores inbound nodes, it's pivoted from once in the fini block.
 -$explicit
 
-$inbound.append($node.iden())
+// In a subquery, so it only runs for inbound nodes (a runtsafe edit runs once without any).
+{ $state.inbound = (true) }
 $key = $util.certKeyOf($node)
-if ($key = $lib.null) {
-    $lib.warn(`slib.crtsh.pivot: Unable to pivot from {$node.form()} {$node.repr()}, it needs a crypto:x509:cert with a SHA-256 or SHA-1.`)
+if ($key = null) {
+    $lib.warn(`slib.crtsh.pivot: Unable to pivot from {$node.form()} {$node.repr()}, it needs a crypto:x509:cert with a SHA-256 or SHA-1.`)  // noqa: R002 - $node.form is a method on 2.x
 }
--$($key = $lib.null)
+-$($key = null)
 
 ($kind, $valu) = $key
 divert (true) $util.nodes($crtsh.pivot($valu, $opts.by, kind=$kind, valid=$opts.valid,
@@ -35,7 +36,7 @@ fini {
                 yield $n
             }
         }
-    } elif ($lib.len($inbound) = 0) {
+    } elif (not $state.inbound) {
         $lib.warn("slib.crtsh.pivot: Nothing to pivot from, give --cert or inbound nodes.")
     }
 }

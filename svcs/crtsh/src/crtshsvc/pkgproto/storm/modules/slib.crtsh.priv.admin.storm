@@ -6,11 +6,11 @@ init {
 
 function tagSettings() {
     return(({
-        "enabled": $lib.globals.get("slib:crtsh:tag:enabled"),
-        "prefix": $lib.globals.get("slib:crtsh:tag:prefix"),
+        "enabled": $lib.globals.get("slib:crtsh:tag:enabled"),  // noqa: R005 - $lib.globals.<name> is 3.x only
+        "prefix": $lib.globals.get("slib:crtsh:tag:prefix"),  // noqa: R005
     }))
 }
-function setTagPrefix(prefix) { $lib.globals.set("slib:crtsh:tag:prefix", $prefix) }
-function setTagsEnabled(enabled) { $lib.globals.set("slib:crtsh:tag:enabled", $enabled) }
+function setTagPrefix(prefix) { $lib.globals.set("slib:crtsh:tag:prefix", $prefix) }  // noqa: R005
+function setTagsEnabled(enabled) { $lib.globals.set("slib:crtsh:tag:enabled", $enabled) }  // noqa: R005
 
-function rawQuery(sql, args=$lib.null, limit=(100)) { return($svc.rawQuery($sql, args=$args, limit=$limit)) }
+function rawQuery(sql, args=(null), limit=(100)) { return($svc.rawQuery($sql, args=$args, limit=$limit)) }
