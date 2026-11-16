@@ -213,6 +213,33 @@ def _procPgrp(pid: int) -> int | None:
         return None
 
 
+def _groupAlive(pgid: int) -> list[int]:
+    """The pids of the processes in a process group that aren't dead yet (zombies are)."""
+
+    alive = []
+    with contextlib.suppress(OSError):
+        for name in os.listdir("/proc"):
+            if not name.isdigit() or _procPgrp(int(name)) != pgid:
+                continue
+            status = _procStatus(int(name))
+            if status is not None and not status.get("State", "").startswith("Z"):
+                alive.append(int(name))
+    return alive
+
+
+async def _killGroup(pgid: int, wait: float = 2.0) -> None:
+    """SIGKILL a process group and wait, for at most ``wait`` seconds, for its processes to
+    die. SIGKILL isn't synchronous: right after ``killpg`` its processes can still be running,
+    and a sweep that saw one then would report it as escaped (it isn't a zombie yet)."""
+
+    with contextlib.suppress(ProcessLookupError, PermissionError):
+        os.killpg(pgid, signal.SIGKILL)
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + wait
+    while _groupAlive(pgid) and loop.time() < deadline:
+        await asyncio.sleep(0.01)
+
+
 def sandboxed(status: dict[str, str], own: dict[str, str] | None) -> bool:
     """Whether a process was started in the sandbox (or by something that was): it has more
     seccomp filters than the service, or no_new_privs when the service doesn't. Both are
@@ -359,7 +386,11 @@ class Sandbox:
                         zombies[pid] = first
                 continue
             ours = ids is not None and bool(uids) and int(uids[0]) == ids[0]
-            if ours and _procPgrp(pid) in self._live:
+            # Processes in a running engine's process group (orphaned or not) are that run's,
+            # it kills and reports them as leftovers when it ends. A process can only join a
+            # group in its own session, and every run is a session of its own, so one that
+            # escaped can't hide in another run's group.
+            if (ours or orphan) and _procPgrp(pid) in self._live:
                 continue
             if not (orphan or ours):
                 continue
@@ -716,7 +747,7 @@ class Sandbox:
                             with contextlib.suppress(ProcessLookupError, PermissionError):
                                 os.killpg(proc.pid, 0)
                                 leftovers.append(True)
-                                os.killpg(proc.pid, signal.SIGKILL)
+                                await _killGroup(proc.pid)
                             self.sweep(engine, result)
                             try:
                                 await asyncio.wait_for(asyncio.shield(done), 5)
@@ -746,8 +777,9 @@ class Sandbox:
                     os.killpg(proc.pid, 0)
                     leftover = True
                 if leftover:
-                    with contextlib.suppress(ProcessLookupError, PermissionError):
-                        os.killpg(proc.pid, signal.SIGKILL)
+                    # Its group stays live (skipped by sweeps) until its processes are dead,
+                    # the sweep below reaps them.
+                    await _killGroup(proc.pid)
                     if proc.returncode == 0:
                         self.alert(
                             "leftover",

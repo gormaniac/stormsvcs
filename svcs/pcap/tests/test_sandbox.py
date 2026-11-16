@@ -6,6 +6,7 @@ import os
 import signal
 import sys
 import time
+import unittest.mock
 
 import pytest
 
@@ -287,6 +288,47 @@ class TestDetection:
         res = await runPy(sbx2, code, dirs)
         assert res.stdout.strip() == b"left one"
         assert [a["kind"] for a in res.alerts] == ["leftover"]
+
+    async def test_leftover_killed_not_escaped(self, dirs):
+        # Killed leftovers aren't swept as escaped while SIGKILL is still landing: the run
+        # waits for its group to die before it stops being live (this raced under load).
+        sbx = p_sandbox.Sandbox()
+        code = ("import subprocess, sys; subprocess.Popen([sys.executable, '-c', "
+                "'import time; time.sleep(60)']); print('left one')")
+        killpg = os.killpg
+
+        def slowKill(pgid, sig):
+            killpg(pgid, sig)
+            if sig == signal.SIGKILL:
+                # The sweep right after sees them before they're dead without the wait.
+                sbx.sweep("other")
+
+        with unittest.mock.patch.object(p_sandbox.os, "killpg", slowKill):
+            res = await runPy(sbx, code, dirs)
+        assert [a["kind"] for a in res.alerts] == ["leftover"]
+        assert [a["kind"] for a in sbx.alerts] == ["leftover"]
+
+    async def test_sweep_spares_live_groups(self, dirs):
+        # A process orphaned to the service in a running engine's own process group is that
+        # run's (a leftover when it ends): another run's sweep doesn't kill it as escaped.
+        sbx = p_sandbox.Sandbox()
+        if not sbx.subreaper:
+            pytest.skip("can't be a child subreaper here")
+        code = ("import os, time\n"
+                "if os.fork() == 0:\n"
+                "    if os.fork() == 0:\n"
+                "        time.sleep(60)\n"
+                "    os._exit(0)\n"
+                "os.wait()\n"
+                "time.sleep(1.5)\n"
+                "print('done')")
+        run = asyncio.create_task(runPy(sbx, code, dirs))
+        await asyncio.sleep(0.8)
+        assert sbx.sweep("other") == []
+        res = await run
+        assert res.stdout.strip() == b"done"
+        assert [a["kind"] for a in res.alerts] == ["leftover"]
+        assert [a["kind"] for a in sbx.alerts] == ["leftover"]
 
     async def test_escaped(self, dirs):
         # A child that leaves the run's process group (setsid) and is orphaned to the service
