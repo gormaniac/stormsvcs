@@ -11,7 +11,7 @@ init {
     }
     elif (not $cmdopts.apikey) {
         if $vault {
-            $lib.print("slib.abusech: Your abuse.ch Auth-Key is set in vault {name}.", name=$vault.name)
+            $lib.print(`slib.abusech: Your abuse.ch Auth-Key is set in vault {$vault.name}.`)
         } else {
             $lib.print("slib.abusech: You don't have an abuse.ch Auth-Key set.")
         }
@@ -21,8 +21,14 @@ init {
         $lib.print("slib.abusech: Updated your abuse.ch Auth-Key.")
     }
     else {
-        $name = `abusech:{$lib.user.name()}`
-        $lib.vault.add($name, abusech, user, $lib.user.iden, ({"apikey": $cmdopts.apikey}), ({}))
-        $lib.print("slib.abusech: Saved your abuse.ch Auth-Key in vault {name}.", name=$name)
+        $user = $lib.auth.users.get()
+        $name = `abusech:{$user.name}`
+        // The name can already be taken, ex. by a vault of another type or scope (ABUSE-ST-10).
+        try {
+            $lib.vault.add($name, abusech, user, $user.iden, ({"apikey": $cmdopts.apikey}), ({}))
+            $lib.print(`slib.abusech: Saved your abuse.ch Auth-Key in vault {$name}.`)
+        } catch * as err {
+            $lib.warn(`slib.abusech: Unable to save your abuse.ch Auth-Key in a new vault named {$name}: {$err.mesg} If a vault with that name already exists, rename or delete it, or ask an admin to.`)
+        }
     }
 }

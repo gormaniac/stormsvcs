@@ -15,8 +15,8 @@ function download(plat, sha256, unpacked=(false)) {
     $name = $names.$plat
     $sha256 = $lib.cast(str, $sha256).lower()
     if ($util.hashType($sha256) != "sha256") {
-        $lib.warn("{cmd}: {sha} is not a SHA256 hash.", cmd=$cmd, sha=$sha256)
-        return($lib.null)
+        $lib.warn(`{$cmd}: {$sha256} is not a SHA256 hash.`)
+        return()
     }
 
     switch $plat {
@@ -27,17 +27,17 @@ function download(plat, sha256, unpacked=(false)) {
             else { $retn = $privdl.yaraify($sha256) }
         }
     }
-    if $util.failed($retn, `Downloading {$sha256} from {$name}`) { return($lib.null) }
-    if ($retn.data = $lib.null) {
-        $lib.warn("{cmd}: {name} does not have {sha} available.", cmd=$cmd, name=$name, sha=$sha256)
-        return($lib.null)
+    if $util.failed($retn, `Downloading {$sha256} from {$name}`) { return() }
+    if ($retn.data = null) {
+        $lib.warn(`{$cmd}: {$name} does not have {$sha256} available.`)
+        return()
     }
 
     $info = $retn.data
     if ($info.sha256 != $sha256) {
-        $lib.warn("{cmd}: Downloaded {got} but expected {sha}.", cmd=$cmd, got=$info.sha256, sha=$sha256)
+        $lib.warn(`{$cmd}: Downloaded {$info.sha256} but expected {$sha256}.`)
     }
-    $lib.print("{cmd}: Saved {sha} ({size} bytes) to the Axon.", cmd=$cmd, sha=$info.sha256, size=$info.size)
-    return($model.sample(({"sha256": $info.sha256, "size": $info.size, "name": $info.name, "clamav": ([]),
-                           "scans": ([]), "rules": ([]), "certs": ([]), "tags": ([]), "families": ([])}), $plat))
+    $lib.print(`{$cmd}: Saved {$info.sha256} ({$info.size} bytes) to the Axon.`)
+    return($model.sample(({"sha256": $info.sha256, "size": $info.size, "name": $info.name, "clamav": [],
+                           "scans": [], "rules": [], "certs": [], "tags": [], "families": []}), $plat))
 }

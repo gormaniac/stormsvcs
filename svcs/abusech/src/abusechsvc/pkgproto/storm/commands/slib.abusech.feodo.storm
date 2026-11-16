@@ -1,9 +1,16 @@
 init {
+    $util = $lib.import(slib.abusech.util)
+    $once = ({"done": false})
     $abusech = $lib.import(slib.abusech.lib)
+
+    // Run once, not once per inbound node (which are dropped).
+    function results() {
+        if $util.first($once) {
+            for $c2 in $abusech.feodoBlocklist(kind=$cmdopts.list, limit=$cmdopts.limit) {
+                if $cmdopts.yield { yield $c2 }
+            }
+        }
+    }
 }
 
-spin |
-
-for $c2 in $abusech.feodoBlocklist(kind=$cmdopts.list, limit=$cmdopts.limit) {
-    if $cmdopts.yield { yield $c2 }
-}
+divert (true) $results()

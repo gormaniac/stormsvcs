@@ -6,8 +6,8 @@ init {
         $retn = $priv.yaraifyIdentifier()
         if (not $util.failed($retn, "Generating a YARAify identifier")) {
             $ident = $retn.data
-            if ($lib.vars.type($ident) = "dict") { $ident = $ident.identifier }
-            $lib.print("slib.abusech.yaraify.tasks: Your new (private) identifier is {ident}", ident=$ident)
+            if ($lib.vars.type($ident) = "dict") { $ident = $ident.identifier }  // noqa: R005 - 2.x has no $lib.utils.type()
+            $lib.print(`slib.abusech.yaraify.tasks: Your new (private) identifier is {$ident}`)
         }
     }
     elif (not $cmdopts.identifier) {
@@ -15,7 +15,7 @@ init {
     }
     else {
         $status = $cmdopts.status
-        if ($status = "all") { $status = $lib.null }
+        if ($status = "all") { $status = (null) }
         $retn = $priv.yaraifyTasks($cmdopts.identifier, status=$status)
         if (not $util.failed($retn, "Listing YARAify tasks")) {
             $rows = ([])

@@ -12,6 +12,7 @@
 init {
     $svc = $lib.service.get("slib.abusech")
     $util = $lib.import(slib.abusech.util)
+    $tags = $lib.import(slib.abusech.priv.tags)
 
     // How long to wait between pulls of the frequently updated exports.
     $recentWait = (3600000)
@@ -31,17 +32,10 @@ function _bytes(genr) {
 
 function _time(tick) { return($lib.time.format($tick, "%Y-%m-%d %H:%M:%S")) }
 
-function tagPrefix() {
-    if $lib.globals.get("slib:abusech:tag:enabled") {
-        return($lib.globals.get("slib:abusech:tag:prefix"))
-    }
-    return($lib.null)
-}
-
 // The slib:abusech:datasets global: {"<plat>:<kind>": {"sha256", "size", "time", "file", "nodes"}}.
 function datasets() {
-    $sets = $lib.globals.get("slib:abusech:datasets")
-    if ($sets = $lib.null) { return(({})) }
+    $sets = $lib.globals.get("slib:abusech:datasets")  // noqa: R005 - 2.x has no $lib.globals.<name>
+    if ($sets = null) { return(({})) }
     return($sets)
 }
 
@@ -56,105 +50,100 @@ function run(plat, kind, reuse=(false), repull=(false)) {
         $lib.raise(BadArg, `{$cmd}: Use --reuse or --repull, not both.`)
     }
 
-    $lib.warn("{cmd}: Bulk imports can take a long time (hours for the full exports), run them in the background, ex. background { {cmd} {kind} --bulk }",
-              cmd=$cmd, kind=$kind)
+    $lib.warn(`{$cmd}: Bulk imports can take a long time (hours for the full exports), run them in the background, ex. background \{ {$cmd} {$kind} --bulk }`)
 
-    $jobid = $lib.null
-    $count = $lib.null
+    // Service jobs belong to the user that started them (ABUSE-PY-08).
+    $user = $lib.auth.users.get().iden
+    $jobid = (null)
+    $count = (null)
     try {
         // Pick the export file: the last pull, or a new one.
         $info = $datasets().$key
         $pull = (true)
-        if $repull { $pull = (true) }
-        elif $reuse {
+        if $reuse {
             if (not $info) {
-                $lib.warn("{cmd}: There's no previous {kind} pull to reuse, run without --reuse to pull it.", cmd=$cmd, kind=$kind)
-                return($lib.null)
+                $lib.warn(`{$cmd}: There's no previous {$kind} pull to reuse, run without --reuse to pull it.`)
+                return()
             }
             $pull = (false)
         }
-        elif $info {
+        elif ($info and not $repull) {
+            // --repull skips this, and always pulls.
             $age = ($lib.time.now() - $info.time)
             if $isRecent($kind) {
                 if ($age < $recentWait) {
-                    $lib.warn("{cmd}: The {kind} export was last pulled {mins} minutes ago ({time}). To avoid overusing abuse.ch, rerun with --reuse to import that pull again, or --repull to pull a new one.",
-                              cmd=$cmd, kind=$kind, mins=($age / 60000), time=$_time($info.time))
-                    return($lib.null)
+                    $lib.warn(`{$cmd}: The {$kind} export was last pulled {($age / 60000)} minutes ago ({$_time($info.time)}). To avoid overusing abuse.ch, rerun with --reuse to import that pull again, or --repull to pull a new one.`)
+                    return()
                 }
             } else {
                 $pull = (false)
-                $lib.print("{cmd}: Using the {kind} export pulled at {time} ({sha}), use --repull to pull a new one.",
-                           cmd=$cmd, kind=$kind, time=$_time($info.time), sha=$info.sha256)
+                $lib.print(`{$cmd}: Using the {$kind} export pulled at {$_time($info.time)} ({$info.sha256}), use --repull to pull a new one.`)
                 if ($age > $staleAge) {
-                    $lib.warn("{cmd}: That pull is {days} days old, so newer data isn't included. Use --repull to pull a new one.",
-                              cmd=$cmd, days=($age / 86400000))
+                    $lib.warn(`{$cmd}: That pull is {($age / 86400000)} days old, so newer data isn't included. Use --repull to pull a new one.`)
                 }
             }
         }
 
         if $pull {
-            $lib.print("{cmd}: Pulling the {kind} export into the Axon.", cmd=$cmd, kind=$kind)
+            $lib.print(`{$cmd}: Pulling the {$kind} export into the Axon.`)
             ($size, $sha256) = $lib.axon.upload($_bytes($svc.bulkPull($plat, $kind, apikey=$util.userKey())))
-            $info = ({"sha256": $sha256, "size": $size, "time": $lib.time.now(), "file": $key, "nodes": $lib.null})
+            $info = ({"sha256": $sha256, "size": $size, "time": $lib.time.now(), "file": $key, "nodes": null})
             $sets = $datasets()
             $sets.$key = $info
-            $lib.globals.set("slib:abusech:datasets", $sets)
-            $lib.print("{cmd}: Pulled the {kind} export ({size} bytes, {sha}).", cmd=$cmd, kind=$kind,
-                       size=$size, sha=$sha256)
+            $lib.globals.set("slib:abusech:datasets", $sets)  // noqa: R005 - 2.x has no $lib.globals.<name>
+            $lib.print(`{$cmd}: Pulled the {$kind} export ({$size} bytes, {$sha256}).`)
         }
         elif (not $lib.axon.has($info.sha256)) {
-            $lib.warn("{cmd}: The {kind} export pulled at {time} ({sha}) is no longer in the Axon, rerun with --repull.",
-                      cmd=$cmd, kind=$kind, time=$_time($info.time), sha=$info.sha256)
-            return($lib.null)
+            $lib.warn(`{$cmd}: The {$kind} export pulled at {$_time($info.time)} ({$info.sha256}) is no longer in the Axon, rerun with --repull.`)
+            return()
         }
 
         // Copy the file from the Axon into a new service job.
-        $lib.print("{cmd}: Copying the export into the service.", cmd=$cmd)
-        $retn = $svc.bulkStart($plat, $kind, $info.sha256)
+        $lib.print(`{$cmd}: Copying the export into the service.`)
+        $retn = $svc.bulkStart($plat, $kind, $info.sha256, user=$user)
         if (not $retn.status) { $lib.raise(AbuseChError, $retn.mesg) }
         $jobid = $retn.data
         $offs = (0)
         while ($offs < $info.size) {
             $byts = $lib.axon.read($info.sha256, offs=$offs, size=(1048576))
             if (not $byts) { break }
-            $retn = $svc.bulkStage($jobid, $byts)
+            $retn = $svc.bulkStage($jobid, $byts, user=$user)
             if (not $retn.status) { $lib.raise(AbuseChError, $retn.mesg) }
             $offs = ($offs + $lib.len($byts))
         }
 
         // Build the nodes.
-        $result = $lib.null
-        for $retn in $svc.bulkBuild($jobid, prefix=$tagPrefix()) {
+        $result = (null)
+        for $retn in $svc.bulkBuild($jobid, prefix=$tags.tagPrefix(), user=$user) {
             if $util.failed($retn, `Building the {$kind} export's nodes`) { break }
             if $retn.data.done { $result = $retn.data }
             elif (($retn.data.rows % $progressRows) = 0) {
-                $lib.print("{cmd}: Built {nodes} nodes from {rows} rows.", cmd=$cmd, nodes=$retn.data.nodes, rows=$retn.data.rows)
+                $lib.print(`{$cmd}: Built {$retn.data.nodes} nodes from {$retn.data.rows} rows.`)
             }
         }
 
         if $result {
-            $lib.print("{cmd}: Built {nodes} nodes from {rows} rows in {secs}s, saving them to the Axon.",
-                       cmd=$cmd, nodes=$result.nodes, rows=$result.rows, secs=$result.seconds)
-            ($size, $sha256) = $lib.axon.upload($_bytes($svc.bulkNodes($jobid)))
+            $lib.print(`{$cmd}: Built {$result.nodes} nodes from {$result.rows} rows in {$result.seconds}s, saving them to the Axon.`)
+            ($size, $sha256) = $lib.axon.upload($_bytes($svc.bulkNodes($jobid, user=$user)))
 
             // Ingested as the calling user.
-            $lib.print("{cmd}: Ingesting {sha}.", cmd=$cmd, sha=$sha256)
+            $lib.print(`{$cmd}: Ingesting {$sha256}.`)
             $start = $lib.time.now()
             $count = $lib.feed.fromAxon($sha256)
             $secs = (($lib.time.now() - $start) / 1000)
 
-            $info.nodes = ({"sha256": $sha256, "size": $size, "count": $result.nodes, "rows": $result.rows,
+            $info.nodes = ({"sha256": $sha256, "size": $size, "count": $count, "built": $result.nodes, "rows": $result.rows,
                             "skipped": $result.skipped, "builder": $result.builder, "time": $lib.time.now()})
             $sets = $datasets()
             $sets.$key = $info
-            $lib.globals.set("slib:abusech:datasets", $sets)
-            $lib.print("{cmd}: Ingested {count} nodes in {secs}s.", cmd=$cmd, count=$count, secs=$secs)
+            $lib.globals.set("slib:abusech:datasets", $sets)  // noqa: R005 - 2.x has no $lib.globals.<name>
+            $lib.print(`{$cmd}: Ingested {$count} nodes in {$secs}s.`)
         }
     } catch * as err {
-        $lib.warn("{cmd}: The bulk import failed: {error}", cmd=$cmd, error=$err.mesg)
+        $lib.warn(`{$cmd}: The bulk import failed: {$err.mesg}`)
     }
 
     // Abandoned jobs (ex. a cancelled import) are also removed by the service after a while.
-    if $jobid { $svc.bulkDone($jobid) }
+    if $jobid { $svc.bulkDone($jobid, user=$user) }
     return($count)
 }

@@ -12,10 +12,10 @@ init {
 function _save(retn) {
     if (not $retn.status) { return($retn) }
     $file = $retn.data
-    if ($file = $lib.null) { return($retn) }
+    if ($file = null) { return($retn) }
 
     ($size, $sha256) = $lib.axon.put($file.bytes)
-    return(({"status": (true), "mesg": "", "data": ({"sha256": $sha256, "size": $size, "name": $file.name})}))
+    return(({"status": true, "mesg": "", "data": {"sha256": $sha256, "size": $size, "name": $file.name}}))
 }
 
 function bazaar(sha256) { return($_save($svc.bazaarFile($sha256, apikey=$util.userKey()))) }

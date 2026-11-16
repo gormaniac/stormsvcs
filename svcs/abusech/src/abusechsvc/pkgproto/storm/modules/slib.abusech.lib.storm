@@ -10,7 +10,7 @@ init {
     $priv = $lib.import(slib.abusech.priv.user)
     $model = $lib.import(slib.abusech.model)
     $util = $lib.import(slib.abusech.util)
-    $model.setPrefix($priv.tagPrefix())
+    $model.setPrefix($lib.import(slib.abusech.priv.tags).tagPrefix())
 }
 
 // Model a list of samples from a service call. Returns a list of file:bytes nodes.
@@ -30,10 +30,10 @@ function _samples(retn, what, plat) {
 function bazaarLookup(sha) {
     $sha = $lib.cast(str, $sha).lower()
     $retn = $priv.bazaarInfo($sha)
-    if $util.failed($retn, `MalwareBazaar lookup of {$sha}`) { return($lib.null) }
-    if ($retn.data = $lib.null) {
-        $lib.print("slib.abusech: {sha} is not in MalwareBazaar.", sha=$sha)
-        return($lib.null)
+    if $util.failed($retn, `MalwareBazaar lookup of {$sha}`) { return() }
+    if ($retn.data = null) {
+        $lib.print(`slib.abusech: {$sha} is not in MalwareBazaar.`)
+        return()
     }
     return($model.sample($retn.data, bazaar))
 }
@@ -80,12 +80,12 @@ function bazaarExport(kind=recent, limit=(0)) {
 // ---- URLhaus ----
 
 // Look up a URL (or a URLhaus URL ID). Returns the inet:url node, or null.
-function urlhausUrl(url=$lib.null, urlid=$lib.null) {
+function urlhausUrl(url=(null), urlid=(null)) {
     $retn = $priv.urlhausUrl(url=$url, urlid=$urlid)
     $what = `URLhaus lookup of {$url}`
     if $urlid { $what = `URLhaus lookup of URL ID {$urlid}` }
-    if $util.failed($retn, $what) { return($lib.null) }
-    if ($retn.data = $lib.null) { return($lib.null) }
+    if $util.failed($retn, $what) { return() }
+    if ($retn.data = null) { return() }
     return($model.url($retn.data))
 }
 
@@ -93,8 +93,8 @@ function urlhausUrl(url=$lib.null, urlid=$lib.null) {
 function urlhausHost(host) {
     $host = $lib.cast(str, $host)
     $retn = $priv.urlhausHost($host)
-    if $util.failed($retn, `URLhaus lookup of {$host}`) { return($lib.null) }
-    if ($retn.data = $lib.null) { return($lib.null) }
+    if $util.failed($retn, `URLhaus lookup of {$host}`) { return() }
+    if ($retn.data = null) { return() }
     return($model.urlhausHost($retn.data))
 }
 
@@ -102,8 +102,8 @@ function urlhausHost(host) {
 function urlhausPayload(sha) {
     $sha = $lib.cast(str, $sha).lower()
     $retn = $priv.urlhausPayload($sha)
-    if $util.failed($retn, `URLhaus lookup of {$sha}`) { return($lib.null) }
-    if ($retn.data = $lib.null) { return($lib.null) }
+    if $util.failed($retn, `URLhaus lookup of {$sha}`) { return() }
+    if ($retn.data = null) { return() }
     return($model.sample($retn.data, urlhaus))
 }
 
@@ -112,9 +112,7 @@ function urlhausSearch(by, valu, limit=(0)) {
     $retn = $priv.urlhausSearch($by, $valu, limit=$limit)
     if $util.failed($retn, `URLhaus {$by} search for {$valu}`) { return(([])) }
     if $retn.data.url_count {
-        $lib.print("slib.abusech: URLhaus has {count} URLs for {by} {valu} (first seen {first}, last seen {last}).",
-                   count=$retn.data.url_count, by=$by, valu=$valu, first=$retn.data.first_seen,
-                   last=$retn.data.last_seen)
+        $lib.print(`slib.abusech: URLhaus has {$retn.data.url_count} URLs for {$by} {$valu} (first seen {$retn.data.first_seen}, last seen {$retn.data.last_seen}).`)
     }
     $nodes = ([])
     for $u in $retn.data.urls {
@@ -125,7 +123,7 @@ function urlhausSearch(by, valu, limit=(0)) {
 }
 
 // Recently added URLs (kind=urls, inet:url nodes) or payloads (kind=payloads, file:bytes nodes).
-function urlhausRecent(kind=urls, limit=$lib.null) {
+function urlhausRecent(kind=urls, limit=(null)) {
     $retn = $priv.urlhausRecent(kind=$kind, limit=$limit)
     if $util.failed($retn, `URLhaus recent {$kind}`) { return(([])) }
     $nodes = ([])
@@ -150,7 +148,7 @@ function urlhausExport(kind=recent, limit=(0)) {
 
 // Query ThreatFox IOCs. by is recent (valu is days), id, search, hash, tag, or malware.
 // Returns a list of the IOC (observable) nodes.
-function threatfox(by, valu=$lib.null, limit=(100), exact=(false)) {
+function threatfox(by, valu=(null), limit=(100), exact=(false)) {
     $retn = $priv.threatfox($by, valu=$valu, limit=$limit, exact=$exact)
     if $util.failed($retn, `ThreatFox {$by} query for {$valu}`) { return(([])) }
     $nodes = ([])
@@ -174,11 +172,11 @@ function threatfoxExport(kind=recent, limit=(0)) {
 
 // Look up a file (MD5, SHA1, SHA256, or SHA3-384) and its YARA/ClamAV/unpacker results.
 // Returns the file:bytes node, or null.
-function yaraifyLookup(sha, malpedia=$lib.null) {
+function yaraifyLookup(sha, malpedia=(null)) {
     $sha = $lib.cast(str, $sha).lower()
     $retn = $priv.yaraifyHash($sha, malpedia=$malpedia)
-    if $util.failed($retn, `YARAify lookup of {$sha}`) { return($lib.null) }
-    if ($retn.data = $lib.null) { return($lib.null) }
+    if $util.failed($retn, `YARAify lookup of {$sha}`) { return() }
+    if ($retn.data = null) { return() }
     return($model.sample($retn.data, yaraify))
 }
 
@@ -189,11 +187,11 @@ function yaraifySearch(by, valu, limit=(25)) {
 
 // The results of a scan task. Returns ($status, $filenode) - status is "done" (with the file node)
 // or YARAify's status (ex. "queued"), or null on error.
-function yaraifyTask(taskid, malpedia=$lib.null) {
+function yaraifyTask(taskid, malpedia=(null)) {
     $retn = $priv.yaraifyResults($taskid, malpedia=$malpedia)
-    if $util.failed($retn, `Retrieving YARAify task {$taskid}`) { return(($lib.null, $lib.null)) }
-    if ($retn.data = $lib.null) { return((unknown, $lib.null)) }
-    if ($retn.data.status != "done") { return(($retn.data.status, $lib.null)) }
+    if $util.failed($retn, `Retrieving YARAify task {$taskid}`) { return(((null), (null))) }
+    if ($retn.data = null) { return((unknown, (null))) }
+    if ($retn.data.status != "done") { return(($retn.data.status, (null))) }
     return((done, $model.sample($retn.data.file, yaraify)))
 }
 
@@ -265,7 +263,7 @@ function sslblBlocklist(kind=certs, limit=(0)) {
 // ---- Hunting ----
 
 // The abuse.ch false positive list (optionally for one platform). Returns a list of the entries' nodes.
-function fplist(platform=$lib.null) {
+function fplist(platform=(null)) {
     $retn = $priv.fplist(platform=$platform)
     if $util.failed($retn, "Retrieving the false positive list") { return(([])) }
     $nodes = ([])
@@ -285,17 +283,17 @@ function fplist(platform=$lib.null) {
 //   inet:fqdn/inet:ipv4                       -> URLhaus (host), ThreatFox
 //   inet:ipv6                                 -> ThreatFox
 //   inet:server                               -> ThreatFox (ip:port)
-function enrich(node, platforms=$lib.null) {
-    if ($platforms = $lib.null) { $platforms = (bazaar, urlhaus, threatfox, yaraify) }
+function enrich(node, platforms=(null)) {
+    if ($platforms = null) { $platforms = (bazaar, urlhaus, threatfox, yaraify) }
     $nodes = ([])
-    $form = $node.form()
+    $form = $node.form()  // noqa: R002
     $repr = $node.repr()
 
     switch $form {
         ("file:bytes", "hash:md5", "hash:sha1", "hash:sha256"): {
             $sha = $util.nodeHash($node)
             if (not $sha) {
-                $lib.warn("slib.abusech: {form} {repr} has no hash to enrich.", form=$form, repr=$repr)
+                $lib.warn(`slib.abusech: {$form} {$repr} has no hash to enrich.`)
                 return($nodes)
             }
             $htype = $util.hashType($sha)
@@ -326,7 +324,7 @@ function enrich(node, platforms=$lib.null) {
             }
         }
         *: {
-            $lib.warn("slib.abusech: The node form {form} is not supported.", form=$form)
+            $lib.warn(`slib.abusech: The node form {$form} is not supported.`)
         }
     }
     return($nodes)

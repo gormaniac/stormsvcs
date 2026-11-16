@@ -53,6 +53,11 @@ modules:
   - name: slib.abusech.priv.bulk
     asroot:perms:
       - [ slib, abusech, bulk ]
+  - name: slib.abusech.priv.tags
+    asroot:perms:
+      - [ slib, abusech, user ]
+      - [ slib, abusech, bulk ]
+      - [ slib, abusech, admin ]
 
   # Unprivileged modules - node edits here run as the calling user.
   - name: slib.abusech.lib
@@ -61,6 +66,9 @@ modules:
   - name: slib.abusech.model
   - name: slib.abusech.util
   - name: slib.abusech.download
+  - name: slib.abusech.families
+    perms:
+      - [ slib, abusech, admin ]
 
 commands:
 
@@ -1258,6 +1266,36 @@ commands:
         - default: false
           action: store_true
           help: Disable tagging.
+
+  - name: slib.abusech.admin.families.merge
+    perms:
+      - [ slib, abusech, admin ]
+    descr: |
+      Merge the malware family nodes made before slib.abusech 0.4.0 into the current ones.
+
+      Malware families (risk:tool:software) are keyed on their name and reporter. Before 0.4.0
+      they were keyed on their tag when tagging was on, so a family could have one node per
+      platform and tag prefix. This finds those tag-keyed nodes and merges each into the node
+      for its name: props the node doesn't have are copied, array props (ex. :soft:names) are
+      combined, and the tags (with their times), light edges (both directions), and the props of
+      other nodes that reference it are moved, then the old node is deleted. Tag props aren't
+      moved.
+
+      Without --apply it's a dry run, which only prints what would be merged. Running it again
+      after --apply finds nothing to merge.
+
+      Examples:
+
+        // See what would be merged.
+        slib.abusech.admin.families.merge
+
+        // Merge them.
+        slib.abusech.admin.families.merge --apply
+    cmdargs:
+      - - --apply
+        - default: false
+          action: store_true
+          help: Merge the nodes (the default is a dry run that changes nothing).
 
   - name: slib.abusech.admin.request
     perms:

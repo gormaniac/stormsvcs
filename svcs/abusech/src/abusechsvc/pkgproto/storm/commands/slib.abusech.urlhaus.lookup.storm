@@ -1,35 +1,42 @@
 init {
+    $once = ({"done": false})
     $abusech = $lib.import(slib.abusech.lib)
     $model = $lib.import(slib.abusech.model)
     $util = $lib.import(slib.abusech.util)
     $usecli = ($cmdopts.url or $cmdopts.id or $cmdopts.host or $cmdopts.hash)
+
+    // The options that ignore inbound nodes (which are dropped) run once, not once per node.
+    function byOptions() {
+        if $util.first($once) {
+            $results = ([])
+            for $url in $cmdopts.url { $results.append($abusech.urlhausUrl(url=$url)) }
+            for $urlid in $cmdopts.id { $results.append($abusech.urlhausUrl(urlid=$urlid)) }
+            for $host in $cmdopts.host { $results.append($abusech.urlhausHost($host)) }
+            for $sha in $cmdopts.hash { $results.append($abusech.urlhausPayload($sha)) }
+            if $cmdopts.yield { yield $model.nodes($results) }
+        }
+    }
 }
 
 if $usecli {
     // --url/--id/--host/--hash ignore inbound nodes.
-    spin |
-    $results = ([])
-    for $url in $cmdopts.url { $results.append($abusech.urlhausUrl(url=$url)) }
-    for $urlid in $cmdopts.id { $results.append($abusech.urlhausUrl(urlid=$urlid)) }
-    for $host in $cmdopts.host { $results.append($abusech.urlhausHost($host)) }
-    for $sha in $cmdopts.hash { $results.append($abusech.urlhausPayload($sha)) }
-    if $cmdopts.yield { yield $model.nodes($results) }
+    divert (true) $byOptions()
 }
 else {
-    switch $node.form() {
+    switch $node.form() {  // noqa: R002
         "inet:url": { $results = ($abusech.urlhausUrl(url=$node.repr()),) }
         ("inet:fqdn", "inet:ipv4", "inet:ipv6"): { $results = ($abusech.urlhausHost($node.repr()),) }
         ("file:bytes", "hash:md5", "hash:sha256"): {
             $results = ([])
             $sha = $node.props.sha256
-            if ($sha = $lib.null) { $sha = $node.props.md5 }
-            if ($node.form() != "file:bytes") { $sha = $node.repr() }
+            if ($sha = null) { $sha = $node.props.md5 }
+            if ($node.form() != "file:bytes") { $sha = $node.repr() }  // noqa: R002
             if $sha { $results = ($abusech.urlhausPayload($sha),) }
-            else { $lib.warn("slib.abusech.urlhaus.lookup: {repr} has no MD5 or SHA256.", repr=$node.repr()) }
+            else { $lib.warn(`slib.abusech.urlhaus.lookup: {$node.repr()} has no MD5 or SHA256.`) }
         }
         *: {
             $results = ([])
-            $lib.warn("slib.abusech.urlhaus.lookup: The node form {form} is not supported.", form=$node.form())
+            $lib.warn(`slib.abusech.urlhaus.lookup: The node form {$node.form()} is not supported.`)  // noqa: R002
         }
     }
     divert $cmdopts.yield $model.nodes($results)

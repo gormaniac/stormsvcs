@@ -1,0 +1,32 @@
+init {
+    $families = $lib.import(slib.abusech.families)
+
+    $olds = ([])
+    $targets = $lib.set()
+    for $item in $families.oldFamilies() {
+        $olds.append($item)
+        $targets.add($item.target)
+    }
+
+    $refs = (0)
+    for $item in $olds {
+        $old = $item.node
+        $what = `{$old.repr()} ({$old.props."soft:name"}, :tag={$old.props.tag})`
+        if $cmdopts.apply {
+            $refs = ($refs + $families.merge($old, $item.target))
+            $lib.print(`Merged {$what} into risk:tool:software={$item.target}`)
+        } else {
+            $lib.print(`Would merge {$what} into risk:tool:software={$item.target}`)
+        }
+    }
+
+    $nold = $lib.len($olds)
+    $nfam = $lib.len($targets)
+    if $cmdopts.apply {
+        $lib.print(`slib.abusech.admin.families.merge: Merged {$nold} old family nodes into {$nfam} families, and re-pointed {$refs} nodes that referenced them.`)
+    } elif $nold {
+        $lib.print(`slib.abusech.admin.families.merge: Found {$nold} old family nodes for {$nfam} families. This was a dry run, rerun with --apply to merge them.`)
+    } else {
+        $lib.print("slib.abusech.admin.families.merge: There are no old family nodes to merge.")
+    }
+}

@@ -10,7 +10,7 @@ init {
             $lib.raise(BadArg, `slib.abusech.bazaar.submit: --ref must be <type>=<url>, not {$ref}.`)
         }
         ($rtype, $rurl) = $parts
-        if ($references.$rtype = $lib.null) { $references.$rtype = ([]) }
+        if ($references.$rtype = null) { $references.$rtype = ([]) }
         $references.$rtype.append($rurl)
     }
     $context = ({})
@@ -18,11 +18,11 @@ init {
     if $cmdopts.dropped_by { $context.dropped_by_sha256 = $cmdopts.dropped_by }
 }
 
-if ($node.form() != "file:bytes") {
-    $lib.warn("slib.abusech.bazaar.submit: Only file:bytes nodes can be submitted, not {form}.", form=$node.form())
+if ($node.form() != "file:bytes") {  // noqa: R002
+    $lib.warn(`slib.abusech.bazaar.submit: Only file:bytes nodes can be submitted, not {$node.form()}.`)  // noqa: R002
 }
 elif ((not :sha256) or (not :size) or (not $privsub.hasFile(:sha256))) {
-    $lib.warn("slib.abusech.bazaar.submit: {repr} is not in the Axon.", repr=$node.repr())
+    $lib.warn(`slib.abusech.bazaar.submit: {$node.repr()} is not in the Axon.`)
 }
 else {
     $name = :name

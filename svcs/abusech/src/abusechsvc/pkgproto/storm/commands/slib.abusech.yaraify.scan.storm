@@ -1,4 +1,5 @@
 init {
+    $once = ({"done": false})
     $abusech = $lib.import(slib.abusech.lib)
     $privsub = $lib.import(slib.abusech.priv.submit)
     $model = $lib.import(slib.abusech.model)
@@ -10,11 +11,10 @@ init {
         while (true) {
             ($status, $file) = $abusech.yaraifyTask($taskid)
             if ($status = "done") { return($file) }
-            if ($status = $lib.null) { return($lib.null) }
+            if ($status = null) { return() }
             if ($lib.time.now() >= $deadline) {
-                $lib.print("slib.abusech.yaraify.scan: Task {task} is still {status}, check it later with slib.abusech.yaraify.lookup --task {task}",
-                           task=$taskid, status=$status)
-                return($lib.null)
+                $lib.print(`slib.abusech.yaraify.scan: Task {$taskid} is still {$status}, check it later with slib.abusech.yaraify.lookup --task {$taskid}`)
+                return()
             }
             $lib.time.sleep(5)
         }
@@ -33,31 +33,37 @@ init {
         } else {
             $sha = $util.nodeHash($n)
             if (not $sha) {
-                $lib.warn("slib.abusech.yaraify.scan: {repr} has no hash to rescan.", repr=$n.repr())
-                return($lib.null)
+                $lib.warn(`slib.abusech.yaraify.scan: {$n.repr()} has no hash to rescan.`)
+                return()
             }
             $retn = $privsub.yaraifyRescan($sha)
             $what = `Rescanning {$sha} on YARAify`
         }
-        if $util.failed($retn, $what) { return($lib.null) }
+        if $util.failed($retn, $what) { return() }
         $taskid = $retn.data.task_id
-        $lib.print("slib.abusech.yaraify.scan: {what}: task {task}", what=$what, task=$taskid)
+        $lib.print(`slib.abusech.yaraify.scan: {$what}: task {$taskid}`)
         return($taskid)
+    }
+
+    // The options that ignore inbound nodes (which are dropped) run once, not once per node.
+    function byOptions() {
+        if $util.first($once) {
+            for $sha in $cmdopts.hash {
+                $retn = $privsub.yaraifyRescan($sha)
+                if (not $util.failed($retn, `Rescanning {$sha} on YARAify`)) {
+                    $lib.print(`slib.abusech.yaraify.scan: Rescanning {$sha}: task {$retn.data.task_id}`)
+                    if $cmdopts.wait {
+                        $file = $wait($retn.data.task_id)
+                        if ($cmdopts.yield and $file) { yield $file }
+                    }
+                }
+            }
+        }
     }
 }
 
 if $cmdopts.hash {
-    spin |
-    for $sha in $cmdopts.hash {
-        $retn = $privsub.yaraifyRescan($sha)
-        if (not $util.failed($retn, `Rescanning {$sha} on YARAify`)) {
-            $lib.print("slib.abusech.yaraify.scan: Rescanning {sha}: task {task}", sha=$sha, task=$retn.data.task_id)
-            if $cmdopts.wait {
-                $file = $wait($retn.data.task_id)
-                if ($cmdopts.yield and $file) { yield $file }
-            }
-        }
-    }
+    divert (true) $byOptions()
 }
 else {
     $results = ([])

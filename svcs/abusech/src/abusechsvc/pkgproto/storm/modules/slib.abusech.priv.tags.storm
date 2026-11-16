@@ -1,0 +1,23 @@
+// The slib.abusech tag settings, read by every module that tags nodes (ABUSE-ST-09).
+//
+// Privileged (asroot) for any slib.abusech user, bulk, or admin user, since reading globals
+// needs a permission those users don't have. It only reads the settings, which aren't secret.
+//
+// NOTE: $lib.globals.get() is removed in Synapse 3.x, but 2.x has no $lib.globals.<name> (and
+// these names have colons), this package requires Synapse <3.0.0 so R005 is ignored here.
+
+// The tag prefix, or null when tagging is disabled.
+function tagPrefix() {
+    if $lib.globals.get("slib:abusech:tag:enabled") {  // noqa: R005
+        return($lib.globals.get("slib:abusech:tag:prefix"))  // noqa: R005
+    }
+    return()
+}
+
+// The tag settings, ({"enabled": <bool>, "prefix": <str>}).
+function tagSettings() {
+    return(({
+        "enabled": $lib.globals.get("slib:abusech:tag:enabled"),  // noqa: R005
+        "prefix": $lib.globals.get("slib:abusech:tag:prefix"),  // noqa: R005
+    }))
+}

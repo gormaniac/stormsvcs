@@ -29,7 +29,7 @@ init {
                 if $props._sha3_384 { return(($props._sha3_384, "sha3_384_hash")) }
             }
         }
-        return(($lib.null, $lib.null))
+        return(((null), (null)))
     }
 
     function submit(iocs) {
@@ -48,11 +48,11 @@ init {
 
 // All the IOCs are submitted at once, after the inbound nodes are consumed. They must share a type.
 ($valu, $ntype) = $iocFor($node)
-if ($valu = $lib.null) {
-    $lib.warn("slib.abusech.threatfox.submit: {repr} can't be submitted.", repr=$node.repr())
+if ($valu = null) {
+    $lib.warn(`slib.abusech.threatfox.submit: {$node.repr()} can't be submitted.`)
 }
 elif ($state.type and $state.type != $ntype) {
-    $lib.warn("slib.abusech.threatfox.submit: Skipping {repr}, every IOC must be a {type}.", repr=$node.repr(), type=$state.type)
+    $lib.warn(`slib.abusech.threatfox.submit: Skipping {$node.repr()}, every IOC must be a {$state.type}.`)
 }
 else {
     $state.type = $ntype

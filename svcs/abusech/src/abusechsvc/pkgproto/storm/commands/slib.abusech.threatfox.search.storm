@@ -1,4 +1,6 @@
 init {
+    $util = $lib.import(slib.abusech.util)
+    $once = ({"done": false})
     $abusech = $lib.import(slib.abusech.lib)
     $model = $lib.import(slib.abusech.model)
 
@@ -13,9 +15,14 @@ init {
     else {
         $iocs = $abusech.threatfox($cmdopts.by, $cmdopts.value, limit=$cmdopts.limit)
     }
-    $lib.print("slib.abusech.threatfox.search: Found {count} IOCs.", count=$lib.len($iocs))
+    $lib.print(`slib.abusech.threatfox.search: Found {$lib.len($iocs)} IOCs.`)
+
+    // Yield the results once, not once per inbound node (which are dropped).
+    function results() {
+        if $util.first($once) {
+            yield $model.nodes($iocs)
+        }
+    }
 }
 
-spin |
-
-yield $model.nodes($iocs)
+divert (true) $results()

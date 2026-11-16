@@ -3,7 +3,7 @@ init {
     $util = $lib.import(slib.abusech.util)
 
     if $cmdopts.clear {
-        $retn = $privadmin.setApiKey($lib.null)
+        $retn = $privadmin.setApiKey((null))
         if (not $util.failed($retn, "Clearing the Auth-Key")) { $lib.print($retn.mesg) }
     }
     elif $cmdopts.apikey {

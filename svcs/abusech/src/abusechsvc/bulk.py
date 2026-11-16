@@ -11,7 +11,8 @@ contain (see ``norm.normSample``, ``norm.normUrl``, ``norm.normUrlhausPayloadRow
 primary values and props match what Storm creates, and nodes keyed by their primary value (files
 by SHA256, URLs, IPs, FQDNs, etc.) merge with nodes modeled live.
 
-Guid-by-dict nodes (``risk:tool:software``, ``inet:service:account``, ``it:av:scan:result``, etc.) get
+Guid-by-dict nodes (``risk:tool:software``, ``inet:service:account``, ``it:av:scan:result``,
+etc.) get
 the guid ``$lib.guid()`` would give them, but Storm's ``{...}`` guid syntax first looks for an
 existing node with those props, which the service can't do. Where a matching node was made some
 other way (ex. by hand, or with a different guid), the import adds a second node instead of
@@ -51,9 +52,10 @@ PLATFORMS = {
     "sslbl": ("ssl blacklist", "https://sslbl.abuse.ch"),
     "hunting": ("abuse.ch hunting", "https://hunting.abuse.ch"),
 }
-"""The inet:service:platform name and URL of each platform (see the Storm model's ``$platnames``)."""
+"""The inet:service:platform name and URL of each platform (see the Storm model's ``$platnames``).
+"""
 
-BUILDER_VERSION = 1
+BUILDER_VERSION = 2
 """Bumped when the nodes the builder creates change, recorded with each bulk import."""
 
 Ndef = tuple[str, Any]
@@ -86,6 +88,8 @@ class NodeBuilder:
     """
 
     def __init__(self, model: s_datamodel.Model, prefix: str | None):
+        """Start an empty set of nodes, tagged with ``prefix`` (None for no tags)."""
+
         self.model = model
         self.prefix = prefix
         self.nodes: dict[Ndef, dict] = {}
@@ -102,7 +106,9 @@ class NodeBuilder:
         return info
 
     def node(self, form: str, valu: Any, hold: bool = False) -> Ndef | None:
-        """Normalize a primary value (like ``[ form?=valu ]``). Returns the ndef, or None if it's invalid."""
+        """Normalize a primary value (like ``[ form?=valu ]``). Returns the ndef, or None if it's
+        invalid.
+        """
 
         if valu in (None, ""):
             return None
@@ -115,7 +121,7 @@ class NodeBuilder:
         return ndef
 
     def guid(self, form: str, props: dict, hold: bool = False) -> Ndef | None:
-        """A guid node made from a dict of props (like ``[ form=({...}) ]``), with those props set."""
+        """A guid node made from a dict of props (like ``[ form=({...}) ]``), with them set."""
 
         formobj = self.model.form(form)
         norms = []
@@ -191,7 +197,7 @@ class NodeBuilder:
     def tags(
         self, ndef: Ndef | None, plat: str, tags: Any, first: Any = None, last: Any = None
     ) -> None:
-        """Apply abuse.ch tags as ``<prefix>.<plat>.<tag>`` (see the Storm model's ``tagNode()``)."""
+        """Apply abuse.ch tags as ``<prefix>.<plat>.<tag>`` (see the Storm ``tagNode()``)."""
 
         if self.prefix is None or not tags or ndef is None:
             return
@@ -200,6 +206,8 @@ class NodeBuilder:
                 self.tag(ndef, f"{self.prefix}.{plat}.{tag}", first, last)
 
     def edge(self, n1: Ndef | None, verb: str, n2: Ndef | None) -> None:
+        """Link two nodes with a light edge, n1 -(verb)> n2 (see ``edge()``)."""
+
         if n1 is None or n2 is None:
             return
         self._info(n1)["edges"].add((verb, n2))
@@ -220,22 +228,34 @@ class NodeBuilder:
 
     # ---- Observables ----
 
-    def ipNode(self, ip: str, plat: str, first=None, last=None) -> Ndef | None:
+    def ipNode(self, ip: str, plat: str, first: Any = None, last: Any = None) -> Ndef | None:
+        """An inet:ipv4/inet:ipv6 seen on the platform (see ``ipNode()``)."""
+
         form = "inet:ipv6" if ":" in str(ip) else "inet:ipv4"
         return self.seen(self.node(form, ip), plat, first, last)
 
-    def serverNode(self, ip: str, port: int, plat: str, first=None, last=None) -> Ndef | None:
+    def serverNode(
+        self, ip: str, port: int, plat: str, first: Any = None, last: Any = None
+    ) -> Ndef | None:
+        """A ``tcp://ip:port`` inet:server seen on the platform (see ``serverNode()``)."""
+
         server = f"tcp://[{ip}]:{port}" if ":" in str(ip) else f"tcp://{ip}:{port}"
         return self.seen(self.node("inet:server", server), plat, first, last)
 
     def refNode(self, url: str | None, ndef: Ndef | None, plat: str) -> Ndef | None:
+        """A reference URL about a node, inet:url -(refs)> node (see ``refNode()``)."""
+
         if not url or ndef is None:
             return None
         ref = self.seen(self.node("inet:url", url), plat)
         self.edge(ref, "refs", ndef)
         return ref
 
-    def obsNode(self, obs: dict | None, plat: str, first=None, last=None) -> Ndef | None:
+    def obsNode(
+        self, obs: dict | None, plat: str, first: Any = None, last: Any = None
+    ) -> Ndef | None:
+        """The node for a normalized observable (see ``obsNode()``)."""
+
         if obs is None:
             return None
         form = obs["form"]
@@ -250,7 +270,9 @@ class NodeBuilder:
 
     # ---- Files ----
 
-    def fileNode(self, hashes: dict, plat: str, first=None, last=None) -> Ndef | None:
+    def fileNode(self, hashes: dict, plat: str, first: Any = None, last: Any = None) -> Ndef | None:
+        """A file:bytes by its hashes, keyed by SHA256 when it has one (see ``fileNode()``)."""
+
         if hashes.get("sha256"):
             ndef = self.node("file:bytes", hashes["sha256"])
         else:
@@ -281,16 +303,15 @@ class NodeBuilder:
 
         if not name:
             return None
-        if tagname and self.prefix:
-            ndef = self.guid(
-                "risk:tool:software", {"tag": f"{self.prefix}.{plat}.{tagname}"}, hold=True
-            )
-        else:
-            ndef = self.guid(
-                "risk:tool:software", {"soft:name": name, "reporter:name": "abuse.ch"}, hold=True
-            )
+        # Keyed on the name and reporter whatever the tag settings, like the Storm model's
+        # familyGuid() (ABUSE-ST-01).
+        ndef = self.guid(
+            "risk:tool:software", {"soft:name": name, "reporter:name": "abuse.ch"}, hold=True
+        )
         if ndef is None:
             return None
+        if tagname and self.prefix:
+            self.prop(ndef, "tag", f"{self.prefix}.{plat}.{tagname}", ifunset=True)
         self.prop(ndef, "soft:name", name)
         self.prop(ndef, "reporter:name", "abuse.ch")
         self.prop(ndef, "type", "malware")
@@ -303,16 +324,20 @@ class NodeBuilder:
         return ndef
 
     def reporter(self, name: str | None, ndef: Ndef | None, plat: str) -> Ndef | None:
+        """An abuse.ch reporter, inet:service:account -(refs)> node (see ``reporter()``)."""
+
         if not name or ndef is None:
             return None
         pname, purl = PLATFORMS[plat]
         platform = self.guid("inet:service:platform", {"name": pname})
         self.prop(platform, "url", purl)
         account = self.guid("inet:service:account", {"platform": platform[1], "user": name})
-        self.edge(account, "seen", ndef)
+        self.edge(account, "refs", ndef)
         return account
 
     def scan(self, file: Ndef, sc: dict, plat: str) -> Ndef | None:
+        """An it:av:scan:result of a file (see ``scan()``)."""
+
         props = {"target:file": file[1], "scanner:name": sc["vendor"]}
         if sc.get("signame"):
             props["signame"] = sc["signame"]
@@ -393,11 +418,11 @@ class NodeBuilder:
         if u.get("status"):
             self.tags(urlnode, plat, (f"status.{u['status']}",), first, last)
         if u.get("larted"):
-            self.tags(urlnode, plat, ("larted",))
+            self.tags(urlnode, plat, ("larted",), first, last)
 
         if u.get("host"):
             host = self.obsNode(u["host"], plat, first)
-            self.tags(host, plat, u.get("blacklists"))
+            self.tags(host, plat, u.get("blacklists"), first, last)
 
         self.refNode(u.get("reference"), urlnode, plat)
         self.reporter(u.get("reporter"), urlnode, plat)

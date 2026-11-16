@@ -4,9 +4,9 @@
 // Only the user scope is read, so another user's or role's secrets are never exposed.
 function userKey() {
     $vault = $lib.vault.bytype(abusech, scope=user)
-    if ($vault = $lib.null) { return($lib.null) }
+    if ($vault = null) { return() }
     $secrets = $vault.secrets
-    if ($secrets = $lib.null) { return($lib.null) }
+    if ($secrets = null) { return() }
     return($secrets.apikey)
 }
 
@@ -18,37 +18,37 @@ function isIpv6(ip) {
 // Warn about a failed service call. Returns true if the call failed.
 function failed(retn, what) {
     if $retn.status { return((false)) }
-    $lib.warn("slib.abusech: {what} failed: {err}", what=$what, err=$retn.mesg)
+    $lib.warn(`slib.abusech: {$what} failed: {$retn.mesg}`)
     return((true))
 }
 
 // The type of a hex hash by its length (md5, sha1, sha256, sha3_384), or null.
 function hashType(valu) {
     $valu = $lib.cast(str, $valu)
-    if (not $lib.regex.matches("^[0-9a-fA-F]+$", $valu)) { return($lib.null) }
+    if (not $lib.regex.matches("^[0-9a-fA-F]+$", $valu)) { return() }
     switch $lib.len($valu) {
         "32": { return(md5) }
         "40": { return(sha1) }
         "64": { return(sha256) }
         "96": { return(sha3_384) }
     }
-    return($lib.null)
+    return()
 }
 
 // The best hash to look a file:bytes/hash:* node up by, preferring SHA256. Returns null if there isn't one.
 function nodeHash(node) {
-    switch $node.form() {
+    switch $node.form() {  // noqa: R002
         "file:bytes": {
             if $node.props.sha256 { return($node.props.sha256) }
             if $node.props.sha1 { return($node.props.sha1) }
             if $node.props.md5 { return($node.props.md5) }
-            return($lib.null)
+            return()
         }
         "hash:md5": { return($node.repr()) }
         "hash:sha1": { return($node.repr()) }
         "hash:sha256": { return($node.repr()) }
     }
-    return($lib.null)
+    return()
 }
 
 // Print a table. columns is a list of (name, width) and rows is a list of lists.
@@ -72,11 +72,20 @@ function printJson(valu) {
 // Print an abuse.ch submission response.
 function printSubmission(what, retn) {
     if $failed($retn, $what) { return((false)) }
-    if ($lib.vars.type($retn.data) = "str") {
-        $lib.print("slib.abusech: {what}: {resp}", what=$what, resp=$retn.data)
+    if ($lib.vars.type($retn.data) = "str") {  // noqa: R005 - 2.x has no $lib.utils.type()
+        $lib.print(`slib.abusech: {$what}: {$retn.data}`)
     } else {
-        $lib.print("slib.abusech: {what}:", what=$what)
+        $lib.print(`slib.abusech: {$what}:`)
         $printJson($retn.data)
     }
+    return((true))
+}
+
+// Whether this is the first call with a command's state dict, ({"done": (false)}) made in its init
+// block. A command's body runs once per inbound node, so the work that ignores inbound nodes (ex.
+// a --hash option, or a blocklist download) is gated on this to run once, without a spin.
+function first(state) {
+    if $state.done { return((false)) }
+    $state.done = (true)
     return((true))
 }

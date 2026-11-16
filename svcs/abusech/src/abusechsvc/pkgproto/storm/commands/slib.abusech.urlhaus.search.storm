@@ -1,4 +1,6 @@
 init {
+    $util = $lib.import(slib.abusech.util)
+    $once = ({"done": false})
     $abusech = $lib.import(slib.abusech.lib)
     $model = $lib.import(slib.abusech.model)
 
@@ -13,9 +15,14 @@ init {
             $nodes = $abusech.urlhausSearch($cmdopts.by, $cmdopts.value, limit=$limit)
         }
     }
-    $lib.print("slib.abusech.urlhaus.search: Found {count} results.", count=$lib.len($nodes))
+    $lib.print(`slib.abusech.urlhaus.search: Found {$lib.len($nodes)} results.`)
+
+    // Yield the results once, not once per inbound node (which are dropped).
+    function results() {
+        if $util.first($once) {
+            yield $model.nodes($nodes)
+        }
+    }
 }
 
-spin |
-
-yield $model.nodes($nodes)
+divert (true) $results()

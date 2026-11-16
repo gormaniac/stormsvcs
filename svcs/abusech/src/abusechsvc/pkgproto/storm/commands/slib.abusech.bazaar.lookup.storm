@@ -1,23 +1,30 @@
 init {
+    $once = ({"done": false})
     $abusech = $lib.import(slib.abusech.lib)
     $model = $lib.import(slib.abusech.model)
     $util = $lib.import(slib.abusech.util)
+
+    // The options that ignore inbound nodes (which are dropped) run once, not once per node.
+    function byOptions() {
+        if $util.first($once) {
+            for $sha in $cmdopts.hash {
+                $file = $abusech.bazaarLookup($sha)
+                if ($cmdopts.yield and $file) { yield $file }
+            }
+        }
+    }
 }
 
 if $cmdopts.hash {
     // --hash ignores inbound nodes.
-    spin |
-    for $sha in $cmdopts.hash {
-        $file = $abusech.bazaarLookup($sha)
-        if ($cmdopts.yield and $file) { yield $file }
-    }
+    divert (true) $byOptions()
 }
 else {
     $sha = $util.nodeHash($node)
     if $sha { $results = ($abusech.bazaarLookup($sha),) }
     else {
         $results = ([])
-        $lib.warn("slib.abusech.bazaar.lookup: {form} {repr} has no hash to look up.", form=$node.form(), repr=$node.repr())
+        $lib.warn(`slib.abusech.bazaar.lookup: {$node.form()} {$node.repr()} has no hash to look up.`)  // noqa: R002
     }
     divert $cmdopts.yield $model.nodes($results)
 }
