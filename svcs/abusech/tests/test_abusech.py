@@ -1173,6 +1173,37 @@ class TestClient(s_tests.SynTest):
                 await client.fetch("bazaar:export", "recent.csv", apikey="secretkey")
             assert "secretkey" not in cm.exception.mesg
 
+    async def test_client_export_error_scrubs_key(self):
+        """An export error page that echoes the URL doesn't leak the key (ABUSE-PY-02).
+
+        The key is the caller's (ex. a user's vault key), which the API's own redaction
+        doesn't know, so the client scrubs it. A key with "/" and "+" shows up both raw and
+        URL-quoted.
+        """
+
+        key = "user/key+1"
+        async with FakeAbuseCh() as fake, aiohttp.ClientSession() as sess:
+
+            async def notfound(request, info, path, query):
+                return aiohttp.web.Response(
+                    status=404, text=f"Not Found: {request.raw_path} ({request.path})"
+                )
+
+            fake._bazaar_export = notfound
+            client = AbuseChClient(sess, urls=fake.urls, rate=0)
+
+            with self.raises(AbuseChApiError) as cm:
+                await client.fetch("bazaar:export", "recent.csv", apikey=key)
+            assert key not in cm.exception.mesg and "key%2B1" not in cm.exception.mesg
+            assert "<auth-key>" in cm.exception.mesg
+            assert cm.exception.args[0] == cm.exception.mesg
+
+            with self.raises(AbuseChApiError) as cm:
+                async for _ in client.stream("bazaar:export", "recent.csv", apikey=key):
+                    pass
+            assert key not in cm.exception.mesg and "key%2B1" not in cm.exception.mesg
+            assert "<auth-key>" in cm.exception.mesg
+
 
 class TestSvc(s_tests.SynTest):
     """The AbuseChSvc methods send the right requests and normalize the responses."""
