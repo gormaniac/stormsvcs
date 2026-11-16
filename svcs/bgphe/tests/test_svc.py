@@ -176,18 +176,27 @@ class TestBgpHeSvc(s_tests.SynTest):
                 assert len(items) == 1 and items[0]["status"] is False
                 assert "fake error 400" in items[0]["mesg"]
 
-                # Unexpected errors are raised, not returned.
+                # Unexpected errors are logged and returned as status=False, not raised.
                 async def boom(*args, **kwargs):
                     raise RuntimeError("boom")
 
                 svc.client.whoisAsn = boom
-                with self.raises(Exception):
-                    await prox.whoisAsn(15169)
+                with self.getLoggerStream("stormlibpp.svc") as stream:
+                    retn = await prox.whoisAsn(15169)
+                self.eq(
+                    {"status": False, "mesg": "Unexpected error: RuntimeError: boom", "data": None},
+                    retn,
+                )
+                stream.seek(0)
+                assert "Unexpected error in BgpHeCellApi.whoisAsn." in stream.read()
 
                 async def boomGenr(*args, **kwargs):
                     raise RuntimeError("boom")
                     yield  # pragma: no cover
 
                 svc.certs = boomGenr
-                with self.raises(Exception):
-                    [item async for item in prox.certs("gormo.co")]
+                items = [item async for item in prox.certs("gormo.co")]
+                self.eq(
+                    [{"status": False, "mesg": "Unexpected error: RuntimeError: boom", "data": None}],
+                    items,
+                )

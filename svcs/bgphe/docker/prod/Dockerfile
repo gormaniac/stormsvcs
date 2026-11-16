@@ -1,4 +1,6 @@
-FROM ghcr.io/gormaniac/stormsvcs/base:latest
+# CI passes the base image it just built (see _service.yml); the default is the published one.
+ARG BASE_IMAGE=ghcr.io/gormaniac/stormsvcs/base:latest
+FROM ${BASE_IMAGE}
 
 # Copy all the service files into a build dir.
 COPY pyproject.toml /opt/stormsvcs/bgphe/pyproject.toml
