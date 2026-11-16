@@ -2,6 +2,7 @@
 
 import os
 import shutil
+from unittest import mock
 
 import pytest
 
@@ -28,8 +29,42 @@ class TestHelpers:
 
     def test_contact(self):
         assert s_rules.contact("Visi@Vertex.Link ") == {"email": "visi@vertex.link"}
-        assert s_rules.contact("@_re_fox") == {"name": "@_re_fox"}
+        # A handle is the contact's :user, without the "@".
+        assert s_rules.contact("@_re_fox") == {"user": "_re_fox"}
+        assert s_rules.contact(" @Mr-Bt ") == {"user": "mr-bt"}
         assert s_rules.contact("BitsOfBinary") == {"name": "bitsofbinary"}
+        assert s_rules.contact("Jane Doe") == {"name": "jane doe"}
+        assert s_rules.contact("@") == {"name": "@"}
+
+    def test_mbc(self):
+        assert s_rules.mbc(
+            [
+                "Anti-Static Analysis::Executable Code Obfuscation [B0032]",
+                "Anti-Behavioral Analysis::Debugger Detection::Software Breakpoints [B0001.025]",
+                "Communication::HTTP Communication::Create Request [c0002.012]",
+                "Anti-Static Analysis::Executable Code Obfuscation [B0032]",
+                "Not an MBC behavior",
+                "Two parts only [B0009.001]",
+            ]
+        ) == [
+            {"id": "B0032", "name": "Executable Code Obfuscation", "parent": None},
+            {
+                "id": "B0001.025",
+                "name": "Software Breakpoints",
+                "parent": {"id": "B0001", "name": "Debugger Detection", "parent": None},
+            },
+            {
+                "id": "C0002.012",
+                "name": "Create Request",
+                "parent": {"id": "C0002", "name": "HTTP Communication", "parent": None},
+            },
+            {
+                "id": "B0009.001",
+                "name": "Two parts only",
+                "parent": {"id": "B0009", "name": None, "parent": None},
+            },
+        ]
+        assert s_rules.mbc([]) == []
 
     def test_techniques(self):
         assert s_rules.techniques(
@@ -109,8 +144,9 @@ class TestCapaRules:
         assert rec["desc"].startswith("The file contains the slib.capa test marker string.")
         assert "MBC:\n- Anti-Static Analysis::Executable Code Obfuscation [B0032]" in rec["desc"]
         assert "Examples:\n- 0123456789abcdef0123456789abcdef:0x1000" in rec["desc"]
-        assert rec["authors"] == [{"email": "test@example.com"}, {"name": "@visi"}]
+        assert rec["authors"] == [{"email": "test@example.com"}, {"user": "visi"}]
         assert rec["techniques"] == ["T1027", "T1059.001"]
+        assert [m["id"] for m in rec["mbc"]] == ["B0032", "B0001.025"]
         assert rec["meta"]["att&ck"][0].endswith("[T1027]")
 
         lib = rules.rules["contain ret"]
@@ -130,6 +166,11 @@ class TestCapaRules:
             s_rules.CapaRules(RULES, "vother", "").info()["key"],
         }
         assert len(keys) == 3
+
+        # And with the version of what slib.capa.sync models from a rule.
+        key = rules.info()["key"]
+        with mock.patch.object(s_rules, "MODEL_VERSION", s_rules.MODEL_VERSION + 1):
+            assert rules.info()["key"] != key
 
     def test_rulesStat(self, tmp_path):
         rules = loadRules()
@@ -214,6 +255,16 @@ class TestCapaRules:
         (bad / "bad.yml").write_text("rule:\n  meta:\n    name: bad\n  features:\n    - newp: 1\n")
         with pytest.raises(s_rules.CapaRulesError, match="Invalid capa rule bad.yml"):
             loadRules(str(bad))
+
+    def test_readRules_oserror(self, tmp_path):
+        # The directory can't be listed (ex. a permission error).
+        with mock.patch.object(
+            s_rules.capa.rules, "collect_rule_file_paths", side_effect=PermissionError("newp")
+        ):
+            with pytest.raises(
+                s_rules.CapaRulesError, match="Unable to read the capa rules directory .*: newp"
+            ):
+                s_rules.readRules(RULES)
 
 
 class TestRulesVersion:

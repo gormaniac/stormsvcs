@@ -22,8 +22,19 @@ RULE_TYPE = "capa"
 LIB_RULE_TYPE = "capa.lib"
 """The ``meta:rule:type`` of capa library rules, which are only used by other rules."""
 
+MODEL_VERSION = 2
+"""The version of what slib.capa.sync models from a rule, part of the rules' sync ``key``.
+
+Bump it when the model of a rule changes, so the next package load imports the rules again.
+2: MBC behaviors as ``ou:technique`` nodes, ``@handle`` authors as ``ps:contact:user``.
+"""
+
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+HANDLE_RE = re.compile(r"^@([^@\s]+)$")
 TECHNIQUE_RE = re.compile(r"\[(T\d{4}(?:\.\d{3})?)\]\s*$")
+MBC_RE = re.compile(
+    r"^(?P<path>.*?)\s*\[(?P<id>[A-Z]\d{4}(?:\.[A-Z]?\d{2,3})?)\]\s*$", re.IGNORECASE
+)
 
 
 class CapaRulesError(Exception):
@@ -67,11 +78,17 @@ def nsTag(namespace: str | None) -> str | None:
 
 
 def contact(author: str) -> dict[str, str]:
-    """The ``ps:contact`` guid ctor props for a capa rule author (an email or a handle)."""
+    """The ``ps:contact`` guid ctor props for a capa rule author.
+
+    An email is the contact's ``:email``, an ``@handle`` its ``:user`` (without the ``@``),
+    and anything else (ex. a person's name) its ``:name``.
+    """
 
     author = author.strip()
     if EMAIL_RE.match(author):
         return {"email": author.lower()}
+    if match := HANDLE_RE.match(author):
+        return {"user": match.group(1).lower()}
     return {"name": author.lower()}
 
 
@@ -83,6 +100,34 @@ def techniques(attack: list[str]) -> list[str]:
         if (match := TECHNIQUE_RE.search(str(entry))) and match.group(1) not in ids:
             ids.append(match.group(1))
     return ids
+
+
+def mbc(entries: list[str]) -> list[dict[str, Any]]:
+    """The MBC behaviors and methods in a rule's ``mbc`` meta.
+
+    Entries look like ``Objective::Behavior [B0032]`` or ``Objective::Behavior::Method
+    [B0001.025]``. Each record has the ``id``, the ``name`` (the last part of the entry, or
+    None), and the ``parent`` record of a method's behavior (``{id, name}``, or None). Entries
+    without an MBC ID are left out.
+    """
+
+    records = []
+    seen = set()
+    for entry in entries:
+        if not (match := MBC_RE.match(str(entry).strip())):
+            continue
+        mbcid = match.group("id").upper()
+        if mbcid in seen:
+            continue
+        seen.add(mbcid)
+
+        parts = [p.strip() for p in match.group("path").split("::") if p.strip()]
+        parent = None
+        if "." in mbcid:
+            pname = parts[-2] if len(parts) >= 3 else None
+            parent = {"id": mbcid.split(".", 1)[0], "name": pname, "parent": None}
+        records.append({"id": mbcid, "name": parts[-1] if parts else None, "parent": parent})
+    return records
 
 
 def ruleDoc(meta: dict[str, Any]) -> str:
@@ -191,6 +236,7 @@ def ruleRecord(
         "url": url,
         "authors": [contact(str(a)) for a in meta.get("authors") or ()],
         "techniques": techniques(meta.get("att&ck") or ()),
+        "mbc": mbc(meta.get("mbc") or ()),
         "meta": ruleMeta(meta),
     }
 
@@ -375,7 +421,7 @@ class CapaRules:
             "version": self.version,
             "sha256": self.sha256,
             # Changes when anything slib.capa.sync models from the rules changes.
-            "key": s_common.guid((self.sha256, self.version, self.urlfmt)),
+            "key": s_common.guid((self.sha256, self.version, self.urlfmt, MODEL_VERSION)),
             "ruleset": rulesetGuid(self.version),
             "rules": len(self.rules),
             "lib": sum(1 for r in self.rules.values() if r["lib"]),
