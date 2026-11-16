@@ -1,0 +1,141 @@
+// Replace the inet:dns:a/aaaa nodes that slib.shodan < 0.17.0 made from Shodan's hostnames with
+// inet:dns:rev/rev6 nodes (see slib.shodan.model.revNode).
+//
+// Node edits run as the calling user. Functions are defined before init, which uses them.
+
+// The node of a form and value that the slib.shodan meta:source has seen, or null.
+function shodanSeen(form, valu) {
+    *$form=$valu +{ <(seen)- meta:source=$sourceGuid }
+    return($node)
+}
+
+// A node linked to a node, other than by the slib.shodan meta:source's -(seen)> edge, or null.
+// NOTE: These return $node, not (true): a constant return runs even when no node is lifted.
+function otherN2(n) {
+    yield $n
+    <(*)- * -meta:source=$sourceGuid
+    return($node)
+}
+
+function anyN1(n) {
+    yield $n
+    -(*)> *
+    return($node)
+}
+
+// Whether a domain or one of its parents has DNS records from slib.shodan.dns.domain, which models
+// the zone's NS, SOA, MX, TXT, and CNAME records (an A record from it isn't from a hostname).
+function zoneRecord(fqdn) {
+    $domain = $fqdn
+    while ($domain ~= "\\.") {
+        if $shodanZone($domain) { return((true)) }
+        $domain = $domain.split(".", maxsplit=(1)).1
+    }
+    return((false))
+}
+
+function shodanZone(domain) {
+    inet:dns:ns:zone=$domain inet:dns:soa:fqdn=$domain inet:dns:mx:fqdn=$domain
+    inet:dns:txt:fqdn=$domain inet:dns:cname:fqdn=$domain
+    +{ <(seen)- meta:source=$sourceGuid }
+    return($node)
+}
+
+// Why a node is kept, or null if it's one slib.shodan made from a hostname.
+//
+// slib.shodan made inet:dns:a/aaaa nodes in three ways: from host/banner hostnames (always with the
+// IP modeled too, linked to the meta:source, and with a .seen when Shodan has a time, InternetDB
+// doesn't), from slib.shodan.dns.domain records (without linking the IP, and with every subdomain an
+// inet:fqdn linked to the meta:source, and the zone's other records), and from
+// slib.shodan.dns.lookup of a hostname (without a .seen). Only nodes that can only be from a
+// hostname are replaced, the rest are kept.
+function keepReason(n, ipform, ip, fqdn) {
+    if (not $shodanSeen($ipform, $ip)) { return("the IP isn't from slib.shodan, it may be a DNS domain record") }
+    if ($n.props.".seen" = (null)) { return("it has no .seen, it may be a DNS lookup or an InternetDB hostname") }
+    if $shodanSeen(inet:fqdn, $fqdn) { return("the hostname is a slib.shodan subdomain or reverse DNS name, it may be a DNS domain record") }
+    if $zoneRecord($fqdn) { return("slib.shodan has DNS domain records for the zone") }
+    return()
+}
+
+// Replace a node: add the inet:dns:rev/rev6 for it (with its .seen, linked to the meta:source),
+// then delete the node, or only remove the meta:source's -(seen)> edge when the node is linked to
+// anything else or tagged (it has another source).
+function replace(n, ipform, ip, fqdn) {
+    $shared = ($n.tags() or $otherN2($n) or $anyN1($n))
+    if $shared { $action = "unlink" }
+    else { $action = "delete" }
+    $lib.print(`slib.shodan.admin.dns.cleanup: {$action} {$n.form()}={$n.repr()}, adding the reverse DNS record ({$ip}, {$fqdn}).`)  // noqa: R002
+    if (not $cmdopts.apply) { return($action) }
+
+    $revNode($ipform, $ip, $fqdn, $n.props.".seen")  // noqa: M004
+    if $shared { $unlink($n) }
+    else { $delNode($n) }
+    return($action)
+}
+
+function revNode(ipform, ip, fqdn, seen) {
+    if ($ipform = "inet:ipv6") { [ inet:dns:rev6=($ip, $fqdn) ] }
+    else { [ inet:dns:rev=($ip, $fqdn) ] }
+    [ .seen?=$seen <(seen)+ { meta:source=$sourceGuid } ]  // noqa: M004
+    return($node)
+}
+
+function unlink(n) {
+    yield $n
+    [ <(seen)- { meta:source=$sourceGuid } ]
+    return()
+}
+
+// The meta:source's -(seen)> edge is its only edge (see replace()), remove it to delete the node.
+function delNode(n) {
+    yield $n
+    [ <(seen)- { meta:source=$sourceGuid } ]
+    | delnode
+}
+
+// The nodes to check, all lifted before any are changed.
+function candidates() {
+    $nodes = ([])
+    for $n in $liftCandidates() { $nodes.append($n) }
+    return($nodes)
+}
+
+function liftCandidates() {
+    meta:source=$sourceGuid -(seen)> (inet:dns:a, inet:dns:aaaa)
+    emit $node
+}
+
+function cleanup() {
+    $counts = ({"delete": (0), "unlink": (0), "keep": (0)})
+    for $n in $candidates() {
+        $fqdn = $n.props.fqdn
+        if ($n.form() = "inet:dns:aaaa") {  // noqa: R002
+            $ipform = "inet:ipv6"
+            $ip = $n.props.ipv6
+        } else {
+            $ipform = "inet:ipv4"
+            $ip = $lib.repr(inet:ipv4, $n.props.ipv4)
+        }
+
+        $reason = $keepReason($n, $ipform, $ip, $fqdn)
+        if $reason {
+            $counts.keep = ($counts.keep + 1)
+            $lib.print(`slib.shodan.admin.dns.cleanup: keep {$n.form()}={$n.repr()}, {$reason}.`)  // noqa: R002
+            continue
+        }
+
+        $action = $replace($n, $ipform, $ip, $fqdn)
+        $counts.$action = ($counts.$action + 1)
+    }
+
+    if $cmdopts.apply {
+        $lib.print(`slib.shodan.admin.dns.cleanup: Deleted {$counts.delete}, unlinked {$counts.unlink}, kept {$counts.keep}.`)
+    } else {
+        $lib.print(`slib.shodan.admin.dns.cleanup: Dry run: would delete {$counts.delete}, unlink {$counts.unlink}, keep {$counts.keep}. Use --apply to make the changes.`)
+    }
+}
+
+init {
+    $sourceGuid = "5c1b0a3d0e7f4b2e9a8c6d4f2b1e0a97"
+    $cleanup()
+}

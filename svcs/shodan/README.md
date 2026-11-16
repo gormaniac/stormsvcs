@@ -72,7 +72,7 @@ need the normal node permissions for the nodes the commands create.
 
 | Command | Description |
 |---|---|
-| `slib.shodan.host` | Look up IPs and model everything Shodan knows (ASN, location, hostnames, tags, vulns, every banner). Takes IPs, or the IPs of `inet:server`, `inet:banner`, and `inet:dns:a`/`aaaa` nodes (each IP is looked up once). `--history`, `--timeline`, `--minify`, `--internetdb`. |
+| `slib.shodan.host` | Look up IPs and model everything Shodan knows (ASN, location, hostnames, tags, vulns, every banner). Takes IPs, or the IPs of `inet:server`, `inet:banner`, `inet:dns:a`/`aaaa`, and `inet:dns:rev`/`rev6` nodes (each IP is looked up once). `--history`, `--timeline`, `--minify`, `--internetdb`. |
 | `slib.shodan.enrich` | Enrich any supported node with the best API: IPs → host, `inet:fqdn` → DNS, `risk:vuln`/`it:sec:cve` → CVEDB, `it:sec:cpe` → CVEs. |
 | `slib.shodan.search` | Search Shodan, model each banner, and yield the IPs. `--count` and `--facets` are free, `--tokens` explains a query, `--filters` lists filters/facets. Inbound nodes are searched for with a query built for their form (see below), AND'd with any query. |
 | `slib.shodan.count` | List the IPs matching a query with the free count API (no query credits), model them, and yield them. One request per query, up to your plan's facet limit in IPs. `--facets` prints extra facets for context. Takes the same inbound nodes as `search`. |
@@ -93,13 +93,17 @@ need the normal node permissions for the nodes the commands create.
 | `slib.shodan.scan.internet` | Request an Internet-wide scan of a port/protocol. |
 | `slib.shodan.alert.list` | List alerts, or show one. |
 | `slib.shodan.alert.add` | Create an alert for the inbound IPs/CIDRs, enabling `--trigger`s and attaching `--notifier`s in one step. |
-| `slib.shodan.alert.edit` | Replace/`--append` IPs, `--enable`/`--disable` triggers, `--ignore`/`--unignore` services, and add/remove notifiers in one step. |
+| `slib.shodan.alert.edit` | Replace/`--append` IPs, `--enable`/`--disable` triggers, `--ignore`/`--unignore` services (`<trigger>/<ip>:<port>`, anything else is refused), and add/remove notifiers in one step. |
 | `slib.shodan.alert.del` | Delete alerts. |
-| `slib.shodan.notifier.list` / `.add` / `.edit` / `.del` | Manage notifiers. |
+| `slib.shodan.notifier.list` | List notifiers, or show one. |
+| `slib.shodan.notifier.add` | Create a notifier for a provider, with `--arg name=value` provider arguments. |
+| `slib.shodan.notifier.edit` | Change a notifier's provider arguments. |
+| `slib.shodan.notifier.del` | Delete notifiers. |
 | `slib.shodan.admin.apikey` | Set/clear/check the service-wide key. |
 | `slib.shodan.admin.tags` | Set the tag `--prefix` (default `rep.shodan`), `--enable` or `--disable` tagging. |
 | `slib.shodan.admin.org` | Show the organization, or `--add`/`--remove` members. |
 | `slib.shodan.admin.data` | List bulk datasets and their files. |
+| `slib.shodan.admin.dns.cleanup` | Replace the `inet:dns:a`/`aaaa` nodes versions before 0.17.0 made from Shodan's hostnames with `inet:dns:rev`/`rev6` nodes. A dry run unless `--apply`, see [Cleaning up hostname DNS records](#cleaning-up-hostname-dns-records). |
 | `slib.shodan.admin.request` | Send a raw request to any Shodan API, for anything not covered above. |
 
 Run any command with `--help` for all of its options and examples.
@@ -285,6 +289,35 @@ the full list:
 
 Every node is linked to the service's `meta:source` with a `-(seen)>` edge, and has `.seen`
 updated from Shodan's timestamps.
+
+## Cleaning up hostname DNS records
+
+Before 0.17.0, Shodan's hostnames (from host lookups, search and stream banners, InternetDB, and
+reverse `slib.shodan.dns.lookup`s) were modeled as forward `inet:dns:a`/`aaaa` records, which
+assert resolutions that may never have happened. They're now `inet:dns:rev`/`rev6` records (see
+[Data model](#data-model)). `slib.shodan.admin.dns.cleanup` (needs `slib.shodan.admin`, and
+`node.del` permissions to delete nodes) fixes the nodes older versions made:
+
+```
+// Print what would change, and why each kept node is kept.
+slib.shodan.admin.dns.cleanup
+
+// Make the changes. Running it again changes nothing.
+slib.shodan.admin.dns.cleanup --apply
+```
+
+Only `inet:dns:a`/`aaaa` nodes linked to the service's `meta:source` (`-(seen)>`) are checked,
+and only those that can only be from a hostname are changed: their IP is linked to the
+`meta:source` too, they have a `.seen`, their hostname isn't a `meta:source` linked `inet:fqdn`
+(a `dns.domain` subdomain or reverse DNS name), and the service has no NS, SOA, MX, TXT, or CNAME
+records for the hostname or its parent domains. Anything else may be a real DNS record from
+`slib.shodan.dns.domain` or a forward `slib.shodan.dns.lookup`, and is kept. So are InternetDB
+hostnames, which have no `.seen` to tell them from lookups, and hostnames from reverse lookups
+(their `inet:fqdn` is linked to the `meta:source`).
+
+Each changed node gets its `inet:dns:rev`/`rev6` (with the node's `.seen`, linked to the
+`meta:source`). Then the old node is deleted, or, if it's tagged or has any other edge (ex.
+another source's `-(seen)>`), only the service's `-(seen)>` edge is removed.
 
 ## Shodan API coverage
 

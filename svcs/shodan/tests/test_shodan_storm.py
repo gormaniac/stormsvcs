@@ -78,7 +78,7 @@ class TestShodanStormPkg(s_tests.SynTest):
                 self.eq([mesg], [i async for i in prox.stream("banners", limit=1)])
 
     async def test_pkg(self):
-        assert len(CMDS) == 32
+        assert len(CMDS) == 33
 
         async with shodanSvc(self) as (core, svc, fake):
             msgs = await core.stormlist("service.list")
@@ -2013,6 +2013,88 @@ class TestShodanStormAdmin(s_tests.SynTest):
 
             msgs = await core.stormlist("slib.shodan.admin.tags --enable --disable")
             self.stormIsInErr("not both", msgs)
+
+
+class TestShodanStormDnsCleanup(s_tests.SynTest):
+    """slib.shodan.admin.dns.cleanup replaces the inet:dns:a/aaaa that older versions made from
+    Shodan's hostnames (SHODAN-05)."""
+
+    async def _oldHost(self, core, fqdn, ip, time="2026-10-01T12:00:00"):
+        # What slib.shodan < 0.17.0 did with a host's hostnames.
+        model = "$model = $lib.import(slib.shodan.model)"
+        await core.nodes(f"{model} $model.ipNode($ip, $time) $model.dnsNode($fqdn, $ip, $time)", opts={"vars": {"fqdn": fqdn, "ip": ip, "time": time}})
+
+    async def test_dns_cleanup(self):
+        async with shodanSvc(self) as (core, svc, fake):
+            # Old-style nodes from host lookups (IPv4 and IPv6), and two with another source.
+            await self._oldHost(core, "dns.google", "8.8.8.8")
+            await self._oldHost(core, "v6.example.com", "2001:db8::1")
+            await self._oldHost(core, "shared.example.com", "8.8.8.8")
+            await core.nodes("[ inet:dns:a=(shared.example.com, 8.8.8.8) <(seen)+ { [ meta:source=* :name=other ] } ]")
+            await self._oldHost(core, "tagged.example.com", "8.8.8.8")
+            await core.nodes("[ inet:dns:a=(tagged.example.com, 8.8.8.8) +#my.analysis ]")
+
+            # Real DNS records: from slib.shodan.dns.domain and a forward slib.shodan.dns.lookup.
+            self.stormHasNoErr(await core.stormlist("slib.shodan.dns.domain --domain vertex.link"))
+            self.stormHasNoErr(await core.stormlist("[ inet:fqdn=vertex.link ] | slib.shodan.dns.lookup"))
+            # A dns.domain A record for an IP that slib.shodan also looked up.
+            await core.nodes("slib.shodan.host --ip 1.2.3.4")
+            # An InternetDB hostname has no .seen, so it can't be told from a lookup, and is kept.
+            await self._oldHost(core, "one.one.one.one", "1.1.1.1", time=None)
+            # Not from slib.shodan at all.
+            await core.nodes("[ inet:dns:a=(other.example.com, 8.8.8.8) ]")
+
+            def snapshot():
+                return core.nodes("inet:dns:a inet:dns:aaaa inet:dns:rev inet:dns:rev6")
+
+            before = {n.ndef for n in await snapshot()}
+            dnsdomain = {n.ndef for n in await core.nodes("inet:dns:a:fqdn=vertex.link inet:dns:a:fqdn=www.vertex.link inet:dns:aaaa:fqdn=api.vertex.link")}
+            assert dnsdomain
+
+            # A dry run changes nothing.
+            msgs = await core.stormlist("slib.shodan.admin.dns.cleanup")
+            self.stormHasNoWarnErr(msgs)
+            self.stormIsInPrint("delete inet:dns:a=('dns.google', '8.8.8.8')", msgs)
+            self.stormIsInPrint("Dry run: would delete 2, unlink 2, keep", msgs)
+            assert {n.ndef for n in await snapshot()} == before
+
+            msgs = await core.stormlist("slib.shodan.admin.dns.cleanup --apply")
+            self.stormHasNoWarnErr(msgs)
+            self.stormIsInPrint("Deleted 2, unlinked 2, kept", msgs)
+
+            # The hostname nodes are replaced by reverse DNS records, with their .seen and source.
+            assert not await core.nodes("inet:dns:a=(dns.google, 8.8.8.8)")
+            assert not await core.nodes("inet:dns:aaaa=(v6.example.com, 2001:db8::1)")
+            nodes = await core.nodes(f"meta:source={SVC_GUID} -(seen)> inet:dns:rev=(8.8.8.8, dns.google)")
+            assert len(nodes) == 1 and nodes[0].get(".seen") is not None
+            assert len(await core.nodes(f"meta:source={SVC_GUID} -(seen)> inet:dns:rev6=(2001:db8::1, v6.example.com)")) == 1
+
+            # Nodes with another source keep it, only slib.shodan's edge is removed.
+            for fqdn in ("shared.example.com", "tagged.example.com"):
+                assert len(await core.nodes(f"inet:dns:a=({fqdn}, 8.8.8.8)")) == 1
+                assert not await core.nodes(f"inet:dns:a=({fqdn}, 8.8.8.8) <(seen)- meta:source={SVC_GUID}")
+                assert len(await core.nodes(f"inet:dns:rev=(8.8.8.8, {fqdn})")) == 1
+            assert len(await core.nodes("inet:dns:a=(shared.example.com, 8.8.8.8) <(seen)- meta:source:name=other")) == 1
+
+            # Real DNS records, InternetDB hostnames, and other nodes are kept.
+            for ndef in dnsdomain:
+                assert len(await core.nodes(f"{ndef[0]}=$v", opts={"vars": {"v": ndef[1]}})) == 1
+            assert len(await core.nodes("inet:dns:a=(vertex.link, 1.2.3.4) <(seen)- meta:source")) == 1
+            assert len(await core.nodes("inet:dns:a=(one.one.one.one, 1.1.1.1)")) == 1
+            assert len(await core.nodes("inet:dns:a=(other.example.com, 8.8.8.8)")) == 1
+
+            # A second run changes nothing.
+            after = {n.ndef for n in await snapshot()}
+            msgs = await core.stormlist("slib.shodan.admin.dns.cleanup --apply")
+            self.stormIsInPrint("Deleted 0, unlinked 0, kept", msgs)
+            assert {n.ndef for n in await snapshot()} == after
+
+            # It's an admin command.
+            user = await core.auth.addUser("user")
+            await user.addRule((True, ("node",)))
+            await user.addRule((True, USER_PERM))
+            msgs = await core.stormlist("slib.shodan.admin.dns.cleanup --apply", opts={"user": user.iden})
+            self.stormIsInErr("requires permission: slib.shodan.admin", msgs)
 
 
 class TestShodanStormPerms(s_tests.SynTest):

@@ -1439,6 +1439,42 @@ commands:
           action: store_true
           help: Disable tagging.
 
+  - name: slib.shodan.admin.dns.cleanup
+    perms:
+      - [ slib, shodan, admin ]
+    descr: |
+      Replace the inet:dns:a/aaaa nodes that slib.shodan before 0.17.0 made from Shodan's hostnames
+      with inet:dns:rev/rev6 nodes.
+
+      Shodan's hostnames come from reverse DNS and TLS/HTTP observations, not forward lookups, so
+      they're now modeled as inet:dns:rev/rev6 (see slib.shodan.host). This fixes the nodes older
+      versions made. It's a dry run that prints what it would change, unless --apply is used.
+
+      Only inet:dns:a/aaaa nodes linked to the slib.shodan meta:source (-(seen)>) are checked, and
+      only the ones that can only be from a hostname are changed: their IP is linked to the
+      meta:source too, they have a .seen, their hostname isn't a slib.shodan inet:fqdn (a DNS domain
+      subdomain or reverse DNS name), and slib.shodan has no NS, SOA, MX, TXT, or CNAME records for
+      the hostname or its parent domains. The rest may be records from slib.shodan.dns.domain or
+      slib.shodan.dns.lookup, or InternetDB hostnames (which have no .seen), and are kept.
+
+      Each changed node gets its inet:dns:rev/rev6 (with the node's .seen, linked to the
+      meta:source). Then it's deleted, or, when it's tagged or linked to anything else (it has
+      another source), only the meta:source's -(seen)> edge is removed. Running it again changes
+      nothing. Deleting nodes needs the node.del permissions.
+
+      Examples:
+
+        // Print what would change.
+        slib.shodan.admin.dns.cleanup
+
+        // Make the changes.
+        slib.shodan.admin.dns.cleanup --apply
+    cmdargs:
+      - - --apply
+        - default: false
+          action: store_true
+          help: Make the changes, instead of only printing them.
+
   - name: slib.shodan.admin.org
     perms:
       - [ slib, shodan, admin ]
