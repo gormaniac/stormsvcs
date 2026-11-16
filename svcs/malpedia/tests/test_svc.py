@@ -1,5 +1,6 @@
 """Tests for the slib.malpedia service: pulling, the snapshot, and per-view change tracking."""
 
+import asyncio
 import datetime
 from unittest import mock
 
@@ -86,14 +87,15 @@ class TestMalpediaPull(s_tests.SynTest):
             assert len(fake.requests) == len(INITIAL) + 1
 
             # Unless it's forced, which pulls the bulk data even though the version is the same,
-            # but never the whole YARA zip again.
+            # and every YARA rule again (MALP-04).
             summary = await svc.pull(force=True)
             assert summary["pulled"] is True
             assert summary["initial"] is False
+            assert summary["yarafull"] is True
             assert summary["added"] == {"news": 0, "actor": 0, "family": 0, "yara": 0}
             assert summary["updated"] == {"news": 0, "actor": 0, "family": 0, "yara": 0}
-            assert fake.countPaths("/api/get/yara/tlp_white/zip") == 1
-            assert fake.countPaths("/api/get/yara/after/") == 1
+            assert fake.countPaths("/api/get/yara/tlp_white/zip") == 2
+            assert fake.countPaths("/api/get/yara/after/") == 0
             assert fake.countPaths("/api/get/misp") == 0
 
     async def test_incremental(self):
@@ -441,3 +443,180 @@ class TestMalpediaViews(s_tests.SynTest):
                         retn = await prox.status(VIEW)
                         assert retn["status"] is True
                         assert s_common.isguid(VIEW)
+
+
+class TestMalpediaAuditFixes(s_tests.SynTest):
+    async def test_refresh_ids(self):
+        # MALP-03: Malpedia accepts IDs in any case, the refresh uses the snapshot's form.
+        async with fm.malpediaSvc(self) as (core, svc, fake):
+            await svc.pull()
+            start = len(fake.requests)
+            data = await svc.refresh("actor", " APT28 ")
+            assert fake.requests[start] == "/api/get/actor/apt28"
+            assert data["id"] == "apt28"
+            assert [i["rec"]["key"] for i in data["actor"]] == ["apt28"]
+            data = await svc.refresh("family", "WIN.XAgent")
+            assert data["id"] == "win.xagent"
+            assert [i["rec"]["key"] for i in data["family"]] == ["win.xagent"]
+            # Unknown IDs are lowercased too (Malpedia's IDs are lowercase).
+            assert svc._normId("actor", "New_Actor") == "new_actor"
+            for bad in ("a b", "a/b", "a?b", "x" * (m_svc.MAX_ID_LEN + 1), "", None):
+                with self.raises(MalpediaSvcError):
+                    await svc.refresh("actor", bad)
+
+    async def test_yara_full_refetch(self):
+        # MALP-04: the "after" watermark misses rules edited without a new version date, so
+        # every rule is downloaded again every malpedia:yara:fullage days.
+        async with fm.malpediaSvc(self) as (core, svc, fake):
+            await svc.pull()
+            assert fake.countPaths("/api/get/yara/tlp_white/zip") == 1
+            assert (await svc.status())["yarafull"] is not None
+
+            # A rule's text changes, but its version date doesn't, so "after" skips it.
+            text = fm.YARA_XAGENT_W0.replace("all of them", "any of them")
+            fake.state["yara"]["tlp_white"]["win.xagent_w0.yar"] = ("win.xagent", text)
+            fake.state["version"]["version"] += 1
+            summary = await svc.pull()
+            assert summary["yarafull"] is False
+            assert fake.countPaths("/api/get/yara/tlp_white/zip") == 1
+            assert (await svc.record("yara", "win.xagent_w0.yar"))["text"] == fm.YARA_XAGENT_W0
+
+            # Once the last full download is old enough, the next pull gets the zip.
+            svc.info.set("yarafull", s_common.now() - 8 * m_svc.DAY)
+            fake.state["version"]["version"] += 1
+            summary = await svc.pull()
+            assert summary["yarafull"] is True
+            assert summary["updated"]["yara"] == 1
+            assert fake.countPaths("/api/get/yara/tlp_white/zip") == 2
+            assert (await svc.record("yara", "win.xagent_w0.yar"))["text"] == text
+
+            # 0 turns the periodic download off.
+            svc.conf["malpedia:yara:fullage"] = 0
+            svc.info.set("yarafull", 0)
+            fake.state["version"]["version"] += 1
+            assert (await svc.pull())["yarafull"] is False
+            assert fake.countPaths("/api/get/yara/tlp_white/zip") == 2
+
+    async def test_gaps_are_retried(self):
+        # MALP-05: a pull that couldn't fill a gap pulls again on the next check, even if
+        # Malpedia's version didn't change.
+        async with fm.malpediaSvc(self) as (core, svc, fake):
+            fake.state["errors"]["/api/get/actor/turla"] = [500] * 10
+            summary = await svc.pull()
+            assert summary["gaps"] == 1
+            assert (await svc.status())["gaps"] == 1
+            assert await svc.record("actor", "turla") is None
+
+            fake.state["errors"].clear()
+            summary = await svc.pull()
+            assert summary["pulled"] is True
+            assert summary["gaps"] == 0
+            assert (await svc.record("actor", "turla"))["name"] == "Turla"
+            # Now the version check is enough again.
+            assert (await svc.pull())["reason"] == "unchanged"
+
+            # A 404 isn't a gap, retrying wouldn't help.
+            fake.state["actorids"].append("gone")
+            fake.state["version"]["version"] += 1
+            summary = await svc.pull()
+            assert summary["gaps"] == 0
+            assert any("Unable to get the actor gone" in w for w in summary["warnings"])
+
+            # A failed request for a family's new YARA rules is a gap too.
+            fake.state["version"]["version"] += 1
+            fake.state["yara"]["tlp_white"]["win.sedreco_w0.yar"] = (
+                "win.sedreco", fm.YARA_WANNA_W0.replace("win_wannacryptor_w0", "win_sedreco_w0"))
+            fake.state["errors"]["/api/get/yara/win.sedreco"] = [500] * 10
+            summary = await svc.pull()
+            assert summary["gaps"] == 1
+            assert any("Unable to get the YARA rules for win.sedreco" in w for w in summary["warnings"])
+            assert await svc.record("yara", "win.sedreco_w0.yar") is None
+            fake.state["errors"].clear()
+            summary = await svc.pull()
+            assert summary["pulled"] is True
+            assert (await svc.record("yara", "win.sedreco_w0.yar"))["family"] == "win.sedreco"
+
+    async def test_skipped_yara_file(self):
+        async with fm.malpediaSvc(self) as (core, svc, fake):
+            fake.state["yara"]["tlp_white"]["win.xagent_w9.yar"] = ("win.xagent", "/* no rule here */")
+            summary = await svc.pull()
+            assert "Skipped the YARA file win.xagent_w9.yar: it has no rule." in summary["warnings"]
+            assert await svc.record("yara", "win.xagent_w9.yar") is None
+
+    async def test_long_keys(self):
+        # MALP-08: keys too long for the slab are handled, not raised as BadArg.
+        async with fm.malpediaSvc(self) as (core, svc, fake):
+            await svc.pull()
+            assert await svc.record("actor", "x" * 600) is None
+            assert await svc.synced(VIEW, "actor", done=[["x" * 600, "h"]], removed=["y" * 600]) == 0
+
+            async def findActor(needle):
+                return [{"name": "x" * 600}, "not a dict", {"name": "apt28"}]
+
+            with mock.patch.object(svc.client, "findActor", findActor):
+                found = await svc.find("actor", "x")
+            assert [(f["name"][:5], f["known"]) for f in found] == [("xxxxx", False), ("apt28", True)]
+
+            async with svc.getLocalProxy() as prox:
+                retn = await prox.record("actor", "x" * 600)
+                assert retn == {"status": True, "mesg": "", "data": None}
+
+    async def test_store_lock(self):
+        # MALP-12: changes() never reads the snapshot while a pull is writing it.
+        async with fm.malpediaSvc(self) as (core, svc, fake):
+            await svc.pull()
+            await svc.storelock.acquire()
+            task = asyncio.create_task(drain(svc, VIEW, "actor"))
+            await asyncio.sleep(0.1)
+            assert not task.done()
+            svc.storelock.release()
+            assert (await task)["total"] == 4
+
+            # The records are hashed in _build (in a thread), not while storing.
+            raw = {"actorids": [], "actors": {}, "families": {}, "references": {}, "bib": "",
+                   "yaralist": {}, "extra_actors": {}, "yara": {"full": True, "rules": []}, "haveyara": {}}
+            built = svc._build(raw, [])
+            assert built == {"news": {}, "actor": {}, "family": {}, "yara": {}}
+
+    async def test_changes_key_removed_between_batches(self):
+        async with fm.malpediaSvc(self) as (core, svc, fake):
+            await svc.pull()
+            genr = svc.changes(VIEW, "actor", size=2)
+            first = await genr.__anext__()
+            assert len(first["upsert"]) == 2
+            # A pull removes a record before its batch is built.
+            rest = [k for k in svc._snapRecs("actor") if k not in {i["key"] for i in first["upsert"]}]
+            svc._snapkv("actor").delete(rest[0])
+            second = await genr.__anext__()
+            assert [i["key"] for i in second["upsert"]] == rest[1:]
+
+    async def test_interrupted_store(self):
+        # MALP-12: a pull interrupted while writing the snapshot is repaired by the next one.
+        async with fm.FakeMalpedia() as fake:
+            from malpediasvc import MalpediaSvc
+
+            with self.getTestDir() as dirn:
+                async with await MalpediaSvc.anit(dirn, conf=fm.svcConf(fake)) as svc:
+                    await svc.pull()
+                    svc.info.set("storing", True)
+                async with await MalpediaSvc.anit(dirn, conf=fm.svcConf(fake)) as svc:
+                    status = await svc.status()
+                    assert status["version"] is None
+                    assert status["yarafull"] is None
+                    assert svc.info.get("storing") is None
+                    # The same Malpedia version is pulled (and every YARA rule) again.
+                    summary = await svc.pull()
+                    assert summary["pulled"] is True
+                    assert summary["yarafull"] is True
+
+    async def test_view_info(self):
+        async with fm.malpediaSvc(self) as (core, svc, fake):
+            assert await svc.viewInfo(VIEW) == {}
+            info = await svc.viewSynced(VIEW, tags={"prefix": "rep.x", "tlp": "tlp", "other": 1})
+            assert info["tags"] == {"prefix": "rep.x", "tlp": "tlp"}
+            # A sync that doesn't say keeps the last known prefixes.
+            info = await svc.viewSynced(VIEW)
+            assert info["tags"] == {"prefix": "rep.x", "tlp": "tlp"}
+            assert (await svc.viewInfo(VIEW))["tags"] == {"prefix": "rep.x", "tlp": "tlp"}
+            with self.raises(MalpediaSvcError):
+                await svc.viewInfo("x")

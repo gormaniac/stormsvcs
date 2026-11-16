@@ -22,6 +22,7 @@ class MalpediaCellApi(RetnApi, s_cell.CellApi, s_stormsvc.StormSvc):
         "pull",
         "synced",
         "viewSynced",
+        "viewInfo",
         "resetView",
         "status",
         "record",
