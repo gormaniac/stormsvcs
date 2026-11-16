@@ -1,4 +1,6 @@
-FROM ghcr.io/gormaniac/stormsvcs/base:latest
+# CI passes the base image it just built (see _service.yml); the default is the published one.
+ARG BASE_IMAGE=ghcr.io/gormaniac/stormsvcs/base:latest
+FROM ${BASE_IMAGE}
 
 COPY pyproject.toml /opt/stormsvcs/yarastorm/pyproject.toml
 COPY uv.lock /opt/stormsvcs/yarastorm/uv.lock

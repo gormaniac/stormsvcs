@@ -4,7 +4,6 @@ import hashlib
 import io
 import os
 import pathlib
-import tomllib
 from unittest import mock
 
 import synapse.common as s_common
@@ -12,6 +11,7 @@ import synapse.exc as s_exc
 import synapse.tests.utils as s_tests
 import yara_x
 from stormlibpp.node import StormNode
+from stormlibpp.testing import assertMainHelp, assertVersionsMatch
 
 import yarastorm.svc as y_svc
 from yarastorm import YaraSvc, __version__
@@ -49,12 +49,39 @@ class TestYaraStorm(s_tests.SynTest):
 
     def test_versions_match(self):
         # The version lives in pyproject.toml, __init__.py, the package yaml, and uv.lock.
-        with (SVCDIR / "pyproject.toml").open("rb") as fd:
-            assert tomllib.load(fd)["project"]["version"] == __version__
-        assert PKGDEFS[0]["version"] == __version__
-        with (SVCDIR / "uv.lock").open("rb") as fd:
-            pkgs = tomllib.load(fd)["package"]
-        assert [p["version"] for p in pkgs if p["name"] == "yarastorm"] == [__version__]
+        assert assertVersionsMatch(SVCDIR) == __version__
+
+    def test_main_help(self):
+        assertMainHelp("yarastorm")
+
+    async def test_api_unexpected_error(self):
+        # An error raised by the cell reaches Storm as status=False, not as a raw exception.
+        async with self.getTestCell(YaraSvc) as svc:
+
+            async def boom(*args, **kwargs):
+                raise RuntimeError("boom")
+
+            async def boomgenr(*args, **kwargs):
+                raise RuntimeError("boom")
+                yield  # pragma: no cover
+
+            svc.getRuleCount = boom
+            svc.matchFile = boomgenr
+            async with svc.getLocalProxy() as prox:
+                with self.getLoggerStream("stormlibpp.svc") as stream:
+                    retn = await prox.getRuleCount()
+                self.eq(
+                    {"status": False, "mesg": "Unexpected error: RuntimeError: boom", "data": None},
+                    retn,
+                )
+                stream.seek(0)
+                self.isin("Unexpected error in YaraApi.getRuleCount.", stream.read())
+
+                retns = [r async for r in prox.matchFile("a" * 64)]
+                self.eq(
+                    [{"status": False, "mesg": "Unexpected error: RuntimeError: boom", "data": None}],
+                    retns,
+                )
 
     def test_ingest_srcguid(self):
         # slib.yara.ingest hard codes the service's meta:source guid.
