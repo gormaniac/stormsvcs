@@ -54,6 +54,12 @@ class TestShodanStormPkg(s_tests.SynTest):
         # and the service's uv.lock entry.
         assert assertVersionsMatch(pathlib.Path(__file__).parents[1]) == __version__
 
+    def test_synapse_version(self):
+        # SHODAN-02: vaults, $lib.gen.vulnByCve, inet:http:response:header, and the Synapse the
+        # service is built and tested with (2.256.0) need a recent 2.x.
+        assert PKGDEFS[0]["synapse_version"] == ">=2.256.0,<3.0.0"
+        assert "synapse_minversion" not in PKGDEFS[0]
+
     def test_main_help(self):
         assertMainHelp("shodansvc")
 
