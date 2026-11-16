@@ -224,7 +224,7 @@ file:bytes=sha256:<sha256> -(refs)> (it:app:snort:hit, it:app:suricata:matched)
 
 | Option | Default | Description |
 |---|---|---|
-| `sha256s` | | SHA-256s of captures to analyze instead of the inbound `file:bytes` nodes. They're analyzed once, after the inbound nodes, which pass through (unchanged and not analyzed). |
+| `sha256s` | | SHA-256s of captures to analyze instead of the inbound `file:bytes` nodes. They're analyzed once, and the inbound nodes are dropped. |
 | `--timeout` | `pcap:timeout` | Seconds a flow can be idle before a new flow starts, `0` to never time out. |
 | `--limit` | `pcap:limit` | The max number of flows to model per capture (capped by `pcap:limit`). |
 | `--handshake` | `pcap:handshake` | The max characters kept from each side's first text payload. |
