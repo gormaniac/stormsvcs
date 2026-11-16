@@ -1,6 +1,7 @@
 """Pytests for the slib.abusech service's HTTP client, normalization, and Cell/Telepath methods."""
 
 import asyncio
+import io
 import json
 
 import aiohttp
@@ -1071,7 +1072,7 @@ class TestClient(s_tests.SynTest):
 
     async def test_client(self):
         async with FakeAbuseCh() as fake, aiohttp.ClientSession() as sess:
-            client = AbuseChClient(sess, urls=fake.urls, rate=0)
+            client = AbuseChClient(sess, urls=fake.urls, rate=0, backoff=0)
 
             with self.raises(AbuseChApiError):
                 client.url("nope")
@@ -1152,7 +1153,9 @@ class TestClient(s_tests.SynTest):
 
     async def test_client_unreachable(self):
         async with aiohttp.ClientSession() as sess:
-            client = AbuseChClient(sess, urls={"feodo": "http://127.0.0.1:1"}, rate=0, timeout=5)
+            client = AbuseChClient(
+                sess, urls={"feodo": "http://127.0.0.1:1"}, rate=0, timeout=5, backoff=0
+            )
             with self.raises(AbuseChApiError):
                 await client.fetch("feodo", "x")
 
@@ -1167,7 +1170,7 @@ class TestClient(s_tests.SynTest):
 
         async with aiohttp.ClientSession() as sess:
             client = AbuseChClient(
-                sess, urls={"bazaar:export": "http://127.0.0.1:1/x"}, rate=0, timeout=5
+                sess, urls={"bazaar:export": "http://127.0.0.1:1/x"}, rate=0, timeout=5, backoff=0
             )
             with self.raises(AbuseChApiError) as cm:
                 await client.fetch("bazaar:export", "recent.csv", apikey="secretkey")
@@ -1712,3 +1715,295 @@ class TestSvc(s_tests.SynTest):
                 retn = await prox.setApiKey(None)
                 assert "Cleared" in retn["mesg"]
                 assert (await prox.hasApiKey())["data"] is True  # The config key.
+
+
+class TestAuditFixes(s_tests.SynTest):
+    """Regression tests for the audit findings (ABUSE-PY-*), each from the audit's repro."""
+
+    def test_ts_epoch(self):
+        # ABUSE-PY-06: epoch seconds were passed through, and Synapse reads "1700000000" as
+        # YYYYMMDDhh.
+        assert norm.ts(1700000000) == "2023-11-14 22:13:20"
+        assert norm.ts("1700000000") == "2023-11-14 22:13:20"
+        assert norm.ts(1700000000123) == "2023-11-14 22:13:20.123"
+        assert norm.ts(True) is None
+        assert norm.ts("2024-01-01 12:00:00 UTC") == "2024-01-01 12:00:00"
+        assert norm.tsMillis("2023-11-14 22:13:20") == 1700000000000
+        assert norm.tsMillis("2026-10-01T12:00:00.5") == 1790856000500
+        assert norm.tsMillis("2026-02-30") is None
+        assert norm.tsMillis("garbage") is None
+
+    def test_time_pair_mixed_formats(self):
+        # ABUSE-PY-06: "T" > " " made the string compare swap these, inverting the interval.
+        first, last = norm.ts("2026-10-01T12:00:00Z"), norm.ts("2026-10-01 13:00:00")
+        assert norm.timePair(first, last) == (first, last)
+        assert norm.timePair(last, first) == (first, last)
+        assert norm.timePair("2026-10-02", "2026-10-01 13:00:00") == (
+            "2026-10-01 13:00:00",
+            "2026-10-02",
+        )
+        # Times that can't be parsed are left alone.
+        assert norm.timePair("b", "a") == ("b", "a")
+
+    def test_csv_quoted_comments(self):
+        # ABUSE-PY-07: the repro, a quoted field with a line starting with "#".
+        rows = list(norm.parseCsvLines(['"1","a', '#b"', '"2","c"'], ("id", "v")))
+        assert rows == [{"id": "1", "v": "a\n#b"}, {"id": "2", "v": "c"}]
+        # Blank lines in a quoted field are kept too, and comments between rows still dropped.
+        lines = ["# header", "# id,v", '"1","a', "", 'b"', "# middle", "", '"2","c ""q"""', "#end"]
+        rows = list(norm.parseCsvLines(lines, ("id", "v")))
+        assert rows == [{"id": "1", "v": "a\n\nb"}, {"id": "2", "v": 'c "q"'}]
+        # Only the first row can be an un-commented header.
+        rows = list(norm.parseCsvLines(["id,v", "1,a", "id,x"], ("id", "v")))
+        assert rows == [{"id": "1", "v": "a"}, {"id": "id", "v": "x"}]
+
+    def test_host_port(self):
+        # ABUSE-PY-10: "evil.com:8080" was an inet:fqdn Synapse rejects.
+        assert norm.normHost("evil.com:8080") == {"form": "inet:fqdn", "valu": "evil.com"}
+        assert norm.normHost("1.2.3.4:80") == {"form": "inet:ipv4", "valu": "1.2.3.4"}
+        assert norm.normHost("[2001:db8::1]:443") == {"form": "inet:ipv6", "valu": "2001:db8::1"}
+        assert norm.normHost("2001:db8::1") == {"form": "inet:ipv6", "valu": "2001:db8::1"}
+        assert norm.normHost("Evil.COM") == {"form": "inet:fqdn", "valu": "evil.com"}
+        assert norm.normHost("a:b:c") is None
+
+    def test_unzip_total_cap(self):
+        # ABUSE-PY-05: each file fits, but together they're over the max.
+        byts = mkzip({"a": b"x" * 6, "b": b"y" * 6})
+        assert len(unzip(byts, password=None, maxsize=12)) == 2
+        with self.raises(AbuseChApiError) as cm:
+            unzip(byts, password=None, maxsize=10)
+        assert "larger than the max of 10" in cm.exception.mesg
+
+    def test_raw_path(self):
+        # ABUSE-PY-03: paths that leave the API's base URL are refused.
+        from abusechsvc.svc import checkRawPath
+
+        for path in ("", "x/y/", "urls/recent/limit/3/"):
+            assert checkRawPath(path) == path
+        for path in ("../../x", "a/../b", "%2e%2e/x", "./x", "http://evil/x", "a\\b", "a?b=1",
+                     "a#b", "a b", "a\n", 5):
+            with self.raises(AbuseChApiError):
+                checkRawPath(path)
+
+    def test_limits(self):
+        from abusechsvc.svc import clampLimit, limitReached, sliceLimit
+
+        assert clampLimit(0) == 1000 and clampLimit(None) == 1000 and clampLimit(-5) == 1000
+        assert clampLimit(5) == 5 and clampLimit(5000) == 1000
+        assert sliceLimit(-5) == 0 and sliceLimit(None) == 0 and sliceLimit(3) == 3
+        assert not limitReached(10, 0) and not limitReached(10, -5) and limitReached(3, 3)
+
+    def test_retry_after(self):
+        from abusechsvc.client import MAX_RETRY_WAIT, retryAfter
+
+        assert retryAfter(None) is None and retryAfter("soon") is None
+        assert retryAfter("3") == 3.0 and retryAfter("-1") == 0.0
+        assert retryAfter("100000") == MAX_RETRY_WAIT
+        assert retryAfter("Wed, 21 Oct 2015 07:28:00 GMT") == 0.0
+
+    async def test_retries(self):
+        # ABUSE-PY-04: 5xx and connection errors are retried, Retry-After is honored, and
+        # stream() retries before the first byte. Writes only retry what wasn't processed.
+        import abusechsvc.client as s_client
+
+        waits = []
+        sleep = asyncio.sleep
+
+        async def fakesleep(secs):
+            waits.append(secs)
+            await sleep(0)
+
+        async with FakeAbuseCh() as fake, aiohttp.ClientSession() as sess:
+            client = AbuseChClient(sess, urls=fake.urls, rate=0)
+            calls = []
+
+            async def flaky(request, info, path, query):
+                calls.append(query)
+                if len(calls) == 1:
+                    return aiohttp.web.Response(status=502)
+                if len(calls) == 2:
+                    return aiohttp.web.Response(status=429, headers={"Retry-After": "7"})
+                return aiohttp.web.json_response({"query_status": "ok", "data": []})
+
+            fake._bazaar = flaky
+            s_client.asyncio.sleep = fakesleep
+            try:
+                data = await client.query("bazaar", apikey="k", form={"query": "x"})
+                assert data == {"query_status": "ok", "data": []} and len(calls) == 3
+                assert waits == [1.0, 7.0]
+
+                # A write that got a 500 may have been processed, so it isn't retried.
+                calls.clear()
+                waits.clear()
+
+                async def err500(request, info, path, query):
+                    calls.append(query)
+                    return aiohttp.web.Response(status=500, text="boom")
+
+                fake._bazaar = err500
+                with self.raises(AbuseChApiError):
+                    await client.query(
+                        "bazaar", apikey="k", form={"query": "x"}, idempotent=False
+                    )
+                assert len(calls) == 1
+                # A read is retried, then gives up with the last error.
+                with self.raises(AbuseChApiError) as cm:
+                    await client.query("bazaar", apikey="k", form={"query": "x"})
+                assert len(calls) == 1 + 1 + s_client.MAX_RETRIES and cm.exception.code == 500
+
+                # stream() retries before the first byte.
+                calls.clear()
+
+                async def flakyexport(request, info, path, query):
+                    calls.append(path)
+                    if len(calls) == 1:
+                        return aiohttp.web.Response(status=503)
+                    return aiohttp.web.Response(body=b"data")
+
+                fake._bazaar_export = flakyexport
+                byts = b"".join([b async for b in client.stream("bazaar:export", "x", apikey="k")])
+                assert byts == b"data" and len(calls) == 2
+            finally:
+                s_client.asyncio.sleep = sleep
+
+        # Connection failures are retried (nothing was sent), then reported.
+        waits.clear()
+        s_client.asyncio.sleep = fakesleep
+        try:
+            async with aiohttp.ClientSession() as sess:
+                client = AbuseChClient(sess, urls={"feodo": "http://127.0.0.1:1"}, rate=0)
+                with self.raises(AbuseChApiError):
+                    await client.fetch("feodo", "x")
+                assert waits == [1.0, 2.0, 4.0]
+                waits.clear()
+                with self.raises(AbuseChApiError):
+                    async for _ in client.stream("feodo", "x"):
+                        pass
+                assert waits == [1.0, 2.0, 4.0]
+        finally:
+            s_client.asyncio.sleep = sleep
+
+    async def test_body_cap(self):
+        # ABUSE-PY-05: responses read into memory are capped at maxsize.
+        async with FakeAbuseCh() as fake, aiohttp.ClientSession() as sess:
+            client = AbuseChClient(sess, urls=fake.urls, rate=0, maxsize=10)
+            fake.overrides[("bazaar", "big")] = (200, "x" * 100)
+            with self.raises(AbuseChApiError) as cm:
+                await client.query("bazaar", apikey="k", form={"query": "big"})
+            assert "larger than the max of 10" in cm.exception.mesg
+            buf = io.BytesIO()
+            with self.raises(AbuseChApiError):
+                await client.download("feodo", "ipblocklist.json", buf, maxsize=10)
+            assert await client.download("feodo", "ipblocklist.json", io.BytesIO()) > 10
+
+    async def test_svc_caps(self):
+        async with abusechSvc(self) as (core, svc, fake):
+            # ABUSE-PY-05: datasets read into memory, and their unzipped files, are capped.
+            fake.overrides[("threatfox:export", "testkey/full.json.zip")] = (
+                200,
+                mkzip({"full.json": json.dumps({"1": [fake_data.THREATFOX_IOC]}).encode() * 50}),
+            )
+            svc.maxsize = 200
+            svc.client.maxsize = 200
+            with self.raises(AbuseChApiError) as cm:
+                [i async for i in svc.threatfoxExport("full")]
+            assert "larger than the max of 200" in cm.exception.mesg
+            with self.raises(AbuseChApiError):
+                await svc.feodoBlocklist("all").__anext__()
+
+    async def test_sample_zip(self):
+        # ABUSE-PY-11: an empty zip (only directories) or one with several files is an error,
+        # not "not available".
+        async with abusechSvc(self) as (core, svc, fake):
+            assert svc._sample([("a", b"x")])["name"] == "a"
+            with self.raises(AbuseChApiError) as cm:
+                svc._sample([])
+            assert "0 files" in cm.exception.mesg
+            with self.raises(AbuseChApiError):
+                svc._sample([("a", b"x"), ("b", b"y")])
+
+            import zipfile
+
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w") as zfd:
+                zfd.writestr("dir/", b"")
+            fake.overrides[("urlhaus", f"download/{SHA256}/")] = (200, buf.getvalue())
+            with self.raises(AbuseChApiError) as cm:
+                await svc.urlhausDownload(SHA256)
+            assert "0 files" in cm.exception.mesg
+
+    async def test_unexpected_responses(self):
+        # Leftovers of ABUSE-PY-01: a JSON list from ThreatFox is a clear error.
+        async with abusechSvc(self) as (core, svc, fake):
+            fake.overrides[("threatfox", "ioc")] = (200, [1, 2])
+            with self.raises(AbuseChApiError) as cm:
+                await svc.threatfoxIoc(1)
+            assert "unexpected response" in cm.exception.mesg
+            async with svc.getLocalProxy() as prox:
+                retn = await prox.threatfoxIoc(1)
+                assert not retn["status"] and "unexpected response" in retn["mesg"]
+
+    async def test_limit_requests(self):
+        # ABUSE-PY-09: negative limits aren't sent to abuse.ch.
+        async with abusechSvc(self) as (core, svc, fake):
+            await svc.urlhausRecentUrls(limit=-5)
+            assert fake.last()["path"] == "/urlhaus/urls/recent/"
+            await svc.urlhausRecentPayloads(limit=5000)
+            assert fake.last()["path"] == "/urlhaus/payloads/recent/limit/1000/"
+            await svc.bazaarSearch("tag", "exe", limit=0)
+            assert fake.last()["form"]["limit"] == "1000"
+            assert len(await svc.normBazaarSearch("tag", "exe", limit=-1)) == len(
+                await svc.normBazaarSearch("tag", "exe", limit=0)
+            )
+
+    async def test_raw_request_path(self):
+        async with abusechSvc(self) as (core, svc, fake):
+            before = len(fake.requests)
+            with self.raises(AbuseChApiError):
+                await svc.rawRequest("urlhaus", "../../x")
+            assert len(fake.requests) == before
+
+
+class TestUntested(s_tests.SynTest):
+    """Code paths the audit found untested."""
+
+    def test_errmesg_unzip(self):
+        assert errMesg(400, {"error": "Bad thing"}, "") == "Bad thing"
+        assert errMesg(400, {"detail": "Detail"}, "") == "Detail"
+        import zipfile
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zfd:
+            zfd.writestr("dir/", b"")
+            zfd.writestr("dir/a.txt", b"a")
+        assert unzip(buf.getvalue(), password=None) == [("dir/a.txt", b"a")]
+
+    async def test_fetch_brace_body(self):
+        # A body starting with "{" that isn't JSON is returned as-is.
+        async with FakeAbuseCh() as fake, aiohttp.ClientSession() as sess:
+            client = AbuseChClient(sess, urls=fake.urls, rate=0, backoff=0)
+            fake.overrides[("feodo", "brace.txt")] = (200, b"{not json")
+            byts, _ = await client.fetch("feodo", "brace.txt")
+            assert byts == b"{not json"
+
+    async def test_file_lines(self):
+        async with abusechSvc(self) as (core, svc, fake):
+            # A bad zip, and a dataset retired in place.
+            fd = io.BytesIO(b"PK" + b"\x00" * 30)
+            with self.raises(AbuseChApiError):
+                list(svc._fileLines(fd, "sslbl", "x.csv"))
+            fd = io.BytesIO(b"# This list has been deprecated on 2025-01-03\n1,2\n")
+            with self.raises(AbuseChApiError) as cm:
+                list(svc._fileLines(fd, "sslbl", "x.csv"))
+            assert "has been deprecated" in cm.exception.mesg
+
+    async def test_rule_text_error(self):
+        # A rule whose text can't be downloaded keeps its metadata.
+        async with abusechSvc(self) as (core, svc, fake):
+
+            async def fail(*args, **kwargs):
+                raise AbuseChApiError("nope")
+
+            svc.yaraifyRule = fail
+            rules = await svc._ruleText([{"text": None, "uuid": "u1", "name": "r"}])
+            assert rules == [{"text": None, "uuid": "u1", "name": "r"}]

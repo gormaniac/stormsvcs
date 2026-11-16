@@ -16,6 +16,7 @@ code short, and lets it be unit tested without a Cortex. The shapes are:
 """
 
 import csv
+import datetime
 import ipaddress
 import re
 from collections.abc import Iterable, Iterator
@@ -52,7 +53,9 @@ VERDICTS = {
     "malware": 40,
     "known malware": 40,
 }
-"""Vendor verdict strings (lower case, with ``_`` as spaces) mapped to Synapse's ``it:av:scan:result:verdict`` levels."""
+"""Vendor verdict strings (lower case, with ``_`` as spaces) mapped to Synapse's
+``it:av:scan:result:verdict`` levels.
+"""
 
 FAMILY_KEYS = ("malware_family", "family_name", "threat_name", "family", "malware")
 VERDICT_KEYS = ("verdict", "status", "threat_level", "classification", "detection")
@@ -65,29 +68,83 @@ TIME_KEYS = ("date", "first_seen", "analysis_date", "time_stamp", "timestamp")
 # ---- Generic value helpers ----
 
 
+EPOCH_RE = re.compile(r"^\d{10}(\d{3})?$")
+"""An epoch time in seconds (10 digits) or milliseconds (13 digits), as a string."""
+
+TIME_RE = re.compile(
+    r"^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,6}))?)?)?$"
+)
+"""The date/time forms ``ts()`` returns: ``YYYY-MM-DD[ HH:MM[:SS[.ffffff]]]``."""
+
+
+def _epochTime(secs: float) -> str:
+    """Format epoch seconds as the UTC ``YYYY-MM-DD HH:MM:SS[.fff]`` Synapse parses."""
+
+    when = datetime.datetime.fromtimestamp(secs, tz=datetime.UTC)
+    text = when.strftime("%Y-%m-%d %H:%M:%S")
+    if when.microsecond:
+        text += f".{when.microsecond // 1000:03d}"
+    return text
+
+
 def ts(valu: Any) -> str | None:
     """Make an abuse.ch timestamp parseable by Synapse's time type.
 
-    abuse.ch uses ``2024-01-01 12:00:00`` with an occasional `` UTC`` suffix.
+    abuse.ch uses ``2024-01-01 12:00:00`` with an occasional `` UTC`` suffix, some vendors
+    use ISO 8601 (``2024-01-01T12:00:00Z``), and a few fields are epoch seconds. Epoch
+    times (ints, or 10/13 digit strings) are converted to UTC date strings, since Synapse
+    reads a bare ``1700000000`` as ``YYYYMMDDhh``.
     """
 
-    if valu in (None, "", 0, "0"):
+    if valu in (None, "", 0, "0") or isinstance(valu, bool):
         return None
+    if isinstance(valu, (int, float)):
+        # Milliseconds when it's too large to be seconds (after the year 5138).
+        return _epochTime(valu / 1000 if valu > 1e11 else valu)
     valu = str(valu).strip()
+    if EPOCH_RE.match(valu):
+        num = int(valu)
+        return _epochTime(num / 1000 if len(valu) == 13 else num)
     for suffix in (" UTC", "UTC", "Z", "+00:00"):
         if valu.endswith(suffix):
             valu = valu[: -len(suffix)].strip()
     return valu or None
 
 
+def tsMillis(valu: str | None) -> int | None:
+    """Parse a ``ts()`` time to UTC epoch milliseconds, or None if it can't be parsed."""
+
+    match = TIME_RE.match(valu or "")
+    if match is None:
+        return None
+    year, mon, day, hour, mins, secs, frac = match.groups()
+    try:
+        when = datetime.datetime(
+            int(year),
+            int(mon),
+            int(day),
+            int(hour or 0),
+            int(mins or 0),
+            int(secs or 0),
+            int((frac or "0").ljust(6, "0")),
+            tzinfo=datetime.UTC,
+        )
+    except ValueError:
+        return None
+    return int(when.timestamp() * 1000)
+
+
 def timePair(first: str | None, last: str | None) -> tuple[str | None, str | None]:
     """Order a (first, last) pair of ``ts()`` times.
 
     abuse.ch sometimes reports a last seen before the first seen. Left as is, the pair is an
-    invalid interval and Storm drops every tag set with it.
+    invalid interval and Storm drops every tag set with it. The times are compared as times,
+    not strings, so mixed formats (ex. ``2026-10-01T12:00:00`` and ``2026-10-01 13:00:00``)
+    order correctly. Times that can't be parsed are left as they are.
     """
 
-    if first and last and last < first:
+    fmillis, lmillis = tsMillis(first), tsMillis(last)
+    if fmillis is not None and lmillis is not None and lmillis < fmillis:
         return last, first
     return first, last
 
@@ -156,7 +213,7 @@ def lower(valu: Any) -> str | None:
 
 
 def normTag(valu: Any) -> str | None:
-    """Normalize a value into a single Synapse tag segment (ex. "Cobalt Strike" -> "cobalt_strike")."""
+    """Normalize a value into one Synapse tag segment (ex. "Cobalt Strike" -> "cobalt_strike")."""
 
     if valu in (None, ""):
         return None
@@ -212,16 +269,36 @@ def parseCsv(text: str, fields: tuple[str, ...]) -> list[dict]:
     return list(parseCsvLines(text.splitlines(), fields))
 
 
+def csvRecordLines(lines: Iterable[str]) -> Iterator[str]:
+    """Drop the ``#`` comment and blank lines between CSV records, keeping the line endings.
+
+    Lines inside a quoted field (one that spans lines) are kept as they are, even when they
+    start with ``#`` or are blank, so the field and the rows after it parse correctly. A
+    line is inside a quoted field when the lines before it have an odd number of quotes
+    (an escaped ``""`` counts twice, so it doesn't change that).
+    """
+
+    quoted = False
+    for line in lines:
+        if not quoted and (not line.strip() or line.lstrip().startswith("#")):
+            continue
+        if line.count('"') % 2:
+            quoted = not quoted
+        # The reader needs the line endings to keep newlines inside quoted fields.
+        yield line + "\n"
+
+
 def parseCsvLines(lines: Iterable[str], fields: tuple[str, ...]) -> Iterator[dict]:
     """Like ``parseCsv`` but streaming, over an iterable of lines (ex. a file too large to load)."""
 
-    # The reader needs the line endings to keep newlines inside quoted fields.
-    data = (line + "\n" for line in lines if line.strip() and not line.lstrip().startswith("#"))
-    for row in csv.reader(data, skipinitialspace=True):
+    first = True
+    for row in csv.reader(csvRecordLines(lines), skipinitialspace=True):
         if not row:
             continue
-        # The URLhaus/MalwareBazaar exports sometimes include an un-commented header.
-        if row[0].strip().lower() == fields[0]:
+        # The URLhaus/MalwareBazaar exports sometimes include an un-commented header, as
+        # their first row. A later row whose first value is the column name is data.
+        isfirst, first = first, False
+        if isfirst and row[0].strip().lower() == fields[0]:
             continue
         yield {
             k: (v.strip() if v.strip() not in ("", "n/a", "None") else None)
@@ -327,12 +404,28 @@ def normObservable(kind: str | None, valu: Any) -> dict | None:
     return None
 
 
+HOST_PORT_RE = re.compile(r"^(?:\[(?P<ip6>[0-9a-fA-F:.]+)\]|(?P<host>[^:\[\]]+)):(?P<port>\d+)$")
+"""A ``host:port`` or ``[IPv6]:port`` value."""
+
+
 def normHost(valu: str | None) -> dict | None:
-    """Type a URLhaus/Feodo host (an FQDN or IP) as an observable."""
+    """Type a URLhaus/Feodo host (an FQDN or IP, with or without a ``:port``) as an observable.
+
+    A port is dropped, so ``evil.com:8080`` is the inet:fqdn ``evil.com`` (an FQDN can't have
+    a port, Synapse would reject it and the host would be lost).
+    """
 
     if not valu:
         return None
-    return normObservable("ip" if re.match(r"^[0-9.]+$|:", valu) else "domain", valu)
+    valu = str(valu).strip()
+    match = HOST_PORT_RE.match(valu)
+    if match is not None:
+        valu = match.group("ip6") or match.group("host")
+    if ipAddr(valu.strip("[]")) is not None:
+        return normObservable("ip", valu.strip("[]"))
+    if ":" in valu:
+        return None
+    return normObservable("domain", valu)
 
 
 # ---- Files ----
@@ -384,6 +477,8 @@ def normRule(rule: dict) -> dict | None:
 
 
 def normRules(rules: Any) -> list[dict]:
+    """Normalize a list of YARA rules (see ``normRule``), dropping invalid ones."""
+
     return [r for r in (normRule(r) for r in lst(rules)) if r]
 
 
@@ -427,7 +522,7 @@ def normCert(cert: dict, blocklist: bool = False) -> dict | None:
 
 
 def normVirusTotal(vt: dict | None) -> dict | None:
-    """Normalize URLhaus's ``virustotal`` field (``{"result": "10 / 60", "percent": "16.67", "link": ...}``)."""
+    """Normalize URLhaus's ``virustotal`` field (ex. ``{"result": "10 / 60", "percent": ...}``)."""
 
     if not isinstance(vt, dict):
         return None
@@ -533,7 +628,10 @@ def _triageVerdict(score: float | None) -> int | None:
 
 
 def normC2Config(cfg: Any, family: str | None = None) -> dict | None:
-    """Normalize a sandbox's extracted malware config C2 (ex. Triage's ``{"extraction": "c2", "c2": "host:port"}``)."""
+    """Normalize a sandbox's extracted malware config C2.
+
+    Ex. Triage's ``{"extraction": "c2", "c2": "host:port"}``.
+    """
 
     if not isinstance(cfg, dict):
         return None
@@ -592,7 +690,7 @@ def _detections(valu: Any) -> list[str]:
     return retn
 
 
-def _vendorAnyRun(info):
+def _vendorAnyRun(info: dict) -> dict | None:
     return _scan(
         "any.run",
         verdict_=verdict(info.get("verdict")),
@@ -603,21 +701,21 @@ def _vendorAnyRun(info):
     )
 
 
-def _vendorFamilyLink(vendor):
+def _vendorFamilyLink(vendor: str) -> Any:
     # CAPE and CERT-PL's MWDB only report a detected family (or null) and a link.
-    def func(info):
+    def func(info: dict) -> dict | None:
         return _scan(vendor, signame=info.get("detection"), link=info.get("link"))
 
     return func
 
 
-def _vendorYoroi(info):
+def _vendorYoroi(info: dict) -> dict | None:
     return _scan(
         "yoroi_yomi", verdict_=verdict(info.get("detection")), score=_scaled(info.get("score"), 100)
     )
 
 
-def _vendorIntezer(info):
+def _vendorIntezer(info: dict) -> dict | None:
     return _scan(
         "intezer",
         verdict_=verdict(info.get("verdict")),
@@ -626,7 +724,7 @@ def _vendorIntezer(info):
     )
 
 
-def _vendorTriage(info):
+def _vendorTriage(info: dict) -> dict | None:
     score = toFloat(info.get("score"))
     family = info.get("malware_family")
     c2s = [c for c in (normC2Config(c, family) for c in lst(info.get("malware_config"))) if c]
@@ -641,7 +739,7 @@ def _vendorTriage(info):
     )
 
 
-def _vendorReversingLabs(info):
+def _vendorReversingLabs(info: dict) -> dict | None:
     return _scan(
         "reversinglabs",
         verdict_=verdict(info.get("status")),
@@ -654,11 +752,11 @@ def _vendorReversingLabs(info):
     )
 
 
-def _vendorSpamhaus(info):
+def _vendorSpamhaus(info: dict) -> dict | None:
     return _scan("spamhaus_hbl", verdict_=verdict(info.get("detection")), link=info.get("link"))
 
 
-def _vendorUnpacMe(info):
+def _vendorUnpacMe(info: dict) -> dict | None:
     children = _children([info])
     families = [f for c in children for f in c["families"]]
     return _scan(
@@ -670,7 +768,7 @@ def _vendorUnpacMe(info):
     )
 
 
-def _vendorFileScan(info):
+def _vendorFileScan(info: dict) -> dict | None:
     return _scan(
         "filescan-io",
         verdict_=verdict(info.get("verdict")),
@@ -679,7 +777,7 @@ def _vendorFileScan(info):
     )
 
 
-def _vendorKaspersky(info):
+def _vendorKaspersky(info: dict) -> dict | None:
     dets = _detections(info.get("detections"))
     return _scan(
         "kaspersky",
@@ -691,7 +789,7 @@ def _vendorKaspersky(info):
     )
 
 
-def _vendorDocGuard(info):
+def _vendorDocGuard(info: dict) -> dict | None:
     return _scan(
         "docguard",
         verdict_=verdict(info.get("verdict")),
@@ -700,7 +798,7 @@ def _vendorDocGuard(info):
     )
 
 
-def _vendorGeneric(vendor, info):
+def _vendorGeneric(vendor: str, info: dict) -> dict | None:
     """A vendor ``VENDORS`` doesn't know, read with the common key names."""
 
     return _scan(
@@ -731,7 +829,9 @@ VENDORS = {
     "kaspersky": _vendorKaspersky,
     "docguard": _vendorDocGuard,
 }
-"""The vendors in MalwareBazaar's ``vendor_intel``, keyed by lower case name, and how to read each one."""
+"""
+The vendors in MalwareBazaar's ``vendor_intel``, keyed by lower case name, and how to read each one.
+"""
 
 
 def _vendorScan(vendor: str, info: dict) -> dict:
@@ -988,7 +1088,9 @@ def normSample(data: dict) -> dict | None:
 
 
 def normTlsh(valu: str | None) -> str | None:
-    """Normalize a TLSH to its versioned form (``t1`` + 70 hex chars), some endpoints drop the ``T1``."""
+    """
+    Normalize a TLSH to its versioned form (``t1`` + 70 hex chars), some endpoints drop the ``T1``.
+    """
 
     if valu and len(valu) == 70 and isHex(valu):
         return "t1" + valu
@@ -1028,12 +1130,17 @@ def normOle(ole: Any) -> dict:
     for item in lst(ole.get("olevba")):
         if isinstance(item, dict):
             retn["notes"].append(
-                f"olevba {item.get('type') or ''}: {item.get('keyword') or ''} - {item.get('description') or ''}".strip()
+                (
+                    f"olevba {item.get('type') or ''}: {item.get('keyword') or ''} - "
+                    f"{item.get('description') or ''}"
+                ).strip()
             )
     return retn
 
 
 def normSamples(items: Any) -> list[dict]:
+    """Normalize a list of samples (see ``normSample``), dropping invalid ones."""
+
     return [s for s in (normSample(i) for i in lst(items)) if s]
 
 
@@ -1068,7 +1175,9 @@ def normTask(task: dict) -> dict | None:
     sample = normSample(task.get("metadata") or {}) if task.get("metadata") else None
     params = params or task.get("yaraify_parameters") or {}
 
-    def param(key):
+    def param(key: str) -> Any:
+        """A task parameter, from the parameters or the task itself."""
+
         valu = params.get(key, task.get(key))
         return None if valu is None else toBool(valu)
 
@@ -1131,7 +1240,7 @@ def normYaraifyFile(data: dict) -> dict | None:
 
 
 def normBlacklists(bls: Any) -> list[str]:
-    """Normalize URLhaus's ``blacklists`` (``{"spamhaus_dbl": "...", "surbl": "..."}``) to tag segments.
+    """Normalize URLhaus's ``blacklists`` (``{"spamhaus_dbl": ..., "surbl": ...}``) to tags.
 
     Only listings are returned (ex. ``spamhaus_dbl.abused_legit_malware``, ``surbl.listed``).
     """
@@ -1147,7 +1256,9 @@ def normBlacklists(bls: Any) -> list[str]:
 
 
 def normUrl(data: dict) -> dict | None:
-    """Normalize a URLhaus URL (``/url/``, ``/urls/recent/``, host/tag/signature URLs, the CSV export)."""
+    """
+    Normalize a URLhaus URL (``/url/``, ``/urls/recent/``, host/tag/signature URLs, the CSV export).
+    """
 
     if not isinstance(data, dict) or not data.get("url"):
         return None
@@ -1194,6 +1305,8 @@ def normUrl(data: dict) -> dict | None:
 
 
 def normUrls(items: Any) -> list[dict]:
+    """Normalize a list of URLhaus URLs (see ``normUrl``), dropping invalid ones."""
+
     return [u for u in (normUrl(i) for i in lst(items)) if u]
 
 
@@ -1313,7 +1426,8 @@ def normIoc(data: dict) -> dict | None:
     )
 
     family = data.get("malware_printable") or data.get("fk_malware")
-    # ThreatFox uses placeholders like "Unknown malware" and "Unknown Stealer" for unattributed IOCs.
+    # ThreatFox uses placeholders like "Unknown malware" and "Unknown Stealer" for unattributed
+    # IOCs.
     if (
         not isinstance(family, str)
         or not family.strip()
@@ -1360,11 +1474,16 @@ def normIoc(data: dict) -> dict | None:
 
 
 def normIocs(items: Any) -> list[dict]:
+    """Normalize a list of ThreatFox IOCs (see ``normIoc``), dropping invalid ones."""
+
     return [i for i in (normIoc(i) for i in lst(items)) if i]
 
 
 def normYaraStats(data: Any) -> list[dict]:
-    """Normalize MalwareBazaar's YARA rule statistics export (``{"<rank>": [{yara_rule_name, ...}]}``) into rules."""
+    """
+    Normalize MalwareBazaar's YARA rule statistics export (``{"<rank>": [{yara_rule_name, ...}]}``)
+    into rules.
+    """
 
     items = []
     for recs in data.values() if isinstance(data, dict) else [data]:
@@ -1557,7 +1676,9 @@ RULE_RE = re.compile(r"^\s*(?:(?:private|global)\s+)*rule\s+([A-Za-z0-9_]+)", re
 
 
 def parseYara(text: str) -> list[dict]:
-    """Split YARA rule text into normalized rules, pulling metadata out of each rule's ``meta:`` section."""
+    """Split YARA rule text into normalized rules, pulling metadata out of each rule's ``meta:``
+    section.
+    """
 
     retn = []
     starts = [m for m in RULE_RE.finditer(text)]
