@@ -1,7 +1,7 @@
 init {
     $yaralib = $lib.import(slib.yara.lib)
 
-    if (not $lib.user.allowed(slib.yara.admin)) {
+    if (not $lib.auth.users.get().allowed(slib.yara.admin)) {
         $lib.warn("slib.yara.sync requires the slib.yara.admin permission.")
     }
     else {

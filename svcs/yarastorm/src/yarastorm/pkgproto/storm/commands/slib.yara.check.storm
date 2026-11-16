@@ -2,7 +2,7 @@ init {
     $yaralib = $lib.import(slib.yara.lib)
 }
 
-switch $node.form() {
+switch $node.form() {  // noqa: R002 - 2.x needs the call
     "it:app:yara:rule": {
         $retn = $yaralib.compile($node, (true))
         $guid = $node.repr()
@@ -15,6 +15,6 @@ switch $node.form() {
         }
     }
     *: {
-        $lib.warn(`slib.yara.check only supports it:app:yara:rule nodes, skipping {$node.form()}.`)
+        $lib.warn(`slib.yara.check only supports it:app:yara:rule nodes, skipping {$node.form()}.`)  // noqa: R002 - 2.x needs the call
     }
 }

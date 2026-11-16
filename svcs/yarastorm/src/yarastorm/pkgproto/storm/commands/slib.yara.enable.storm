@@ -1,13 +1,13 @@
 init {
     $yaralib = $lib.import(slib.yara.lib)
-    $isadmin = $lib.user.allowed(slib.yara.admin)
+    $isadmin = $lib.auth.users.get().allowed(slib.yara.admin)
     if (not $isadmin) {
         $lib.warn("slib.yara.enable requires the slib.yara.admin permission.")
     }
 }
 
 if $isadmin {
-    switch $node.form() {
+    switch $node.form() {  // noqa: R002 - 2.x needs the call
         "it:app:yara:rule": {
             $retn = $yaralib.enableRule($node)
             if (not $retn.status) {
@@ -15,7 +15,7 @@ if $isadmin {
             }
         }
         *: {
-            $lib.warn(`slib.yara.enable only supports it:app:yara:rule nodes, skipping {$node.form()}.`)
+            $lib.warn(`slib.yara.enable only supports it:app:yara:rule nodes, skipping {$node.form()}.`)  // noqa: R002 - 2.x needs the call
         }
     }
 }

@@ -4,7 +4,7 @@ init {
 
 // Raise an AuthDeny if the current user can't change the service's rules.
 function reqAdmin() {
-    if (not $lib.user.allowed(slib.yara.admin)) {
+    if (not $lib.auth.users.get().allowed(slib.yara.admin)) {
         $lib.raise(AuthDeny, "Changing the slib.yara rules requires the slib.yara.admin permission.")
     }
     return()
