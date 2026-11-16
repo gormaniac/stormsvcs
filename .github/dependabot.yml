@@ -1,0 +1,7 @@
+# Keeps the pinned base image digest in docker/Dockerfile current.
+version: 2
+updates:
+  - package-ecosystem: docker
+    directory: /docker
+    schedule:
+      interval: weekly
