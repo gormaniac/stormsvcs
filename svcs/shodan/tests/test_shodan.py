@@ -1052,6 +1052,29 @@ class TestShodanSvc(s_tests.SynTest):
             assert len(banners) == 150
             assert len(fake.requests) == 2
 
+            # SHODAN-09: Shodan ends deep paging with an error, not an empty page. Past the first
+            # page that's the end of the results, other errors (or any on the first page) fail.
+            def capped(request):
+                if int(request.query["page"]) > 1:
+                    return (400, {"error": "Search cursor too deep for your plan"})
+                return paged(request)
+
+            fake.routes[("GET", "/api/shodan/host/search")] = capped
+            banners = [b async for b in svc.searchGenr("nginx", limit=0)]
+            assert len(banners) == 100
+            with self.raises(ShodanApiError):
+                [b async for b in svc.searchGenr("nginx", limit=0, page=2)]
+
+            for code in (401, 402, 429, 500, 503):
+                def failing(request, code=code):
+                    if int(request.query["page"]) > 1:
+                        return (code, {"error": f"HTTP {code} error"})
+                    return paged(request)
+
+                fake.routes[("GET", "/api/shodan/host/search")] = failing
+                with self.raises(ShodanApiError):
+                    [b async for b in svc.searchGenr("nginx", limit=0)]
+
     async def test_directory_pages(self):
         async with shodanSvc(self) as (core, svc, fake):
 

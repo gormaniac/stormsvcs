@@ -9,6 +9,7 @@ Shodan's data as-is (or normalized, for the ``norm*`` variants) and raise
 import hashlib
 import ipaddress
 import json
+import logging
 import re
 import time
 from collections.abc import AsyncIterator
@@ -21,6 +22,8 @@ import synapse.lib.cell as s_cell
 from . import norm
 from .api import ShodanCellApi
 from .client import BASE_URLS, ShodanApiError, ShodanClient
+
+logger = logging.getLogger(__name__)
 
 # Streaming API endpoints and whether they take a comma separated list of values.
 STREAM_KINDS = {
@@ -36,6 +39,10 @@ STREAM_KINDS = {
 
 # The default number of results Shodan returns per search page.
 SEARCH_PAGE_SIZE = 100
+
+# The HTTP status codes of the error Shodan returns past the deepest page a plan can reach, which
+# searchGenr() treats as the end of the results.
+DEEP_PAGE_CODES = frozenset((400, 403, 404))
 
 # Saved queries per page of Shodan's query directory.
 DIRECTORY_PAGE_SIZE = 10
@@ -342,8 +349,18 @@ class ShodanSvc(s_cell.Cell):
         """
 
         count = 0
+        first = page
         while True:
-            data = await self.search(query, page=page, minify=minify, apikey=apikey)
+            try:
+                data = await self.search(query, page=page, minify=minify, apikey=apikey)
+            except ShodanApiError as err:
+                # Shodan caps how deep a non-enterprise plan can page with an error, not with an
+                # empty page, so a request error past the first page is the end of the results.
+                # Key, credit, rate limit, and server errors still fail.
+                if page == first or err.code not in DEEP_PAGE_CODES:
+                    raise
+                logger.info("Search stopped at page %d: %s", page, err.mesg)
+                return
             matches = data.get("matches") or []
             if not matches:
                 return

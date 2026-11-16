@@ -274,7 +274,9 @@ commands:
       again, the earlier search's it:exec:query refs them too.
 
       Each page of 100 results consumes one Shodan query credit. Use --count to get
-      the total (and any --facets) for free without ingesting anything.
+      the total (and any --facets) for free without ingesting anything. Shodan limits how many
+      pages a plan can read, and answers a page past that with an error, which ends the results
+      (without a warning) once at least a page has been read.
 
       Every inbound node is read before any are run, so the nodes this command creates can't come
       back in from a lift that's still running (ex. "inet:banner | slib.shodan.search" would otherwise
