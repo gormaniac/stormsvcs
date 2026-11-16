@@ -155,6 +155,36 @@ class TestPostgres(s_tests.SynTest):
             # The connection is still usable after those errors.
             assert (await svc.rawQuery("VALUES (1)")) == [{"column1": 1}]
 
+            # Functions that change the session from inside a query are undone (the raw query's
+            # transaction is rolled back), so they can't change the settings of later queries.
+            settings = (
+                "SELECT current_setting('search_path') AS sp, "
+                "current_setting('statement_timeout') AS st, "
+                "current_setting('default_transaction_read_only') AS ro"
+            )
+            before = await svc.db.fetch(settings)
+            for sql in (
+                "SELECT set_config('search_path', 'pg_catalog', false)",
+                "SELECT set_config('statement_timeout', '1', false)",
+                "SELECT set_config('default_transaction_read_only', 'off', false)",
+            ):
+                await svc.rawQuery(sql)
+            assert await svc.db.fetch(settings) == before
+            assert len(await svc.lookup(None, [10])) == 1
+            # Session advisory locks outlive a rollback, so they're refused.
+            for sql in (
+                "SELECT pg_advisory_lock(1)",
+                'SELECT pg_catalog."pg_try_advisory_lock_shared" (1, 2)',
+            ):
+                with pytest.raises(CrtshDbError, match="advisory"):
+                    await svc.rawQuery(sql)
+            # Transaction level ones are released with the rollback.
+            sql = "SELECT 1 AS ok FROM (SELECT pg_advisory_xact_lock(1)) l"
+            assert await svc.rawQuery(sql) == [{"ok": 1}]
+            assert await svc.db.fetch(
+                "SELECT count(*) AS n FROM pg_locks WHERE locktype = 'advisory'"
+            ) == [{"n": 0}]
+
     async def test_cycles(self):
         # CAs that cross-sign each other: CA 2 (certs 2, 4) is signed by CA 3, whose certificate
         # (14) is signed by CA 2. Without the path check the recursion bounces between them.
