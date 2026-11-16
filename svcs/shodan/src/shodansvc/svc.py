@@ -106,7 +106,9 @@ def _service(valu: Any) -> str:
     ok = bool(sep) and port.isascii() and port.isdigit() and int(port) <= 65535
     if ok:
         try:
-            ipaddress.ip_address(host[1:-1] if host.startswith("[") and host.endswith("]") else host)
+            ipaddress.ip_address(
+                host[1:-1] if host.startswith("[") and host.endswith("]") else host
+            )
         except ValueError:
             ok = False
     if not ok:

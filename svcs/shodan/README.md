@@ -292,6 +292,23 @@ Every node is linked to the service's `meta:source` with a `-(seen)>` edge (incl
 updated from Shodan's timestamps, when Shodan saw it. CVEDB's publish dates are only
 `:timeline:published`, never the `.seen` of a `risk:vuln` or `it:sec:cve`.
 
+## Upgrading to 0.17.0
+
+0.17.0 changes how some Shodan data is modeled. Nodes made by older versions aren't changed,
+except by `slib.shodan.admin.dns.cleanup`:
+
+- Shodan's hostnames are `inet:dns:rev`/`rev6` records, not `inet:dns:a`/`aaaa` (see below).
+- Bare ports from minified host lookups and InternetDB that Shodan crawls over UDP (ex. 53) are
+  no longer guessed as `tcp://` servers.
+- CVEDB scores go in the prop of their CVSS version (`:cvss:v3_0:score` or `:cvss:v3_1:score`),
+  and scores without a version are left unset. CVEDB publish dates are no longer `.seen`.
+- `inet:asn`, `ou:org`, `it:prod:softver`, and `risk:vuln` nodes are linked to the `meta:source`.
+- JARM and JA3S fingerprints are modeled (`inet:ssl:jarmsample`, `inet:tls:ja3s:sample`).
+- `slib.shodan.alert.edit` refuses `--ignore`/`--unignore` services that aren't `<ip>:<port>`,
+  `slib.shodan.admin.tags` refuses an invalid `--prefix`, `slib.shodan.scan --wait` stops at a
+  `FAILED` scan, and `slib.shodan.search` ends quietly at Shodan's deep-paging limit.
+- The package requires Synapse 2.256.0 or newer.
+
 ## Cleaning up hostname DNS records
 
 Before 0.17.0, Shodan's hostnames (from host lookups, search and stream banners, InternetDB, and
