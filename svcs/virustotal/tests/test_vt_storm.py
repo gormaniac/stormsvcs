@@ -20,6 +20,14 @@ async def count(core, query, opts=None):
 
 
 class TestVtStormPkg(s_tests.SynTest):
+    def test_readmes_match(self):
+        # The package's README (shown in the Cortex) is a copy of the service's README.
+        svcdir = pathlib.Path(__file__).parents[1]
+        pkgreadme = svcdir / "src" / "vtsvc" / "pkgproto" / "README.md"
+        assert pkgreadme.read_text() == (svcdir / "README.md").read_text(), (
+            "Copy README.md to src/vtsvc/pkgproto/README.md"
+        )
+
     def test_versions_match(self):
         # The version lives in pyproject.toml (the image tag), __init__.py, the package yaml,
         # and the service's uv.lock entry.
