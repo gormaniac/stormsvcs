@@ -31,7 +31,7 @@ function _batch(view, kind, batch, conf, summary) {
             $n = $model.model($kind, $item, $conf)
             $done.append(($item.key, $item.hash))
             // Only articles can be skipped: their URL isn't a valid inet:url.
-            if ($n = $lib.null) { $counts.skipped = ($counts.skipped + 1) }
+            if ($n = null) { $counts.skipped = ($counts.skipped + 1) }
             elif $item.new { $counts.added = ($counts.added + 1) }
             else { $counts.updated = ($counts.updated + 1) }
         } catch * as err {
@@ -54,7 +54,7 @@ function _batch(view, kind, batch, conf, summary) {
 
     $retn = $svc.synced($view, $kind, done=$done, removed=$gone)
     if (not $retn.status) { return($retn.mesg) }
-    return($lib.null)
+    return()
 }
 
 // Sync Malpedia into the current view.
@@ -62,12 +62,15 @@ function _batch(view, kind, batch, conf, summary) {
 // Returns a summary: {"pull": the pull summary (or null), "pullerror": why the pull failed
 // (the view is still synced from the service's last good pull), "error": why the sync
 // stopped, "kinds": {kind: {"total", "added", "updated", "removed", "skipped", "failed"}},
-// "errors"}.
+// "errors", "retagged": whether the tag prefixes changed since the view's last sync}.
+//
+// When a tag prefix changed since the view's last sync, every record is modeled again (like
+// full=(true)) and loses the tags it got under the old prefix.
 function sync(force=(false), full=(false), pull=(true), progress=(false)) {
     $view = $lib.view.get().iden
-    $summary = ({"pull": $lib.null, "pullerror": $lib.null, "error": $lib.null, "kinds": ({}), "errors": ([])})
+    $summary = ({"pull": null, "pullerror": null, "error": null, "kinds": {}, "errors": [], "retagged": false})
     for $kind in $kinds {
-        $summary.kinds.$kind = ({"total": (0), "added": (0), "updated": (0), "removed": (0), "skipped": (0), "failed": (0)})
+        $summary.kinds.$kind = ({"total": 0, "added": 0, "updated": 0, "removed": 0, "skipped": 0, "failed": 0})
     }
 
     if $pull {
@@ -76,7 +79,22 @@ function sync(force=(false), full=(false), pull=(true), progress=(false)) {
         else { $summary.pullerror = $retn.mesg }
     }
 
-    $conf = $model.conf()
+    // The tag prefixes the view was last synced with.
+    $retn = $svc.viewInfo($view)
+    if (not $retn.status) {
+        $summary.error = $retn.mesg
+        return($summary)
+    }
+    $old = $retn.data.tags
+    $conf = $model.conf(old=$old)
+    if $conf.changed {
+        $full = (true)
+        $summary.retagged = (true)
+        if $progress {
+            $lib.print(`slib.malpedia.sync: The tag prefixes changed since this view's last sync, modeling every record to replace the old tags.`)
+        }
+    }
+
     for $kind in $kinds {
         $first = (true)
         for $retn in $svc.changes($view, $kind, full=$full) {
@@ -89,7 +107,7 @@ function sync(force=(false), full=(false), pull=(true), progress=(false)) {
                 $summary.kinds.$kind.total = $batch.total
                 $first = (false)
                 if ($progress and $batch.total) {
-                    $lib.print("slib.malpedia.sync: Modeling {count} {kind} records.", count=$batch.total, kind=$kind)
+                    $lib.print(`slib.malpedia.sync: Modeling {$batch.total} {$kind} records.`)
                 }
             }
             $mesg = $_batch($view, $kind, $batch, $conf, $summary)
@@ -100,7 +118,7 @@ function sync(force=(false), full=(false), pull=(true), progress=(false)) {
         }
     }
 
-    $retn = $svc.viewSynced($view)
+    $retn = $svc.viewSynced($view, tags=({"prefix": $conf.prefix, "tlp": $conf.tlp}))
     if (not $retn.status) { $summary.error = $retn.mesg }
     return($summary)
 }
@@ -111,7 +129,7 @@ function sync(force=(false), full=(false), pull=(true), progress=(false)) {
 // "errors": [...], "warnings": [...]}.
 function refresh(actors, families) {
     $conf = $model.conf()
-    $summary = ({"nodes": ([]), "counts": ({}), "errors": ([]), "warnings": ([])})
+    $summary = ({"nodes": [], "counts": {}, "errors": [], "warnings": []})
     for $kind in $kinds { $summary.counts.$kind = (0) }
 
     $todo = ([])
@@ -125,6 +143,8 @@ function refresh(actors, families) {
             continue
         }
         $data = $retn.data
+        // The service normalizes the ID (ex. APT28 is apt28).
+        $id = $data.id
         for $warn in $data.warnings { $summary.warnings.append($warn) }
 
         // Model in sync order, so the main node exists before the articles link to it.

@@ -3,13 +3,13 @@
 // The data from a service retn, or null (with a warning) if the call failed.
 function data(retn, what) {
     if $retn.status { return($retn.data) }
-    $lib.warn("slib.malpedia: {what} failed: {err}", what=$what, err=$retn.mesg)
-    return($lib.null)
+    $lib.warn(`slib.malpedia: {$what} failed: {$retn.mesg}`)
+    return()
 }
 
 // Format an epoch millis time (or null) for printing.
 function when(time) {
-    if ($time = $lib.null) { return(never) }
+    if ($time = null) { return(never) }
     return($lib.time.format($time, "%Y-%m-%d %H:%M:%S UTC"))
 }
 
@@ -32,10 +32,19 @@ function kindCounts(counts) {
     $parts = ([])
     for $kind in (news, actor, family, yara) {
         $count = $counts.$kind
-        if ($count = $lib.null) { $count = (0) }
+        if ($count = null) { $count = (0) }
         $parts.append(`{$kind}={$count}`)
     }
-    return($lib.str.join(", ", $parts))
+    return((", ").join($parts))
+}
+
+// The plural of a record kind, for messages.
+function plural(kind) {
+    switch $kind {
+        family: { return(families) }
+        news: { return(news) }
+    }
+    return(`{$kind}s`)
 }
 
 // Yield the (non-null) nodes in a list.
