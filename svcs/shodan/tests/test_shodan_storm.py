@@ -2,6 +2,8 @@
 
 import base64
 import copy
+
+import aiohttp.web
 import hashlib
 import pathlib
 import time
@@ -889,6 +891,36 @@ class TestShodanStormSearch(s_tests.SynTest):
             msgs = await core.stormlist("slib.shodan.stream ports")
             self.stormIsInWarn("requires at least one value", msgs)
 
+    async def test_api_errors_in_storm(self):
+        # SHODAN-12: Shodan's error shapes reach Storm as warnings: HTML 401 pages, a 429 that
+        # is retried, and Streaming API errors.
+        async with shodanSvc(self) as (core, svc, fake):
+            html = aiohttp.web.Response(text="<html><title>401 Unauthorized</title></html>", status=401)
+            fake.routes[("GET", "/api/api-info")] = html
+            msgs = await core.stormlist("slib.shodan.info")
+            self.stormIsInWarn("Shodan rejected the API key", msgs)
+
+            calls = []
+
+            def flaky(request):
+                calls.append(1)
+                if len(calls) == 1:
+                    return (429, {"error": "Rate limit reached"})
+                return (200, [22, 80])
+
+            fake.routes[("GET", "/api/shodan/ports")] = flaky
+            msgs = await core.stormlist("slib.shodan.ref ports")
+            self.stormHasNoWarnErr(msgs)
+            assert len(calls) == 2
+
+            async def denied(request):
+                return aiohttp.web.Response(text="", status=401)
+
+            fake.streamhandler = denied
+            msgs = await core.stormlist("slib.shodan.stream --timeout 5")
+            self.stormIsInWarn("Shodan rejected the API key", msgs)
+            assert not await core.nodes("it:exec:query")
+
 
 FOUND_FORMS = {"inet:server", "inet:banner", "inet:ipv4", "inet:ipv6"}
 
@@ -1654,6 +1686,23 @@ class TestShodanStormDns(s_tests.SynTest):
             # Inbound nodes pass through without --yield.
             msgs = await core.stormlist("inet:fqdn=vertex.link | slib.shodan.dns.domain")
             assert [m[1][0] for m in msgs if m[0] == "node"] == [("inet:fqdn", "vertex.link")]
+
+    async def test_dns_domain_all_pages(self):
+        # --pages 0 reads every page.
+        async with shodanSvc(self) as (core, svc, fake):
+
+            def paged(request):
+                page = int(request.query["page"])
+                data = [{"subdomain": f"s{page}", "type": "A", "value": f"1.2.3.{page}"}]
+                return (200, {"domain": "vertex.link", "subdomains": [f"s{page}"], "more": page < 12, "data": data})
+
+            fake.routes[("GET", "/api/dns/domain/vertex.link")] = paged
+            msgs = await core.stormlist("slib.shodan.dns.domain --domain vertex.link --pages 0")
+            self.stormHasNoWarnErr(msgs)
+            assert len(await core.nodes("inet:fqdn:domain=vertex.link -> inet:dns:a")) == 12
+
+            msgs = await core.stormlist("slib.shodan.dns.domain --domain vertex.link")
+            self.stormIsInWarn("has more DNS results than were retrieved", msgs)
 
     async def test_dns_domain_unsupported_node(self):
         # An unsupported inbound node only warns: it isn't sent to Shodan and doesn't stop the others.

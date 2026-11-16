@@ -1,8 +1,10 @@
 """Pytests for the slib.shodan service's HTTP client, normalization, and Cell/Telepath methods."""
 
 import asyncio
+import json
 
 import aiohttp
+import aiohttp.web
 import synapse.tests.utils as s_tests
 
 from shodansvc import norm
@@ -665,6 +667,23 @@ class TestNorm(s_tests.SynTest):
         assert norm.normSshKey({"type": "ssh-rsa"}) is None
         assert norm.normSshKey({"type": "ssh-rsa", "key": "  \n "}) is None
 
+    def test_ssh_key_algo_edges(self):
+        algo = norm._sshKeyAlgo
+        ok = (7).to_bytes(4, "big") + b"ssh-rsa" + b"rest"
+        assert algo(ok) == "ssh-rsa"
+        assert algo(b"\x00\x00") is None  # too short for the size
+        assert algo((0).to_bytes(4, "big")) is None  # empty name
+        assert algo((65).to_bytes(4, "big") + b"a" * 65) is None  # too long
+        assert algo((7).to_bytes(4, "big") + b"ssh") is None  # truncated
+        assert algo((3).to_bytes(4, "big") + b"\xff\xfe\xfd") is None  # not ASCII
+        assert algo((3).to_bytes(4, "big") + b"a b") is None  # not printable
+
+    def test_cert_time(self):
+        assert norm._certTime("20240102030405Z") == "2024/01/02 03:04:05"
+        assert norm._certTime("2024010203") is None
+        assert norm._certTime(None) is None
+        assert norm._certTime("") is None
+
     def test_norm_internetdb(self):
         host = norm.normInternetDb(INTERNETDB_1111)
         assert host["ip"] == "1.1.1.1"
@@ -853,6 +872,73 @@ class TestClient(s_tests.SynTest):
                 b async for b in client.stream("/shodan/banners", apikey="key", limit=1, timeout=5)
             ]
             assert len(banners) == 1
+
+
+    async def test_client_bad_json(self):
+        # SHODAN-12: a 2xx that isn't JSON is an error, a 4xx that isn't JSON uses the status.
+        async with FakeShodan() as fake, aiohttp.ClientSession() as sess:
+            client = ShodanClient(sess, urls=fake.urls, rate=0)
+
+            fake.routes[("GET", "/api/shodan/ports")] = aiohttp.web.Response(text="<html>oops</html>", status=200)
+            with self.raises(ShodanApiError) as cm:
+                await client.request("get", "/shodan/ports", apikey="key")
+            assert cm.exception.mesg.startswith("Unable to parse the JSON response")
+            assert cm.exception.code == 200
+
+            fake.routes[("GET", "/api/shodan/ports")] = aiohttp.web.Response(text="<html>401</html>", status=401)
+            with self.raises(ShodanApiError) as cm:
+                await client.request("get", "/shodan/ports", apikey="key")
+            assert cm.exception.mesg.startswith("Shodan rejected the API key")
+
+            # An empty 200 is None.
+            fake.routes[("GET", "/api/shodan/ports")] = aiohttp.web.Response(text="", status=200)
+            assert await client.request("get", "/shodan/ports", apikey="key") is None
+
+    async def test_client_stream_errors(self):
+        # SHODAN-12: the Streaming API's error, quiet, and connection paths.
+        async with FakeShodan() as fake, aiohttp.ClientSession() as sess:
+            client = ShodanClient(sess, urls=fake.urls, rate=0)
+
+            async def html401(request):
+                return aiohttp.web.Response(text="<html><title>401 Unauthorized</title></html>", status=401)
+
+            fake.streamhandler = html401
+            with self.raises(ShodanApiError) as cm:
+                [b async for b in client.stream("/shodan/banners", apikey="key", timeout=5)]
+            assert cm.exception.code == 401
+            assert cm.exception.mesg.startswith("Shodan rejected the API key")
+
+            async def jsonerr(request):
+                return aiohttp.web.json_response({"error": "Invalid stream"}, status=404)
+
+            fake.streamhandler = jsonerr
+            with self.raises(ShodanApiError) as cm:
+                [b async for b in client.stream("/shodan/banners", apikey="key", timeout=5)]
+            assert (cm.exception.code, cm.exception.mesg) == (404, "Invalid stream")
+
+            # A stream that goes quiet ends at the read timeout, keeping what was read. Lines
+            # that aren't JSON are skipped.
+            async def quiet(request):
+                resp = aiohttp.web.StreamResponse(status=200)
+                await resp.prepare(request)
+                await resp.write(b"not json\n")
+                await resp.write(json.dumps(HOST_8888["data"][0]).encode() + b"\n")
+                await asyncio.sleep(5)
+                return resp
+
+            fake.streamhandler = quiet
+            loop = asyncio.get_running_loop()
+            start = loop.time()
+            banners = [b async for b in client.stream("/shodan/banners", apikey="key", limit=0, timeout=1)]
+            assert [b["port"] for b in banners] == [443]
+            assert loop.time() - start < 4
+
+        # A connection error is a ShodanApiError.
+        async with aiohttp.ClientSession() as sess:
+            client = ShodanClient(sess, urls={"stream": "http://127.0.0.1:1"}, rate=0)
+            with self.raises(ShodanApiError) as cm:
+                [b async for b in client.stream("/shodan/banners", apikey="key", timeout=5)]
+            assert "Unable to connect to the Shodan Streaming API" in cm.exception.mesg
 
 
 class TestShodanSvc(s_tests.SynTest):

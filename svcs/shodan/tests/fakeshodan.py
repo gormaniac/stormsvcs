@@ -627,6 +627,8 @@ class FakeShodan:
         self.urls: dict[str, str] = {}
         # The most values a facet may ask for, like a Shodan plan's limit.
         self.facetlimit = 1000
+        # Replaces the Streaming API's handler, ex. to return an error or go quiet.
+        self.streamhandler = None
 
     def _count(self, request: web.Request) -> tuple[int, dict]:
         """GET /shodan/host/count, honoring facet sizes ("name:N", default 5) and the plan limit."""
@@ -692,11 +694,16 @@ class FakeShodan:
             )
         if callable(route):
             route = route(request)
+        # A raw response, ex. an HTML error page or a body that isn't JSON.
+        if isinstance(route, web.StreamResponse):
+            return route
 
         status, data = route
         return web.json_response(data, status=status)
 
     async def _stream(self, request: web.Request) -> web.StreamResponse:
+        if self.streamhandler is not None:
+            return await self.streamhandler(request)
         resp = web.StreamResponse(status=200)
         await resp.prepare(request)
         for banner in STREAM_BANNERS:
