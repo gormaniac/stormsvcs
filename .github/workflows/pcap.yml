@@ -22,4 +22,5 @@ jobs:
       # tshark, Suricata, and Snort are built from source in the image, so the tests that need
       # them skip in the host test job and run in the service's test image instead.
       docker_tests: true
+      storm_lint: block
     secrets: inherit

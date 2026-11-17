@@ -213,6 +213,51 @@ def _procPgrp(pid: int) -> int | None:
         return None
 
 
+def _groupAlive(pgid: int) -> list[int]:
+    """The pids of the processes in a process group that aren't dead yet (zombies are)."""
+
+    alive = []
+    with contextlib.suppress(OSError):
+        for name in os.listdir("/proc"):
+            if not name.isdigit() or _procPgrp(int(name)) != pgid:
+                continue
+            status = _procStatus(int(name))
+            if status is not None and not status.get("State", "").startswith("Z"):
+                alive.append(int(name))
+    return alive
+
+
+async def _killGroup(pgid: int, wait: float = 2.0) -> None:
+    """SIGKILL a process group and wait, for at most ``wait`` seconds, for its processes to
+    die. SIGKILL isn't synchronous: right after ``killpg`` its processes can still be running,
+    and a sweep that saw one then would report it as escaped (it isn't a zombie yet)."""
+
+    with contextlib.suppress(ProcessLookupError, PermissionError):
+        os.killpg(pgid, signal.SIGKILL)
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + wait
+    while _groupAlive(pgid) and loop.time() < deadline:
+        await asyncio.sleep(0.01)
+
+
+async def _finish(coro: Any) -> None:
+    """Run ``coro`` to the end even if the caller is cancelled meanwhile, then pass the
+    cancellation on. For short, bounded cleanup that can't be left half done."""
+
+    task = asyncio.ensure_future(coro)
+    cancelled = None
+    while True:
+        try:
+            await asyncio.shield(task)
+            break
+        except asyncio.CancelledError as err:
+            if task.done():
+                raise
+            cancelled = err
+    if cancelled is not None:
+        raise cancelled
+
+
 def sandboxed(status: dict[str, str], own: dict[str, str] | None) -> bool:
     """Whether a process was started in the sandbox (or by something that was): it has more
     seccomp filters than the service, or no_new_privs when the service doesn't. Both are
@@ -359,7 +404,11 @@ class Sandbox:
                         zombies[pid] = first
                 continue
             ours = ids is not None and bool(uids) and int(uids[0]) == ids[0]
-            if ours and _procPgrp(pid) in self._live:
+            # Processes in a running engine's process group (orphaned or not) are that run's,
+            # it kills and reports them as leftovers when it ends. A process can only join a
+            # group in its own session, and every run is a session of its own, so one that
+            # escaped can't hide in another run's group.
+            if (ours or orphan) and _procPgrp(pid) in self._live:
                 continue
             if not (orphan or ours):
                 continue
@@ -716,7 +765,7 @@ class Sandbox:
                             with contextlib.suppress(ProcessLookupError, PermissionError):
                                 os.killpg(proc.pid, 0)
                                 leftovers.append(True)
-                                os.killpg(proc.pid, signal.SIGKILL)
+                                await _killGroup(proc.pid)
                             self.sweep(engine, result)
                             try:
                                 await asyncio.wait_for(asyncio.shield(done), 5)
@@ -740,27 +789,12 @@ class Sandbox:
                     task.cancel()
                 if verify is not None:
                     verify.cancel()
-                # Anything still in the run's process group outlived the engine.
-                leftover = bool(leftovers)
-                with contextlib.suppress(ProcessLookupError, PermissionError):
-                    os.killpg(proc.pid, 0)
-                    leftover = True
-                if leftover:
-                    with contextlib.suppress(ProcessLookupError, PermissionError):
-                        os.killpg(proc.pid, signal.SIGKILL)
-                    if proc.returncode == 0:
-                        self.alert(
-                            "leftover",
-                            engine,
-                            "processes of its run were still "
-                            "running after it exited, they were killed",
-                            result,
-                        )
-                self._live.discard(proc.pid)
+                # Finished even if the run is cancelled meanwhile: a group left in _live would
+                # be skipped by every later sweep.
+                await _finish(self._teardown(proc, engine, result, bool(leftovers)))
         finally:
             if outfd is not None:
                 outfd.close()
-        self.sweep(engine, result)
 
         warnings = []
         stderr = bytes(errb)
@@ -791,6 +825,34 @@ class Sandbox:
                     result,
                 )
         return result
+
+    async def _teardown(
+        self, proc: asyncio.subprocess.Process, engine: str, result: Result, leftover: bool
+    ) -> None:
+        """End a run, however it ended: kill what's left in its process group (and wait for
+        it to die), stop treating the group as live, and sweep."""
+
+        # Anything still in the run's process group outlived the engine.
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.killpg(proc.pid, 0)
+            leftover = True
+        try:
+            if leftover:
+                # Its group stays live (skipped by sweeps) until its processes are dead, the
+                # sweep below reaps them.
+                await _killGroup(proc.pid)
+                if proc.returncode == 0:
+                    self.alert(
+                        "leftover",
+                        engine,
+                        "processes of its run were still running after it exited, they were killed",
+                        result,
+                    )
+        finally:
+            self._live.discard(proc.pid)
+            # Also after a timeout or failure: _reap's sweep skipped the group while it was
+            # live, the zombies of what was killed in it are reaped here.
+            self.sweep(engine, result)
 
     async def _reap(
         self, proc: asyncio.subprocess.Process, engine: str, result: Result, wait: float = 5
