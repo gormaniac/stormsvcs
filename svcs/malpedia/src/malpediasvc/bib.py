@@ -206,7 +206,14 @@ class _Reader:
                 break
         if need:
             return False
-        return offs >= self.size or self.text[offs] in ",})#"
+        if offs < self.size and self.text[offs] == "}":
+            # That would end the entry too, so the next entry (or the end) must follow.
+            # Otherwise (ex. ``{a \}}, b = {c}}``) the ``\}`` is an escaped brace.
+            nxt = offs + 1
+            while nxt < self.size and self.text[nxt].isspace():
+                nxt += 1
+            return nxt >= self.size or self.text[nxt] in "@%"
+        return offs >= self.size or self.text[offs] in ",)#"
 
     def braced(self) -> str:
         """Read a {...} value (the reader is on the opening brace), returning its contents.

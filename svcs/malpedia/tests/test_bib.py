@@ -133,6 +133,21 @@ def test_backslashes():
     assert fields["path"] == "C:\\Windows\\"
     assert entries[1]["fields"]["title"] == "plain C:\\"
 
+    # An escaped brace that ends a value isn't taken for a backslash that ends the entry, the
+    # fields after it are kept. At the end of an entry, it's still a backslash.
+    text = r"""@online{k1, title = {ends \}}, url = {https://example.com/1}}
+@online{k2, title = {{nested \}}}, url = {https://example.com/2}}
+@online{k3, url = {https://example.com/3}, path = {C:\}}
+% a comment
+@online{k4, url = {https://example.com/4}, path = {D:\}}"""
+    entries, errors = bib.parse(text)
+    assert errors == []
+    got = {e["key"]: e["fields"] for e in entries}
+    assert got["k1"] == {"title": "ends }", "url": "https://example.com/1"}
+    assert got["k2"] == {"title": "nested }", "url": "https://example.com/2"}
+    assert got["k3"]["path"] == "C:\\"
+    assert got["k4"]["path"] == "D:\\"
+
 
 def test_latex_accents():
     # MALP-11: the common LaTeX accents and letters are decoded.
