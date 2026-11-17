@@ -155,6 +155,49 @@ class TestPostgres(s_tests.SynTest):
             # The connection is still usable after those errors.
             assert (await svc.rawQuery("VALUES (1)")) == [{"column1": 1}]
 
+            # Functions that change the session from inside a query are undone (the raw query's
+            # transaction is rolled back), so they can't change the settings of later queries.
+            settings = (
+                "SELECT current_setting('search_path') AS sp, "
+                "current_setting('statement_timeout') AS st, "
+                "current_setting('default_transaction_read_only') AS ro"
+            )
+            before = await svc.db.fetch(settings)
+            for sql in (
+                "SELECT set_config('search_path', 'pg_catalog', false)",
+                "SELECT set_config('statement_timeout', '1', false)",
+                "SELECT set_config('default_transaction_read_only', 'off', false)",
+            ):
+                await svc.rawQuery(sql)
+            assert await svc.db.fetch(settings) == before
+            assert len(await svc.lookup(None, [10])) == 1
+            # Session advisory locks outlive a rollback, so they're refused.
+            for sql in (
+                "SELECT pg_advisory_lock(1)",
+                'SELECT pg_catalog."pg_try_advisory_lock_shared" (1, 2)',
+                "SELECT pg_advisory_lock/**/(1)",
+                "SELECT pg_advisory_lock\n-- a comment\n(1)",
+                r'SELECT U&"pg\0061dvisory_lock"(1)',
+            ):
+                with pytest.raises(CrtshDbError, match="advisory"):
+                    await svc.rawQuery(sql)
+            # Transaction level ones are released with the rollback.
+            sql = "SELECT 1 AS ok FROM (SELECT pg_advisory_xact_lock(1)) l"
+            assert await svc.rawQuery(sql) == [{"ok": 1}]
+            locks = "SELECT count(*) AS n FROM pg_locks WHERE locktype = 'advisory'"
+            assert await svc.db.fetch(locks) == [{"n": 0}]
+            # Dynamic SQL gets past the name check, so the session locks a raw query takes are
+            # released before its rollback, whether it succeeds or fails after taking them.
+            dyn = "query_to_xml('SELECT pg_advisory_' || 'lock(7)', false, false, '')"
+            assert await svc.rawQuery(f"SELECT {dyn} IS NOT NULL AS ok") == [{"ok": True}]
+            assert await svc.db.fetch(locks) == [{"n": 0}]
+            with pytest.raises(CrtshDbError, match="division by zero"):
+                await svc.rawQuery(f"SELECT {dyn} IS NOT NULL, (random() * 0)::int / 0")
+            assert await svc.db.fetch(locks) == [{"n": 0}]
+            # The connection is still usable, on the same backend.
+            pid = await svc.db.fetch("SELECT pg_backend_pid() AS pid")
+            assert await svc.rawQuery("SELECT pg_backend_pid() AS pid") == pid
+
     async def test_cycles(self):
         # CAs that cross-sign each other: CA 2 (certs 2, 4) is signed by CA 3, whose certificate
         # (14) is signed by CA 2. Without the path check the recursion bounces between them.

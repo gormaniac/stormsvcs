@@ -82,6 +82,16 @@ class TestCrtshStormPkg(s_tests.SynTest):
     def test_main_help(self):
         assertMainHelp("crtshsvc")
 
+    def test_readmes_match(self):
+        # The package's README (shown in the Cortex) is a copy of the service's README.
+        svcdir = pathlib.Path(__file__).parents[1]
+        readme = (svcdir / "README.md").read_text()
+        pkgreadme = svcdir / "src" / "crtshsvc" / "pkgproto" / "README.md"
+        assert pkgreadme.read_text() == readme, "Copy README.md to src/crtshsvc/pkgproto/README.md"
+        # And it names every command.
+        for cmd in PKGDEFS[0]["commands"]:
+            assert f"`{cmd['name']}`" in readme, cmd["name"]
+
     async def test_pkg(self):
         async with self.getTestCoreProxSvc(CrtshSvc) as (core, prox, svc):
             msgs = await core.stormlist("service.list")

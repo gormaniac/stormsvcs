@@ -162,6 +162,16 @@ def _lookup(params: Params, lookups: dict[str, list]) -> str:
     return "(" + " OR ".join(conds) + ")"
 
 
+# The functions that take session level advisory locks, which a ROLLBACK doesn't release.
+# Any mention of their names is refused, not only calls (``name(``), since comments can sit
+# between a function and its parenthesis (``pg_advisory_lock/**/(1)``). An identifier can't
+# be split by a comment, and quoted names (``"pg_advisory_lock"(1)``) contain the name, so
+# only Unicode escaped names (``U&"pg\0061dvisory_lock"``) can hide one; those are refused.
+SESSION_LOCK_RE = re.compile(
+    r'(?<![a-z0-9_$])pg_(try_)?advisory_lock(_shared)?(?![a-z0-9_$])|\bu&"', re.IGNORECASE
+)
+
+
 def _alias(cond: str, alias: str = "c") -> str:
     return cond.replace("{c}", alias)
 
@@ -328,12 +338,21 @@ class CrtshDb:
         self._conn = None
         conn.terminate()
 
-    async def _run(self, conn: asyncpg.Connection, sql: str, args: tuple) -> list:
+    async def _run(
+        self, conn: asyncpg.Connection, sql: str, args: tuple, commit: bool = True
+    ) -> list:
         """Run one query in a read-only transaction with its own statement_timeout.
 
         crt.sh's default statement_timeout cancels big queries (chains, wide searches) that
         finish fine given time, so each query sets its own (0 is no limit). ``SET LOCAL`` in
         a transaction works with any PgBouncer pooling mode.
+
+        Without ``commit`` the transaction is rolled back once the rows are fetched, which
+        also undoes any session setting the query changed (ex. ``set_config(..., false)``).
+        Session advisory locks outlive a rollback, so the query also runs in a savepoint and
+        every session advisory lock is released before the rollback, whether the query
+        succeeded or failed (see ``_unlockAll``). The service never takes advisory locks of
+        its own, so none of them are lost.
         """
 
         if self._setLocal:
@@ -356,15 +375,43 @@ class CrtshDb:
                     ) from err
         if not self._setLocal:
             await conn.execute("BEGIN READ ONLY")
+        if not commit:
+            await conn.execute("SAVEPOINT raw")
 
         try:
             rows = await conn.fetch(sql, *args, timeout=self.timeout)
         except asyncpg.PostgresError:
             # The transaction is aborted, end it so the connection can be reused.
-            await self._rollback(conn)
+            if commit or await self._unlockAll(conn, aborted=True):
+                await self._rollback(conn)
             raise
-        await conn.execute("COMMIT")
+        if commit:
+            await conn.execute("COMMIT")
+        elif await self._unlockAll(conn):
+            await conn.execute("ROLLBACK")
         return rows
+
+    async def _unlockAll(self, conn: asyncpg.Connection, aborted: bool = False) -> bool:
+        """Release the session advisory locks a query took (ex. through dynamic SQL, like
+        ``query_to_xml('SELECT pg_advisory_lock(1)', ...)``), which a ROLLBACK doesn't.
+
+        It runs in the query's transaction, so behind PgBouncer's transaction pooling it
+        reaches the same server connection the query ran on. An ``aborted`` transaction is
+        rolled back to the savepoint first. If the locks can't be released the connection
+        is dropped (ending its session releases them) and this returns false.
+        """
+
+        try:
+            if aborted:
+                await asyncio.wait_for(conn.execute("ROLLBACK TO SAVEPOINT raw"), timeout=30)
+            await asyncio.wait_for(conn.execute("SELECT pg_advisory_unlock_all()"), timeout=30)
+            return True
+        except Exception as err:
+            logger.debug(
+                "Unable to release crt.sh advisory locks, dropping the connection: %s", err
+            )
+            await self._drop()
+            return False
 
     async def _rollback(self, conn: asyncpg.Connection) -> None:
         """Roll back the current transaction, dropping the connection if that fails."""
@@ -417,9 +464,10 @@ class CrtshDb:
         async with self._lock:
             await self._drop()
 
-    async def fetch(self, sql: str, *args) -> list[dict]:
+    async def fetch(self, sql: str, *args, commit: bool = True) -> list[dict]:
         """Queue a query, run it (reconnecting and retrying when the connection drops), and
-        return its rows as dicts."""
+        return its rows as dicts. Without ``commit`` its transaction is rolled back (see
+        ``_run``)."""
 
         loop = asyncio.get_running_loop()
         async with self._lock:
@@ -427,7 +475,7 @@ class CrtshDb:
                 conn = await self._ensure()
                 self._lastUsed = loop.time()
                 try:
-                    rows = await self._run(conn, sql, args)
+                    rows = await self._run(conn, sql, args, commit=commit)
                     return [dict(row) for row in rows]
                 except asyncio.CancelledError:
                     # The caller went away mid-query, the connection is mid-query and can't be reused.
@@ -689,11 +737,24 @@ class CrtshDb:
         SELECT, VALUES, TABLE, or WITH ... SELECT query. That bounds the rows held in memory,
         and rejects statements that change the session (``SET``, ``COMMIT``) or data, along
         with the read-only transaction every query runs in (see ``_run``).
+
+        Functions can still change the session from inside a query, so the transaction is
+        rolled back instead of committed, which undoes every setting a query changed (ex.
+        ``set_config(name, value, false)``) before the connection is used again. Session
+        advisory locks outlive a rollback, so they're released before it with
+        ``pg_advisory_unlock_all()``, which catches locks taken through dynamic SQL too. As a
+        first line, queries that name the functions that take them are refused.
         """
 
         args = list(args or ())
         sql = re.sub(r"[\s;]+$", "", sql.strip())
         if not sql:
             raise CrtshDbError("No SQL to run.")
+        if SESSION_LOCK_RE.search(sql):
+            raise CrtshDbError(
+                "Session advisory locks (pg_advisory_lock) would outlive the query, "
+                "use the pg_advisory_xact_lock functions. Queries can't mention their "
+                'names or use Unicode escaped identifiers (U&"...").'
+            )
         wrapped = f"SELECT * FROM (\n{sql}\n) q LIMIT ${len(args) + 1}"
-        return await self.fetch(wrapped, *args, int(limit))
+        return await self.fetch(wrapped, *args, int(limit), commit=False)

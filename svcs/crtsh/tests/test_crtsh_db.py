@@ -19,6 +19,38 @@ from crtshsvc.db import (
     tsquery,
 )
 
+from .fakecrtsh import PKI, identityText
+
+
+class FakeRecord:
+    """Like asyncpg.Record: iterating gives the values (not the keys), indexed by position or name."""
+
+    def __init__(self, **items):
+        self._items = items
+
+    def __iter__(self):
+        return iter(self._items.values())
+
+    def __len__(self):
+        return len(self._items)
+
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return list(self._items.values())[key]
+        return self._items[key]
+
+    def get(self, key, default=None):
+        return self._items.get(key, default)
+
+    def keys(self):
+        return iter(self._items.keys())
+
+    def values(self):
+        return iter(self._items.values())
+
+    def items(self):
+        return iter(self._items.items())
+
 
 class FakeConn:
     """A fake asyncpg connection that runs scripted results."""
@@ -54,7 +86,7 @@ class FakeConn:
                 err = self.server.errors.pop(0)
                 if err is not None:
                     raise err
-            return [{"sql": sql, "conn": self.num}]
+            return [FakeRecord(sql=sql, conn=self.num)]
         finally:
             self.server.busy = False
 
@@ -66,6 +98,8 @@ class FakeConn:
                 "permission denied to set parameter"
             )
         if self.server.rollbackfail and sql == "ROLLBACK":
+            raise OSError("connection lost")
+        if sql in self.server.failon:
             raise OSError("connection lost")
 
     async def fetchval(self, sql, timeout=None):
@@ -98,6 +132,7 @@ class FakeServer:
         self.executed: list[str] = []
         self.setfail = False
         self.rollbackfail = False
+        self.failon: set[str] = set()
 
     async def connect(self, dsn, **kwargs):
         self.attempts += 1
@@ -227,6 +262,7 @@ async def test_keepalive_and_idle_close():
 
 
 BEGIN = "BEGIN READ ONLY; SET LOCAL statement_timeout = {}"
+RAW_END = ["SAVEPOINT raw", "SELECT pg_advisory_unlock_all()", "ROLLBACK"]
 
 
 async def test_statement_timeout():
@@ -378,10 +414,12 @@ class Recorder(CrtshDb):
     def __init__(self, rows=None):
         super().__init__()
         self.queries: list[tuple[str, tuple]] = []
+        self.commits: list[bool] = []
         self.rows = rows or []
 
-    async def fetch(self, sql, *args):
+    async def fetch(self, sql, *args, commit=True):
         self.queries.append((sql, args))
+        self.commits.append(commit)
         return self.rows
 
     @property
@@ -607,6 +645,80 @@ async def test_sql_raw():
     assert db.queries[-1] == ("SELECT * FROM (\nSELECT 1 -- a comment\n) q LIMIT $1", (5,))
     with pytest.raises(CrtshDbError, match="No SQL"):
         await db.raw(" ; ")
+    # Raw queries are rolled back, the other queries are committed.
+    assert db.commits == [False, False]
+    await db.cas(name="Test")
+    assert db.commits[-1] is True
+
+    # Session advisory locks outlive the rollback, so they're refused.
+    for sql in (
+        "SELECT pg_advisory_lock(1)",
+        "select PG_TRY_ADVISORY_LOCK_SHARED (1, 2)",
+        'SELECT pg_catalog."pg_advisory_lock"(1)',
+        # Comments and whitespace between the name and its parenthesis.
+        "SELECT pg_advisory_lock/**/(1)",
+        "SELECT pg_advisory_lock /* a /* nested */ comment */ (1)",
+        "SELECT pg_try_advisory_lock\n-- a comment\n\t (1)",
+        "SELECT pg_advisory_lock_shared\n\n(1)",
+        'SELECT "pg_advisory_lock"/**/(1)',
+        # Unicode escaped names (U&"pg\0061dvisory_lock"), in either case.
+        r'SELECT U&"pg\0061dvisory_lock"(1)',
+        "SELECT u&\"pg!0061dvisory_lock\" UESCAPE '!' (1)",
+    ):
+        with pytest.raises(CrtshDbError, match="advisory locks"):
+            await db.raw(sql)
+    # Other advisory lock functions, and names that only contain a refused one, are fine.
+    await db.raw("SELECT pg_advisory_xact_lock(1), pg_advisory_unlock(1)")
+    await db.raw("SELECT pg_try_advisory_xact_lock_shared(1) AS pg_advisory_lock_count")
+    await db.raw('SELECT "u&x" FROM t')
+
+
+async def test_raw_rolls_back():
+    # A raw query's transaction is rolled back, undoing any session setting it changed
+    # (ex. set_config(..., false)) before the connection is reused.
+    server = FakeServer()
+    db = makeDb(server, statement_timeout=60)
+    try:
+        rows = await db.raw("SELECT set_config('search_path', 'pg_catalog', false)")
+        assert rows == [{"sql": rows[0]["sql"], "conn": 0}]
+        # Session advisory locks outlive the rollback, so they're released in the transaction
+        # first (behind PgBouncer's transaction pooling, a later one may be on another backend).
+        assert server.executed == [BEGIN.format(60000), *RAW_END]
+        await db.fetch("SELECT 1")
+        assert server.executed[-1] == "COMMIT"
+        assert "SAVEPOINT raw" not in server.executed[-2:]
+
+        # A failed raw query is rolled back to the savepoint (its transaction is aborted) to
+        # release the locks it took before failing.
+        server.executed.clear()
+        server.errors = [asyncpg.exceptions.DivisionByZeroError("division by zero")]
+        with pytest.raises(CrtshDbError, match="division by zero"):
+            await db.raw("SELECT 1/0")
+        assert server.executed == [
+            BEGIN.format(60000),
+            "SAVEPOINT raw",
+            "ROLLBACK TO SAVEPOINT raw",
+            "SELECT pg_advisory_unlock_all()",
+            "ROLLBACK",
+        ]
+        assert db._conn is not None
+
+        # If the locks can't be released, the connection is dropped, which releases them.
+        for errors in ([], [asyncpg.exceptions.DivisionByZeroError("division by zero")]):
+            server.failon = {"SELECT pg_advisory_unlock_all()"}
+            server.errors = list(errors)
+            server.executed.clear()
+            if errors:
+                with pytest.raises(CrtshDbError, match="division by zero"):
+                    await db.raw("SELECT 1/0")
+            else:
+                assert len(await db.raw("SELECT 1")) == 1
+            assert db._conn is None and server.open == 0
+            assert "ROLLBACK" not in server.executed
+            server.failon = set()
+            assert (await db.fetch("SELECT 1"))[0]["conn"] == len(server.conns) - 1
+    finally:
+        await db.close()
 
 
 def test_tsquery():
@@ -614,3 +726,24 @@ def test_tsquery():
     assert tsquery("%.vertex.link") == "vertex.link"
     assert tsquery("a%b*c") == "a b c"
     assert likeEscape("a_b%c\\") == "a\\_b\\%c\\\\"
+
+
+def test_identity_text():
+    # The fakes index what crt.sh's identities() (certwatch_db fnc/identities.fnc) does: each
+    # identity longest first, the reverse of names that aren't domains, an email's domain and
+    # reverse, and every parent domain down to the TLD with the first parent's reverse
+    # (unless that's already in the text, as "knil." is after the email).
+    assert identityText(PKI.certs[10]).split(" ") == [
+        ":2001:db8:0:0:0:0:0:1",
+        "1:0:0:0:0:0:8bd:1002:",
+        "https://vertex.link/",
+        "/knil.xetrev//:sptth",
+        "the", "vertex", "project", "tcejorp", "xetrev", "eht",
+        "visi@vertex.link", "vertex.link", "knil.xetrev@isiv", "link",
+        "www.vertex.link", "vertex.link", "knil.xetrev", "link",
+        "*.vertex.link", "vertex.link", "knil.xetrev", "link",
+        "engineering", "gnireenigne",
+        "vertex.link", "link",
+        "1.2.3.4", "4.3.2.1",
+        "us", "su",
+    ]  # fmt: skip

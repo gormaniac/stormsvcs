@@ -422,6 +422,34 @@ class TestCrtshStormAdmin(s_tests.SynTest):
             msgs = await core.stormlist("slib.crtsh.admin.tags --enable --disable")
             self.stormIsInErr("Use --enable or --disable, not both.", msgs)
 
+            # An invalid prefix is refused (and not stored), instead of making every tag edit fail.
+            for prefix in ('""', '"my tags"', '"#my.tags"', '"my..tags"'):
+                msgs = await core.stormlist(f"slib.crtsh.admin.tags --prefix {prefix}")
+                self.stormIsInErr("isn't a valid tag name", msgs)
+            msgs = await core.stormlist("slib.crtsh.admin.tags")
+            self.stormIsInPrint("prefix=my.tags", msgs)
+            # Valid prefixes are normed.
+            msgs = await core.stormlist("slib.crtsh.admin.tags --prefix ' My.Tags2 '")
+            self.stormIsInPrint("prefix=my.tags2", msgs)
+
+    async def test_tags_bad_stored_prefix(self):
+        # A bad prefix stored before it was validated turns tagging off, with a warning,
+        # instead of failing the node edits.
+        # Prefixes syn:tag would rewrite (ex. "my tags" to "my_tags") are treated the same way,
+        # as slib.crtsh.admin.tags refuses them.
+        async with crtshSvc(self) as (core, svc, fake):
+            for prefix in ("bad..prefix", "my tags", "#my.tags", ""):
+                opts = {"vars": {"prefix": prefix}}
+                await core.callStorm('$lib.globals.set("slib:crtsh:tag:prefix", $prefix)', opts=opts)
+                msgs = await core.stormlist("slib.crtsh.cert 1 --yield")
+                self.stormHasNoErr(msgs)
+                self.stormIsInWarn(f"The tag prefix {prefix} isn't a valid tag name", msgs)
+                assert not (await core.nodes(CERT[1]))[0].tags
+            # A prefix admin.tags would accept is normed, as it would be.
+            await core.callStorm('$lib.globals.set("slib:crtsh:tag:prefix", " My.Tags ")')
+            nodes = await core.nodes("slib.crtsh.cert 1 --yield")
+            assert "my.tags" in nodes[0].tags
+
     async def test_sql(self):
         async with crtshSvc(self) as (core, svc, fake):
             msgs = await core.stormlist(
@@ -509,6 +537,29 @@ class TestCrtshStormInputs(s_tests.SynTest):
             fake.calls.clear()
             await core.nodes("crypto:x509:cert | slib.crtsh.chain --cert 10")
             assert fake.called("chain") == 1
+
+    async def test_search_two_nodes(self):
+        """Two inbound nodes are searched separately with the filter options, or ignored for a
+        search option, which runs once."""
+
+        async with crtshSvc(self) as (core, svc, fake):
+            await core.nodes("[ inet:fqdn=vertex.link inet:email=visi@vertex.link ]")
+            q = "inet:fqdn=vertex.link inet:email=visi@vertex.link | slib.crtsh.search"
+
+            fake.calls.clear()
+            nodes = await core.nodes(f"{q} --valid --no-precerts --since 2000-01-01")
+            calls = [kw for m, kw in fake.calls if m == "certsByIdentity"]
+            assert [kw["text"] for kw in calls] == ["vertex.link", "visi@vertex.link"]
+            assert all(kw["valid"] and kw["since"] for kw in calls)
+            # Both find certificate 10 (the email's other match, 9, is a precert), yielded once.
+            assert await crtshIds(nodes) == [10, 11]
+            assert all(n.form.name == "crypto:x509:cert" for n in nodes)
+
+            fake.calls.clear()
+            nodes = await core.nodes(f"{q} --dns old.vertex.link --valid")
+            assert fake.called("certsByIdentity") == 1
+            assert fake.last("certsByIdentity")["text"] == "old.vertex.link"
+            assert await crtshIds(nodes) == [11]
 
     async def test_no_input(self):
         """Commands without values or inbound nodes warn instead of failing (CRTSH-05, CRTSH-11)."""

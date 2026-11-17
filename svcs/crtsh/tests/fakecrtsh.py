@@ -476,19 +476,50 @@ def _identities(cert: x509.Certificate) -> list[tuple[str, str]]:
     return rows
 
 
-def identityText(cert) -> str:
-    """The text identities() indexes: each identity, and every parent domain of names."""
+# The identity types identities() treats as domain names, and as email addresses.
+_DOMAIN_TYPES = ("2.5.4.3", "san:dNSName")
+_EMAIL_TYPES = ("1.2.840.113549.1.9.1", "san:rfc822Name")
 
-    words = []
+
+def identityText(cert) -> str:
+    """The text crt.sh's ``identities()`` indexes, ported from certwatch_db's fnc/identities.fnc.
+
+    Each identity (subject attribute and SAN), lowercased and longest first. A name with no
+    domain (not a commonName, dNSName, or email address) is followed by its reverse. An email
+    address is followed by its domain and its reverse. Then every parent domain of the domain,
+    down to its TLD, follows, and the first parent's reverse (unless it's already there).
+    """
+
+    rows: list[tuple[str, str | None]] = []
     for nametype, valu in _identities(cert):
-        valu = valu.lower()
-        words.append(valu)
-        if nametype in ("2.5.4.3", "san:dNSName", "san:rfc822Name", "1.2.840.113549.1.9.1"):
-            domain = valu.split("@")[-1]
-            while "." in domain:
-                words.append(domain)
-                domain = domain.split(".", 1)[1]
-    return " ".join(words)
+        ident = valu.lower()
+        if nametype in _DOMAIN_TYPES:
+            domain = ident
+        elif nametype in _EMAIL_TYPES:
+            domain = ident[ident.find("@") + 1 :]
+        else:
+            domain = None
+        if (ident, domain) not in rows:  # GROUP BY IDENTITY, DOMAIN_NAME
+            rows.append((ident, domain))
+    rows.sort(key=lambda row: len(row[0]), reverse=True)
+
+    text = ""
+    for ident, domain in rows:
+        text += " " + ident
+        if not domain:
+            text += " " + ident[::-1]
+            continue
+        if domain != ident:
+            text += " " + domain + " " + ident[::-1]
+        reverse = True
+        while "." in domain:
+            domain = domain[domain.index(".") + 1 :]
+            text += " " + domain
+            if reverse:
+                if domain[::-1] + "." not in text:
+                    text += " " + domain[::-1]
+                reverse = False
+    return text.lstrip()
 
 
 def tsTokens(text: str) -> set[str]:

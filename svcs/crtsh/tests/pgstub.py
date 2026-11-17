@@ -5,7 +5,8 @@ The schema copies what the service's queries use from crt.sh's
 partitioned by year on notAfter, the same expression and GIN indexes, and the
 ``certificate_and_identities`` view. libx509pq isn't available, so the ``x509_*``
 functions (and ``identities()``) are SQL stubs that read a side table filled from
-each certificate's parsed values. Unparsable certificates have no side table row,
+each certificate's parsed values. The text ``identities()`` indexes is built by
+``fakecrtsh.identityText``, a port of certwatch_db's ``fnc/identities.fnc``. Unparsable certificates have no side table row,
 so like libx509pq the stubs return null for them.
 
     uv run python -m tests.pgstub postgresql://postgres@127.0.0.1:5432/certwatch
@@ -72,6 +73,9 @@ CREATE INDEX c_subject_sha1 ON certificate (digest(x509_name(CERTIFICATE), 'sha1
 CREATE INDEX c_ski ON certificate (x509_subjectKeyIdentifier(CERTIFICATE));
 CREATE INDEX c_identities ON certificate USING GIN (identities(CERTIFICATE));
 
+-- Like crt.sh's (sql/create_schema.sql), a LEFT JOIN: a certificate without identities still
+-- has a row, with null NAME_TYPE and NAME_VALUE. crt.sh's is a LEFT JOIN LATERAL on the UNION
+-- of x509_nameAttributes_raw() and x509_altNames_raw(), x509_ident holds the same rows.
 CREATE VIEW certificate_and_identities AS
 SELECT c.ID CERTIFICATE_ID, c.CERTIFICATE, i.NAME_TYPE, i.NAME_VALUE, c.ISSUER_CA_ID
     FROM certificate c LEFT JOIN x509_ident i ON i.SHA256 = digest(c.CERTIFICATE, 'sha256');
@@ -121,7 +125,7 @@ async def load(dsn: str, pki: Pki = PKI) -> None:
             sha256 = hashlib.sha256(row["der"]).digest()
             if cert is not None:
                 await conn.execute(
-                    "INSERT INTO x509_info VALUES ($1, $2, $3, $4, $5, $6, $7, to_tsvector('certwatch', $8))",
+                    "INSERT INTO x509_info VALUES ($1, $2, $3, $4, $5, $6, $7, strip(to_tsvector('certwatch', $8)))",
                     sha256,
                     _naive(cert.not_valid_before_utc),
                     _naive(cert.not_valid_after_utc),

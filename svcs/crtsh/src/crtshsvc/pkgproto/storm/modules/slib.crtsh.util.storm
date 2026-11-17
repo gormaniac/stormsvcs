@@ -7,6 +7,15 @@ function failed(retn, what) {
     return((true))
 }
 
+// The tag prefix as a normed tag name, or null if it isn't one already, apart from case and
+// surrounding whitespace. syn:tag would quietly rewrite others (ex. "my tags" to "my_tags",
+// "#my.tags" to "my.tags"), tagging under a prefix nobody chose.
+function normTagPrefix(prefix) {
+    ($ok, $norm) = $lib.trycast(syn:tag, $prefix)
+    if ($ok and $norm = $lib.cast(str, $prefix).strip().lower()) { return($norm) }
+    return()
+}
+
 // Print a table. columns is a list of (name, width) and rows is a list of lists.
 function table(columns, rows) {
     $cols = ([])
@@ -27,7 +36,7 @@ function printJson(valu) {
 
 // Convert a time string (ex. 2024-01-01, "-30 days") to epoch millis, or null.
 function toTime(valu) {
-    if ($valu = $lib.null or $valu = "") { return() }
+    if ($valu = null or $valu = "") { return() }
     return($lib.cast(time, $valu))
 }
 
@@ -94,7 +103,7 @@ function nodes(items) {
 // Whether an option was given: not null, not an empty string, and not an empty list.
 // 0 and false count as given.
 function given(valu) {
-    if ($valu = $lib.null or $valu = "") { return((false)) }
-    if ($lib.vars.type($valu) = "list") { return(($lib.len($valu) > 0)) }
+    if ($valu = null or $valu = "") { return((false)) }
+    if ($lib.vars.type($valu) = "list") { return(($lib.len($valu) > 0)) }  // noqa: R005 - $lib.utils.type() is 3.x only
     return((true))
 }

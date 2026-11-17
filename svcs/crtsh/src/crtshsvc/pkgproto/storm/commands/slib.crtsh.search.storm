@@ -27,19 +27,20 @@ init {
     for $field in (dns, cn, org, ou, email, ip, uri, subject, identity, issuer, caids) {
         if $util.given($opts.$field) { $explicit = (true) }
     }
-    // The inbound nodes seen, so the fini block can tell when there were none.
-    $inbound = ([])
+    // Whether any node came in, so the fini block can tell when there were none.
+    $state = ({"inbound": false})
 }
 
 // Search options ignore inbound nodes, the search runs once in the fini block.
 -$explicit
 
-$inbound.append($node.iden())
+// In a subquery, so it only runs for inbound nodes (a runtsafe edit runs once without any).
+{ $state.inbound = (true) }
 $key = $util.searchKey($node)
-if ($key = $lib.null) {
-    $lib.warn(`slib.crtsh.search: Unable to search for {$node.form()} {$node.repr()}.`)
+if ($key = null) {
+    $lib.warn(`slib.crtsh.search: Unable to search for {$node.form()} {$node.repr()}.`)  // noqa: R002 - $node.form is a method on 2.x
 }
--$($key = $lib.null)
+-$($key = null)
 
 ($field, $valu) = $key
 divert (true) $util.nodes($crtsh.search($util.withKey($opts, $field, $valu), chain=$cmdopts.chain))
@@ -47,7 +48,7 @@ divert (true) $util.nodes($crtsh.search($util.withKey($opts, $field, $valu), cha
 fini {
     if $explicit {
         for $n in $crtsh.search($opts, chain=$cmdopts.chain) { yield $n }
-    } elif ($lib.len($inbound) = 0) {
+    } elif (not $state.inbound) {
         $lib.warn("slib.crtsh.search: Nothing to search for, give a search option (ex. --dns) or inbound nodes.")
     }
 }

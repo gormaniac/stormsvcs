@@ -83,7 +83,7 @@ every other call.
 | `slib.crtsh.pivot` | From certs to related certs: `--by issued`, `siblings`, `key`, `subject`, `serial`, `ski`. |
 | `slib.crtsh.chain` | Model every chain from a cert up to its root(s), setting `:issuer:cert`. |
 | `slib.crtsh.ca` | Find CAs by name/ID, model their certs (`--certs`) or what they issued (`--issued`). |
-| `slib.crtsh.admin.tags` | Configure the `precert`, `revoked`, `ca`, and `root` tags (prefix `rep.crtsh`). |
+| `slib.crtsh.admin.tags` | Configure the `precert`, `revoked`, `ca`, and `root` tags (prefix `rep.crtsh`). A `--prefix` that isn't a valid tag name is refused. |
 | `slib.crtsh.admin.sql` | Run a raw SQL query against crt.sh, at most `--limit` rows. |
 
 Explicit values (`slib.crtsh.cert <valus>`, `--cert`, or any `slib.crtsh.search` option) are
@@ -102,8 +102,18 @@ whole field values.
 
 `slib.crtsh.admin.sql` runs a single query that returns rows (`SELECT`, `VALUES`, `TABLE`, or
 `WITH ... SELECT`), wrapped as `SELECT * FROM (<sql>) q LIMIT <limit>` in a read-only
-transaction. So it can't change data or session settings, even with a writable `crtsh:dsn`, and
-statements like `SHOW` or `EXPLAIN` aren't accepted.
+transaction that's rolled back once the rows are fetched. So it can't change data or session
+settings, even with a writable `crtsh:dsn`: a function that changes a setting (ex.
+`set_config('search_path', ..., false)`) only lasts for the query. Session advisory locks outlive
+a rollback, so every session advisory lock is released (`pg_advisory_unlock_all()`) before the
+rollback, even ones taken through dynamic SQL (ex. `query_to_xml`) or by a query that then failed.
+As a first line, queries that mention `pg_advisory_lock` and friends anywhere (even in a comment or
+string) are refused, as are Unicode escaped identifiers (`U&"..."`) that could spell them; the
+`pg_advisory_xact_lock` ones work.
+Statements like `SHOW` or `EXPLAIN` aren't accepted.
+
+The library behind the commands is the `slib.crtsh.lib` Storm module, ex.
+`for $cert in $lib.import(slib.crtsh.lib).lookup((1234567,)) { $lib.print($cert) }`.
 
 ## Modeling
 
