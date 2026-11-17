@@ -377,6 +377,7 @@ class MalpediaSvc(s_cell.Cell):
 
         if raw["yara"]["full"]:
             self.info.set("yarafull", now)
+        self.info.set("gaptried", raw["gaptried"])
         if raw["gaps"]:
             self.info.set("gaps", raw["gaps"])
         else:
@@ -422,13 +423,21 @@ class MalpediaSvc(s_cell.Cell):
         # Actors /api/get/actors is missing (it's keyed by display name, the IDs come from
         # /api/list/actors) are requested one by one, up to a limit.
         matched, unmatched = norm.resolveActorIds(raw["actors"], raw["actorids"])
-        missing = sorted(set(raw["actorids"]) - set(matched))
         snapactors = self._snapActors()
+        # New actors first, then the ones requested longest ago, so a pull doesn't request
+        # the same actors every time and never get to the rest.
+        tried = self.info.get("gaptried") or {}
+        missing = sorted(
+            set(raw["actorids"]) - set(matched),
+            key=lambda aid: (aid in snapactors, tried.get(aid, 0), aid),
+        )
+        raw["gaptried"] = {aid: tried[aid] for aid in missing if aid in tried}
         # Actors that are still listed, but couldn't be requested, keep their last known
         # record. Otherwise they'd look removed until a later pull got them.
         raw["kept_actors"] = {}
         for i, aid in enumerate(missing):
             if i < MAX_GAP_REQUESTS:
+                raw["gaptried"][aid] = now
                 try:
                     raw["extra_actors"][aid] = await self.client.getActor(aid)
                     continue

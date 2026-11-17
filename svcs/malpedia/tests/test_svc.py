@@ -536,6 +536,31 @@ class TestMalpediaAuditFixes(s_tests.SynTest):
             assert summary["pulled"] is True
             assert (await svc.record("yara", "win.sedreco_w0.yar"))["family"] == "win.sedreco"
 
+    async def test_gap_requests_rotate(self):
+        # Past the per-pull limit, each pull requests different missing actors (new ones
+        # first, then the ones requested longest ago), instead of the same ones every time.
+        async with fm.malpediaSvc(self) as (core, svc, fake):
+            for aid in ("xa", "xb", "xc"):
+                fake.state["actorids"].append(aid)
+                fake.state["actor"][aid] = {"value": aid.upper(), "meta": {}, "description": ""}
+            with mock.patch.object(m_svc, "MAX_GAP_REQUESTS", 2):
+                summary = await svc.pull()
+                assert summary["gaps"] == 2
+                assert fake.countPaths("/api/get/actor/") == 2
+                assert await svc.record("actor", "xb") is None
+
+                # The gaps make the next check pull again, and it gets the other two.
+                summary = await svc.pull()
+                assert fake.countPaths("/api/get/actor/") == 4
+                for aid in ("turla", "xa", "xb", "xc"):
+                    assert await svc.record("actor", aid) is not None, aid
+
+                # Then the ones requested longest ago.
+                start = len(fake.requests)
+                await svc.pull()
+                got = sorted(r for r in fake.requests[start:] if r.startswith("/api/get/actor/"))
+                assert got == ["/api/get/actor/turla", "/api/get/actor/xa"]
+
     async def test_skipped_yara_file(self):
         async with fm.malpediaSvc(self) as (core, svc, fake):
             fake.state["yara"]["tlp_white"]["win.xagent_w9.yar"] = ("win.xagent", "/* no rule here */")
