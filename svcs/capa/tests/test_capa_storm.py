@@ -719,6 +719,53 @@ class TestCapaStormModel(s_tests.SynTest):
             refs = await core.nodes(f"meta:rule={guid} -(refs)> ou:technique:ext:id=B0032")
             assert [n.ndef for n in refs] == [nodes[0].ndef]
 
+    async def test_refs_follow_mappings(self):
+        # A rule's ATT&CK and MBC edges follow its current mappings when it's modeled again
+        # (ex. a rules update), and its other -(refs)> edges are left alone.
+        async with capaSvc(self) as (core, svc, axon):
+            q = """
+                $model = $lib.import(slib.capa.model)
+                $r = ({
+                    "guid": $guid, "name": "remapped", "type": "capa", "techniques": $tids,
+                    "mbc": $mbc, "meta": ({}), "authors": ([]),
+                })
+                yield $model.rule($r)
+            """
+            guid = "c" * 32
+            first = {
+                "guid": guid,
+                "tids": ["T1027", "T1497"],
+                "mbc": [
+                    {"id": "B0032", "name": "obfuscation", "parent": None},
+                    {"id": "B0009", "name": "virtual machine detection", "parent": None},
+                ],
+            }
+            await core.nodes(q, opts={"vars": first})
+            await core.nodes(f"meta:rule={guid} [ +(refs)> {{ [ inet:fqdn=example.com ] }} ]")
+            # Another source's ou:technique the rule refs isn't one of its MBC mappings.
+            await core.nodes(
+                f"meta:rule={guid} [ +(refs)> {{ [ ou:technique=* :ext:id=B0009 :reporter:name=x ] }} ]"
+            )
+
+            second = {
+                "guid": guid,
+                "tids": ["T1027"],
+                "mbc": [{"id": "B0032", "name": "obfuscation", "parent": None}],
+            }
+            await core.nodes(q, opts={"vars": second})
+
+            tids = {n.ndef[1] for n in await core.nodes(f"meta:rule={guid} -(refs)> it:mitre:attack:technique")}
+            assert tids == {"T1027"}
+            techs = await core.nodes(f"meta:rule={guid} -(refs)> ou:technique")
+            assert {(n.get("reporter:name"), n.get("ext:id")) for n in techs} == {
+                ("mbc", "B0032"),
+                ("x", "B0009"),
+            }
+            assert len(await core.nodes(f"meta:rule={guid} -(refs)> inet:fqdn")) == 1
+            # The nodes themselves are kept.
+            assert len(await core.nodes("ou:technique:ext:id=B0009")) == 2
+            assert len(await core.nodes("it:mitre:attack:technique=T1497")) == 1
+
     async def test_contacts(self):
         async with capaSvc(self) as (core, svc, axon):
             # An email author is the contact's :email, as before.

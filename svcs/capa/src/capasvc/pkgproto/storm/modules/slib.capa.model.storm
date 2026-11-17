@@ -39,6 +39,12 @@ function refs(n, other) {
     return($n)
 }
 
+function unref(n, other) {
+    yield $n
+    [ -(refs)> $other ]
+    return($n)
+}
+
 function has(n, other) {
     yield $n
     [ +(has)> $other ]
@@ -113,6 +119,22 @@ function mbcTechnique(m) {
     return($seen($node))
 }
 
+// The ATT&CK techniques a rule node -(refs)> that aren't in tids (ATT&CK IDs), and the MBC
+// behaviors (ou:technique, see mbcTechnique) it -(refs)> that aren't in mids (MBC IDs), so a
+// rule's edges follow its current mappings when the rules are reloaded. Its other -(refs)>
+// edges (ex. to another source's ou:technique) are left alone.
+function staleTechniques(n, tids) {
+    yield $n
+    -(refs)> it:mitre:attack:technique
+    if (not $tids.has($node.repr())) { emit $node }
+}
+
+function staleMbc(n, mids) {
+    yield $n
+    -(refs)> ou:technique +:reporter:name=mbc
+    if (not $mids.has(:ext:id)) { emit $node }
+}
+
 // Create a capa rule's meta:rule and set its props. Returns the node.
 function ruleNode(r) {
     [ meta:rule=$r.guid
@@ -132,9 +154,17 @@ function ruleNode(r) {
 // The rule's documentation (description, namespace, scopes, ATT&CK, MBC, references, and
 // examples) is its :desc, its YAML is its :text, and its full meta is its "slib:capa"
 // node data. It -(refs)> the ATT&CK techniques and the MBC behaviors (ou:technique, see
-// mbcTechnique) it maps to, and is in the ruleset, if given.
+// mbcTechnique) it maps to, and is in the ruleset, if given. Its edges to the ones it no
+// longer maps to (ex. after a rules update) are removed, see staleTechniques.
 function rule(r, ruleset=(null)) {
     $n = $ruleNode($r)
+    $mids = ([])
+    for $m in $r.mbc { $mids.append($m.id) }
+    // Collected first, so the edges aren't removed while they're being walked.
+    $stale = ([])
+    for $o in $staleTechniques($n, $r.techniques) { $stale.append($o) }
+    for $o in $staleMbc($n, $mids) { $stale.append($o) }
+    for $o in $stale { $unref($n, $o) }
     for $tid in $r.techniques { $refs($n, $technique($tid)) }
     for $m in $r.mbc { $refs($n, $mbcTechnique($m)) }
     if ($ruleset != null) { $has($ruleset, $n) }

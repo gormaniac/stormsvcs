@@ -107,7 +107,8 @@ they only model a rule that isn't in the Cortex yet. Each rule is a `meta:rule`:
 
 The rule's full meta is its `slib:capa` node data. Rules `-(refs)>` the `it:mitre:attack:technique`
 nodes of their ATT&CK mappings and the `ou:technique` nodes of their
-[MBC](https://github.com/MBCProject/mbc-markdown) behaviors, and each version of the rules is a
+[MBC](https://github.com/MBCProject/mbc-markdown) behaviors (a rules update that drops a mapping
+removes its edge), and each version of the rules is a
 `meta:ruleset` that `-(has)>` its rules. Every node is linked to the `slib.capa` `meta:source` with a
 `-(seen)>` edge. MAEC categories and families are only in `:desc` and the node data.
 
