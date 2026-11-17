@@ -47,7 +47,7 @@ function findSample(query, url=(null)) {
 
 // The Triage search query for a node: file:bytes/hash:* by hash, inet:url by URL. Null if unsupported.
 function nodeQuery(node) {
-    if ($node.form() = "inet:url") { return(`url:"{$node.repr()}"`) }
+    if ($node.form() = "inet:url") { return(`url:"{$node.repr()}"`) }  // noqa: R002 - $node.form is a method on 2.x
     $hash = $util.nodeHash($node)
     if ($hash = null) { return() }
     return(`{$util.hashType($hash)}:{$hash}`)
@@ -58,11 +58,11 @@ function nodeQuery(node) {
 function enrich(node, tasks=(false)) {
     $query = $nodeQuery($node)
     if ($query = null) {
-        $lib.warn(`slib.hatching: {$node.form()} {$node.repr()} has no hash or URL to look up.`)
+        $lib.warn(`slib.hatching: {$node.form()} {$node.repr()} has no hash or URL to look up.`)  // noqa: R002 - $node.form is a method on 2.x
         return()
     }
     $url = (null)
-    if ($node.form() = "inet:url") { $url = $node.repr() }
+    if ($node.form() = "inet:url") { $url = $node.repr() }  // noqa: R002 - $node.form is a method on 2.x
     $sid = $findSample($query, url=$url)
     if ($sid = null) {
         $lib.warn(`slib.hatching: Hatching Triage has no reported sample for {$node.repr()}.`)
@@ -166,7 +166,7 @@ function _submitted(retn, what, opts) {
 // Returns the modeled sample's node (with opts.wait), the sample's metadata, or null.
 function submitNode(node, opts) {
     $psub = $lib.import(slib.hatching.priv.submit)
-    switch $node.form() {
+    switch $node.form() {  // noqa: R002 - $node.form is a method on 2.x
         "inet:url": { return($submitUrl($node.repr(), $opts)) }
         "file:bytes": {
             $sha256 = $node.props.sha256
@@ -180,7 +180,7 @@ function submitNode(node, opts) {
             return($_submitted($psub.submitFile($sha256, $name, $opts), $sha256, $opts))
         }
     }
-    $lib.warn(`slib.hatching: The node form {$node.form()} can't be submitted.`)
+    $lib.warn(`slib.hatching: The node form {$node.form()} can't be submitted.`)  // noqa: R002 - $node.form is a method on 2.x
     return()
 }
 

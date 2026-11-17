@@ -12,12 +12,12 @@ function hasApiKey() { return($svc.hasApiKey()) }
 
 function tagSettings() {
     return(({
-        "enabled": $lib.globals.get("slib:hatching:tag:enabled"),
-        "prefix": $lib.globals.get("slib:hatching:tag:prefix"),
+        "enabled": $lib.globals.get("slib:hatching:tag:enabled"),  // noqa: R005 - $lib.globals.<name> is 3.x only
+        "prefix": $lib.globals.get("slib:hatching:tag:prefix"),  // noqa: R005 - $lib.globals.<name> is 3.x only
     }))
 }
-function setTagPrefix(prefix) { $lib.globals.set("slib:hatching:tag:prefix", $prefix) }
-function setTagsEnabled(enabled) { $lib.globals.set("slib:hatching:tag:enabled", $enabled) }
+function setTagPrefix(prefix) { $lib.globals.set("slib:hatching:tag:prefix", $prefix) }  // noqa: R005 - $lib.globals.<name> is 3.x only
+function setTagsEnabled(enabled) { $lib.globals.set("slib:hatching:tag:enabled", $enabled) }  // noqa: R005 - $lib.globals.<name> is 3.x only
 
 // Users and API keys (private and self-hosted Triage instances)
 

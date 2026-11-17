@@ -635,6 +635,9 @@ class TestStormManage(s_tests.SynTest):
             self.stormHasNoWarnErr(msgs)
             self.stormIsInPrint("Renamed Yara rule hunt.yara to hunt2.yara.", msgs)
             assert fake.last("put")["json"] == {"name": "hunt2.yara", "rule": "rule hunt { condition: false }"}
+            assert "hunt2.yara" in fake.rules and "hunt.yara" not in fake.rules
+            msgs = await core.stormlist("slib.hatching.yara.add --name hunt3.yara --rename nope.yara")
+            self.stormIsInWarn("Renaming Yara rule nope.yara failed", msgs)
 
             msgs = await core.stormlist('slib.hatching.yara.add --name bad.yara --text "rule bad {"')
             self.stormIsInWarn("COMPILE_ERROR", msgs)
@@ -660,9 +663,10 @@ class TestStormManage(s_tests.SynTest):
             msgs = await core.stormlist("it:app:yara:rule | slib.hatching.yara.add --rename hunt2.yara")
             self.stormIsInErr("--rename requires --name", msgs)
 
-            msgs = await core.stormlist("slib.hatching.yara.del hunt.yara")
-            self.stormIsInPrint("Deleted Yara rule hunt.yara.", msgs)
-            assert "hunt.yara" not in fake.rules
+            msgs = await core.stormlist("slib.hatching.yara.del hunt2.yara hunt.yara")
+            self.stormIsInPrint("Deleted Yara rule hunt2.yara.", msgs)
+            self.stormIsInWarn("hunt.yara", msgs)
+            assert "hunt2.yara" not in fake.rules
 
 
 class TestStormAdmin(s_tests.SynTest):
@@ -840,3 +844,137 @@ class TestStormPerms(s_tests.SynTest):
             await visi.addRule((True, ("slib", "hatching", "submit")))
             msgs = await core.stormlist("slib.hatching.submit --url http://a.com", opts=opts)
             self.stormHasNoWarnErr(msgs)
+
+
+class TestStormPaths(s_tests.SynTest):
+    """Paths the other tests don't reach."""
+
+    async def test_model_ipv6_and_configs(self):
+        async with hatchingSvc(self) as (core, svc, fake):
+            report = fake.task_reports[(SID, "behavioral1")]
+            report["network"]["flows"].append(
+                {"id": 3, "src": "10.127.0.5:49800", "dst": "[2001:db8::7]:443", "proto": "tcp"})
+            report["network"]["requests"][1]["dns_response"]["answers"] += [
+                {"name": "evil.example.com", "type": "IN AAAA", "value": "2001:db8::7"},
+                {"name": "www.example.com", "type": "IN CNAME", "value": "evil.example.com"},
+                {"name": "evil.example.com", "type": "IN TXT", "value": "v=spf1"},
+            ]
+            report["network"]["ips"]["2001:db8::7"] = {"cc": "DE", "asn": "AS64501"}
+
+            # Triage reports a dump's config in both the overview and the task report.
+            for config in (fake.overviews[SID]["extracted"][0]["config"], report["extracted"][0]["config"]):
+                config.update({"listen_addr": "203.0.113.5", "listen_port": 4444,
+                               "dns": ["8.8.4.4", "[2001:4860:4860::8844]:5353", "not-an-ip"],
+                               "decoy": ["decoy.example.com/a", "https://b.example.com/"]})
+
+            msgs = await core.stormlist(f"slib.hatching.enrich --sample {SID} --tasks")
+            self.stormHasNoWarnErr(msgs)
+
+            (flow,) = await core.nodes('inet:flow:dst="tcp://[2001:db8::7]:443"')
+            assert flow.get("dst:ipv6") == "2001:db8::7" and flow.get("dst:port") == 443
+            (ip,) = await core.nodes("inet:ipv6=2001:db8::7")
+            assert ip.get("asn") == 64501 and ip.get("loc") == "de"
+            assert await core.count("inet:dns:aaaa=(evil.example.com, 2001:db8::7)") == 1
+            assert await core.count("inet:dns:cname=(www.example.com, evil.example.com)") == 1
+            assert await core.count("inet:dns:txt") == 0
+
+            (c2,) = await core.nodes(f"it:sec:c2:config:file=sha256:{ft.SAMPLE_SHA256}")
+            assert c2.get("listens") == ("tcp://203.0.113.5:4444",)
+            assert c2.get("dns:resolvers") == ("udp://8.8.4.4:53", "udp://[2001:4860:4860::8844]:5353")
+            assert c2.get("decoys") == ("http://decoy.example.com/a", "https://b.example.com/")
+            assert await core.count("inet:url=tcp://203.0.113.5:4444") == 1
+
+    async def test_lookup_hashes(self):
+        async with hatchingSvc(self) as (core, svc, fake):
+            # file:bytes without a SHA256 are looked up by their other hashes.
+            for prop, valu in (("sha1", ft.SAMPLE_SHA1), ("sha512", ft.SAMPLE_SHA512),
+                               ("md5", ft.SAMPLE_MD5)):
+                msgs = await core.stormlist(f"[ file:bytes=* :{prop}={valu} ] | slib.hatching.enrich --yield")
+                self.stormHasNoWarnErr(msgs)
+                assert yielded(msgs) == [("file:bytes", f"sha256:{ft.SAMPLE_SHA256}")], prop
+                assert fake.last("get", "/search")["query"]["query"] == f"{prop}:{valu}"
+
+            for form, valu in (("hash:sha1", ft.SAMPLE_SHA1), ("hash:sha512", ft.SAMPLE_SHA512)):
+                msgs = await core.stormlist(f"[ {form}={valu} ] | slib.hatching.download --yield")
+                self.stormHasNoWarnErr(msgs)
+                assert yielded(msgs) == [("file:bytes", f"sha256:{ft.SAMPLE_SHA256}")], form
+
+    async def test_wait_events_kernel(self):
+        async with hatchingSvc(self) as (core, svc, fake):
+            await core.nodes("[ test:int=1 ]")
+
+            # --model models the sample, and the inbound nodes pass through.
+            msgs = await core.stormlist(f"test:int | slib.hatching.sample.wait {SID} --timeout 5 --model")
+            self.stormHasNoWarnErr(msgs)
+            self.stormIsInPrint(f"Modeled sample {SID}", msgs)
+            assert yielded(msgs) == [("test:int", 1)]
+            assert await core.count(SAMPLE) == 1
+
+            # A sample that didn't get reported isn't modeled.
+            fake.samples[SID]["status"] = "failed"
+            count = len(fake.requests)
+            msgs = await core.stormlist(f"slib.hatching.sample.wait {SID} --timeout 5 --yield")
+            self.stormIsInPrint(f"Sample {SID} is failed.", msgs)
+            self.stormNotInPrint("Modeled", msgs)
+            assert yielded(msgs) == []
+            assert not any(r["path"].endswith("/overview.json") for r in fake.requests[count:])
+            msgs = await core.stormlist("slib.hatching.sample.wait nope --timeout 5")
+            self.stormIsInWarn("Waiting for sample nope failed", msgs)
+
+            msgs = await core.stormlist("slib.hatching.events --sample nope")
+            self.stormIsInWarn("Reading sample events failed", msgs)
+            self.stormIsInWarn("NOT_FOUND", msgs)
+
+            msgs = await core.stormlist(f"slib.hatching.kernel {SID} behavioral1 --limit 1")
+            self.stormHasNoWarnErr(msgs)
+            assert [json.loads(line) for line in prints(msgs).splitlines()] == ft.KERNEL_EVENTS[:1]
+
+    async def test_download_paths(self):
+        async with hatchingSvc(self) as (core, svc, fake):
+            msgs = await core.stormlist(f"slib.hatching.download --sample {SID} --archive tar --yield")
+            self.stormHasNoWarnErr(msgs)
+            (node,) = await core.nodes(f"file:bytes={yielded(msgs)[0][1]}")
+            assert node.get("name") == f"{SID}.tar"
+            assert fake.last("get", f"/samples/{SID}/archive") is not None
+
+            # --task picks the task, instead of every reported behavioral task of the sample.
+            count = len(fake.requests)
+            msgs = await core.stormlist(f"slib.hatching.download --sample {SID} --pcap --task behavioral1 --yield")
+            self.stormHasNoWarnErr(msgs)
+            assert yielded(msgs) == [("file:bytes", f"sha256:{hashlib.sha256(ft.PCAP_BYTES).hexdigest()}")]
+            assert [r["path"] for r in fake.requests[count:]] == [
+                f"/api/v0/samples/{SID}/behavioral1/dump.pcap"]
+
+            # A dropped file whose hash isn't the one in the report is warned about, and kept.
+            fake.task_reports[(SID, "behavioral1")]["dumped"][0]["sha256"] = "cd" * 32
+            msgs = await core.stormlist(f"slib.hatching.download --sample {SID} --dumped --yield")
+            self.stormIsInWarn(f"Downloaded {ft.DROPPED_SHA256} but expected {'cd' * 32}.", msgs)
+            assert yielded(msgs) == [("file:bytes", f"sha256:{ft.DROPPED_SHA256}")]
+
+    async def test_manage_perm(self):
+        async with hatchingSvc(self) as (core, svc, fake):
+            visi = await core.auth.addUser("visi")
+            await visi.addRule((True, ("slib", "hatching", "manage")))
+            opts = {"user": visi.iden}
+
+            msgs = await core.stormlist("slib.hatching.profile.add visi-drop --network drop", opts=opts)
+            self.stormHasNoWarnErr(msgs)
+            self.stormIsInPrint("Added profile visi-drop", msgs)
+            msgs = await core.stormlist("slib.hatching.profile.edit visi-drop --timeout 90", opts=opts)
+            self.stormHasNoWarnErr(msgs)
+            msgs = await core.stormlist("slib.hatching.profile.del visi-drop", opts=opts)
+            self.stormIsInPrint("Deleted profile visi-drop.", msgs)
+
+            msgs = await core.stormlist('slib.hatching.yara.add --name visi.yara --text "rule v { condition: true }"', opts=opts)
+            self.stormHasNoWarnErr(msgs)
+            msgs = await core.stormlist("slib.hatching.yara.add --name visi2.yara --rename visi.yara", opts=opts)
+            self.stormHasNoWarnErr(msgs)
+            assert "visi2.yara" in fake.rules and "visi.yara" not in fake.rules
+            msgs = await core.stormlist("slib.hatching.yara.del visi2.yara", opts=opts)
+            self.stormIsInPrint("Deleted Yara rule visi2.yara.", msgs)
+            assert not any(r["name"].startswith("visi") for r in fake.rules.values())
+
+            # manage doesn't grant submitting or the admin commands.
+            for cmd in ("slib.hatching.submit --url http://a.com", "slib.hatching.admin.users"):
+                msgs = await core.stormlist(cmd, opts=opts)
+                self.stormIsInErr("requires permission: slib.hatching", msgs)

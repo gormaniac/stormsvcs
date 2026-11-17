@@ -48,6 +48,12 @@ service.add slib.hatching tcp://<user>:<passwd>@<host>:27492/*
 
 The service honors the standard `HTTP(S)_PROXY` environment variables.
 
+`slib.hatching.submit` sends a file from the Axon to the service 1 MiB at a time. The service
+spools it to `tmp/uploads/` in its storage directory (not memory), and deletes it once it's
+submitted, after an hour unused, or when the service restarts. At most 16 uploads are kept
+at once, so the volume needs room for 16 files of `hatching:maxsize`. pyhatching reads the
+file into memory once, to send it to Triage.
+
 ## API keys
 
 Keys are resolved in this order, per request:
@@ -161,8 +167,10 @@ task that couldn't run) are printed as warnings.
   config `keys`, `webinject`, `command_lines`, and `attr` (they stay in the config's `:raw`).
 - Dropper source code, ransom note text, and signature indicators and descriptions.
 - Relative timestamps (process start, flow first/last seen, request times): they're offsets into
-  the task, and task reports don't say when the task started (only when the sample was submitted
-  and reported), so they can't be turned into times without guessing.
+  the task, and task reports don't say when the task started. A task report's `analysis` only
+  has the sample's `submitted` and `reported` times (and the `max_time_network`/`max_time_kernel`
+  durations), and the overview's tasks have no times at all, so they can't be turned into times
+  without guessing.
 - The static report beyond the sample's MIME type (the overview report covers its tags and
   signatures), kernel monitor events (print them with `slib.hatching.kernel`), and UrlScan
   reports (Triage documents their shape as subject to change, print them with
@@ -195,5 +203,6 @@ uv sync --dev
 uv run pytest tests
 ```
 
-The tests run against `pyhatching.testing.FakeTriage`. `tests/test_live.py` runs against the real
-API when `HATCHING_LIVE_APIKEY` is set (and `HATCHING_LIVE_URL`, for a non-public instance).
+The tests run against `pyhatching.testing.FakeTriage`, extended in `tests/helpers.py` where it
+doesn't do what the real API does (ex. renaming Yara rules). `tests/test_live.py` runs against
+the real API when `HATCHING_LIVE_APIKEY` is set (and `HATCHING_LIVE_URL`, for a non-public instance).

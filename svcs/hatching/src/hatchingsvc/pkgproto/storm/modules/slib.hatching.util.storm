@@ -32,7 +32,7 @@ function hashType(valu) {
 
 // The best hash to look a file:bytes/hash:* node up by, preferring SHA256. Returns null if there isn't one.
 function nodeHash(node) {
-    switch $node.form() {
+    switch $node.form() {  // noqa: R002 - $node.form is a method on 2.x
         "file:bytes": {
             if $node.props.sha256 { return($node.props.sha256) }
             if $node.props.sha1 { return($node.props.sha1) }

@@ -14,8 +14,8 @@ init {
 function hasSvcKey() { return($svc.hasApiKey().data) }
 
 function tagPrefix() {
-    if $lib.globals.get("slib:hatching:tag:enabled") {
-        return($lib.globals.get("slib:hatching:tag:prefix"))
+    if $lib.globals.get("slib:hatching:tag:enabled") {  // noqa: R005 - $lib.globals.<name> is 3.x only
+        return($lib.globals.get("slib:hatching:tag:prefix"))  // noqa: R005 - $lib.globals.<name> is 3.x only
     }
     return()
 }

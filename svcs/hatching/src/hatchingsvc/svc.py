@@ -9,6 +9,8 @@ them in the standard ``TelepathRetn`` convention for Storm.
 import asyncio
 import collections
 import contextlib
+import os
+import shutil
 import time
 import urllib.parse
 from collections.abc import AsyncIterator
@@ -67,6 +69,13 @@ def dump(obj: Any) -> Any:
     if isinstance(obj, p_base.TriageModel):
         return obj.model_dump(mode="json", by_alias=True, exclude_none=True)
     return obj
+
+
+def appendFile(path: str, byts: bytes, mode: str = "ab") -> None:
+    """Write bytes to the end of a file (``mode="wb"`` to create or empty it)."""
+
+    with open(path, mode) as fd:
+        fd.write(byts)
 
 
 def profileList(profiles: list | None) -> list[dict] | None:
@@ -134,9 +143,15 @@ class HatchingSvc(s_cell.Cell):
         # How many calls are using each client, so evicted clients are only closed once idle.
         self.inuse: collections.Counter = collections.Counter()
         self.retired: set[pyhatching.PyHatchingClient] = set()
-        # File uploads in progress (see submitFileInit), by ID: {"byts": bytearray, "time": float}.
+        # File uploads in progress (see submitFileInit), by ID: {"path": str, "size": int,
+        # "time": float}. Each is spooled to a file in uploaddir, not held in memory.
         self.uploads: collections.OrderedDict[str, dict] = collections.OrderedDict()
+        self.uploaddir = os.path.join(self.dirn, "tmp", "uploads")
+        # Uploads don't survive a restart, so drop any a previous run left behind.
+        shutil.rmtree(self.uploaddir, ignore_errors=True)
+        s_common.gendir(self.uploaddir)
         self.onfini(self._closeClients)
+        self.onfini(self._dropUploads)
 
     async def _closeClients(self) -> None:
         for client in list(self.clients.values()) + list(self.retired):
@@ -448,26 +463,43 @@ class HatchingSvc(s_cell.Cell):
         req = self._submitReq("import", url=str(sample).strip())
         return await self._call(apikey, "submit_sample", req)
 
+    def _dropUpload(self, upload: str) -> None:
+        """Forget a file upload and delete its spooled file."""
+
+        item = self.uploads.pop(upload, None)
+        if item is not None:
+            with contextlib.suppress(FileNotFoundError):
+                os.unlink(item["path"])
+
+    async def _dropUploads(self) -> None:
+        for upload in list(self.uploads):
+            self._dropUpload(upload)
+
     def _pruneUploads(self) -> None:
         """Drop file uploads that have been idle for longer than ``UPLOAD_TTL``."""
 
         now = time.monotonic()
         for upload, item in list(self.uploads.items()):
             if now - item["time"] > UPLOAD_TTL:
-                del self.uploads[upload]
+                self._dropUpload(upload)
 
     async def submitFileInit(self) -> str:
         """Start a file upload, returning its ID.
 
         Send the file with ``submitFileChunk`` then submit it with ``submitFile``. This keeps
-        each Telepath call small, instead of sending the whole file in one request.
+        each Telepath call small, instead of sending the whole file in one request. The chunks
+        are spooled to a file in the service's storage directory, not held in memory.
         """
 
         self._pruneUploads()
         upload = s_common.guid()
-        self.uploads[upload] = {"byts": bytearray(), "time": time.monotonic()}
+        path = os.path.join(self.uploaddir, upload)
+        # Written in place, not in an executor: with no await between creating the file and
+        # tracking it, a cancelled call can't leave an untracked file behind.
+        appendFile(path, b"", "wb")
+        self.uploads[upload] = {"path": path, "size": 0, "time": time.monotonic()}
         while len(self.uploads) > MAX_UPLOADS:
-            self.uploads.popitem(last=False)
+            self._dropUpload(next(iter(self.uploads)))
         return upload
 
     def _upload(self, upload: str) -> dict:
@@ -480,12 +512,16 @@ class HatchingSvc(s_cell.Cell):
         """Add the next chunk of a file to an upload, returning the upload's size so far."""
 
         item = self._upload(upload)
-        if len(item["byts"]) + len(byts) > self.maxsize:
-            del self.uploads[upload]
+        if item["size"] + len(byts) > self.maxsize:
+            self._dropUpload(upload)
             raise HatchingApiError(f"The file is larger than the max of {self.maxsize} bytes.")
-        item["byts"] += byts
+        # Written in place, not in an executor (a chunk is at most a few MB). With no await
+        # between the checks above and the write, a submitFile for this upload can't run before
+        # the chunk is on disk, and a cancelled or evicted upload can't have its file recreated.
+        appendFile(item["path"], byts)
+        item["size"] += len(byts)
         item["time"] = time.monotonic()
-        return len(item["byts"])
+        return item["size"]
 
     async def submitFile(
         self,
@@ -500,25 +536,33 @@ class HatchingSvc(s_cell.Cell):
         geolocation: str | None = None,
         apikey: str | None = None,
     ) -> dict:
-        """POST /v0/samples - submit a file sent with ``submitFileInit``/``submitFileChunk``."""
+        """POST /v0/samples - submit a file sent with ``submitFileInit``/``submitFileChunk``.
 
-        byts = bytes(self._upload(upload)["byts"])
-        # The upload is done with either way, keep only one copy of the file.
+        The upload is done with either way, it's deleted once this returns. pyhatching reads
+        the spooled file into memory to send it (its API takes bytes or a path, not a stream).
+        """
+
+        item = self._upload(upload)
+        # Taken out of the open uploads, so it can't be evicted while it's being sent.
         del self.uploads[upload]
-        if not byts:
-            raise HatchingApiError("The file is empty.")
-        req = self._submitReq(
-            "file",
-            name=name or "sample",
-            interactive=interactive,
-            password=password,
-            profiles=profiles,
-            tags=tags,
-            timeout=timeout,
-            network=network,
-            geolocation=geolocation,
-        )
-        return await self._call(apikey, "submit_sample", req, byts)
+        try:
+            if not item["size"]:
+                raise HatchingApiError("The file is empty.")
+            req = self._submitReq(
+                "file",
+                name=name or "sample",
+                interactive=interactive,
+                password=password,
+                profiles=profiles,
+                tags=tags,
+                timeout=timeout,
+                network=network,
+                geolocation=geolocation,
+            )
+            return await self._call(apikey, "submit_sample", req, item["path"])
+        finally:
+            with contextlib.suppress(FileNotFoundError):
+                os.unlink(item["path"])
 
     async def wait(self, sample: str, timeout: float = 600, apikey: str | None = None) -> dict:
         """Wait (up to ``timeout`` seconds) for a sample's analysis to finish, using its events.
