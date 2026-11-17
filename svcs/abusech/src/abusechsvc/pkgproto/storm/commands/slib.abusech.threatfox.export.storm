@@ -1,4 +1,6 @@
 init {
+    $util = $lib.import(slib.abusech.util)
+    $once = ({"done": false})
     $abusech = $lib.import(slib.abusech.lib)
     if $cmdopts.bulk {
         $bulk = $lib.import(slib.abusech.priv.bulk)
@@ -10,12 +12,15 @@ init {
     elif ($cmdopts.kind = "full") {
         $lib.warn("slib.abusech.threatfox.export: The full export has every ThreatFox IOC, this may take a while.")
     }
-}
 
-spin |
-
-if (not $cmdopts.bulk) {
-    for $ioc in $abusech.threatfoxExport(kind=$cmdopts.kind, limit=$cmdopts.limit) {
-        if $cmdopts.yield { yield $ioc }
+    // Run once, not once per inbound node (which are dropped).
+    function results() {
+        if ((not $cmdopts.bulk) and $util.first($once)) {
+            for $ioc in $abusech.threatfoxExport(kind=$cmdopts.kind, limit=$cmdopts.limit) {
+                if $cmdopts.yield { yield $ioc }
+            }
+        }
     }
 }
+
+divert (true) $results()

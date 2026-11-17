@@ -12,7 +12,7 @@ init {
 }
 
 // All the URLs are submitted at once, after the inbound nodes are consumed.
-if ($node.form() = "inet:url") { $urls.append($node.repr()) }
-else { $lib.warn("slib.abusech.urlhaus.submit: Only inet:url nodes can be submitted, not {form}.", form=$node.form()) }
+if ($node.form() = "inet:url") { $urls.append($node.repr()) }  // noqa: R002
+else { $lib.warn(`slib.abusech.urlhaus.submit: Only inet:url nodes can be submitted, not {$node.form()}.`) }  // noqa: R002
 
 fini { $submit($urls) }

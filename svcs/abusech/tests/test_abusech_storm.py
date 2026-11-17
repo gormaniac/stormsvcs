@@ -3,6 +3,7 @@
 import json
 import pathlib
 
+import pytest
 import synapse.tests.utils as s_tests
 from stormlibpp.testing import assertMainHelp, assertVersionsMatch
 
@@ -45,6 +46,18 @@ class TestStormPkg(s_tests.SynTest):
 
     def test_main_help(self):
         assertMainHelp("abusechsvc")
+
+    def test_readmes(self):
+        # The package's README (shown in the Cortex) is a copy of the service's README, which
+        # names every command.
+        svcdir = pathlib.Path(__file__).parents[1]
+        readme = (svcdir / "README.md").read_text()
+        pkgreadme = svcdir / "src" / "abusechsvc" / "pkgproto" / "README.md"
+        assert pkgreadme.read_text() == readme, (
+            "Copy README.md to src/abusechsvc/pkgproto/README.md"
+        )
+        missing = [cmd for cmd in CMDS if f"`{cmd}`" not in readme]
+        assert not missing, f"README.md doesn't describe {missing}"
 
     async def test_api_unexpected_error(self):
         # An error that isn't an AbuseChApiError reaches Storm as status=False, not as a raw
@@ -99,7 +112,7 @@ class TestStormPkg(s_tests.SynTest):
             self.eq("abuse.ch bazaar: hash_not_found", retn["mesg"])
 
     async def test_pkg(self):
-        assert len(CMDS) == 32
+        assert len(CMDS) == 33
 
         async with abusechSvc(self) as (core, svc, fake):
             msgs = await core.stormlist("service.list")
@@ -164,7 +177,7 @@ class TestStormBazaar(s_tests.SynTest):
             )
 
             # The reporter.
-            nodes = await core.nodes("inet:service:account:user=abuse_ch -(seen)> file:bytes")
+            nodes = await core.nodes("inet:service:account:user=abuse_ch -(refs)> file:bytes")
             assert [n.ndef[1] for n in nodes] == [f"sha256:{SHA256}"]
             assert (
                 await count(
@@ -529,6 +542,11 @@ class TestStormUrlhaus(s_tests.SynTest):
             for tag in ("malware_download", "elf", "mozi", "status.online", "larted"):
                 assert f"rep.abusech.urlhaus.{tag}" in u.tags, tag
             assert u.tags["rep.abusech.urlhaus.mozi"] == (1790848800000, 1791021600000)
+            # The larted and blacklist tags carry the same time as the others (ABUSE-ST-06).
+            assert u.tags["rep.abusech.urlhaus.larted"] == (1790848800000, 1791021600000)
+            host = (await core.nodes("inet:fqdn=evil.example.com"))[0]
+            ival = host.tags["rep.abusech.urlhaus.spamhaus_dbl.abused_legit_malware"]
+            assert ival[0] == 1790848800000
 
             assert (
                 await count(
@@ -547,7 +565,7 @@ class TestStormUrlhaus(s_tests.SynTest):
             )
             assert (
                 await count(
-                    core, f"inet:service:account:user=lrz_urlhaus -(seen)> inet:url +inet:url={url}"
+                    core, f"inet:service:account:user=lrz_urlhaus -(refs)> inet:url +inet:url={url}"
                 )
                 == 1
             )
@@ -722,7 +740,7 @@ class TestStormThreatFox(s_tests.SynTest):
 
             # The IOC's malware sample references it.
             assert await count(core, f"{FILE} -(refs)> inet:fqdn +inet:fqdn=gaga.com") == 1
-            assert await count(core, "inet:service:account:user=abuse_ch -(seen)> inet:fqdn") == 1
+            assert await count(core, "inet:service:account:user=abuse_ch -(refs)> inet:fqdn") == 1
 
     async def test_lookup_forms(self):
         async with abusechSvc(self) as (core, svc, fake):
@@ -1073,6 +1091,15 @@ class TestStormBlocklists(s_tests.SynTest):
                 "rep.abusech.sslbl.ja3" in nodes[0].tags
                 and "rep.abusech.sslbl.dridex" in nodes[0].tags
             )
+            # A JA3 says so even without tags (ABUSE-ST-04).
+            await core.nodes("slib.abusech.admin.tags --disable")
+            await core.nodes("hash:md5 | delnode --force")
+            nodes = await core.nodes("slib.abusech.sslbl ja3 --yield")
+            assert not [t for t in nodes[0].tags if t.startswith("rep.")]
+            assert (
+                await count(core, "hash:md5 <(about)- meta:note +:type=slib.abusech.sslbl.ja3")
+                == 1
+            )
 
     async def test_fplist(self):
         async with abusechSvc(self) as (core, svc, fake):
@@ -1374,12 +1401,14 @@ class TestStormReview(s_tests.SynTest):
             self.stormHasNoErr(msgs)
             assert fake.queries("yaraify")[-1] == "rescan_file"
 
-            # Files too large to submit are rejected before they're read out of the Axon.
+            # Files too large to submit are rejected before they're read out of the Axon, and
+            # nothing is sent to MalwareBazaar.
             svc.maxsize = 4
             await core.nodes(f"file:bytes={sha256} [ :size={size} ]")
+            before = len(fake.requests)
             msgs = await core.stormlist(f"file:bytes={sha256} | slib.abusech.bazaar.submit")
             self.stormIsInWarn("larger than the max of 4", msgs)
-            assert "file" not in fake.last("/bazaar")["files"] if fake.queries("bazaar") else True
+            assert fake.requests[before:] == []
 
             # Identical comments from different authors are different notes.
             model = "$m = $lib.import(slib.abusech.model)"
@@ -1394,3 +1423,379 @@ class TestStormReview(s_tests.SynTest):
                 )
                 == 1
             )
+
+
+class TestStormFamilies(s_tests.SynTest):
+    """Malware families are keyed on their name, and old tag-keyed ones merge (ABUSE-ST-01)."""
+
+    async def test_family_keying(self):
+        async with abusechSvc(self) as (core, svc, fake):
+            model = "$m = $lib.import(slib.abusech.model)"
+            # Tagging on, two platforms, then tagging off: one node, keyed on the name.
+            await core.nodes(f"{model} $m.setPrefix(rep.abusech) $m.family(bazaar, Emotet, emotet)")
+            await core.nodes(
+                f"{model} $m.setPrefix(rep.abusech) $m.family(threatfox, Emotet, emotet)"
+            )
+            await core.nodes(f"{model} $m.setPrefix((null)) $m.family(bazaar, Emotet, emotet)")
+            await core.nodes(f"{model} $m.setPrefix(rep.other) $m.family(bazaar, Emotet, emotet)")
+            nodes = await core.nodes("risk:tool:software")
+            assert len(nodes) == 1
+            node = nodes[0]
+            assert node.get("soft:name") == "emotet"
+            # The tag from the first platform it was tagged on.
+            assert node.get("tag") == "rep.abusech.bazaar.emotet"
+            guid = await core.callStorm(f"{model} return($m.familyGuid(Emotet))")
+            assert node.ndef[1] == guid
+
+            # The bulk builder keys it the same way, with tagging on or off.
+            from abusechsvc import bulk
+
+            for prefix in ("rep.abusech", None):
+                builder = bulk.NodeBuilder(bulk.buildModel(), prefix)
+                assert builder.family("threatfox", "Emotet", "emotet")[1] == guid
+
+    # Synapse 2.x's only read-only props that can reference a family are on deprecated forms
+    # (meta:seen, edge:refs, ...), which older Cortexes still have.
+    @pytest.mark.allow_synapse_deprecations
+    async def test_merge_readonly_refs(self):
+        # An old node referenced by a read-only prop (part of another node's primary value)
+        # can't be re-pointed, so it's skipped before anything changes, and the rest merge.
+        async with abusechSvc(self) as (core, svc, fake):
+            src = SOURCES["bazaar"][0]
+            for query in (
+                """[ risk:tool:software=({"tag": "rep.abusech.bazaar.emotet"})
+                    :soft:name=Emotet :reporter:name=abuse.ch +#other.tag ]""",
+                """[ risk:tool:software=({"tag": "rep.abusech.threatfox.emotet"})
+                    :soft:name=Emotet :reporter:name=abuse.ch :desc=threatfox ]""",
+                """[ risk:tool:software=({"tag": "rep.abusech.bazaar.qakbot"})
+                    :soft:name=Qakbot :reporter:name=abuse.ch ]""",
+            ):
+                await core.nodes(query)
+            emo = await core.nodes("risk:tool:software:tag=rep.abusech.bazaar.emotet")
+            emoguid = emo[0].ndef[1]
+            qak = await core.nodes("risk:tool:software:tag=rep.abusech.bazaar.qakbot")
+            qakguid = qak[0].ndef[1]
+            await core.nodes(
+                "[ meta:seen=($src, (risk:tool:software, $g)) ]",
+                opts={"vars": {"src": src, "g": emoguid}},
+            )
+            await core.nodes(
+                "[ edge:refs=((inet:fqdn, x.com), (risk:tool:software, $g)) ]",
+                opts={"vars": {"g": qakguid}},
+            )
+            model = "$m = $lib.import(slib.abusech.model)"
+            emotet = await core.callStorm(f"{model} return($m.familyGuid(Emotet))")
+
+            msgs = await core.stormlist("slib.abusech.admin.families.merge")
+            self.stormHasNoErr(msgs)
+            self.stormIsInWarn("referenced by read-only props", msgs)
+            self.stormIsInWarn("meta:seen:node", msgs)
+            self.stormIsInWarn("edge:refs:n2", msgs)
+            self.stormIsInPrint("Found 1 old family nodes for 1 families", msgs)
+            self.stormIsInPrint("Skipped 2 old family nodes", msgs)
+
+            msgs = await core.stormlist("slib.abusech.admin.families.merge --apply")
+            self.stormHasNoErr(msgs)
+            self.stormIsInPrint("Merged 1 old family nodes into 1 families", msgs)
+            # The skipped nodes are untouched, the other one merged.
+            for guid in (emoguid, qakguid):
+                assert await count(core, f"risk:tool:software={guid}") == 1
+            emo = (await core.nodes(f"risk:tool:software={emoguid}"))[0]
+            assert emo.getTag("other.tag") == (None, None)
+            new = (await core.nodes(f"risk:tool:software={emotet}"))[0]
+            assert new.get("desc") == "threatfox" and new.getTag("other.tag") is None
+            assert await count(core, f"meta:seen:node=(risk:tool:software, {emoguid})") == 1
+
+    async def test_merge(self):
+        async with abusechSvc(self) as (core, svc, fake):
+            await core.addFormProp(
+                "inet:fqdn", "_family", ("risk:tool:software", {}), {"doc": "test"}
+            )
+            await core.addFormProp(
+                "inet:fqdn",
+                "_families",
+                ("array", {"type": "risk:tool:software"}),
+                {"doc": "test"},
+            )
+            src = SOURCES["bazaar"][0]
+
+            # Two old tag-keyed nodes (two platforms, tagging on) for one family, and one more
+            # family with only an old node.
+            await core.nodes(
+                """
+                [ risk:tool:software=({"tag": "rep.abusech.bazaar.emotet"})
+                    :soft:name=Emotet :reporter:name=abuse.ch :type=malware :id=win.emotet
+                    :soft:names=(emotet, heodo) .seen=(2020, 2021)
+                    +#rep.abusech.bazaar.emotet=(2020, 2021) +#other.tag
+                    <(refs)+ { [ inet:url=https://bazaar.abuse.ch/emotet ] }
+                    +(uses)> { [ inet:fqdn=c2.emotet.com ] }
+                ]
+                [ <(seen)+ { meta:source=$src } ]
+                """,
+                opts={"vars": {"src": src}},
+            )
+            await core.nodes(
+                """
+                [ risk:tool:software=({"tag": "rep.abusech.threatfox.emotet"})
+                    :soft:name=Emotet :reporter:name=abuse.ch :soft:names=(geodo,)
+                    :desc="from threatfox" .seen=(2022, 2023)
+                    +#rep.abusech.threatfox.emotet=(2022, 2023)
+                ]
+                """
+            )
+            await core.nodes(
+                """
+                [ risk:tool:software=({"tag": "rep.abusech.bazaar.qakbot"})
+                    :soft:name=Qakbot :reporter:name=abuse.ch ]
+                """
+            )
+            # The current node for Emotet (tagging off), with its own values.
+            model = "$m = $lib.import(slib.abusech.model)"
+            await core.nodes(f"{model} $m.setPrefix((null)) $m.family(urlhaus, Emotet, emotet)")
+            emotet = await core.callStorm(f"{model} return($m.familyGuid(Emotet))")
+            qakbot = await core.callStorm(f"{model} return($m.familyGuid(Qakbot))")
+            await core.nodes(f"risk:tool:software={emotet} [ :id=keep.me ]")
+
+            # References to the old nodes, by guid, array, and ndef.
+            old = await core.nodes("risk:tool:software:tag=rep.abusech.bazaar.emotet")
+            oldguid = old[0].ndef[1]
+            await core.nodes(
+                f"""
+                [ inet:fqdn=ref.com :_family={oldguid} :_families=({oldguid}, {emotet}) ]
+                """
+            )
+            await core.nodes(f"[ risk:vulnerable=* :node=(risk:tool:software, {oldguid}) ]")
+            # Unrelated nodes are left alone: one keyed some other way, and a new-keyed one.
+            await core.nodes("[ risk:tool:software=* :soft:name=Emotet :reporter:name=abuse.ch ]")
+            assert await count(core, "risk:tool:software") == 5
+
+            # A non-admin is refused.
+            user = await core.auth.addUser("analyst")
+            await user.addRule((True, ("slib", "abusech", "user")))
+            await user.addRule((True, ("node",)))
+            msgs = await core.stormlist(
+                "slib.abusech.admin.families.merge --apply", opts={"user": user.iden}
+            )
+            self.stormIsInErr("permission", msgs)
+            assert await count(core, "risk:tool:software") == 5
+
+            # The dry run changes nothing.
+            before = {n.ndef: (n.props, n.tags) for n in await core.nodes("risk:tool:software")}
+            msgs = await core.stormlist("slib.abusech.admin.families.merge")
+            self.stormHasNoErr(msgs)
+            self.stormIsInPrint("Found 3 old family nodes for 2 families", msgs)
+            self.stormIsInPrint("dry run", msgs)
+            after = {n.ndef: (n.props, n.tags) for n in await core.nodes("risk:tool:software")}
+            assert before == after
+            assert await count(core, f"inet:fqdn=ref.com +:_family={oldguid}") == 1
+
+            # --apply merges them.
+            msgs = await core.stormlist("slib.abusech.admin.families.merge --apply")
+            self.stormHasNoErr(msgs)
+            self.stormIsInPrint("Merged 3 old family nodes into 2 families", msgs)
+            self.stormIsInPrint("re-pointed 2 nodes", msgs)
+            assert await count(core, "risk:tool:software:tag^=rep.abusech") == 2
+            assert await count(core, "risk:tool:software") == 3
+
+            node = (await core.nodes(f"risk:tool:software={emotet}"))[0]
+            # Props unset on the target are copied, set ones are kept, arrays are combined.
+            assert node.get("id") == "keep.me"
+            assert node.get("desc") == "from threatfox"
+            assert node.get("type") == "malware."
+            assert set(node.get("soft:names")) == {"emotet", "heodo", "geodo"}
+            assert node.get(".seen")[0] == 1577836800000  # 2020
+            assert node.get(".seen")[1] == 1672531200000  # 2023
+            # Tags move with their times.
+            assert node.getTag("rep.abusech.bazaar.emotet") == (1577836800000, 1609459200000)
+            assert node.getTag("rep.abusech.threatfox.emotet") == (1640995200000, 1672531200000)
+            assert node.getTag("other.tag") == (None, None)
+            # Light edges move, both directions.
+            assert await count(core, f"risk:tool:software={emotet} -(uses)> inet:fqdn") == 1
+            assert await count(core, f"risk:tool:software={emotet} <(refs)- inet:url") == 1
+            assert await count(core, f"risk:tool:software={emotet} <(seen)- meta:source") >= 1
+            # References are re-pointed.
+            ref = (await core.nodes("inet:fqdn=ref.com"))[0]
+            assert ref.get("_family") == emotet
+            assert set(ref.get("_families")) == {emotet}
+            assert await count(core, f"risk:vulnerable:node=(risk:tool:software, {emotet})") == 1
+            assert await count(core, f"risk:tool:software={oldguid}") == 0
+            assert await count(core, f"risk:tool:software={qakbot} +:soft:name=qakbot") == 1
+
+            # A second run is a no-op.
+            before = {n.ndef: (n.props, n.tags) for n in await core.nodes("risk:tool:software")}
+            msgs = await core.stormlist("slib.abusech.admin.families.merge --apply")
+            self.stormHasNoErr(msgs)
+            self.stormIsInPrint("Merged 0 old family nodes into 0 families", msgs)
+            msgs = await core.stormlist("slib.abusech.admin.families.merge")
+            self.stormIsInPrint("There are no old family nodes to merge", msgs)
+            after = {n.ndef: (n.props, n.tags) for n in await core.nodes("risk:tool:software")}
+            assert before == after
+
+
+class TestStormAuditFixes(s_tests.SynTest):
+    """Storm side audit fixes (ABUSE-ST-*), and commands that ignore inbound nodes."""
+
+    async def test_tag_prefix(self):
+        async with abusechSvc(self) as (core, svc, fake):
+            # Bad prefixes are refused, and the setting is unchanged (ABUSE-ST-09).
+            for bad in ('"rep abuse"', '""', '"rep..abuse"', '"rep.x-y"', '"rep.#x"'):
+                msgs = await core.stormlist(f"slib.abusech.admin.tags --prefix {bad}")
+                self.stormIsInErr("isn't a valid tag name", msgs)
+            msgs = await core.stormlist("slib.abusech.admin.tags")
+            self.stormIsInPrint("prefix=rep.abusech", msgs)
+            # The module refuses them too, for callers that skip the command.
+            msgs = await core.stormlist(
+                '$lib.import(slib.abusech.priv.admin).setTagPrefix("rep abuse")'
+            )
+            self.stormIsInErr("isn't a valid tag name", msgs)
+
+            # Upper case is only normalized.
+            msgs = await core.stormlist("slib.abusech.admin.tags --prefix Rep.Abuse")
+            self.stormIsInPrint("prefix=rep.abuse", msgs)
+
+            # One helper gives every module the prefix, or null when tagging is off.
+            q = "return($lib.import(slib.abusech.priv.tags).tagPrefix())"
+            await core.nodes("slib.abusech.admin.tags --prefix rep.abuse")
+            assert await core.callStorm(q) == "rep.abuse"
+            await core.nodes("slib.abusech.admin.tags --disable")
+            assert await core.callStorm(q) is None
+
+            # Users and bulk users can read it, others can't.
+            user = await core.auth.addUser("bulker")
+            await user.addRule((True, ("slib", "abusech", "bulk")))
+            await core.nodes("slib.abusech.admin.tags --enable")
+            assert await core.callStorm(q, opts={"user": user.iden}) == "rep.abuse"
+            nobody = await core.auth.addUser("nobody")
+            msgs = await core.stormlist(q, opts={"user": nobody.iden})
+            self.stormIsInErr("requires permission", msgs)
+
+    async def test_vault_collision(self):
+        # ABUSE-ST-10: a vault with the name already taken warns instead of raising.
+        async with abusechSvc(self) as (core, svc, fake):
+            await core.callStorm(
+                '$lib.vault.add("abusech:root", other, global, (null), ({}), ({}))'
+            )
+            msgs = await core.stormlist("slib.abusech.apikey mykey")
+            self.stormHasNoErr(msgs)
+            self.stormIsInWarn("Unable to save your abuse.ch Auth-Key", msgs)
+
+    async def test_once_per_command(self):
+        # Options that ignore inbound nodes ran once per inbound node, ex. three downloads of
+        # the Feodo blocklist for three inbound nodes. They now run once, and the inbound
+        # nodes are dropped as before.
+        async with abusechSvc(self) as (core, svc, fake):
+            await core.nodes("[ test:int=1 test:int=2 test:int=3 ]")
+            for query, path, yielded in (
+                ("slib.abusech.feodo", "/feodo", 0),
+                ("slib.abusech.feodo --yield", "/feodo", 2),
+                (f"slib.abusech.bazaar.lookup --hash {SHA256} --yield", "/bazaar", 1),
+                ("slib.abusech.bazaar.cscb --yield", "/bazaar", None),
+                ("slib.abusech.threatfox.search recent", "/threatfox", None),
+            ):
+                before = len([r for r in fake.requests if r["path"].startswith(path)])
+                msgs = await core.stormlist(f"test:int | {query}")
+                self.stormHasNoErr(msgs)
+                after = len([r for r in fake.requests if r["path"].startswith(path)])
+                assert after - before == 1, query
+                nodes = [m[1] for m in msgs if m[0] == "node"]
+                assert not [n for n in nodes if n[0][0] == "test:int"], query
+                if yielded is not None:
+                    assert len(nodes) == yielded, query
+                # Without inbound nodes too.
+                msgs = await core.stormlist(query)
+                self.stormHasNoErr(msgs)
+                if yielded is not None:
+                    assert len([m for m in msgs if m[0] == "node"]) == yielded, query
+
+            # Options that don't yield nodes still run once.
+            before = len(fake.queries("bazaar"))
+            msgs = await core.stormlist(
+                f"test:int | slib.abusech.bazaar.update --hash {SHA256} --comment hi"
+            )
+            self.stormHasNoErr(msgs)
+            assert len(fake.queries("bazaar")) - before == 1
+
+
+class TestStormOptions(s_tests.SynTest):
+    """Command options the audit found untested."""
+
+    async def test_options(self):
+        async with abusechSvc(self) as (core, svc, fake):
+            # bazaar.search by every field that takes a limit.
+            for by, field in (
+                ("filetype", "file_type"),
+                ("clamav", "clamav"),
+                ("imphash", "imphash"),
+                ("tlsh", "tlsh"),
+                ("telfhash", "telfhash"),
+                ("gimphash", "gimphash"),
+                ("dhash", "dhash_icon"),
+                ("yara", "yara_rule"),
+            ):
+                msgs = await core.stormlist(f"slib.abusech.bazaar.search {by} abc --limit 7")
+                self.stormHasNoErr(msgs)
+                form = fake.last("/bazaar")["form"]
+                assert form[field] == "abc" and form["limit"] == "7", by
+
+            # yaraify.search by everything but yara.
+            for by, query in (
+                ("clamav", "get_clamav"),
+                ("imphash", "get_imphash"),
+                ("gimphash", "get_gimphash"),
+                ("dhash", "get_dhash_icon"),
+                ("tlsh", "get_tlsh"),
+                ("telfhash", "get_telfhash"),
+            ):
+                msgs = await core.stormlist(f"slib.abusech.yaraify.search {by} abc --limit 3")
+                self.stormHasNoErr(msgs)
+                body = fake.last("/yaraify")["json"]
+                assert body["query"] == query and body["search_term"] == "abc", by
+                assert body["result_max"] == 3
+
+            # threatfox.submit --reference and --compromised.
+            msgs = await core.stormlist(
+                "slib.abusech.threatfox.submit payload_delivery x --ioc a.com --type domain"
+                " --reference https://ref.example.com/ --compromised"
+            )
+            self.stormHasNoErr(msgs)
+            body = fake.last("/threatfox")["json"]
+            assert body["reference"] == "https://ref.example.com/" and body["is_compromised"]
+
+            # yaraify.scan --share --noclamav --skipknown --skipnoisy.
+            size, sha256 = await core.axon.put(b"MZ scan flags")
+            sha256 = sha256.hex()
+            await core.nodes(f"[ file:bytes={sha256} :size={size} ]")
+            msgs = await core.stormlist(
+                f"file:bytes={sha256} | slib.abusech.yaraify.scan --share --noclamav"
+                " --skipknown --skipnoisy"
+            )
+            self.stormHasNoErr(msgs)
+            opts = json.loads(fake.last("/yaraify")["form"]["json_data"])
+            assert opts["share_file"] == 1 and opts["clamav_scan"] == 0
+            assert opts["skip_known"] == 1 and opts["skip_noisy"] == 1
+
+            # yaraify.scan --wait gives up on a task that stays queued.
+            fake.overrides[("yaraify", "get_results")] = (
+                200,
+                {"query_status": "ok", "data": "queued"},
+            )
+            msgs = await core.stormlist(
+                f"file:bytes={sha256} | slib.abusech.yaraify.scan --rescan --wait 1"
+            )
+            self.stormHasNoErr(msgs)
+            self.stormIsInPrint("is still queued", msgs)
+
+            # sslbl --limit.
+            nodes = await core.nodes("slib.abusech.sslbl certs --limit 1 --yield")
+            assert len(nodes) == 1
+
+            # admin.request --params.
+            msgs = await core.stormlist(
+                "slib.abusech.admin.request urlhaus --path urls/recent/ --method get"
+                ' --params ({"x": "1"})'
+            )
+            self.stormHasNoErr(msgs)
+            assert fake.last("/urlhaus")["query"] == {"x": "1"}
+            # And paths that leave the API are refused (ABUSE-PY-03).
+            msgs = await core.stormlist("slib.abusech.admin.request urlhaus --path ../../x")
+            self.stormIsInWarn("Invalid path", msgs)

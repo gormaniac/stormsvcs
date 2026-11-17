@@ -1,4 +1,5 @@
 init {
+    $once = ({"done": false})
     $privsub = $lib.import(slib.abusech.priv.submit)
     $util = $lib.import(slib.abusech.util)
 
@@ -8,7 +9,7 @@ init {
 
     function update(sha256) {
         if ($util.hashType($sha256) != "sha256") {
-            $lib.warn("slib.abusech.bazaar.update: {sha} is not a SHA256 hash.", sha=$sha256)
+            $lib.warn(`slib.abusech.bazaar.update: {$sha256} is not a SHA256 hash.`)
             return()
         }
         if $cmdopts.comment {
@@ -17,18 +18,24 @@ init {
         for $add in $cmdopts.add {
             $parts = $add.split("=", maxsplit=(1))
             if ($lib.len($parts) != 2) {
-                $lib.warn("slib.abusech.bazaar.update: --add must be <key>=<value>, not {add}.", add=$add)
+                $lib.warn(`slib.abusech.bazaar.update: --add must be <key>=<value>, not {$add}.`)
                 continue
             }
             ($key, $valu) = $parts
             $util.printSubmission(`Updating {$key} on {$sha256}`, $privsub.bazaarUpdate($sha256, $key, $valu))
         }
     }
+
+    // The options that ignore inbound nodes (which are dropped) run once, not once per node.
+    function byOptions() {
+        if $util.first($once) {
+            for $sha in $cmdopts.hash { $update($lib.cast(str, $sha).lower()) }
+        }
+    }
 }
 
 if $cmdopts.hash {
-    spin |
-    for $sha in $cmdopts.hash { $update($lib.cast(str, $sha).lower()) }
+    divert (true) $byOptions()
 }
 else {
     $sha = $util.nodeHash($node)

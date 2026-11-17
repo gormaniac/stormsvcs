@@ -1,0 +1,183 @@
+// Merge the malware family nodes keyed the old way into the current ones (ABUSE-ST-01).
+//
+// Before 0.4.0, a family's risk:tool:software was keyed on its tag (ex.
+// rep.abusech.bazaar.emotet) when tagging was on, and on its name and reporter when it was
+// off. So a family got one node per platform and tag prefix it was tagged with, plus one for
+// tagging off. It's now always keyed on its name and reporter (see
+// slib.abusech.model.familyGuid). This finds the tag-keyed nodes and merges each into the
+// node for its name, which slib.abusech.admin.families.merge runs.
+//
+// Unprivileged: node edits run as the calling admin, so their node permissions apply.
+
+init {
+    $model = $lib.import(slib.abusech.model)
+}
+
+// Whether a risk:tool:software was keyed on its :tag, ({"tag": ...}), the old tagging-on guid.
+function isTagKeyed(n) {
+    $tag = $n.props.tag
+    if ($tag = null) { return((false)) }
+    return(($n.value() = $lib.guid((tag, $tag))))
+}
+
+// Emit ({"node": <old node>, "target": <guid>}) for every tag-keyed abuse.ch family node.
+function oldFamilies() {
+    for $n in ${ risk:tool:software:reporter:name="abuse.ch" +:soft:name +:tag } {  // noqa: M001
+        if $isTagKeyed($n) {
+            $target = $model.familyGuid($n.props."soft:name")
+            if ($target and $target != $n.value()) { emit ({"node": $n, "target": $target}) }
+        }
+    }
+}
+
+// The props of other nodes that reference the old node but are read-only, as a list of
+// "<form>:<prop> (<iden>)". These (ex. meta:seen:node, edge:refs:n1) are derived from the
+// referencing node's primary value, so they can't be re-pointed: a node referenced this way
+// must be skipped before anything is merged.
+function readOnlyRefs(old) {
+    $refs = ([])
+    $form = $old.form()  // noqa: R002 - $node.form is a gtor in 3.x, 2.x needs the call.
+    $oval = $old.value()
+    for $ref in ${ yield $old <- * } {
+        $refform = $ref.form()  // noqa: R002
+        for ($name, $valu) in $ref.props {
+            $prop = $lib.model.prop(`{$refform}:{$name}`)
+            if (not $prop) { continue }
+            if (not $_isReadOnly($prop.full)) { continue }
+            $refd = ($_swap($prop.type.name, $valu, $form, $oval, $oval) != null)
+            if ((not $refd) and $prop.type.name = "array") {
+                for $item in $valu {
+                    if ($_swap($prop.type.opts.type, $item, $form, $oval, $oval) != null) {
+                        $refd = (true)
+                    }
+                }
+            }
+            if $refd { $refs.append(`{$prop.full} ({$ref.iden()})`) }
+        }
+    }
+    return($refs)
+}
+
+function _isReadOnly(full) {
+    for $p in ${ syn:prop=$full +:ro=1 } { return((true)) }  // noqa: M001
+    return((false))
+}
+
+// Merge an old family node into the node keyed by guid. Returns how many nodes referenced
+// the old node by a prop (and now reference the new one).
+function merge(old, guid) {
+    $new = $_target($guid)
+    $_props($old, $new)
+    $_tags($old, $new)
+    $_edges($old, $new)
+    $refs = $_repoint($old, $new)
+    $_delete($old)
+    return($refs)
+}
+
+function _target(guid) {
+    [ risk:tool:software=$guid ]  // noqa: M001
+    return($node)
+}
+
+// Copy the props the new node doesn't have, union the array props, and merge .seen.
+function _props(old, new) {
+    for ($name, $valu) in $old.props {
+        if ($name = ".created") { continue }
+        $cur = $new.props.$name
+        if ($name = ".seen") {
+            // Setting an interval merges it with the current one.
+            $new.props.set($name, $valu)
+            continue
+        }
+        $prop = $lib.model.prop(`risk:tool:software:{$name}`)
+        if ($prop and $prop.type.name = "array") {
+            $vals = $lib.set()
+            for $v in $cur { $vals.add($v) }
+            for $v in $valu { $vals.add($v) }
+            $new.props.set($name, $vals.list())
+        } elif ($cur = null) {
+            $new.props.set($name, $valu)
+        }
+    }
+}
+
+// Move the tags, with their times.
+function _tags(old, new) {
+    ($ndef, $info) = $old.pack()
+    for ($tag, $ival) in $info.tags { $_tag($new, $tag, $ival) }
+}
+
+function _tag(n, tag, ival) {
+    yield $n
+    if ($ival.0 = null) { [ +#$tag ] }
+    else { [ +#$tag=$ival ] }
+    return($n)
+}
+
+// Move the light edges, both directions. An edge between the old node and itself moves to
+// the new node and itself.
+function _edges(old, new) {
+    $oiden = $old.iden()
+    $niden = $new.iden()
+    for ($verb, $iden) in $old.edges() {
+        if ($iden = $oiden) { $iden = $niden }
+        $new.addEdge($verb, $iden)
+        $old.delEdge($verb, $iden)
+    }
+    for ($verb, $iden) in $old.edges(reverse=(true)) {
+        for $n1 in ${ yield $iden } {
+            $n1.addEdge($verb, $niden)
+            $n1.delEdge($verb, $oiden)
+        }
+    }
+}
+
+// Point the props that reference the old node (by guid or ndef, or in an array) at the new one.
+function _repoint(old, new) {
+    $count = (0)
+    $form = $old.form()  // noqa: R002 - $node.form is a gtor in 3.x, 2.x needs the call.
+    $oval = $old.value()
+    $nval = $new.value()
+    for $ref in ${ yield $old <- * } {
+        $changed = (false)
+        $refform = $ref.form()  // noqa: R002
+        for ($name, $valu) in $ref.props {
+            $prop = $lib.model.prop(`{$refform}:{$name}`)
+            if (not $prop) { continue }
+            $newvalu = $_swap($prop.type.name, $valu, $form, $oval, $nval)
+            if ($newvalu = null) {
+                if ($prop.type.name = "array") {
+                    $items = ([])
+                    $swapped = (false)
+                    for $item in $valu {
+                        $sitem = $_swap($prop.type.opts.type, $item, $form, $oval, $nval)
+                        if ($sitem = null) { $items.append($item) }
+                        else { $items.append($sitem) $swapped = (true) }
+                    }
+                    if $swapped {
+                        $ref.props.set($name, $items)
+                        $changed = (true)
+                    }
+                }
+            } else {
+                $ref.props.set($name, $newvalu)
+                $changed = (true)
+            }
+        }
+        if $changed { $count = ($count + 1) }
+    }
+    return($count)
+}
+
+// The new value for a value of the given type that references the old node, or null.
+function _swap(type, valu, form, oval, nval) {
+    if ($type = $form and $valu = $oval) { return($nval) }
+    if ($type = "ndef" and $valu.0 = $form and $valu.1 = $oval) { return(($form, $nval)) }
+    return()
+}
+
+function _delete(old) {
+    yield $old | delnode
+    return()
+}

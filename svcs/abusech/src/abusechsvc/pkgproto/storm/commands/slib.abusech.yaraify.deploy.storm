@@ -10,11 +10,11 @@ init {
     }
 }
 
-if ($node.form() != "it:app:yara:rule") {
-    $lib.warn("slib.abusech.yaraify.deploy: Only it:app:yara:rule nodes can be deployed, not {form}.", form=$node.form())
+if ($node.form() != "it:app:yara:rule") {  // noqa: R002
+    $lib.warn(`slib.abusech.yaraify.deploy: Only it:app:yara:rule nodes can be deployed, not {$node.form()}.`)  // noqa: R002
 }
 elif (not :text) {
-    $lib.warn("slib.abusech.yaraify.deploy: {name} has no :text to deploy.", name=:name)
+    $lib.warn(`slib.abusech.yaraify.deploy: {:name} has no :text to deploy.`)
 }
 else {
     $name = :name

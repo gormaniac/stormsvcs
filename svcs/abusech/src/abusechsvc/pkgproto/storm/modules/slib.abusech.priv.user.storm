@@ -15,13 +15,6 @@ function hasKey() {
     return($svc.hasApiKey().data)
 }
 
-function tagPrefix() {
-    if $lib.globals.get("slib:abusech:tag:enabled") {
-        return($lib.globals.get("slib:abusech:tag:prefix"))
-    }
-    return($lib.null)
-}
-
 // MalwareBazaar
 
 function bazaarInfo(sha) { return($svc.normBazaarInfo($sha, apikey=$util.userKey())) }
@@ -35,33 +28,33 @@ function bazaarExport(kind=recent, limit=(0)) {
 
 // URLhaus
 
-function urlhausUrl(url=$lib.null, urlid=$lib.null) { return($svc.normUrlhausUrl(url=$url, urlid=$urlid, apikey=$util.userKey())) }
+function urlhausUrl(url=(null), urlid=(null)) { return($svc.normUrlhausUrl(url=$url, urlid=$urlid, apikey=$util.userKey())) }
 function urlhausHost(host) { return($svc.normUrlhausHost($host, apikey=$util.userKey())) }
 function urlhausPayload(sha) { return($svc.normUrlhausPayload($sha, apikey=$util.userKey())) }
 function urlhausSearch(by, valu, limit=(0)) { return($svc.normUrlhausSearch($by, $valu, limit=$limit, apikey=$util.userKey())) }
-function urlhausRecent(kind=urls, limit=$lib.null) { return($svc.normUrlhausRecent(kind=$kind, limit=$limit, apikey=$util.userKey())) }
+function urlhausRecent(kind=urls, limit=(null)) { return($svc.normUrlhausRecent(kind=$kind, limit=$limit, apikey=$util.userKey())) }
 function urlhausExport(kind=recent, limit=(0)) {
     for $retn in $svc.urlhausExport(kind=$kind, limit=$limit, apikey=$util.userKey()) { emit $retn }
 }
 
 // ThreatFox
 
-function threatfox(by, valu=$lib.null, limit=(100), exact=(false)) {
+function threatfox(by, valu=(null), limit=(100), exact=(false)) {
     return($svc.normThreatfox($by, valu=$valu, limit=$limit, exact=$exact, apikey=$util.userKey()))
 }
 function threatfoxTypes() { return($svc.threatfoxTypes(apikey=$util.userKey())) }
 function threatfoxTagList() { return($svc.threatfoxTagList(apikey=$util.userKey())) }
 function threatfoxMalwareList() { return($svc.threatfoxMalwareList(apikey=$util.userKey())) }
-function threatfoxLabel(malware, platform=$lib.null) { return($svc.threatfoxLabel($malware, platform=$platform, apikey=$util.userKey())) }
+function threatfoxLabel(malware, platform=(null)) { return($svc.threatfoxLabel($malware, platform=$platform, apikey=$util.userKey())) }
 function threatfoxExport(kind=recent, limit=(0)) {
     for $retn in $svc.threatfoxExport(kind=$kind, limit=$limit, apikey=$util.userKey()) { emit $retn }
 }
 
 // YARAify
 
-function yaraifyHash(sha, malpedia=$lib.null) { return($svc.normYaraifyHash($sha, malpedia=$malpedia, apikey=$util.userKey())) }
+function yaraifyHash(sha, malpedia=(null)) { return($svc.normYaraifyHash($sha, malpedia=$malpedia, apikey=$util.userKey())) }
 function yaraifySearch(by, valu, limit=(25)) { return($svc.normYaraifySearch($by, $valu, limit=$limit, apikey=$util.userKey())) }
-function yaraifyResults(taskid, malpedia=$lib.null) { return($svc.normYaraifyResults($taskid, malpedia=$malpedia, apikey=$util.userKey())) }
+function yaraifyResults(taskid, malpedia=(null)) { return($svc.normYaraifyResults($taskid, malpedia=$malpedia, apikey=$util.userKey())) }
 function yaraifyTasks(identifier, status=processed) { return($svc.normYaraifyTasks($identifier, status=$status, apikey=$util.userKey())) }
 function yaraifyIdentifier() { return($svc.yaraifyIdentifier(apikey=$util.userKey())) }
 function yaraifyRecentRules() { return($svc.normYaraifyRecentRules(apikey=$util.userKey())) }
@@ -82,4 +75,4 @@ function sslblBlocklist(kind=certs, limit=(0)) {
 
 // Hunting
 
-function fplist(platform=$lib.null) { return($svc.normFplist(platform=$platform, apikey=$util.userKey())) }
+function fplist(platform=(null)) { return($svc.normFplist(platform=$platform, apikey=$util.userKey())) }

@@ -191,13 +191,21 @@ class TestBulkSvc(s_tests.SynTest):
             assert new in svc.bulkjobs
             await svc.bulkDone(new)
 
-            # ThreatFox exports, zipped or not, build from the staged JSON.
+            # ThreatFox exports, zipped or not, build from the staged JSON. --bulk is for exports
+            # bigger than abusech:maxsize, so it's capped at abusech:bulk:maxsize instead.
+            maxsize, svc.maxsize = svc.maxsize, 10
             byts = b"".join([b async for b in svc.bulkPull("threatfox", "full")])
             jobid = await svc.bulkStart("threatfox", "full", hashlib.sha256(byts).hexdigest())
             await svc.bulkStage(jobid, byts)
             done = [i async for i in svc.bulkBuild(jobid, prefix="rep.abusech")][-1]
             assert done["rows"] > 0 and done["nodes"] > done["rows"]
             await svc.bulkDone(jobid)
+
+            # Without --bulk it's capped at abusech:maxsize, and the error says to use --bulk.
+            with self.raises(AbuseChApiError) as cm:
+                [i async for i in svc.threatfoxExport("full")]
+            assert "--bulk" in cm.exception.mesg
+            svc.maxsize = maxsize
 
 
 class TestBulkStorm(s_tests.SynTest):
@@ -219,6 +227,36 @@ class TestBulkStorm(s_tests.SynTest):
                 {k for k in set(storm) | set(bulked) if storm.get(k) != bulked.get(k)},
             )
 
+    async def test_family_tag(self):
+        # A family keeps the :tag it already has (from the first platform it was tagged on),
+        # like the Storm model's familyNode(). Packed nodes always set their props, so the tag
+        # is set after ingesting, only where it's unset.
+        async with abusechSvc(self) as (core, svc, fake):
+            guid = await core.callStorm(
+                "return($lib.import(slib.abusech.model).familyGuid(QakBot))"
+            )
+            await core.nodes(
+                "[ risk:tool:software=$g :soft:name=qakbot :tag=rep.abusech.bazaar.qakbot ]",
+                opts={"vars": {"g": guid}},
+            )
+            msgs = await core.stormlist("slib.abusech.threatfox.export full --bulk")
+            self.stormIsInPrint("Ingested", msgs)
+            nodes = await core.nodes("risk:tool:software=$g", opts={"vars": {"g": guid}})
+            assert nodes[0].get("tag") == "rep.abusech.bazaar.qakbot"
+            assert nodes[0].get("reporter:name") == "abuse.ch"
+
+            # A family without one gets the platform's tag.
+            await core.nodes(
+                "risk:tool:software=$g [ -:tag ]", opts={"vars": {"g": guid}}
+            )
+            await core.stormlist("slib.abusech.threatfox.export full --bulk --reuse")
+            nodes = await core.nodes("risk:tool:software=$g", opts={"vars": {"g": guid}})
+            assert (nodes[0].get("tag") or "").startswith("rep.abusech.threatfox.")
+
+        builder = bulk.NodeBuilder(bulk.buildModel(), None)
+        builder.family("threatfox", "QakBot", "qakbot")
+        assert builder.familyTags() == []
+
     async def test_datasets(self):
         async with abusechSvc(self) as (core, svc, fake):
             msgs = await core.stormlist("slib.abusech.urlhaus.export recent --bulk")
@@ -239,8 +277,9 @@ class TestBulkStorm(s_tests.SynTest):
             assert info["size"] == len(fd.URLHAUS_CSV) and info["file"] == "urlhaus:recent"
             assert (
                 info["nodes"]["count"] == 5
+                and info["nodes"]["built"] == 5
                 and info["nodes"]["rows"] == 1
-                and info["nodes"]["builder"] == 1
+                and info["nodes"]["builder"] == bulk.BUILDER_VERSION
             )
             assert await core.axon.has(bytes.fromhex(info["sha256"]))
             assert await core.axon.has(bytes.fromhex(info["nodes"]["sha256"]))
@@ -358,3 +397,102 @@ class TestBulkStorm(s_tests.SynTest):
                 assert [m for m in msgs if m[0] == "err"], name
             msgs = await core.stormlist("$lib.import(slib.abusech.bulk)", opts=opts)
             self.stormIsInErr("slib.abusech.bulk", msgs)
+
+
+class TestBulkLimits(s_tests.SynTest):
+    """Bulk jobs are capped and belong to their owner (ABUSE-PY-08), and fail clearly."""
+
+    async def test_limits(self):
+        async with abusechSvc(self) as (core, svc, fake):
+            # Clear errors instead of "Unexpected error"s.
+            jobid = await svc.bulkStart("urlhaus", "recent", "a" * 64, owner="alice")
+            with self.raises(AbuseChApiError) as cm:
+                [i async for i in svc.bulkBuild(jobid, owner="alice")]
+            assert "Nothing was staged" in cm.exception.mesg
+            with self.raises(AbuseChApiError) as cm:
+                [b async for b in svc.bulkNodes(jobid, owner="alice")]
+            assert "haven't been built" in cm.exception.mesg
+            await svc.bulkStage(jobid, b"x", owner="alice")
+            for batch in (0, -1, "1", True):
+                with self.raises(AbuseChApiError) as cm:
+                    [i async for i in svc.bulkBuild(jobid, batch=batch, owner="alice")]
+                assert "batch size must be at least 1" in cm.exception.mesg
+            with self.raises(AbuseChApiError):
+                await svc.bulkStage(jobid, "notbytes", owner="alice")
+
+            # Only the owner can use or remove a job, others see an unknown job.
+            with self.raises(AbuseChApiError) as cm:
+                await svc.bulkStage(jobid, b"x", owner="bob")
+            assert "Unknown bulk import job" in cm.exception.mesg
+            with self.raises(AbuseChApiError):
+                await svc.bulkStage(jobid, b"x")
+            with self.raises(AbuseChApiError):
+                [b async for b in svc.bulkNodes(jobid, owner="bob")]
+            assert await svc.bulkDone(jobid, owner="bob")
+            assert jobid in svc.bulkjobs
+            assert await svc.bulkDone(jobid, owner="alice")
+            assert jobid not in svc.bulkjobs
+
+            # The staged size is capped.
+            svc.bulkmaxsize = 10
+            jobid = await svc.bulkStart("urlhaus", "recent", "a" * 64)
+            assert await svc.bulkStage(jobid, b"x" * 10) == 10
+            with self.raises(AbuseChApiError) as cm:
+                await svc.bulkStage(jobid, b"x")
+            assert "abusech:bulk:maxsize" in cm.exception.mesg
+            await svc.bulkDone(jobid)
+
+            # So is the number of jobs, idle jobs are pruned to make room.
+            svc.bulkmaxjobs = 2
+            one = await svc.bulkStart("urlhaus", "recent", "a" * 64)
+            two = await svc.bulkStart("urlhaus", "recent", "a" * 64)
+            with self.raises(AbuseChApiError) as cm:
+                await svc.bulkStart("urlhaus", "recent", "a" * 64)
+            assert "the max is 2" in cm.exception.mesg
+            svc.bulkjobs[one]["touched"] -= BULK_IDLE + 1
+            three = await svc.bulkStart("urlhaus", "recent", "a" * 64)
+            assert set(svc.bulkjobs) == {two, three}
+
+    async def test_api_nodes_chunk(self):
+        # The Telepath bulkNodes takes the chunk size, by keyword or position, like the svc's.
+        import hashlib
+
+        async with abusechSvc(self) as (core, svc, fake):
+            byts = fd.BAZAAR_CSV.encode()
+            sha = hashlib.sha256(byts).hexdigest()
+            async with svc.getLocalProxy() as prox:
+                jobid = (await prox.bulkStart("bazaar", "recent", sha, user="alice"))["data"]
+                assert (await prox.bulkStage(jobid, byts, user="alice"))["status"]
+                items = [i async for i in prox.bulkBuild(jobid, user="alice")]
+                size = items[-1]["data"]["size"]
+                assert size > 100
+
+                whole = [i async for i in prox.bulkNodes(jobid, user="alice")]
+                assert len(whole) == 1 and len(whole[0]["data"]) == size
+                for items in (
+                    [i async for i in prox.bulkNodes(jobid, chunk=100, user="alice")],
+                    [i async for i in prox.bulkNodes(jobid, 100, user="alice")],
+                ):
+                    assert all(i["status"] for i in items)
+                    assert len(items) == -(-size // 100)
+                    assert b"".join(i["data"] for i in items) == whole[0]["data"]
+
+    async def test_api_owner(self):
+        # Over Telepath, a job belongs to the Telepath user and the Storm user it names.
+        async with abusechSvc(self) as (core, svc, fake):
+            async with svc.getLocalProxy() as prox:
+                retn = await prox.bulkStart("urlhaus", "recent", "a" * 64, user="alice")
+                assert retn["status"]
+                jobid = retn["data"]
+                assert svc.bulkjobs[jobid]["owner"].endswith(":alice")
+                assert (await prox.bulkStage(jobid, b"x", user="alice"))["data"] == 1
+                retn = await prox.bulkStage(jobid, b"x", user="bob")
+                assert not retn["status"] and "Unknown bulk import job" in retn["mesg"]
+                items = [i async for i in prox.bulkBuild(jobid, batch=0, user="alice")]
+                assert not items[-1]["status"] and "batch size" in items[-1]["mesg"]
+                items = [i async for i in prox.bulkNodes(jobid, user="bob")]
+                assert not items[-1]["status"] and "Unknown" in items[-1]["mesg"]
+                assert (await prox.bulkDone(jobid, user="bob"))["status"]
+                assert jobid in svc.bulkjobs
+                assert (await prox.bulkDone(jobid, user="alice"))["status"]
+                assert jobid not in svc.bulkjobs

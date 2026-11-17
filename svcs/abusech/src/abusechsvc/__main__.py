@@ -1,3 +1,5 @@
+"""Run the slib.abusech service: ``python -m abusechsvc <cell dir>``."""
+
 import asyncio
 import sys
 

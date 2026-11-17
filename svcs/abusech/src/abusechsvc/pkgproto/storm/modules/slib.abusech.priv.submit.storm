@@ -11,11 +11,11 @@ init {
 // {status, mesg} if it is (or its size is unknown), otherwise null.
 function tooLarge(size) {
     $max = $svc.maxSize().data
-    if ($size = $lib.null) { return(({"status": (false), "mesg": "The file's size is unknown.", "data": $lib.null})) }
+    if ($size = null) { return(({"status": false, "mesg": "The file's size is unknown.", "data": null})) }
     if ($size > $max) {
-        return(({"status": (false), "mesg": `The file is {$size} bytes, larger than the max of {$max}.`, "data": $lib.null}))
+        return(({"status": false, "mesg": `The file is {$size} bytes, larger than the max of {$max}.`, "data": null}))
     }
-    return($lib.null)
+    return()
 }
 
 // Read a file from the Axon as a list of (up to 1MiB) chunks for the service.
@@ -35,8 +35,8 @@ function hasFile(sha256) { return($lib.axon.has($sha256)) }
 
 // MalwareBazaar
 
-function bazaarUpload(sha256, size, name, anonymous=(false), tags=$lib.null, delivery=$lib.null,
-                      references=$lib.null, context=$lib.null) {
+function bazaarUpload(sha256, size, name, anonymous=(false), tags=(null), delivery=(null),
+                      references=(null), context=(null)) {
     $err = $tooLarge($size)
     if $err { return($err) }
     return($svc.bazaarUpload($chunks($sha256, $size), $name, anonymous=$anonymous, tags=$tags,
@@ -48,14 +48,14 @@ function bazaarComment(sha256, comment) { return($svc.bazaarComment($sha256, $co
 
 // URLhaus
 
-function urlhausSubmit(urls, threat=malware_download, tags=$lib.null, anonymous=(false)) {
+function urlhausSubmit(urls, threat=malware_download, tags=(null), anonymous=(false)) {
     return($svc.urlhausSubmit($urls, threat=$threat, tags=$tags, anonymous=$anonymous, apikey=$util.userKey()))
 }
 
 // ThreatFox
 
-function threatfoxSubmit(threat, ioctype, malware, iocs, confidence=(50), reference=$lib.null,
-                         comment=$lib.null, tags=$lib.null, anonymous=(false), compromised=(false)) {
+function threatfoxSubmit(threat, ioctype, malware, iocs, confidence=(50), reference=(null),
+                         comment=(null), tags=(null), anonymous=(false), compromised=(false)) {
     return($svc.threatfoxSubmit($threat, $ioctype, $malware, $iocs, confidence=$confidence,
                                 reference=$reference, comment=$comment, tags=$tags, anonymous=$anonymous,
                                 compromised=$compromised, apikey=$util.userKey()))
@@ -63,7 +63,7 @@ function threatfoxSubmit(threat, ioctype, malware, iocs, confidence=(50), refere
 
 // YARAify
 
-function yaraifyScan(sha256, size, name, identifier=$lib.null, clamav=(true), unpack=(false),
+function yaraifyScan(sha256, size, name, identifier=(null), clamav=(true), unpack=(false),
                      share=(false), skipknown=(false), skipnoisy=(false)) {
     $err = $tooLarge($size)
     if $err { return($err) }

@@ -11,18 +11,23 @@ init {
 function setApiKey(apikey) { return($svc.setApiKey($apikey)) }
 function hasApiKey() { return($svc.hasApiKey()) }
 
-function tagSettings() {
-    return(({
-        "enabled": $lib.globals.get("slib:abusech:tag:enabled"),
-        "prefix": $lib.globals.get("slib:abusech:tag:prefix"),
-    }))
+function tagSettings() { return($lib.import(slib.abusech.priv.tags).tagSettings()) }
+
+// Set the tag prefix. Raises BadArg for one that isn't a valid tag name (ex. "" or one with
+// spaces), which would make every tag edit silently do nothing (ABUSE-ST-09).
+function setTagPrefix(prefix) {
+    ($ok, $norm) = $lib.trycast(syn:tag, $prefix)
+    if ((not $ok) or ($norm != $lib.cast(str, $prefix).strip().lower())) {
+        $lib.raise(BadArg, `slib.abusech: {$prefix} isn't a valid tag name.`)
+    }
+    $lib.globals.set("slib:abusech:tag:prefix", $norm)  // noqa: R005
+    return($norm)
 }
-function setTagPrefix(prefix) { $lib.globals.set("slib:abusech:tag:prefix", $prefix) }
-function setTagsEnabled(enabled) { $lib.globals.set("slib:abusech:tag:enabled", $enabled) }
+function setTagsEnabled(enabled) { $lib.globals.set("slib:abusech:tag:enabled", $enabled) }  // noqa: R005
 
 // Raw requests
 
-function rawRequest(base, path="", method=post, form=$lib.null, json=$lib.null, params=$lib.null) {
+function rawRequest(base, path="", method=post, form=(null), json=(null), params=(null)) {
     return($svc.rawRequest($base, path=$path, method=$method, form=$form, json_data=$json, params=$params,
                            apikey=$util.userKey()))
 }

@@ -1252,4 +1252,6 @@ async def abusechSvc(test, apikey: str | None = "testkey"):
     async with FakeAbuseCh() as fake:
         conf = {"abusech:urls": fake.urls, "abusech:ratelimit": 0, "abusech:apikey": apikey}
         async with test.getTestCoreProxSvc(AbuseChSvc, ssvc_conf=conf) as (core, prox, svc):
+            # Retry right away, so tests of HTTP errors that are retried don't wait.
+            svc.client.backoff = 0
             yield core, svc, fake

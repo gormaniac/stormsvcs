@@ -1,10 +1,17 @@
 init {
+    $util = $lib.import(slib.abusech.util)
+    $once = ({"done": false})
     $abusech = $lib.import(slib.abusech.lib)
     $model = $lib.import(slib.abusech.model)
     $fps = $abusech.fplist(platform=$cmdopts.platform)
-    $lib.print("slib.abusech.fplist: {count} false positive entries.", count=$lib.len($fps))
+    $lib.print(`slib.abusech.fplist: {$lib.len($fps)} false positive entries.`)
+
+    // Yield the results once, not once per inbound node (which are dropped).
+    function results() {
+        if $util.first($once) {
+            if $cmdopts.yield { yield $model.nodes($fps) }
+        }
+    }
 }
 
-spin |
-
-if $cmdopts.yield { yield $model.nodes($fps) }
+divert (true) $results()

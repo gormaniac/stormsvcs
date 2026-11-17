@@ -1,6 +1,6 @@
 """The slib.abusech Synapse Service."""
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 from .svc import AbuseChSvc
 

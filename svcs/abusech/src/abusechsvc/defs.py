@@ -17,7 +17,8 @@ SOURCES = {
     "sslbl": ("af7571ed96af44cba0ceab4b6bf44c5b", "SSL Blacklist", "https://sslbl.abuse.ch"),
     "hunting": ("2f9357321acd42188845ba7c95bf6471", "abuse.ch Hunting", "https://hunting.abuse.ch"),
 }
-"""The meta:source (guid, name, url) for each abuse.ch platform, keyed by the platform's short name."""
+"""The meta:source (guid, name, url) for each abuse.ch platform, keyed by the platform's short name.
+"""
 
 EXT_PROPS = {
     "_sha3_384": ("hash:sha3_384", "The SHA3-384 hash of the file."),
@@ -26,7 +27,9 @@ EXT_PROPS = {
     "_gimphash": ("str", "The gimphash (Go import hash) of the file."),
     "_dhash_icon": ("str", "The dhash (perceptual hash) of the file's icon."),
 }
-"""Extended file:bytes props added for the fuzzy hashes abuse.ch provides that Synapse doesn't model."""
+"""
+Extended file:bytes props added for the fuzzy hashes abuse.ch provides that Synapse doesn't model.
+"""
 
 
 def _addStorm() -> str:
@@ -35,7 +38,8 @@ def _addStorm() -> str:
     lines = []
     for plat, (guid, name, url) in SOURCES.items():
         lines.append(
-            f'[ meta:source={guid} :name="{name.lower()}" :type=slib.abusech.{plat} :url={url} ] | spin |'
+            f'[ meta:source={guid} :name="{name.lower()}" :type=slib.abusech.{plat} '
+            f":url={url} ] | spin |"
         )
     for prop, (ptype, doc) in EXT_PROPS.items():
         if ptype == "hash:sha3_384":
@@ -48,11 +52,11 @@ def _addStorm() -> str:
             f'$lib.model.ext.addFormProp(file:bytes, {prop}, {typedef}, ({{"doc": "{doc}"}})) }}'
         )
     lines.append(
-        'if ($lib.globals.get("slib:abusech:tag:enabled") = $lib.null) { '
+        'if ($lib.globals.get("slib:abusech:tag:enabled") = (null)) { '
         '$lib.globals.set("slib:abusech:tag:enabled", (true)) }'
     )
     lines.append(
-        'if ($lib.globals.get("slib:abusech:tag:prefix") = $lib.null) { '
+        'if ($lib.globals.get("slib:abusech:tag:prefix") = (null)) { '
         '$lib.globals.set("slib:abusech:tag:prefix", "rep.abusech") }'
     )
     return "\n".join(lines)

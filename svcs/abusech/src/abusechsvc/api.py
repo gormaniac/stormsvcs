@@ -1,11 +1,12 @@
 """The CellApi implementation for slib.abusech."""
 
+from collections.abc import AsyncIterator
 from urllib.parse import quote
 
 import synapse.lib.cell as s_cell
 import synapse.lib.stormsvc as s_stormsvc
-from stormlibpp.svc import RetnApi
-from stormlibpp.telepath import BoolRetn
+from stormlibpp.svc import RetnApi, retn, retnGenr
+from stormlibpp.telepath import BoolRetn, TelepathRetn
 from stormlibpp.utils import normver
 
 from .client import AbuseChApiError
@@ -25,11 +26,8 @@ class AbuseChCellApi(RetnApi, s_cell.CellApi, s_stormsvc.StormSvc):
     RETN_METHS = (
         "rawRequest",
         "maxSize",
-        # Bulk imports
+        # Bulk imports (bulkStart, bulkStage, and bulkDone are hand-written below)
         "bulkExports",
-        "bulkStart",
-        "bulkStage",
-        "bulkDone",
         # MalwareBazaar
         "bazaarQuery",
         "bazaarInfo",
@@ -106,8 +104,6 @@ class AbuseChCellApi(RetnApi, s_cell.CellApi, s_stormsvc.StormSvc):
     # AbuseChSvc async generators exposed over Telepath, each item wrapped in a TelepathRetn.
     GENR_METHS = (
         "bulkPull",
-        "bulkBuild",
-        "bulkNodes",
         "bazaarExport",
         "urlhausExport",
         "threatfoxExport",
@@ -149,3 +145,69 @@ class AbuseChCellApi(RetnApi, s_cell.CellApi, s_stormsvc.StormSvc):
         """Whether the service has a stored or configured Auth-Key."""
 
         return BoolRetn(status=True, mesg="", data=await self.cell.hasApiKey())
+
+    # ---- Bulk imports ----
+    #
+    # A bulk import job belongs to the caller that started it: the Telepath user (the Cortex's
+    # service user, or anyone else with Telepath access) and the Storm user that the
+    # slib.abusech.priv.bulk module passes as ``user``. Every later call on the job must come
+    # from the same pair (ABUSE-PY-08).
+
+    def _bulkOwner(self, user: str | None) -> str:
+        """The owner of a bulk import job started or used by this Telepath session."""
+
+        return f"{self.user.iden}:{user or ''}"
+
+    def _retnKwargs(self, name: str) -> dict:
+        """The keyword arguments for ``retn()``/``retnGenr()``, like the generated methods."""
+
+        return {
+            "errors": self.RETN_ERRORS,
+            "redact": self._retnRedact,
+            "name": f"{type(self).__name__}.{name}",
+        }
+
+    async def bulkStart(
+        self, plat: str, kind: str, sha256: str, user: str | None = None
+    ) -> TelepathRetn:
+        """Start a bulk import job owned by the caller (see ``AbuseChSvc.bulkStart``)."""
+
+        owner = self._bulkOwner(user)
+        coro = self.cell.bulkStart(plat, kind, sha256, owner=owner)
+        return await retn(coro, **self._retnKwargs("bulkStart"))
+
+    async def bulkStage(self, jobid: str, byts: bytes, user: str | None = None) -> TelepathRetn:
+        """Append a chunk to the caller's job (see ``AbuseChSvc.bulkStage``)."""
+
+        coro = self.cell.bulkStage(jobid, byts, owner=self._bulkOwner(user))
+        return await retn(coro, **self._retnKwargs("bulkStage"))
+
+    async def bulkBuild(
+        self,
+        jobid: str,
+        prefix: str | None = None,
+        batch: int | None = None,
+        user: str | None = None,
+    ) -> AsyncIterator[TelepathRetn]:
+        """Build the caller's job's nodes, yielding progress (see ``AbuseChSvc.bulkBuild``)."""
+
+        kwargs = {} if batch is None else {"batch": batch}
+        genr = self.cell.bulkBuild(jobid, prefix=prefix, owner=self._bulkOwner(user), **kwargs)
+        async for item in retnGenr(genr, **self._retnKwargs("bulkBuild")):
+            yield item
+
+    async def bulkNodes(
+        self, jobid: str, chunk: int | None = None, user: str | None = None
+    ) -> AsyncIterator[TelepathRetn]:
+        """Stream the caller's job's .nodes file (see ``AbuseChSvc.bulkNodes``)."""
+
+        kwargs = {} if chunk is None else {"chunk": chunk}
+        genr = self.cell.bulkNodes(jobid, owner=self._bulkOwner(user), **kwargs)
+        async for item in retnGenr(genr, **self._retnKwargs("bulkNodes")):
+            yield item
+
+    async def bulkDone(self, jobid: str, user: str | None = None) -> TelepathRetn:
+        """Remove the caller's job (see ``AbuseChSvc.bulkDone``)."""
+
+        coro = self.cell.bulkDone(jobid, owner=self._bulkOwner(user))
+        return await retn(coro, **self._retnKwargs("bulkDone"))

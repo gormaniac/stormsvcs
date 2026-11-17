@@ -16,6 +16,7 @@ command (related endpoints are combined into one command). Everything abuse.ch r
 modeled, see [Data model](#data-model).
 
 The service registers the `slib.abusech` Storm package. Everything is namespaced under `slib.abusech`.
+The package requires Synapse 2.256.0 or later (and before 3.0.0), the version it's tested with.
 
 ## Deploying
 
@@ -42,10 +43,23 @@ service.add slib.abusech tcp://<user>:<passwd>@<host>:27492/*
 | `abusech:apikey` | `SYN_ABUSECHSVC_ABUSECH_APIKEY` | none | Fallback Auth-Key, see [Auth-Keys](#auth-keys). |
 | `abusech:ratelimit` | `SYN_ABUSECHSVC_ABUSECH_RATELIMIT` | `5.0` | Max requests/second sent to abuse.ch (0 disables it). |
 | `abusech:timeout` | `SYN_ABUSECHSVC_ABUSECH_TIMEOUT` | `120` | Seconds before a single request times out. |
-| `abusech:maxsize` | `SYN_ABUSECHSVC_ABUSECH_MAXSIZE` | `67108864` | Max bytes of a file downloaded from or submitted to abuse.ch. |
+| `abusech:maxsize` | `SYN_ABUSECHSVC_ABUSECH_MAXSIZE` | `67108864` | Max bytes of a file downloaded from or submitted to abuse.ch, of any response or dataset read into memory, and of anything unzipped (each file, and all of a zip's files together). |
+| `abusech:bulk:maxsize` | `SYN_ABUSECHSVC_ABUSECH_BULK_MAXSIZE` | `17179869184` | Max bytes of an export streamed to disk: a bulk import's staged copy, and the CSV exports the export commands read without `--bulk`. |
+| `abusech:bulk:maxjobs` | `SYN_ABUSECHSVC_ABUSECH_BULK_MAXJOBS` | `4` | Max bulk import jobs at once. |
 | `abusech:urls` | `SYN_ABUSECHSVC_ABUSECH_URLS` | abuse.ch's | Override base URLs (`bazaar`, `bazaar:export`, `urlhaus`, `urlhaus:submit`, `urlhaus:export`, `threatfox`, `threatfox:export`, `yaraify`, `yaraify:export`, `hunting`, `feodo`, `sslbl`). |
 
 The service honors the standard `HTTP(S)_PROXY` environment variables.
+
+Requests that fail in a way that may be temporary are retried up to 3 times, waiting 1, 2,
+then 4 seconds, or as long as abuse.ch's `Retry-After` header says (at most 60 seconds): HTTP
+429 and 503, and failing to connect, always; HTTP 500, 502, and 504, timeouts, and dropped
+connections only for requests that are safe to repeat (not submissions, uploads, updates,
+deletes, or `slib.abusech.admin.request`). Downloads of the exports and blocklists are retried
+until their first byte arrives.
+
+The ThreatFox JSON exports are parsed in memory. Without `--bulk` they're capped at
+`abusech:maxsize`, which the `full` export unzips to more than by default, so import it with
+`--bulk`, which caps it at `abusech:bulk:maxsize` instead.
 
 ## Auth-Keys
 
@@ -70,7 +84,7 @@ sent when available). The MalwareBazaar, URLhaus, and ThreatFox exports take the
 | `slib.abusech.download` | Downloading malware samples into the Axon. |
 | `slib.abusech.bulk` | Bulk importing exports (`--bulk`). Ingesting also needs the `node` permission on the layer. |
 | `slib.abusech.submit` | Sending data to abuse.ch: samples, URLs, IOCs, comments, YARAify scans, and YARA rules. |
-| `slib.abusech.admin` | The service-wide key, tag settings, and raw API requests. |
+| `slib.abusech.admin` | The service-wide key, tag settings, raw API requests, and merging old malware family nodes. |
 
 Users don't need the `service.get` or Axon permissions. The `slib.abusech.priv.*` modules talk
 to the service (and the Axon) and elevate privileges only for users that hold the matching
@@ -110,10 +124,14 @@ permission. Users still need the normal node permissions for the nodes the comma
 | `slib.abusech.fplist` | Model the false positive list (optionally one `--platform`). |
 | `slib.abusech.apikey` | Set/clear your own Auth-Key. |
 | `slib.abusech.admin.apikey` | Set/clear/check the service-wide Auth-Key. |
-| `slib.abusech.admin.tags` | Set the tag `--prefix` (default `rep.abusech`), `--enable` or `--disable` tagging. |
+| `slib.abusech.admin.tags` | Set the tag `--prefix` (default `rep.abusech`, it must be a valid tag name), `--enable` or `--disable` tagging. |
+| `slib.abusech.admin.families.merge` | Merge the malware family nodes made before 0.4.0 into the current ones, see [Malware families](#malware-families). A dry run unless `--apply`. |
 | `slib.abusech.admin.request` | Send a raw request to any abuse.ch API, for anything not covered above. |
 
 Run any command with `--help` for all of its options and examples.
+
+Options that name what to look up (ex. `--hash`, or a blocklist or export) ignore the inbound
+nodes: they run once per command, not once per inbound node, and the inbound nodes are dropped.
 
 ### Examples
 
@@ -127,9 +145,9 @@ slib.abusech.bazaar.search signature AgentTesla --limit 50 | slib.abusech.urlhau
 // Cobalt Strike C2s from ThreatFox, and the samples that use them.
 slib.abusech.threatfox.search malware win.cobalt_strike | <(refs)- file:bytes
 
-// Block the recommended Feodo Tracker C2s and SSLBL's C2 IPs.
+// Model the recommended Feodo Tracker C2s and SSLBL's JA3 fingerprints.
 slib.abusech.feodo recommended
-slib.abusech.sslbl ips
+slib.abusech.sslbl ja3
 
 // Scan a file with YARAify and model the YARA matches.
 file:bytes=<sha256> | slib.abusech.yaraify.scan --unpack --wait 120 --yield | -> it:app:yara:match -> it:app:yara:rule
@@ -168,7 +186,8 @@ background { slib.abusech.urlhaus.export full --bulk }
 
 Every pull is recorded in the `slib:abusech:datasets` global, keyed `<platform>:<export>`
 (ex. `urlhaus:full`): the export file's `sha256`, `size`, and pull `time`, and its `nodes` file
-(`sha256`, `size`, node `count`, `rows`, `skipped`, `builder` version, and `time`).
+(`sha256`, `size`, `count` the nodes ingested, `built` the nodes built, `rows`, `skipped`,
+`builder` version, and `time`).
 
 - **Full exports** (`full`, `payloads`) reuse their last pull by default, so a service update can
   rebuild the same data without pulling it again. `--repull` pulls a new one. When the reused pull
@@ -190,6 +209,10 @@ Guid nodes made from props (`risk:tool:software`, `inet:service:account`, `it:av
 etc.) get the same guid Storm's `{...}` syntax would generate, but the service can't look up an
 existing node with those props first, so one made some other way (ex. by hand) isn't reused.
 
+A job belongs to the user that started it: only they can stage, build, read, or remove it (the
+service checks both the Telepath user and the Storm user). At most `abusech:bulk:maxjobs` jobs
+run at once, and a job's staged copy can be at most `abusech:bulk:maxsize` bytes.
+
 A job's files are removed from the service's storage when the import finishes or fails. Jobs
 left behind by a cancelled import are removed after 6 hours idle, and every job is removed when
 the service restarts. The export and `.nodes` files stay in the Axon.
@@ -207,8 +230,8 @@ the platform's `meta:source` with a `-(seen)>` edge, and has `.seen` updated fro
 | Sample hashes, size, name, MIME type, imphash, ssdeep | `file:bytes` `:sha256`, `:sha1`, `:md5`, `:size`, `:name`, `:mime`, `:mime:pe:imphash`, `:ssdeeps` |
 | SHA3-384, TLSH, telfhash, gimphash, icon dhash | Extended props `file:bytes:_sha3_384`, `:_tlsh`, `:_telfhash`, `:_gimphash`, `:_dhash_icon` (added when the service is added) |
 | File type, tags, signature, delivery method, origin country | Tags, ex. `#rep.abusech.bazaar.type.exe`, `.agenttesla`, `.delivery.email_attachment`, `.origin.de` |
-| Malware families | `risk:tool:software` (`:soft:name`, `:soft:names` aliases, `:id` Malpedia ID, `:tag` the family's tag), Malpedia link `inet:url -(refs)>` |
-| Reporters | `inet:service:account` (on an `inet:service:platform` per abuse.ch platform) `-(seen)>` the node |
+| Malware families | `risk:tool:software` keyed on its name and reporter, see [Malware families](#malware-families) (`:soft:name`, `:soft:names` aliases, `:id` Malpedia ID, `:tag` the family's tag on the first platform it was tagged on), Malpedia link `inet:url -(refs)>` |
+| Reporters | `inet:service:account` (on an `inet:service:platform` per abuse.ch platform) `-(refs)>` the node |
 | ClamAV, vendor intel, VirusTotal | `it:av:scan:result` (`:scanner:name`, `:signame`, `:verdict`, `:time`, `:categories`, `:multi:count`, `:multi:count:malicious`), report links as `inet:url -(refs)> file:bytes`. Each vendor (ANY.RUN, CAPE, CERT-PL MWDB, DocGuard, FileScan.IO, Intezer, Kaspersky, ReversingLabs, Spamhaus HBL, Triage, UnpacMe, YOROI) is read according to its own fields and scales |
 | Extracted malware configs (Triage) | `it:sec:c2:config` (`:file`, `:family`, `:servers`), the C2 host/server tagged `c2` and the family, `file:bytes -(refs)>` the C2 |
 | File format, architecture, Magika type, OLE flags | Tags, ex. `#rep.abusech.bazaar.format.pe`, `.arch.amd64`, `.magika.pebin`, `.ole.vba_macros`; TrID, OLE details, and olevba findings as `meta:note`s. URLs DocGuard found in a file as `file:bytes -(refs)> inet:url` |
@@ -217,21 +240,75 @@ the platform's `meta:source` with a `-(seen)>` edge, and has `.seen` updated fro
 | Unpacked/related files | `file:subfile` (YARAify/UnpacMe unpacked files), droppers as `file:bytes -(refs)> file:bytes` |
 | Comments, file information, OLE info | `meta:note -(about)>` the node |
 | Archive passwords | `inet:passwd`, `file:bytes -(refs)> inet:passwd` |
-| URLhaus URLs | `inet:url` tagged with the threat, tags, `status.<online/offline>`, `larted`; reference `inet:url -(refs)>`; payloads as `inet:urlfile` |
-| URLhaus hosts | `inet:fqdn`/`inet:ipv4`/`inet:ipv6` tagged with Spamhaus DBL/SURBL listings (ex. `#rep.abusech.urlhaus.spamhaus_dbl.abused_legit_malware`) |
+| URLhaus URLs | `inet:url` tagged with the threat, tags, `status.<online/offline>`, `larted` (all with the URL's first seen to last online); reference `inet:url -(refs)>`; payloads as `inet:urlfile` |
+| URLhaus hosts | `inet:fqdn`/`inet:ipv4`/`inet:ipv6` tagged with Spamhaus DBL/SURBL listings (ex. `#rep.abusech.urlhaus.spamhaus_dbl.abused_legit_malware`), with the same time as the URL's tags. A `host:port` is modeled as the host |
 | ThreatFox IOCs | The observable (`inet:url`, `inet:fqdn`, `inet:server`, `inet:ipv4/6`, `file:bytes`) tagged with the threat type, family, tags, and `compromised`; the IOC record as an `it:sec:stix:indicator` (`:id`, `:confidence`, STIX `:pattern`, `:description` with the comment, `:labels`, `:created`, `:updated`) `-(refs)>` the observable; the reference as `inet:url -(refs)>`; samples as `file:bytes -(refs)>` the observable |
 | Feodo Tracker/SSLBL C2s | `inet:server` and `inet:ipv4` tagged `c2`, the family, and `status.<status>`; `inet:ipv4:asn` (with `inet:asn:name`), `:loc`; hostnames as `inet:dns:a` |
 | SSLBL certificates | `crypto:x509:cert:sha1` tagged `c2` and the family, with the listing reason as a `meta:note` |
-| SSLBL JA3 fingerprints | `hash:md5` tagged `ja3` and the family, with the listing reason as a `meta:note` |
+| SSLBL JA3 fingerprints | `hash:md5` tagged `ja3` and the family, with the listing reason as a `meta:note`, and a `meta:note` (`:type=slib.abusech.sslbl.ja3`) saying it's a JA3, since Synapse 2.x has no form for a bare JA3 (`inet:tls:ja3:sample` needs the client) |
 | False positive list | The entry's node tagged `#rep.abusech.hunting.fp` and `.fp.<platform>`, with the removal notes as a `meta:note`. A sample's per-hash rows are merged into one `file:bytes` |
 | SHA3-384-only files (ThreatFox IOCs, the false positive list) | `file:bytes` keyed by `:_sha3_384` |
 
 Not modeled: popularity counters (MalwareBazaar download/upload/mail counts, ThreatFox credits
-and sightings, YARAify sightings, MalwareBazaar YARA rule sample counts), URLhaus takedown
-durations, links to abuse.ch's own download endpoints, and certificate signature algorithms
-(Synapse wants an OID). They
-don't describe the indicators themselves, and are still available from the service's methods
-and `slib.abusech.admin.request`.
+and sightings, YARAify sightings, MalwareBazaar YARA rule sample counts, URLhaus payload counts),
+URLhaus URL IDs and takedown durations, ThreatFox IOC type descriptions (the type is a tag), a
+sample's other file names (only the first is `:name`, Synapse has one), YARAify scan task lists,
+links to abuse.ch's own download endpoints, and certificate signature algorithms (Synapse wants
+an OID). They don't describe the indicators themselves, and are still available from the
+service's `norm*` methods and `slib.abusech.admin.request`.
+
+`:soft:name` is abuse.ch's name for a family (ex. `Loki Password Stealer (PWS)`, lower cased by
+Synapse), while its tag is normalized into a tag segment (`loki_password_stealer_pws`), so the
+two don't always look alike.
+
+### Malware families
+
+A malware family is a `risk:tool:software` keyed on its name (as `:soft:name` normalizes it) and
+`:reporter:name=abuse.ch`, the guid `({"soft:name": <name>, "reporter:name": "abuse.ch"})` gives.
+So the same family is one node whatever the tag settings, the tag prefix, or the platform it was
+seen on. Bulk imports key it the same way.
+
+Before 0.4.0, families seen with tagging on were keyed on their tag instead
+(`({"tag": "rep.abusech.<platform>.<family>"})`), so a family could have one node per platform
+and tag prefix, plus one for tagging off (ABUSE-ST-01). New sightings no longer touch those
+nodes. `slib.abusech.admin.families.merge` merges them into the current node for their name:
+
+- Props the current node doesn't have are copied, array props (ex. `:soft:names`) are combined,
+  and `.seen` is merged.
+- Tags (with their times) and light edges (both directions) are moved.
+- Props of other nodes that reference the old node (by guid, ndef, or in an array) are
+  re-pointed at the current node.
+- The old node is deleted. Tag props aren't moved.
+
+Only nodes whose guid is the old tag-keyed guid of their `:tag` are merged, so nodes made some
+other way are left alone. Without `--apply` it's a dry run that prints what it would merge, and a
+second `--apply` finds nothing to do:
+
+```
+slib.abusech.admin.families.merge
+slib.abusech.admin.families.merge --apply
+```
+
+### Changes in 0.4.0
+
+- Malware families are keyed on their name, see above. Run `slib.abusech.admin.families.merge`
+  to merge the old nodes.
+- Reporters are linked with `-(refs)>` instead of `-(seen)>`, which is meant for `meta:source`.
+  Existing `-(seen)>` edges from `inet:service:account` nodes are left as they are.
+- The URLhaus `larted` and host blacklist tags carry the same time as the URL's other tags.
+- JA3 fingerprints get a `meta:note` saying they're a JA3.
+- Epoch timestamps are converted to dates (Synapse read `1700000000` as `YYYYMMDDhh`), and
+  first/last seen pairs in mixed formats are ordered as times, not strings.
+- Quoted CSV fields that span lines keep their `#` and blank lines, and the rows after them parse.
+- `host:port` URLhaus/Feodo hosts are modeled as the host, instead of being dropped.
+- Limits of 0 or less mean "the default" everywhere: the max (1000) for searches, and every
+  result elsewhere. Negative limits are no longer sent to abuse.ch.
+- Every response, download, and unzip read into memory is capped at `abusech:maxsize`, and
+  exports streamed to disk at `abusech:bulk:maxsize`.
+- A sample zip with no files or several files is an error, not "not available".
+- `slib.abusech.admin.request` refuses paths that leave the API's base URL (ex. `../`).
+- Retries, bulk job limits and owners, and running `--hash`-style options once, see above.
+
 
 ## abuse.ch API coverage
 
@@ -302,4 +379,13 @@ Layout:
 - `src/abusechsvc/svc.py` - `AbuseChSvc`, with a method per abuse.ch endpoint and dataset.
 - `src/abusechsvc/api.py` - `AbuseChCellApi`, the Telepath API. Wraps every method in a `TelepathRetn`.
 - `src/abusechsvc/norm.py` - Flattens abuse.ch's responses into a few shared shapes that are easy to model in Storm.
-- `src/abusechsvc/pkgproto/` - The `slib.abusech` Storm package.
+- `src/abusechsvc/bulk.py` - `NodeBuilder`, which builds the bulk import nodes.
+- `src/abusechsvc/pkgproto/` - The `slib.abusech` Storm package. Its `README.md` is a copy of this
+  file (a test checks they match), copy it there after editing this one.
+
+### Storm lint
+
+The Storm code passes `python -m synapse.tools.storm.lint src`, and CI blocks on it. It also
+passes `--v3-ready`: the 3.x-only changes that don't work on Synapse 2.x (the 3.x model renames,
+`.seen`, `$node.form()` as a gtor, `$lib.globals.<name>`, and `$lib.utils.type()`) are
+`// noqa`'d with a note, since the package requires Synapse <3.0.0.

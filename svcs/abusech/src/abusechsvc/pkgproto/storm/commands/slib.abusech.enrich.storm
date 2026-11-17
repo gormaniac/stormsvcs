@@ -1,7 +1,7 @@
 init {
     $abusech = $lib.import(slib.abusech.lib)
     $model = $lib.import(slib.abusech.model)
-    $platforms = $lib.null
+    $platforms = (null)
     if $cmdopts.platform { $platforms = $cmdopts.platform }
 }
 
