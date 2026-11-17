@@ -7,7 +7,9 @@ Shodan's data as-is (or normalized, for the ``norm*`` variants) and raise
 """
 
 import hashlib
+import ipaddress
 import json
+import logging
 import re
 import time
 from collections.abc import AsyncIterator
@@ -20,6 +22,8 @@ import synapse.lib.cell as s_cell
 from . import norm
 from .api import ShodanCellApi
 from .client import BASE_URLS, ShodanApiError, ShodanClient
+
+logger = logging.getLogger(__name__)
 
 # Streaming API endpoints and whether they take a comma separated list of values.
 STREAM_KINDS = {
@@ -35,6 +39,10 @@ STREAM_KINDS = {
 
 # The default number of results Shodan returns per search page.
 SEARCH_PAGE_SIZE = 100
+
+# The HTTP status codes of the error Shodan returns past the deepest page a plan can reach, which
+# searchGenr() treats as the end of the results.
+DEEP_PAGE_CODES = frozenset((400, 403, 404))
 
 # Saved queries per page of Shodan's query directory.
 DIRECTORY_PAGE_SIZE = 10
@@ -84,6 +92,28 @@ def _seg(valu: Any) -> str:
     """Quote a value for use as a single URL path segment."""
 
     return quote(str(valu), safe="")
+
+
+def _service(valu: Any) -> str:
+    """Validate an alert's ignored ``<ip>:<port>`` service and quote it as one URL path segment.
+
+    Only an IP and a port are allowed, so a value can never change the path it's sent to (ex.
+    ``1.2.3.4:80/../../../org/member/x`` would otherwise reach another endpoint with the key).
+    """
+
+    text = str(valu)
+    host, sep, port = text.rpartition(":")
+    ok = bool(sep) and port.isascii() and port.isdigit() and int(port) <= 65535
+    if ok:
+        try:
+            ipaddress.ip_address(
+                host[1:-1] if host.startswith("[") and host.endswith("]") else host
+            )
+        except ValueError:
+            ok = False
+    if not ok:
+        raise ShodanApiError(f"Invalid service {text!r}, expected <ip>:<port> (ex. 1.2.3.4:9200).")
+    return quote(text, safe=":")
 
 
 def _directoryText(q: dict) -> str:
@@ -321,8 +351,18 @@ class ShodanSvc(s_cell.Cell):
         """
 
         count = 0
+        first = page
         while True:
-            data = await self.search(query, page=page, minify=minify, apikey=apikey)
+            try:
+                data = await self.search(query, page=page, minify=minify, apikey=apikey)
+            except ShodanApiError as err:
+                # Shodan caps how deep a non-enterprise plan can page with an error, not with an
+                # empty page, so a request error past the first page is the end of the results.
+                # Key, credit, rate limit, and server errors still fail.
+                if page == first or err.code not in DEEP_PAGE_CODES:
+                    raise
+                logger.info("Search stopped at page %d: %s", page, err.mesg)
+                return
             matches = data.get("matches") or []
             if not matches:
                 return
@@ -447,16 +487,12 @@ class ShodanSvc(s_cell.Cell):
 
     async def alertTriggerIgnore(self, aid: str, trigger: str, service: str, apikey=None) -> dict:
         """PUT /shodan/alert/{id}/trigger/{trigger}/ignore/{ip:port}"""
-        path = (
-            f"/shodan/alert/{_seg(aid)}/trigger/{_seg(trigger)}/ignore/{quote(service, safe=':/,')}"
-        )
+        path = f"/shodan/alert/{_seg(aid)}/trigger/{_seg(trigger)}/ignore/{_service(service)}"
         return await self._api("put", path, apikey)
 
     async def alertTriggerUnignore(self, aid: str, trigger: str, service: str, apikey=None) -> dict:
         """DELETE /shodan/alert/{id}/trigger/{trigger}/ignore/{ip:port}"""
-        path = (
-            f"/shodan/alert/{_seg(aid)}/trigger/{_seg(trigger)}/ignore/{quote(service, safe=':/,')}"
-        )
+        path = f"/shodan/alert/{_seg(aid)}/trigger/{_seg(trigger)}/ignore/{_service(service)}"
         return await self._api("delete", path, apikey)
 
     async def alertNotifierAdd(self, aid: str, nid: str, apikey=None) -> dict:

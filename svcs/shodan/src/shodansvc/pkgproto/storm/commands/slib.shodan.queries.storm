@@ -41,7 +41,7 @@ init {
                 $rows.append(($kind, $rule.props.name, $rule.props.text))
                 if $cmdopts.yield { $out.append($rule) }
             }
-            $lib.print("Stored saved queries: {total}", total=$rows.size())
+            $lib.print(`Stored saved queries: {$rows.size()}`)
             if $rows { $util.table(([["source", 10], ["name", 40], ["query", 60]]), $rows) }
         }
 
@@ -57,10 +57,9 @@ init {
                 // Shodan's directory search was unavailable, so the service matched the pages it
                 // listed instead.
                 if $retn.data.fallback {
-                    $lib.warn("slib.shodan.queries: Shodan's directory search is unavailable ({err}), so only the {scanned} directory queries on the --pages listed (of {total}) were searched. Raise --pages (10 queries each) to search more, or copy the directory with --yield and search it with --source local.",
-                              err=$retn.data.fallback, scanned=$retn.data.scanned, total=$retn.data.directoryTotal)
+                    $lib.warn(`slib.shodan.queries: Shodan's directory search is unavailable ({$retn.data.fallback}), so only the {$retn.data.scanned} directory queries on the --pages listed (of {$retn.data.directoryTotal}) were searched. Raise --pages (10 queries each) to search more, or copy the directory with --yield and search it with --source local.`)
                 }
-                $lib.print("Total saved queries: {total}", total=$retn.data.total)
+                $lib.print(`Total saved queries: {$retn.data.total}`)
                 $tagPrefix = $priv.tagPrefix()
                 $rows = ([])
                 for $q in $retn.data.matches {
@@ -75,7 +74,7 @@ init {
     }
 }
 
-spin |
+spin |  // noqa: P001 (drops inbound nodes on purpose)
 
 for $rule in $out { yield $rule }
 

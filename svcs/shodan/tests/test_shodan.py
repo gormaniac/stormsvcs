@@ -1,8 +1,10 @@
 """Pytests for the slib.shodan service's HTTP client, normalization, and Cell/Telepath methods."""
 
 import asyncio
+import json
 
 import aiohttp
+import aiohttp.web
 import synapse.tests.utils as s_tests
 
 from shodansvc import norm
@@ -330,10 +332,23 @@ class TestNorm(s_tests.SynTest):
         ]
         assert norm.normSoftvers([], None, None) == []
 
+    def test_tcp_ports(self):
+        assert norm.tcpPorts([22, 53, 80, 111, 123, 161, 443, 1900, 3671, 5353, "8080", 27015, None, "x", 70000, 22]) == [
+            22,
+            80,
+            111,
+            443,
+            8080,
+        ]
+        assert norm.tcpPorts(None) == []
+        assert norm.normInternetDb({"ip": "1.1.1.1", "ports": [53, 80]})["tcp_ports"] == [80]
+
     def test_norm_host(self):
         host = norm.normHost(HOST_8888)
         assert host["ip"] == "8.8.8.8"
         assert host["ports"] == [53, 443]
+        # SHODAN-04: bare ports have no transport, so ports Shodan crawls over UDP aren't TCP.
+        assert host["tcp_ports"] == [443]
         assert host["location"]["country_code"] == "us"
         assert host["location"]["latlong"] == (37.4056, -122.0775)
         # The banner's detailed vuln replaces the host's bare CVE ID.
@@ -653,6 +668,23 @@ class TestNorm(s_tests.SynTest):
         assert norm.normSshKey({"type": "ssh-rsa"}) is None
         assert norm.normSshKey({"type": "ssh-rsa", "key": "  \n "}) is None
 
+    def test_ssh_key_algo_edges(self):
+        algo = norm._sshKeyAlgo
+        ok = (7).to_bytes(4, "big") + b"ssh-rsa" + b"rest"
+        assert algo(ok) == "ssh-rsa"
+        assert algo(b"\x00\x00") is None  # too short for the size
+        assert algo((0).to_bytes(4, "big")) is None  # empty name
+        assert algo((65).to_bytes(4, "big") + b"a" * 65) is None  # too long
+        assert algo((7).to_bytes(4, "big") + b"ssh") is None  # truncated
+        assert algo((3).to_bytes(4, "big") + b"\xff\xfe\xfd") is None  # not ASCII
+        assert algo((3).to_bytes(4, "big") + b"a b") is None  # not printable
+
+    def test_cert_time(self):
+        assert norm._certTime("20240102030405Z") == "2024/01/02 03:04:05"
+        assert norm._certTime("2024010203") is None
+        assert norm._certTime(None) is None
+        assert norm._certTime("") is None
+
     def test_norm_internetdb(self):
         host = norm.normInternetDb(INTERNETDB_1111)
         assert host["ip"] == "1.1.1.1"
@@ -676,6 +708,31 @@ class TestNorm(s_tests.SynTest):
         assert cve["kev"] is True
         assert cve["cpes"] == ["cpe:2.3:a:apache:log4j:2.0:-:*:*:*:*:*:*"]
         assert cve["aliases"] == []
+        assert cve["cvss_scores"] == {"v2_0": 9.3, "v3_1": 10.0}
+
+    def test_cvss_scores(self):
+        # SHODAN-06: cvss_v3 is v3.0 or v3.1, and cvss is cvss_version's score, so cvss_version
+        # picks the prop. Unversioned (and v4.0) scores are left out.
+        scores = norm.cvssScores
+        # CVEDB's own cvss_version is a number, and only ever 2.0, 3.0, or 4.0 (ex. 3.0 for
+        # Log4Shell, which NVD scored with CVSS 3.1), so its 3.0 is "3.x" and goes in v3_1.
+        assert scores({"cvss": 9.8, "cvss_version": 3.0, "cvss_v3": 9.8}) == {"v3_1": 9.8}
+        assert scores({"cvss": 9.8, "cvss_version": 3, "cvss_v3": 9.8}) == {"v3_1": 9.8}
+        # A string (EUVD) or vector version is exact.
+        assert scores({"cvss": 9.8, "cvss_version": "3.0", "cvss_v3": 9.8}) == {"v3_0": 9.8}
+        assert scores({"cvss": 9.8, "cvss_version": "CVSS:3.0/AV:N"}) == {"v3_0": 9.8}
+        assert scores({"cvss": 9.8, "cvss_version": "3.1", "cvss_v3": 9.8}) == {"v3_1": 9.8}
+        assert scores({"cvss": 7.5, "cvss_version": 2, "cvss_v2": 7.5}) == {"v2_0": 7.5}
+        assert scores({"cvss": 7.5, "cvss_version": 2.0}) == {"v2_0": 7.5}
+        # A v4.0 primary score: v3's minor version is unknown, and 2.x has no v4.0 prop.
+        assert scores({"cvss": 9.3, "cvss_version": 4.0, "cvss_v3": 9.8, "cvss_v4": 9.3, "cvss_v2": 5.0}) == {
+            "v2_0": 5.0
+        }
+        assert scores({"cvss": 9.8, "cvss_v3": 9.8}) == {}
+        assert scores({"cvss": 9.8, "cvss_version": "nope"}) == {}
+        assert scores({"cvss": 9.8, "cvss_version": True}) == {}
+        assert scores({"cvss": None, "cvss_version": 3.1}) == {}
+        assert scores({}) == {}
 
     def test_norm_advisory(self):
         ghsa = norm.normAdvisory(GHSA_LOG4SHELL)
@@ -683,6 +740,8 @@ class TestNorm(s_tests.SynTest):
         assert ghsa["aliases"] == ["EUVD-2021-34768", "GHSA-JFH8-C2JP-5V3Q"]
         assert ghsa["cwes"] == ["CWE-20", "CWE-502"]
         assert ghsa["cvss_v3"] == 10.0
+        # The linked CVE's CVEDB cvss_version of 3.0 is any v3.x (Log4Shell's is v3.1).
+        assert ghsa["cvss_scores"] == {"v2_0": 9.3, "v3_1": 10.0}
         # GHSA references are {"type", "url"} dicts.
         assert "https://nvd.nist.gov/vuln/detail/CVE-2021-44228" in ghsa["references"]
 
@@ -691,6 +750,41 @@ class TestNorm(s_tests.SynTest):
         assert euvd["aliases"] == ["EUVD-2099-0001"]
         assert euvd["summary"] == "A made up advisory without a CVE."
         assert euvd["cvss"] == 7.5
+        assert euvd["cvss_scores"] == {"v3_1": 7.5}
+
+        # An advisory without a CVE or a cvss_version: its CVSS vector says which version it is.
+        ghsa = norm.normAdvisory(
+            {
+                "id": "GHSA-xxxx-xxxx-xxxx",
+                "cvss": 8.1,
+                "severity": [{"type": "CVSS_V3", "score": "CVSS:3.0/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H"}],
+            }
+        )
+        assert ghsa["cvss_scores"] == {"v3_0": 8.1}
+        # Without either, the score is unversioned and left out.
+        assert norm.normAdvisory({"id": "GHSA-yyyy-yyyy-yyyy", "cvss": 8.1})["cvss_scores"] == {}
+
+        # CVEDB's GHSAs have no cvss, only GitHub's vectors, so the v3 base score is computed
+        # from the vector (a temporal metric, ex. E:H, doesn't change it). A v4.0 vector is
+        # skipped, Synapse 2.x has no prop for it.
+        ghsa = norm.normAdvisory(
+            {
+                "id": "GHSA-zzzz-zzzz-zzzz",
+                "severity": [
+                    {"type": "CVSS_V3", "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N/E:U"},
+                    {"type": "CVSS_V4", "score": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:N/VA:N/SC:N/SI:N/SA:N"},
+                ],
+            }
+        )
+        assert ghsa["cvss"] == 7.5
+        assert ghsa["cvss_scores"] == {"v3_1": 7.5}
+        ghsa = norm.normAdvisory(
+            {"id": "GHSA-zzzz-zzzz-zzzz", "severity": [{"type": "CVSS_V3", "score": "CVSS:3.0/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H"}]}
+        )
+        assert ghsa["cvss_scores"] == {"v3_0": 8.1}
+        # An invalid vector has no score.
+        ghsa = norm.normAdvisory({"id": "GHSA-zzzz-zzzz-zzzz", "severity": [{"type": "CVSS_V3", "score": "CVSS:3.1/AV:X"}]})
+        assert ghsa["cvss_scores"] == {}
 
 
 class TestClient(s_tests.SynTest):
@@ -809,6 +903,73 @@ class TestClient(s_tests.SynTest):
             assert len(banners) == 1
 
 
+    async def test_client_bad_json(self):
+        # SHODAN-12: a 2xx that isn't JSON is an error, a 4xx that isn't JSON uses the status.
+        async with FakeShodan() as fake, aiohttp.ClientSession() as sess:
+            client = ShodanClient(sess, urls=fake.urls, rate=0)
+
+            fake.routes[("GET", "/api/shodan/ports")] = aiohttp.web.Response(text="<html>oops</html>", status=200)
+            with self.raises(ShodanApiError) as cm:
+                await client.request("get", "/shodan/ports", apikey="key")
+            assert cm.exception.mesg.startswith("Unable to parse the JSON response")
+            assert cm.exception.code == 200
+
+            fake.routes[("GET", "/api/shodan/ports")] = aiohttp.web.Response(text="<html>401</html>", status=401)
+            with self.raises(ShodanApiError) as cm:
+                await client.request("get", "/shodan/ports", apikey="key")
+            assert cm.exception.mesg.startswith("Shodan rejected the API key")
+
+            # An empty 200 is None.
+            fake.routes[("GET", "/api/shodan/ports")] = aiohttp.web.Response(text="", status=200)
+            assert await client.request("get", "/shodan/ports", apikey="key") is None
+
+    async def test_client_stream_errors(self):
+        # SHODAN-12: the Streaming API's error, quiet, and connection paths.
+        async with FakeShodan() as fake, aiohttp.ClientSession() as sess:
+            client = ShodanClient(sess, urls=fake.urls, rate=0)
+
+            async def html401(request):
+                return aiohttp.web.Response(text="<html><title>401 Unauthorized</title></html>", status=401)
+
+            fake.streamhandler = html401
+            with self.raises(ShodanApiError) as cm:
+                [b async for b in client.stream("/shodan/banners", apikey="key", timeout=5)]
+            assert cm.exception.code == 401
+            assert cm.exception.mesg.startswith("Shodan rejected the API key")
+
+            async def jsonerr(request):
+                return aiohttp.web.json_response({"error": "Invalid stream"}, status=404)
+
+            fake.streamhandler = jsonerr
+            with self.raises(ShodanApiError) as cm:
+                [b async for b in client.stream("/shodan/banners", apikey="key", timeout=5)]
+            assert (cm.exception.code, cm.exception.mesg) == (404, "Invalid stream")
+
+            # A stream that goes quiet ends at the read timeout, keeping what was read. Lines
+            # that aren't JSON are skipped.
+            async def quiet(request):
+                resp = aiohttp.web.StreamResponse(status=200)
+                await resp.prepare(request)
+                await resp.write(b"not json\n")
+                await resp.write(json.dumps(HOST_8888["data"][0]).encode() + b"\n")
+                await asyncio.sleep(5)
+                return resp
+
+            fake.streamhandler = quiet
+            loop = asyncio.get_running_loop()
+            start = loop.time()
+            banners = [b async for b in client.stream("/shodan/banners", apikey="key", limit=0, timeout=1)]
+            assert [b["port"] for b in banners] == [443]
+            assert loop.time() - start < 4
+
+        # A connection error is a ShodanApiError.
+        async with aiohttp.ClientSession() as sess:
+            client = ShodanClient(sess, urls={"stream": "http://127.0.0.1:1"}, rate=0)
+            with self.raises(ShodanApiError) as cm:
+                [b async for b in client.stream("/shodan/banners", apikey="key", timeout=5)]
+            assert "Unable to connect to the Shodan Streaming API" in cm.exception.mesg
+
+
 class TestShodanSvc(s_tests.SynTest):
     """Tests for the ShodanSvc Cell and its Telepath API."""
 
@@ -905,6 +1066,38 @@ class TestShodanSvc(s_tests.SynTest):
             with self.raises(ShodanApiError):
                 await svc.countIps("product:nginx", size=0)
 
+    async def test_alert_ignore_service(self):
+        # SHODAN-07: the ignored service is a single "<ip>:<port>" path segment, so it can't
+        # reach another endpoint (ex. /org/member/...) with the service's API key.
+        async with shodanSvc(self) as (core, svc, fake):
+            fake.routes[("PUT", "/api/shodan/alert/ALERT1/trigger/new_service/ignore/2001:db8::1:443")] = (
+                200,
+                {"success": True},
+            )
+            await svc.alertTriggerIgnore("ALERT1", "new_service", "2001:db8::1:443")
+            assert fake.last()["path"] == "/api/shodan/alert/ALERT1/trigger/new_service/ignore/2001:db8::1:443"
+
+            bad = (
+                "1.2.3.4:80/../../../../org/member/visi",
+                "../../../org/member/visi",
+                "1.2.3.4/80",
+                "1.2.3.4",
+                "1.2.3.4:",
+                "1.2.3.4:99999",
+                "1.2.3.4:8a",
+                "notanip:80",
+                "1.2.3.4:80?x=1",
+                "1.2.3.4:80#x",
+                "..:80",
+            )
+            for meth in (svc.alertTriggerIgnore, svc.alertTriggerUnignore):
+                for service in bad:
+                    fake.requests.clear()
+                    with self.raises(ShodanApiError) as cm:
+                        await meth("ALERT1", "new_service", service)
+                    assert "Invalid service" in cm.exception.mesg, service
+                    assert not fake.requests, service
+
     async def test_scans_no_apikey(self):
         async with shodanSvc(self) as (core, svc, fake):
             fake.routes[("GET", "/api/shodan/scans")] = (
@@ -973,6 +1166,29 @@ class TestShodanSvc(s_tests.SynTest):
             banners = [b async for b in svc.searchGenr("nginx", limit=150)]
             assert len(banners) == 150
             assert len(fake.requests) == 2
+
+            # SHODAN-09: Shodan ends deep paging with an error, not an empty page. Past the first
+            # page that's the end of the results, other errors (or any on the first page) fail.
+            def capped(request):
+                if int(request.query["page"]) > 1:
+                    return (400, {"error": "Search cursor too deep for your plan"})
+                return paged(request)
+
+            fake.routes[("GET", "/api/shodan/host/search")] = capped
+            banners = [b async for b in svc.searchGenr("nginx", limit=0)]
+            assert len(banners) == 100
+            with self.raises(ShodanApiError):
+                [b async for b in svc.searchGenr("nginx", limit=0, page=2)]
+
+            for code in (401, 402, 429, 500, 503):
+                def failing(request, code=code):
+                    if int(request.query["page"]) > 1:
+                        return (code, {"error": f"HTTP {code} error"})
+                    return paged(request)
+
+                fake.routes[("GET", "/api/shodan/host/search")] = failing
+                with self.raises(ShodanApiError):
+                    [b async for b in svc.searchGenr("nginx", limit=0)]
 
     async def test_directory_pages(self):
         async with shodanSvc(self) as (core, svc, fake):

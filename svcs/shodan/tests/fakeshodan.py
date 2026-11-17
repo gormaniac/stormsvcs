@@ -229,7 +229,7 @@ CVE_LOG4SHELL = {
     "cve_id": "CVE-2021-44228",
     "summary": "Apache Log4j2 JNDI features do not protect against attacker controlled LDAP.",
     "cvss": 10.0,
-    "cvss_version": 3.1,
+    "cvss_version": 3.0,  # CVEDB says 3.0 for any v3.x score
     "cvss_v2": 9.3,
     "cvss_v3": 10.0,
     "epss": 0.97,
@@ -627,6 +627,8 @@ class FakeShodan:
         self.urls: dict[str, str] = {}
         # The most values a facet may ask for, like a Shodan plan's limit.
         self.facetlimit = 1000
+        # Replaces the Streaming API's handler, ex. to return an error or go quiet.
+        self.streamhandler = None
 
     def _count(self, request: web.Request) -> tuple[int, dict]:
         """GET /shodan/host/count, honoring facet sizes ("name:N", default 5) and the plan limit."""
@@ -692,11 +694,16 @@ class FakeShodan:
             )
         if callable(route):
             route = route(request)
+        # A raw response, ex. an HTML error page or a body that isn't JSON.
+        if isinstance(route, web.StreamResponse):
+            return route
 
         status, data = route
         return web.json_response(data, status=status)
 
     async def _stream(self, request: web.Request) -> web.StreamResponse:
+        if self.streamhandler is not None:
+            return await self.streamhandler(request)
         resp = web.StreamResponse(status=200)
         await resp.prepare(request)
         for banner in STREAM_BANNERS:

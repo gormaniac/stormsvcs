@@ -16,16 +16,16 @@ init {
 // loops call helpers that yield/edit the node in their own runtime instead.
 
 // Link the node to the slib.shodan meta:source and update its .seen.
-function seen(n, time=$lib.null) {
+function seen(n, time=(null)) {
     yield $n
     [ <(seen)+ { [ meta:source=$sourceGuid :name=shodan ] } ]
-    if $time { [ .seen ?= $time ] }
+    if $time { [ .seen ?= $time ] }  // noqa: M004 (the 2.x universal prop, the package requires Synapse <3.0.0)
     return($n)
 }
 
 // Apply Shodan's tags (cloud, vpn, honeypot, etc.) to a node under the configured prefix.
 function applyTags(n, tagPrefix, tags) {
-    if ($tagPrefix = $lib.null or not $tags) { return($n) }
+    if ($tagPrefix = null or not $tags) { return($n) }
     // Never loop with a node in a function's pipeline, the node would reach return() after the first iteration.
     for $tag in $lib.tags.prefix($tags, $tagPrefix) { $addTag($n, $tag) }
     return($n)
@@ -37,46 +37,64 @@ function addTag(n, tag) {
     return($n)
 }
 
-function ipNode(ip, time=$lib.null) {
-    if $util.isIpv6($ip) { [ inet:ipv6?=$ip ] }
-    else { [ inet:ipv4?=$ip ] }
+function ipNode(ip, time=(null)) {
+    if $util.isIpv6($ip) { [ inet:ipv6?=$ip ] }  // noqa: M001 (the 2.x form, the package requires Synapse <3.0.0)
+    else { [ inet:ipv4?=$ip ] }  // noqa: M001 (the 2.x form, the package requires Synapse <3.0.0)
     return($seen($node, $time))
 }
 
-function fqdnNode(fqdn, time=$lib.null) {
+function fqdnNode(fqdn, time=(null)) {
     [ inet:fqdn?=$fqdn ]
     return($seen($node, $time))
 }
 
-function asnNode(asn, org=$lib.null) {
+function asnNode(asn, org=(null), time=(null)) {
     $num = $lib.regex.replace("(?i)^AS", "", $lib.cast(str, $asn))
+    // Made before the inet:asn, so no node is in the pipeline when orgNode() runs.
+    $orgnode = (null)
+    if $org { $orgnode = $orgNode($org, $time) }
     [ inet:asn?=$num ]
-    if $org {
-        [ :owner ?= { yield $lib.gen.orgByName($org) } ]
-    }
-    return($node)
+    if $orgnode { [ :owner ?= $orgnode.value() ] }
+    return($seen($node, $time))
 }
 
-function dnsNode(fqdn, ip, time=$lib.null) {
+// The ou:org of an organization name (via $lib.gen.orgByName), or null.
+function orgNode(name, time=(null)) {
+    $orgnode = $lib.gen.orgByName($name, try=(true))  // noqa: R005 (no 3.x replacement on Synapse 2.x)
+    if ($orgnode = null) { return() }
+    return($seen($orgnode, $time))
+}
+
+// A forward DNS record (inet:dns:a/aaaa), only for real resolutions (DNS domain records, and
+// slib.shodan.dns.lookup of a hostname).
+function dnsNode(fqdn, ip, time=(null)) {
     if $util.isIpv6($ip) { [ inet:dns:aaaa?=($fqdn, $ip) ] }
     else { [ inet:dns:a?=($fqdn, $ip) ] }
     return($seen($node, $time))
 }
 
-function serverNode(ip, port, transport=tcp, time=$lib.null) {
+// A hostname Shodan has for an IP (inet:dns:rev/rev6). Shodan's hostnames come from reverse DNS
+// (PTR) lookups and TLS/HTTP observations, not forward resolutions, so they aren't inet:dns:a/aaaa.
+function revNode(ip, fqdn, time=(null)) {
+    if $util.isIpv6($ip) { [ inet:dns:rev6?=($ip, $fqdn) ] }  // noqa: M001 (the 2.x form, the package requires Synapse <3.0.0)
+    else { [ inet:dns:rev?=($ip, $fqdn) ] }
+    return($seen($node, $time))
+}
+
+function serverNode(ip, port, transport=tcp, time=(null)) {
     if $util.isIpv6($ip) { $server = `{$transport}://[{$ip}]:{$port}` }
     else { $server = `{$transport}://{$ip}:{$port}` }
     [ inet:server?=$server ]
     return($seen($node, $time))
 }
 
-function bannerNode(server, text, time=$lib.null) {
+function bannerNode(server, text, time=(null)) {
     [ inet:banner?=($server, $text) ]
     return($seen($node, $time))
 }
 
 // Model an HTTP response header from a banner, linked with a -(refs)> edge from the banner.
-function httpHeaderNode(banner, header, time=$lib.null) {
+function httpHeaderNode(banner, header, time=(null)) {
     [ inet:http:response:header?=($header.name, $header.value) ]
     [ <(refs)+ $banner ]
     return($seen($node, $time))
@@ -86,15 +104,14 @@ function httpHeaderNode(banner, header, time=$lib.null) {
 // what names the file in the warning when its bytes can't be saved, ex. "SSH key".
 // The bytes are saved to the Axon when the user is allowed to (axon.upload), the file:bytes is
 // made either way. The file is tagged <prefix>.banner, since it's extracted from a banner.
-function fileNode(file, what, time=$lib.null, tagPrefix=$lib.null) {
-    if $lib.user.allowed(axon.upload) {
+function fileNode(file, what, time=(null), tagPrefix=(null)) {
+    if $lib.auth.users.get().allowed(axon.upload) {
         try {
             if $file.b64 { $byts = $lib.base64.decode($file.b64, urlsafe=(false)) }
             else { $byts = $file.text.encode() }
             $lib.axon.put($byts)
         } catch * as err {
-            $lib.warn("slib.shodan: Unable to save the {what} {sha256} to the Axon: {error}",
-                      what=$what, sha256=$file.sha256, error=$err.mesg)
+            $lib.warn(`slib.shodan: Unable to save the {$what} {$file.sha256} to the Axon: {$err.mesg}`)
         }
     }
 
@@ -112,14 +129,14 @@ function fileNode(file, what, time=$lib.null, tagPrefix=$lib.null) {
 }
 
 // Model that a server hosts a file (inet:servfile), tagged <prefix>.banner like the file.
-function servFileNode(server, file, time=$lib.null, tagPrefix=$lib.null) {
-    [ inet:servfile=($server.value(), $file.value()) ]
+function servFileNode(server, file, time=(null), tagPrefix=(null)) {
+    [ inet:servfile=($server.value(), $file.value()) ]  // noqa: M001 (the 2.x form, the package requires Synapse <3.0.0)
     $servfile = $seen($node, $time)
     return($applyTags($servfile, $tagPrefix, (banner,)))
 }
 
 // Model that a URL hosts a file (inet:urlfile), tagged <prefix>.banner like the file.
-function urlFileNode(url, file, time=$lib.null, tagPrefix=$lib.null) {
+function urlFileNode(url, file, time=(null), tagPrefix=(null)) {
     [ inet:urlfile?=($url, $file.value()) ]
     $urlfile = $seen($node, $time)
     return($applyTags($urlfile, $tagPrefix, (banner,)))
@@ -128,7 +145,7 @@ function urlFileNode(url, file, time=$lib.null, tagPrefix=$lib.null) {
 // Model an SSH server's public host key as a file the server hosts (inet:servfile).
 // The file is the key as OpenSSH saves it to disk, "<algo> <base64 key>\n" (see
 // shodansvc.norm.normSshKey), so it matches .pub and keyscan output by hash.
-function sshKeyNode(server, key, time=$lib.null, tagPrefix=$lib.null) {
+function sshKeyNode(server, key, time=(null), tagPrefix=(null)) {
     $file = $fileNode(({
         "text": $key.text, "size": $key.size, "md5": $key.md5, "sha1": $key.sha1,
         "sha256": $key.sha256, "sha512": $key.sha512, "mime": "text/plain",
@@ -140,7 +157,7 @@ function sshKeyNode(server, key, time=$lib.null, tagPrefix=$lib.null) {
 // Model a file an HTTP server returned (see shodansvc.norm.normFile): the file:bytes, the
 // inet:urlfile for the URL it came from, and the inet:servfile when this server returned it
 // (a favicon can be on another server). Returns the file:bytes node.
-function httpFileNode(server, file, time=$lib.null, tagPrefix=$lib.null) {
+function httpFileNode(server, file, time=(null), tagPrefix=(null)) {
     $filenode = $fileNode($file, `HTTP {$file.kind} file`, $time, $tagPrefix)
     if $file.url { $urlFileNode($file.url, $filenode, $time, $tagPrefix) }
     if $file.local { $servFileNode($server, $filenode, $time, $tagPrefix) }
@@ -151,7 +168,7 @@ function httpFileNode(server, file, time=$lib.null, tagPrefix=$lib.null) {
 // inet:http:request (see shodansvc.norm.normHttp). The guid comes from the server, the time
 // (the banner's timestamp), and the URL, so modeling a banner again doesn't make another.
 // body is the response's body file:bytes, if any.
-function httpRequestNode(server, req, time=$lib.null, body=$lib.null) {
+function httpRequestNode(server, req, time=(null), body=(null)) {
     $guid = $lib.guid(slib, shodan, http, request, $server.repr(), $time, $req.url)
     $headers = ([])
     for $h in $req.headers { $headers.append(($h.name, $h.value)) }
@@ -171,7 +188,7 @@ function httpRequestNode(server, req, time=$lib.null, body=$lib.null) {
 }
 
 // Model a reference from a node to a string it contains (it:dev:str), ex. a page's title.
-function refStr(n, valu, time=$lib.null) {
+function refStr(n, valu, time=(null)) {
     [ it:dev:str=$valu ]
     [ <(refs)+ $n ]
     return($seen($node, $time))
@@ -179,7 +196,7 @@ function refStr(n, valu, time=$lib.null) {
 
 // Model a reference from a node to a URL, ex. a file in an open directory a page lists.
 // Returns the inet:url node, or null if the URL isn't valid.
-function refUrl(n, url, time=$lib.null) {
+function refUrl(n, url, time=(null)) {
     [ inet:url?=$url ]
     [ <(refs)+ $n ]
     return($seen($node, $time))
@@ -192,8 +209,8 @@ function refUrl(n, url, time=$lib.null) {
 // it:dev:str referenced by the banner (if any) and the final request. When the page is an open
 // directory, the URL of each file and folder it lists is an inet:url referenced by the request.
 // Returns the final inet:http:request node.
-function httpNodes(server, banner, http, time=$lib.null, tagPrefix=$lib.null) {
-    $body = $lib.null
+function httpNodes(server, banner, http, time=(null), tagPrefix=(null)) {
+    $body = (null)
     $bodies = ({})
     for $file in $http.files {
         $sha256 = $file.sha256
@@ -205,7 +222,7 @@ function httpNodes(server, banner, http, time=$lib.null, tagPrefix=$lib.null) {
     }
 
     for $hop in $http.redirects {
-        $hopbody = $lib.null
+        $hopbody = (null)
         if $hop.body {
             $sha256 = $hop.body.sha256
             $hopbody = $bodies.$sha256
@@ -224,35 +241,36 @@ function httpNodes(server, banner, http, time=$lib.null, tagPrefix=$lib.null) {
 
 // Create an it:prod:softver from a CPE (preferred) or a product name/version,
 // and link the node that runs it with a -(uses)> edge.
-function softverNode(user, cpe=$lib.null, product=$lib.null, version=$lib.null) {
-    $props = $lib.null
+function softverNode(user, cpe=(null), product=(null), version=(null), time=(null)) {
+    $props = (null)
     if $cpe {
         ($ok, $normcpe) = $lib.trycast(it:sec:cpe, $cpe)
         if $ok { $props = ({"cpe": $normcpe}) }
     }
-    if ($props = $lib.null and $product) {
+    if ($props = null and $product) {
         $props = ({"name": $product})
         if $version { $props.vers = $version }
     }
-    if ($props = $lib.null) { return($lib.null) }
+    if ($props = null) { return() }
 
-    [ it:prod:softver=$props ]
+    [ it:prod:softver=$props ]  // noqa: M001 (the 2.x form, the package requires Synapse <3.0.0)
     if $product { [ :name ?= $product ] }
     if $version { [ :vers ?= $version ] }
-    if $user { [ <(uses)+ { yield $user } ] }
-    return($node)
+    if $user { [ <(uses)+ $user ] }
+    return($seen($node, $time))
 }
 
 function vulnNode(cve) {
-    return($lib.gen.vulnByCve($cve, try=(true)))
+    return($lib.gen.vulnByCve($cve, try=(true)))  // noqa: R005 (no 3.x replacement on Synapse 2.x)
 }
 
 // Model that a node (inet:ipv4/6 or inet:server) is vulnerable to a CVE.
-function vulnerableNode(n, vuln, time=$lib.null) {
+function vulnerableNode(n, vuln, time=(null)) {
     $vulnnode = $vulnNode($vuln.cve)
-    if ($vulnnode = $lib.null) { return($lib.null) }
+    if ($vulnnode = null) { return() }
 
     if $vuln.summary { $setDesc($vulnnode, $vuln.summary) }
+    $seen($vulnnode, $time)
 
     [ risk:vulnerable=({"node": [$n.form(), $n.value()], "vuln": $vulnnode.value()}) ]
     return($seen($node, $time))
@@ -265,7 +283,7 @@ function setDesc(n, desc) {
     return($n)
 }
 
-function certNode(server, cert, time=$lib.null) {
+function certNode(server, cert, time=(null)) {
     [ crypto:x509:cert=({"sha256": $cert.sha256}) ]
     [
         :sha1 ?= $cert.sha1
@@ -287,9 +305,26 @@ function certNode(server, cert, time=$lib.null) {
     return($certnode)
 }
 
-function setAsn(n, asn, org=$lib.null) {
-    $asnnode = $asnNode($asn, $org)
-    if ($asnnode = $lib.null) { return($n) }
+// Model a TLS server's JARM (inet:ssl:jarmsample) and JA3S (inet:tls:ja3s:sample) fingerprints
+// (see shodansvc.norm.normTls). Invalid values are skipped.
+function tlsNodes(server, tls, time=(null)) {
+    if $tls.jarm { $jarmNode($server, $tls.jarm, $time) }
+    if $tls.ja3s { $ja3sNode($server, $tls.ja3s, $time) }
+}
+
+function jarmNode(server, jarm, time=(null)) {
+    [ inet:ssl:jarmsample?=($server, $jarm) ]
+    return($seen($node, $time))
+}
+
+function ja3sNode(server, ja3s, time=(null)) {
+    [ inet:tls:ja3s:sample?=($server, $ja3s) ]
+    return($seen($node, $time))
+}
+
+function setAsn(n, asn, org=(null), time=(null)) {
+    $asnnode = $asnNode($asn, $org, $time)
+    if ($asnnode = null) { return($n) }
     yield $n
     [ :asn ?= $asnnode.value() ]
     return($n)
@@ -307,7 +342,7 @@ function dnsRecordNode(rec) {
         "NS": { [ inet:dns:ns?=($fqdn, $valu) ] }
         "TXT": { [ inet:dns:txt?=($fqdn, $valu) ] }
         "SOA": { [ inet:dns:soa=({"fqdn": $fqdn, "ns": $valu}) ] }
-        *: { return($lib.null) }
+        *: { return() }
     }
     return($seen($node, $rec.seen))
 }
@@ -315,9 +350,9 @@ function dnsRecordNode(rec) {
 // ---- Modeling for full API results, each returns the primary node ----
 
 // Model a normalized banner. Returns the inet:server node.
-function banner(b, tagPrefix=$lib.null) {
+function banner(b, tagPrefix=(null)) {
     $res = $bannerNodes($b, $tagPrefix)
-    if ($res = $lib.null) { return($lib.null) }
+    if ($res = null) { return() }
     return($res.server)
 }
 
@@ -327,14 +362,14 @@ function banner(b, tagPrefix=$lib.null) {
 // A historical banner (from a history lookup) is an old observation, so what it says about the
 // current state isn't modeled: its vulns, and the IP's ASN (which overwrites). Shodan's tags for
 // it go on its inet:banner, a snapshot of what was seen, instead of the current inet:server.
-function bannerNodes(b, tagPrefix=$lib.null, historical=(false)) {
+function bannerNodes(b, tagPrefix=(null), historical=(false)) {
     $srv = $serverNode($b.ip, $b.port, $b.transport, $b.timestamp)
-    if ($srv = $lib.null) { return($lib.null) }
+    if ($srv = null) { return() }
 
     $ipnode = $ipNode($b.ip, $b.timestamp)
-    if ((not $historical) and $b.asn and $ipnode) { $setAsn($ipnode, $b.asn, $b.org) }
+    if ((not $historical) and $b.asn and $ipnode) { $setAsn($ipnode, $b.asn, $b.org, $b.timestamp) }
 
-    $bannernode = $lib.null
+    $bannernode = (null)
     if $b.data {
         $bannernode = $bannerNode($srv.repr(), $b.data, $b.timestamp)
         // Date headers aren't included, see shodansvc.norm.normHttpHeaders.
@@ -351,7 +386,7 @@ function bannerNodes(b, tagPrefix=$lib.null, historical=(false)) {
     if $b.http { $httpNodes($srv, $bannernode, $b.http, $b.timestamp, $tagPrefix) }
 
     // See shodansvc.norm.normSoftvers for how CPEs are paired with the product/version.
-    for $sv in $b.softvers { $softverNode($srv, $sv.cpe, $sv.product, $sv.version) }
+    for $sv in $b.softvers { $softverNode($srv, $sv.cpe, $sv.product, $sv.version, $b.timestamp) }
 
     if (not $historical) {
         for $vuln in $b.vulns { $vulnerableNode($srv, $vuln, $b.timestamp) }
@@ -359,7 +394,9 @@ function bannerNodes(b, tagPrefix=$lib.null, historical=(false)) {
 
     if $b.cert { $certNode($srv.repr(), $b.cert, $b.timestamp) }
 
-    for $hostname in $b.hostnames { $dnsNode($hostname, $b.ip, $b.timestamp) }
+    if $b.tls { $tlsNodes($srv.repr(), $b.tls, $b.timestamp) }
+
+    for $hostname in $b.hostnames { $revNode($b.ip, $hostname, $b.timestamp) }
 
     return(({"server": $srv, "banner": $bannernode, "ip": $ipnode}))
 }
@@ -370,11 +407,11 @@ function bannerNodes(b, tagPrefix=$lib.null, historical=(false)) {
 // fields (vulns, ports, tags, ...) are combined over its whole history, and old vulns and ASNs
 // aren't current. Each banner's tags go on its inet:banner. The current host comes from a plain lookup (see slib.shodan.lib.host). With
 // timeline, each banner is added to the IP's timeline.
-function historyBanners(h, tagPrefix=$lib.null, timeline=(false)) {
+function historyBanners(h, tagPrefix=(null), timeline=(false)) {
     $ipnode = $ipNode($h.ip)
-    if ($ipnode = $lib.null) { return($lib.null) }
+    if ($ipnode = null) { return() }
 
-    $tl = $lib.null
+    $tl = (null)
     if ($timeline and $h.banners) { $tl = $timelineNode($ipnode) }
     for $b in $h.banners {
         $res = $bannerNodes($b, $tagPrefix, historical=(true))
@@ -393,7 +430,7 @@ function historyBanners(h, tagPrefix=$lib.null, timeline=(false)) {
 // The meta:timeline of an IP's Shodan history (one per IP), linked -(refs)> to the IP.
 function timelineNode(ipnode) {
     $repr = $ipnode.repr()
-    [ meta:timeline=$lib.guid(slib.shodan, history, $repr) :type=svc.shodan.host.history. ]
+    [ meta:timeline=(slib.shodan, history, $repr) :type=svc.shodan.host.history. ]
     if (not :title) { [ :title=`Shodan history: {$repr}` ] }
     if (not :summary) {
         [ :summary=`Shodan banners observed for {$repr}, one meta:event per banner. Shodan's history covers 90 days and at most the latest 1,000 banners per lookup.` ]
@@ -422,7 +459,7 @@ function eventTitle(b) {
 }
 
 function eventSummary(b) {
-    $summary = $lib.null
+    $summary = (null)
     if $b.scan { $summary = `On-demand scan {$b.scan}` }
     elif $b.crawler { $summary = `Crawler {$b.crawler}` }
     if $b.truncated {
@@ -479,7 +516,7 @@ function liftRule(guid) {
 }
 
 // Model a saved query from Shodan's directory as a community meta:rule. Returns the node.
-function communityRule(q, tagPrefix=$lib.null) {
+function communityRule(q, tagPrefix=(null)) {
     $text = $lib.cast(str, $q.query)
     $name = $q.title
     if (not $name) { $name = $text }
@@ -493,12 +530,12 @@ function communityRule(q, tagPrefix=$lib.null) {
     if (not :url) { [ :url?=`https://www.shodan.io/search?query={$lib.inet.http.urlencode($text)}` ] }
     $rule = $seen($node)
 
-    if ($tagPrefix != $lib.null and $q.tags) { $applyTags($rule, `{$tagPrefix}.query`, $q.tags) }
+    if ($tagPrefix != null and $q.tags) { $applyTags($rule, `{$tagPrefix}.query`, $q.tags) }
     return($rule)
 }
 
 // Save a query in the Cortex as a local meta:rule. Returns the node.
-function localRule(text, name, desc=$lib.null) {
+function localRule(text, name, desc=(null)) {
     [ meta:rule=$localGuid($text) :type=svc.shodan.query.local. :text=$text ]
     if (not :name) { [ :name=$name ] }
     if ((not :desc) and $desc) { [ :desc=$desc ] }
@@ -511,12 +548,12 @@ function localRule(text, name, desc=$lib.null) {
 // Create the it:exec:query for one run of a Shodan query. Every run is its own node.
 // ref is the inbound node the query was built from, if any (it:exec:query -(refs)> ref).
 // opts must never hold an API key.
-function queryNode(text, apiurl, opts, ref=$lib.null) {
+function queryNode(text, apiurl, opts, ref=(null)) {
     [ it:exec:query=*
         :text=$text
         :language=shodan
         :time=now
-        :synuser=$lib.user.iden
+        :synuser=$lib.auth.users.get().iden
         :api:url?=$apiurl
         :opts=$opts
     ]
@@ -554,41 +591,42 @@ function setOffset(query, offset) {
 
 // Model a normalized host (from the Shodan host API or InternetDB). Returns the IP node.
 // With timeline, each banner is also added to the IP's Shodan history timeline (see timelineNode).
-function host(h, tagPrefix=$lib.null, timeline=(false)) {
+function host(h, tagPrefix=(null), timeline=(false)) {
     $ipnode = $ipNode($h.ip, $h.last_update)
-    if ($ipnode = $lib.null) { return($lib.null) }
+    if ($ipnode = null) { return() }
 
-    if $h.asn { $setAsn($ipnode, $h.asn, $h.org) }
+    if $h.asn { $setAsn($ipnode, $h.asn, $h.org, $h.last_update) }
     if $h.location { $setLocation($ipnode, $h.location) }
 
     $applyTags($ipnode, $tagPrefix, $h.tags)
 
-    for $hostname in $h.hostnames { $dnsNode($hostname, $h.ip, $h.last_update) }
+    for $hostname in $h.hostnames { $revNode($h.ip, $hostname, $h.last_update) }
 
     for $vuln in $h.vulns { $vulnerableNode($ipnode, $vuln, $h.last_update) }
 
     // InternetDB results have CPEs at the host level.
     if $h.cpes {
-        for $cpe in $h.cpes { $softverNode($ipnode, $cpe) }
+        for $cpe in $h.cpes { $softverNode($ipnode, $cpe, time=$h.last_update) }
     }
 
     if $h.banners {
-        $tl = $lib.null
+        $tl = (null)
         if $timeline { $tl = $timelineNode($ipnode) }
         for $b in $h.banners {
             $res = $bannerNodes($b, $tagPrefix)
             if ($tl and $res) { $eventNode($tl, $b, $res) }
         }
     } else {
-        // Minified host lookups and InternetDB only give us open ports.
-        for $port in $h.ports { $serverNode($h.ip, $port, tcp, $h.last_update) }
+        // Minified host lookups and InternetDB only give us open ports, without a transport. Only
+        // the ones Shodan doesn't crawl over UDP are modeled, as TCP (see shodansvc.norm.tcpPorts).
+        for $port in $h.tcp_ports { $serverNode($h.ip, $port, tcp, $h.last_update) }
     }
 
     return($ipnode)
 }
 
 // Model a normalized CVE/advisory (from CVEDB). Returns the risk:vuln node.
-function cve(c, tagPrefix=$lib.null, cpes=(false)) {
+function cve(c, tagPrefix=(null), cpes=(false)) {
     if $c.cve {
         $vulnnode = $vulnNode($c.cve)
         if $vulnnode { $cveNode($c) }
@@ -596,15 +634,16 @@ function cve(c, tagPrefix=$lib.null, cpes=(false)) {
         // A GHSA/EUVD advisory without a CVE.
         $vulnnode = $advisoryNode($c.aliases.0)
     } else {
-        return($lib.null)
+        return()
     }
-    if ($vulnnode = $lib.null) { return($lib.null) }
+    if ($vulnnode = null) { return() }
 
     $setVulnProps($vulnnode, $c)
     for $alias in $c.aliases { $addArrayValu($vulnnode, names, $alias) }
     for $cwe in $c.cwes { $addArrayValu($vulnnode, cwes, $cwe) }
     if $c.kev { $applyTags($vulnnode, $tagPrefix, (kev,)) }
-    $seen($vulnnode, $c.published)
+    // :timeline:published is when it was published, not when Shodan saw it, so it isn't the .seen.
+    $seen($vulnnode)
 
     if $cpes {
         for $cpe in $c.cpes {
@@ -624,10 +663,13 @@ function setVulnProps(n, c) {
     }
     if $c.references { [ :cve:references ?= $c.references ] }
     if $c.published { [ :timeline:published ?= $c.published ] }
-    if ($c.cvss_v3 != $lib.null) { [ :cvss:v3_1:score ?= $c.cvss_v3 ] }
-    if ($c.cvss_v2 != $lib.null) { [ :cvss:v2_0:score ?= $c.cvss_v2 ] }
-    // Advisories without a CVE only have an unversioned score.
-    if ($c.cve = "" and $c.cvss != $lib.null) { [ :cvss:v3_1:score ?= $c.cvss ] }
+    // Each score goes in the prop of its CVSS version, unversioned scores are left unset (see
+    // shodansvc.norm.cvssScores).
+    // No loop here, the node is in the pipeline (see the NOTE at the top).
+    $scores = $c.cvss_scores
+    if ($scores.v2_0 != null) { [ :cvss:v2_0:score ?= $scores.v2_0 ] }
+    if ($scores.v3_0 != null) { [ :cvss:v3_0:score ?= $scores.v3_0 ] }
+    if ($scores.v3_1 != null) { [ :cvss:v3_1:score ?= $scores.v3_1 ] }
     return($n)
 }
 
@@ -653,12 +695,12 @@ function addArrayValu(n, prop, valu) {
 function cveNode(c) {
     // it:sec:cve:desc/references are deprecated, the details live on the risk:vuln.
     [ it:sec:cve?=$c.cve ]
-    return($seen($node, $c.published))
+    return($seen($node))
 }
 
 function softverCve(cpe, cve) {
-    [ it:prod:softver=({"cpe": $cpe}) :cves += $cve ]
-    return($node)
+    [ it:prod:softver=({"cpe": $cpe}) :cves += $cve ]  // noqa: M001 (the 2.x form, the package requires Synapse <3.0.0)
+    return($seen($node))
 }
 
 // Yield the given non-null nodes. Lets commands divert to nodes returned by the functions above.

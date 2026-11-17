@@ -1,46 +1,478 @@
-# slib.shodan
+# shodan
 
-A Storm Service that integrates every Shodan API into Synapse: host lookups, search,
-on-demand scanning, network alerts and notifiers, DNS, streaming, saved queries, bulk data,
-organization management, Trends, and the free InternetDB and CVEDB APIs.
+A Synapse Advanced Power-Up (Storm Service) that integrates every Shodan API into Synapse:
+host lookups, search, on-demand scanning, network alerts and notifiers, DNS, the Streaming
+API, the directory of saved queries, bulk data, organization management, Trends, and the
+free InternetDB and CVEDB APIs.
 
-Run any `slib.shodan.*` command with `--help` for its options and examples.
+Two Shodan APIs have been retired and aren't supported:
+
+- The Exploits API (`exploits.shodan.io`) now redirects to CVEDB. Use `slib.shodan.cve`.
+- The Honeyscore API (`/labs/honeyscore`) was folded into Shodan's crawlers. Likely honeypots
+  get Shodan's `honeypot` tag, which `slib.shodan.host` applies as `#rep.shodan.honeypot`.
+
+The service registers the `slib.shodan` Storm package. Everything is namespaced under `slib.shodan`.
+
+## Deploying
+
+The service is published as `ghcr.io/gormaniac/stormsvcs/shodan`.
+
+```bash
+docker run -d --name slib-shodan \
+    -v /srv/slib-shodan:/vertex/storage \
+    -e SYN_SHODANSVC_SHODAN_APIKEY=<optional service-wide key> \
+    -p 27492:27492 \
+    ghcr.io/gormaniac/stormsvcs/shodan:latest
+```
+
+Then add it to a Cortex:
+
+```
+service.add slib.shodan tcp://<user>:<passwd>@<host>:27492/*
+```
+
+### Configuration
+
+| Option | Env var | Default | Description |
+|---|---|---|---|
+| `shodan:apikey` | `SYN_SHODANSVC_SHODAN_APIKEY` | none | Fallback API key, see [API keys](#api-keys). |
+| `shodan:ratelimit` | `SYN_SHODANSVC_SHODAN_RATELIMIT` | `1.0` | Max requests/second to the API key based APIs (Shodan allows 1/s). |
+| `shodan:timeout` | `SYN_SHODANSVC_SHODAN_TIMEOUT` | `60` | Seconds before a single request times out. |
+| `shodan:urls` | `SYN_SHODANSVC_SHODAN_URLS` | Shodan's | Override base URLs (`api`, `stream`, `trends`, `internetdb`, `cvedb`). |
+
+The service honors the standard `HTTP(S)_PROXY` environment variables.
 
 ## API keys
 
-Keys are resolved per request, in this order:
+Keys are resolved in this order, per request:
 
-1. Your own key, set with `slib.shodan.apikey <key>` (stored in a user scoped vault of type `shodan`).
-2. The service-wide key, set by an admin with `slib.shodan.admin.apikey <key>`.
-3. The service's `shodan:apikey` config option.
+1. **The calling user's own key** - set with `slib.shodan.apikey <key>`. It's stored in a
+   user scoped Synapse vault (type `shodan`), so it is only ever used for that user's requests.
+2. **The service-wide key** - set with `slib.shodan.admin.apikey <key>`. It's stored by the
+   service, not the Cortex, so it can't be read back from Storm.
+3. **The `shodan:apikey` config option.**
 
-Without a key, `slib.shodan.host` falls back to the free InternetDB API.
+When no key is available, `slib.shodan.host` falls back to InternetDB. The InternetDB and
+CVEDB APIs never need a key.
 
 ## Permissions
 
-- `slib.shodan.user` - Lookups, search, DNS, CVEs, trends, and streams.
-- `slib.shodan.scan` - On-demand scans.
-- `slib.shodan.alert` - Network alerts and notifiers.
-- `slib.shodan.admin` - The service-wide key, tag settings, organization, bulk data, and raw requests.
+| Permission | Grants |
+|---|---|
+| `slib.shodan.user` | Lookups, search, DNS, CVEs, trends, streams, and setting your own key. |
+| `slib.shodan.scan` | On-demand scans (uses scan credits). |
+| `slib.shodan.alert` | Network alerts and notifiers. |
+| `slib.shodan.admin` | The service-wide key, tag settings, organization, bulk data, and raw API requests. |
 
-## Examples
+Users don't need the `service.get` permission. The `slib.shodan.priv.*` modules talk to the
+service and elevate privileges only for users that hold the matching permission. Users still
+need the normal node permissions for the nodes the commands create.
+
+## Commands
+
+| Command | Description |
+|---|---|
+| `slib.shodan.host` | Look up IPs and model everything Shodan knows (ASN, location, hostnames, tags, vulns, every banner). Takes IPs, or the IPs of `inet:server`, `inet:banner`, `inet:dns:a`/`aaaa`, and `inet:dns:rev`/`rev6` nodes (each IP is looked up once). `--history`, `--timeline`, `--minify`, `--internetdb`. |
+| `slib.shodan.enrich` | Enrich any supported node with the best API: IPs → host, `inet:fqdn` → DNS, `risk:vuln`/`it:sec:cve` → CVEDB, `it:sec:cpe` → CVEs. |
+| `slib.shodan.search` | Search Shodan, model each banner, and yield the IPs. `--count` and `--facets` are free, `--tokens` explains a query, `--filters` lists filters/facets. Inbound nodes are searched for with a query built for their form (see below), AND'd with any query. A page past the deepest one your plan can read ends the results (Shodan answers it with an error), so `--limit 0` stops there quietly. |
+| `slib.shodan.count` | List the IPs matching a query with the free count API (no query credits), model them, and yield them. One request per query, up to your plan's facet limit in IPs. `--facets` prints extra facets for context. Takes the same inbound nodes as `search`. |
+| `slib.shodan.stream` | Read banners from the Streaming API (`banners`, `asn`, `countries`, `ports`, `tags`, `vulns`, `custom`, `alert`) for `--limit` banners or `--timeout` seconds. Inbound `inet:asn`, `risk:vuln`/`it:sec:cve`, `pol:country`, and `meta:rule` nodes are streamed together (one subscription). |
+| `slib.shodan.hash` | Print Shodan's hash filter for `inet:banner` nodes or `--text` (`hash:<n>`), and favicon or HTML `file:bytes` (`http.favicon.hash:<n>`, `http.html_hash:<n>`). Local only, no API calls. |
+| `slib.shodan.dns.domain` | Model every DNS record and subdomain Shodan knows for a domain. |
+| `slib.shodan.dns.lookup` | Resolve `inet:fqdn`s and reverse-resolve IPs. |
+| `slib.shodan.cve` | Model CVEDB details (CVSS, KEV, references, linked GHSA/EUVD IDs) on `risk:vuln`s. Accepts CVE, GHSA, and EUVD IDs. Search by `--cpe`/`--product` with `--kev`, `--epss`, `--start`, `--end`, `--count`. |
+| `slib.shodan.cpe` | Search CVEDB for a product's CPEs. |
+| `slib.shodan.trends` | Monthly historical breakdown of a query, with `--facets`. Takes the same inbound nodes as `search`, skipping any whose query uses filters Trends doesn't support. |
+| `slib.shodan.queries` | List saved queries: those stored in the Cortex (local and community) and Shodan's directory (`--source`). `--yield` copies directory queries in as community `meta:rule` nodes. |
+| `slib.shodan.query.save` | Save a query in the Cortex as a local `meta:rule` (never sent to Shodan). |
+| `slib.shodan.info` | Account, plan, remaining credits, and the service's public IP. |
+| `slib.shodan.ref` | Reference data: `ports`, `protocols`, `services`, `filters`, `facets`, `triggers`, `providers`, `httpheaders`. |
+| `slib.shodan.apikey` | Set/clear your own API key. |
+| `slib.shodan.scan` | Scan inbound IPs/CIDRs as one scan. `--wait` polls until it's done, then ingests the results. |
+| `slib.shodan.scan.status` | List your scans, or check one. |
+| `slib.shodan.scan.internet` | Request an Internet-wide scan of a port/protocol. |
+| `slib.shodan.alert.list` | List alerts, or show one. |
+| `slib.shodan.alert.add` | Create an alert for the inbound IPs/CIDRs, enabling `--trigger`s and attaching `--notifier`s in one step. |
+| `slib.shodan.alert.edit` | Replace/`--append` IPs, `--enable`/`--disable` triggers, `--ignore`/`--unignore` services (`<trigger>/<ip>:<port>`, anything else is refused), and add/remove notifiers in one step. |
+| `slib.shodan.alert.del` | Delete alerts. |
+| `slib.shodan.notifier.list` | List notifiers, or show one. |
+| `slib.shodan.notifier.add` | Create a notifier for a provider, with `--arg name=value` provider arguments. |
+| `slib.shodan.notifier.edit` | Change a notifier's provider arguments. |
+| `slib.shodan.notifier.del` | Delete notifiers. |
+| `slib.shodan.admin.apikey` | Set/clear/check the service-wide key. |
+| `slib.shodan.admin.tags` | Set the tag `--prefix` (default `rep.shodan`), `--enable` or `--disable` tagging. |
+| `slib.shodan.admin.org` | Show the organization, or `--add`/`--remove` members. |
+| `slib.shodan.admin.data` | List bulk datasets and their files. |
+| `slib.shodan.admin.dns.cleanup` | Replace the `inet:dns:a`/`aaaa` nodes versions before 0.17.0 made from Shodan's hostnames with `inet:dns:rev`/`rev6` nodes. A dry run unless `--apply`, see [Cleaning up hostname DNS records](#cleaning-up-hostname-dns-records). |
+| `slib.shodan.admin.request` | Send a raw request to any Shodan API, for anything not covered above. |
+
+Run any command with `--help` for all of its options and examples.
+
+### Examples
 
 ```
 // Everything Shodan knows about some IPs. Likely honeypots get Shodan's honeypot tag (#rep.shodan.honeypot).
 inet:ipv4#my.tag | slib.shodan.host
 
-// Free: count results and summarize by country.
-slib.shodan.search "product:nginx" --count --facets country:10
+// Ingest the first 200 nginx servers in the US, then look at their certs.
+slib.shodan.search "product:nginx country:US" --limit 200 | -> inet:server -> inet:tls:servercert -> crypto:x509:cert
 
-// Ingest the first 200 results.
-slib.shodan.search "product:nginx country:US" --limit 200
-
-// Enrich any mix of IPs, domains, CVEs, and CPEs.
-#my.tag | slib.shodan.enrich
-
-// Monitor a netblock for new services and vulns.
+// Monitor a netblock and get emailed about new services and vulns.
 inet:cidr4=1.2.3.0/24 | slib.shodan.alert.add corp --trigger new_service --trigger vulnerable --notifier default
+
+// Enrich vulns with CVSS/KEV data from CVEDB.
+risk:vuln:cve | slib.shodan.cve
 ```
 
-Shodan's own tags (ex. `cloud`, `vpn`, `honeypot`) and CISA KEV vulns are tagged under
-`rep.shodan` by default. Change it with `slib.shodan.admin.tags`.
+The `slib.shodan.lib` module can also be used directly from Storm:
+
+```
+$shodan = $lib.import(slib.shodan.lib)
+$ipnode = $shodan.host(8.8.8.8, history=(true))
+$vulns = $shodan.cves(product=log4j, kev=(true))
+```
+
+## Query runs
+
+Every `slib.shodan.search`, `slib.shodan.count`, and `slib.shodan.stream` run is recorded as an
+`it:exec:query`:
+
+- `:text` is the query sent to Shodan (ex. `ports:443,53` for a stream).
+- `:language` is `shodan`, plus `:time`, `:synuser`, `:api:url` (never with the API key),
+  `:offset` (the number of banners or IPs read), and `:opts` (the command's options).
+- `-(found)>` edges link it to the `inet:server`, `inet:banner`, and `inet:ipv4`/`inet:ipv6` of
+  every banner it returned (only the IPs, for counts). Everything else from a banner (certs, software, vulns, headers) is one
+  hop from those.
+- A `-(refs)>` edge links it to the inbound node the query was built from.
+
+Each run is its own node. Failed searches and the print-only modes (`--count`, `--tokens`,
+`--filters`) record nothing. `--yield-query` yields the `it:exec:query` nodes instead of the IPs:
+
+```
+// What did the searches for this cert find?
+crypto:x509:cert:sha1=e652c8bd1cafd04a44239fa8dab0c59deacb79ee | slib.shodan.search --yield-query | -(found)> inet:server
+
+// Every search ever run for a node, and when.
+it:exec:query:time +{ -(refs)> inet:asn=15169 }
+```
+
+From Storm, `$shodan.search($query)` returns `({"query": <it:exec:query>, "ips": [...]})`, and
+`$shodan.count($query)` does the same (plus `size` and `full`) without using query credits.
+
+## Saved queries
+
+Saved Shodan queries are `meta:rule` nodes (`:text` is the query) of two kinds, which **never sync**:
+
+| | Community queries | Local queries |
+|---|---|---|
+| From | Shodan's query directory, copied with `slib.shodan.queries --yield` | Saved with `slib.shodan.query.save` |
+| `:type` | `svc.shodan.query.community.` | `svc.shodan.query.local.` |
+| `:name` | `[Community] <title>` (Synapse lower-cases `:name`, so ex. `[community] webcams`) | The name given |
+| Updates | A snapshot. Directory changes only arrive by copying again, and removed queries are never deleted. | Never sent to Shodan, its API can't save to the directory. |
+
+The same query text is a separate node for each kind. Re-copying keeps edits to `:name` and `:desc`.
+`slib.shodan.queries` lists both (stored ones first), and `--source local` or `--source shodan`
+picks one. Pipe any saved query to `slib.shodan.search`, `slib.shodan.count`, or `slib.shodan.stream`
+to run it. Only the two types above are saved queries, not the bare parent type `svc.shodan.query.`.
+
+`--search` matches stored queries by `:name`, `:text`, or `:desc`, ignoring case. For the
+directory it uses Shodan's directory search, which returns a 503 at the moment (see
+[Known API quirks](#known-api-quirks)). Until that's fixed, the command warns and matches the
+directory pages it listed (`--page`, `--pages`, 10 queries a page) by title, query, description,
+or tags instead. The directory has ~7,000 queries, none newer than 2021, so the easiest way to
+search all of it is to copy it once (~700 requests) and search the copies:
+
+```
+slib.shodan.query.save "http.favicon.hash:-1166125415" --name "Favicon"
+slib.shodan.queries --source shodan --pages 1000 --yield | count
+slib.shodan.queries --source local --search webcam
+meta:rule:type^=svc.shodan.query | slib.shodan.count
+```
+
+## Host history timelines
+
+`slib.shodan.host --history` (or `--timeline`, for a plain lookup) adds each banner to the IP's
+Shodan history:
+
+- One `meta:timeline` per IP: `:title` "Shodan history: <ip>", `:type` `svc.shodan.host.history.`,
+  and `-(refs)>` to the IP.
+- One `meta:event` per banner: `:time` is when Shodan saw it, `:title` ex. "tcp/22 OpenSSH 8.9p1",
+  `:summary` the crawler or on-demand scan that produced it, and `:type` `svc.shodan.banner.`.
+  Each event has `-(refs)>` edges to only the `inet:server`, `inet:banner`, and IP it describes.
+- Events are keyed by Shodan's banner ID, so re-running a lookup only adds new banners, and edits
+  to an event's `:title` or `:summary` are kept.
+
+A `--history` lookup is a plain lookup for the IP's current data, then a history lookup (both free),
+since Shodan's history lags its newest data by about a day. The current host (vulns, tags, ports) is
+modeled from the plain lookup, and only the banners from the history, without their vulns or ASN:
+the history's host-level fields combine all 90 days, and old vulns aren't current. Shodan's tags for
+a historical banner (ex. `self-signed`) go on its `inet:banner`, a snapshot of what was seen, not
+the current `inet:server`.
+
+Shodan's history covers 90 days, at most the latest 1,000 banners. Re-run lookups (ex. on a
+schedule) to build a longer history. `--no-timeline` skips the timeline for a `--history` lookup.
+
+```
+inet:ipv4=45.33.32.156 | slib.shodan.host --history
+meta:event:time +{ :timeline -> meta:timeline +:title="Shodan history: 45.33.32.156" }
+meta:event:title^="tcp/22" -(refs)> inet:banner
+```
+
+## Listing IPs without query credits
+
+`slib.shodan.count` gets the IPs matching a query from the free count API's `ip` facet. It makes
+one request per query and models only the IPs: no banners, ports, or counts. Use it to run as many
+queries as you like, then `slib.shodan.search` (which uses credits) or other APIs for details.
+
+- One count returns at most your plan's facet limit in IPs (ex. 1,000 for a Membership, 5,120 for a
+  Freelancer). It asks for that many by default. The service learns the limit from Shodan the first
+  time a key asks for too many (one extra free request), and remembers it in memory.
+- When the IPs fill the limit, the query likely matches more, and a warning says so. Narrow the
+  query (ex. add `country:` or `asn:`) to get the rest. IPs come back busiest first.
+
+```
+slib.shodan.count "http.favicon.hash:-1166125415"
+meta:rule:type^=svc.shodan.query | slib.shodan.count --facets country:10
+```
+
+## Searching from nodes
+
+Nodes piped to `slib.shodan.search` are each searched for with a query built for their form,
+AND'd with any query given (ex. `crypto:x509:cert | slib.shodan.search "country:US" --count`).
+Nodes that build the same query (ex. `inet:banner` nodes with the same text, servers presenting the
+same cert, a `risk:vuln` and its `it:sec:cve`) only run it once per command, and that run's
+`it:exec:query` refs each of them. `slib.shodan.count` and `slib.shodan.trends` do the same, and
+`slib.shodan.host`, `slib.shodan.cve`, and `slib.shodan.enrich` make each IP or CVE lookup once.
+`$shodan.searchQuery($node)` returns the query for a node.
+
+`slib.shodan.search`, `slib.shodan.enrich`, `slib.shodan.dns.domain`, and `slib.shodan.dns.lookup`
+read every inbound node before running any. A Storm lift is still running while a command processes
+its nodes, so a lift of a form the command creates (ex. `inet:banner | slib.shodan.search`, or
+`inet:fqdn:zone=vertex.link | slib.shodan.dns.domain`) would otherwise also return the nodes the
+command creates, and run on them too, using more query credits. `--stream-inbound` runs each
+inbound node as it arrives instead, for inbound sets too large to hold in memory, with that risk. See `slib.shodan.search --help` for
+the full list:
+
+| Form | Query |
+|---|---|
+| `inet:banner` | `hash:<n>` |
+| `file:bytes` | `http.favicon.hash:<n>` (`:mime` image/\*) or `http.html_hash:<n>` (text/html), or `--file-hash` |
+| `crypto:x509:cert`, `inet:tls:servercert` | `ssl.cert.fingerprint:<sha1>`, or `ssl.cert.serial:0x<serial>` |
+| `it:sec:cpe`, `it:prod:softver` | `cpe:"cpe:2.3:<part>:<vendor>:<product>" version:"<version>"`, or `product:"<name>" version:"<vers>"` |
+| `it:sec:cve`, `risk:vuln` | `vuln:<CVE>` |
+| `inet:ssl:jarmhash`, `inet:tls:ja3s:sample` | `ssl.jarm:<hash>`, `ssl.ja3s:<hash>` |
+| `inet:asn`, `inet:cidr4/6`, `inet:fqdn`, `inet:server` | `asn:AS<n>`, `net:<cidr>`, `hostname:"<fqdn>"`, `ip:"<ip>" port:<port>` |
+| `ou:org`, `ou:name` | `org:"<name>"` |
+| `it:dev:str` | The string, as-is |
+| `meta:rule` (`:type` `svc.shodan.query.local.` or `svc.shodan.query.community.`) | Its `:text` |
+
+## Data model
+
+| Shodan data | Synapse |
+|---|---|
+| IP, ASN, org, location | `inet:ipv4`/`inet:ipv6` (`:asn`, `:latlong`, `:loc`), `inet:asn:owner` → `ou:org` |
+| Hostnames | `inet:dns:rev`/`inet:dns:rev6` (the IP, the hostname). Shodan's hostnames come from reverse DNS and TLS/HTTP observations, not forward lookups, so they aren't `inet:dns:a`/`aaaa` records (those come only from `slib.shodan.dns.domain` and `slib.shodan.dns.lookup` of a hostname). `slib.shodan.dns.lookup` of an IP also sets the IP's `:dns:rev`. Before 0.17.0 they were modeled as `inet:dns:a`/`aaaa`, see `slib.shodan.admin.dns.cleanup`. |
+| Services and banners | `inet:server`, `inet:banner` (the full banner text, never truncated). Minified host lookups and InternetDB only list port numbers, without a transport: they're modeled as `tcp://` servers, except the ports Shodan crawls over UDP (ex. 53, 123, 161, 500, 1900, 5353, see `shodansvc.norm.UDP_PORTS`), which aren't modeled since their transport is unknown. |
+| HTTP response headers | `inet:http:response:header`, with `inet:banner -(refs)> inet:http:response:header`. Parsed from HTTP banners, except `Date` headers (they change every scan). |
+| SSH host keys | `file:bytes` of the key as OpenSSH saves it (`<algo> <base64 key>\n`), served by the server via `inet:servfile`, both tagged `#rep.shodan.banner`. The bytes are saved in the Axon for users with `axon.upload`. |
+| HTTP requests | `inet:http:request` for each response Shodan got from a web server (`:server`, `:time`, `:url`, `:path`, `:header:host`, `:response:code`, `:response:reason`, `:response:headers`, `:response:body`). Each redirect Shodan followed to reach the page is another one. Pivot with `inet:server -> inet:http:request`. |
+| HTTP page titles | `it:dev:str`, with `inet:banner -(refs)> it:dev:str` and `inet:http:request -(refs)> it:dev:str` |
+| Open directories | `inet:url` for each file and folder the page lists (Shodan's `open_dir`), with `inet:http:request -(refs)> inet:url`. The listing page itself is the request's `:response:body`. Ex. `inet:url:path=/linpeas.sh <(refs)- inet:http:request :server -> inet:server` |
+| Files web servers return | `file:bytes` for the page (`http.html`), `robots.txt`, `security.txt`, the sitemap, the favicon, and redirect bodies, with `:mime`, `:name`, and every hash. `inet:servfile` for each file the server returned and `inet:urlfile` for the URL it came from. A favicon on another server only gets the `inet:urlfile`. All are tagged `#rep.shodan.banner`, and the bytes are saved in the Axon for users with `axon.upload`, so `slib.shodan.hash` and `slib.shodan.search` find other servers with the same page or favicon. |
+| Products and CPEs | `it:prod:softver` (`:cpe`, `:name`, `:vers`), with `inet:server -(uses)> it:prod:softver` |
+| Vulnerabilities | `risk:vuln` (via `$lib.gen.vulnByCve`), `risk:vulnerable` for the IP and the server |
+| TLS certificates | `crypto:x509:cert` (deconflicted by `:sha256`), `inet:tls:servercert` |
+| TLS fingerprints | `inet:ssl:jarmsample` (the server's JARM, skipped when it's all zeros) and `inet:tls:ja3s:sample` (its JA3S) |
+| DNS records | `inet:dns:a/aaaa/cname/mx/ns/txt/soa` |
+| CVEDB | `risk:vuln` `:cve:desc`, `:cve:references`, `:cvss:v2_0:score`, `:cvss:v3_0:score` or `:cvss:v3_1:score` (picked by the CVSS version: CVEDB's own `cvss_version` is only the major version, so its v3 scores go in `:cvss:v3_1:score`, while EUVD's version and a GHSA's CVSS vector are exact; a GHSA's score is computed from its v3 vector; a score without a version, or a v4.0 one, is left unset), `:timeline:published`, GHSA/EUVD IDs in `:names`, GHSA CWEs in `:cwes`; `it:prod:softver:cves` with `--cpes`. Advisories without a CVE are deconflicted by `risk:vuln:id`. |
+| Shodan tags, CISA KEV | Tags under the prefix, ex. `#rep.shodan.cloud`, `#rep.shodan.honeypot`, `#rep.shodan.kev` |
+
+Every node is linked to the service's `meta:source` with a `-(seen)>` edge (including the
+`inet:asn`, its `ou:org` owner, `it:prod:softver`, and `risk:vuln` nodes), and has `.seen`
+updated from Shodan's timestamps, when Shodan saw it. CVEDB's publish dates are only
+`:timeline:published`, never the `.seen` of a `risk:vuln` or `it:sec:cve`.
+
+## Upgrading to 0.17.0
+
+0.17.0 changes how some Shodan data is modeled. Nodes made by older versions aren't changed,
+except by `slib.shodan.admin.dns.cleanup`:
+
+- Shodan's hostnames are `inet:dns:rev`/`rev6` records, not `inet:dns:a`/`aaaa` (see below).
+- Bare ports from minified host lookups and InternetDB that Shodan crawls over UDP (ex. 53) are
+  no longer guessed as `tcp://` servers.
+- CVEDB scores go in the prop of their CVSS version (`:cvss:v3_0:score` or `:cvss:v3_1:score`),
+  and scores without a version are left unset. GHSAs without a CVE get the score of their CVSS
+  v3 vector. CVEDB publish dates are no longer `.seen`.
+- `inet:asn`, `ou:org`, `it:prod:softver`, and `risk:vuln` nodes are linked to the `meta:source`.
+- JARM and JA3S fingerprints are modeled (`inet:ssl:jarmsample`, `inet:tls:ja3s:sample`).
+- `slib.shodan.alert.edit` refuses `--ignore`/`--unignore` services that aren't `<ip>:<port>`,
+  `slib.shodan.admin.tags` refuses an invalid `--prefix`, `slib.shodan.scan --wait` stops at a
+  `FAILED` scan, and `slib.shodan.search` ends quietly at Shodan's deep-paging limit.
+- The package requires Synapse 2.256.0 or newer.
+
+## Cleaning up hostname DNS records
+
+Before 0.17.0, Shodan's hostnames (from host lookups, search and stream banners, InternetDB, and
+reverse `slib.shodan.dns.lookup`s) were modeled as forward `inet:dns:a`/`aaaa` records, which
+assert resolutions that may never have happened. They're now `inet:dns:rev`/`rev6` records (see
+[Data model](#data-model)). `slib.shodan.admin.dns.cleanup` (needs `slib.shodan.admin`, and
+`node.del` permissions to delete nodes) fixes the nodes older versions made:
+
+```
+// Print what would change, and why each kept node is kept.
+slib.shodan.admin.dns.cleanup
+
+// Make the changes. Running it again changes nothing.
+slib.shodan.admin.dns.cleanup --apply
+```
+
+Only `inet:dns:a`/`aaaa` nodes linked to the service's `meta:source` (`-(seen)>`) are checked,
+and only those that can only be from a hostname are changed: their IP is linked to the
+`meta:source` too, they have a `.seen`, their hostname isn't a `meta:source` linked `inet:fqdn`
+(a `dns.domain` subdomain or reverse DNS name), and the service has no NS, SOA, MX, TXT, or CNAME
+records for the hostname or its parent domains. Anything else may be a real DNS record from
+`slib.shodan.dns.domain` or a forward `slib.shodan.dns.lookup`, and is kept. So are InternetDB
+hostnames, which have no `.seen` to tell them from lookups, and hostnames from reverse lookups
+(their `inet:fqdn` is linked to the `meta:source`).
+
+Each changed node gets its `inet:dns:rev`/`rev6` (with the node's `.seen`, linked to the
+`meta:source`). Then the old node is deleted, or, if it's tagged or has any other edge (ex.
+another source's `-(seen)>`), only the service's `-(seen)>` edge is removed.
+
+## Shodan API coverage
+
+Every Shodan API endpoint is available through a command, and all of them are methods on
+the service (`$lib.service.get(slib.shodan)`, for those with `service.get`).
+
+| Endpoint | Storm |
+|---|---|
+| `GET /shodan/host/{ip}` | `slib.shodan.host`, `slib.shodan.enrich` |
+| `GET /shodan/host/count` | `slib.shodan.count`, `slib.shodan.search --count/--facets` |
+| `GET /shodan/host/search` | `slib.shodan.search` |
+| `GET /shodan/host/search/facets`, `/filters` | `slib.shodan.search --filters`, `slib.shodan.ref facets/filters` |
+| `GET /shodan/host/search/tokens` | `slib.shodan.search --tokens` |
+| `GET /shodan/ports`, `/protocols`, `/services` | `slib.shodan.ref ports/protocols/services` |
+| `POST /shodan/scan`, `GET /shodan/scan/{id}` | `slib.shodan.scan` (`--wait` polls the status) |
+| `POST /shodan/scan/internet` | `slib.shodan.scan.internet` |
+| `GET /shodan/scans`, `/shodan/scan/{id}` | `slib.shodan.scan.status` |
+| `POST /shodan/alert`, `PUT .../trigger/{t}`, `PUT .../notifier/{id}` | `slib.shodan.alert.add` |
+| `GET /shodan/alert/info`, `/shodan/alert/{id}/info` | `slib.shodan.alert.list` |
+| `POST /shodan/alert/{id}`, `PUT/DELETE .../trigger/{t}`, `.../ignore/{svc}`, `.../notifier/{id}` | `slib.shodan.alert.edit` |
+| `DELETE /shodan/alert/{id}` | `slib.shodan.alert.del` |
+| `GET /shodan/alert/triggers` | `slib.shodan.ref triggers` |
+| `GET /notifier`, `/notifier/{id}` | `slib.shodan.notifier.list` |
+| `GET /notifier/provider` | `slib.shodan.ref providers` |
+| `POST /notifier`, `PUT /notifier/{id}`, `DELETE /notifier/{id}` | `slib.shodan.notifier.add/edit/del` |
+| `GET /shodan/query`, `/query/search`, `/query/tags` | `slib.shodan.queries` |
+| `GET /shodan/data`, `/shodan/data/{dataset}` | `slib.shodan.admin.data` |
+| `GET /org`, `PUT/DELETE /org/member/{user}` | `slib.shodan.admin.org` |
+| `GET /account/profile`, `/api-info`, `/tools/myip` | `slib.shodan.info` |
+| `GET /tools/httpheaders` | `slib.shodan.ref httpheaders` |
+| `GET /dns/domain/{domain}` | `slib.shodan.dns.domain`, `slib.shodan.enrich` |
+| `GET /dns/resolve`, `/dns/reverse` | `slib.shodan.dns.lookup` |
+| Streaming API (all streams) | `slib.shodan.stream` |
+| Trends API (`/api/v1/search`, `/facets`, `/filters`) | `slib.shodan.trends` |
+| InternetDB (`/{ip}`) | `slib.shodan.host --internetdb` (or no API key) |
+| CVEDB (`/cve/{id}`, `/ghsa/{id}`, `/euvd/{id}`, `/cves`, `/cpes`) | `slib.shodan.cve`, `slib.shodan.cpe`, `slib.shodan.enrich` |
+| Anything else | `slib.shodan.admin.request` |
+
+## Development
+
+```bash
+cd svcs/shodan
+uv sync --dev
+uv run pytest
+```
+
+The tests run a real Cortex with the service added, pointed at a fake Shodan HTTP server
+(`tests/fakeshodan.py`), so no API key or network access is needed.
+
+### Live tests
+
+`tests/test_live.py` runs against the real Shodan APIs and is skipped by default:
+
+```bash
+# Keyless APIs only (InternetDB and CVEDB), no account needed.
+SLIB_SHODAN_LIVE=1 uv run pytest tests/test_live.py
+
+# Also the keyed APIs. Uses free endpoints and a couple of host lookups, never scan credits.
+# POST /shodan/scan, /shodan/scan/internet, and /notifier are only sent invalid arguments.
+SLIB_SHODAN_LIVE=1 SHODAN_API_KEY=<key> uv run pytest tests/test_live.py
+```
+
+Notes from verifying the service against the live APIs (2026-10):
+
+- **Requests with a malformed key.** `GET /shodan/host/{ip}` and `GET /shodan/ports` returned
+  full, real data with a made-up key (ex. `?key=invalidkey000`), while `/api-info` returned a
+  401 HTML page. Those two endpoints were used to check real host/banner responses against
+  `norm.py` (it matched: short `cpe23` lists, banner `vulns` as a dict, host `vulns` as a list,
+  `ssl`/`ssh`/`http` blocks). Don't rely on this; it is undocumented Shodan behavior and the
+  live tests use a real key for these endpoints.
+- **Network secrets in a Claude Code cloud environment.** A "body parameter" network secret for
+  `api.shodan.io` is only injected into POSTs with a form-encoded body. Nearly every Shodan read
+  endpoint is a GET that requires `?key=` in the URL, so with that secret configured every GET to
+  `api.shodan.io` fails at the proxy (`502 injection failed`), even with an explicit key. Use an
+  environment variable (`SHODAN_API_KEY`) for live tests instead.
+- **Form bodies.** `POST /shodan/scan`, `POST /shodan/scan/internet`, and `POST /notifier` only
+  read their arguments from a form-encoded body and silently ignore query params (a scan then
+  fails with `Private IPs not allowed: `). The alert endpoints take JSON, and `PUT`/`DELETE`
+  endpoints take query params.
+- **Errors.** Most endpoints return `{"error": ...}` JSON, a bad key returns a 401 HTML page, and
+  the Streaming API wraps that HTML page in JSON. `client.errMesg()` handles all three. A valid
+  key whose plan lacks an API gets a 401 with an empty body (Streaming API) or a 403 HTML page
+  (`/org`, `/shodan/data`), so a 401 doesn't always mean the key is wrong.
+- **Banner CPEs.** Banners list every CPE Shodan detected (ex. OpenSSH's and Ubuntu's), often
+  without a version, but `product`/`version` describe only one of them. `norm.normSoftvers()`
+  pairs them.
+- **Banner hash.** Every banner has a `hash`, a signed 32-bit MurmurHash3 (x86_32, seed 0, the
+  same as `mmh3.hash()`) of the banner's full `data`. This was checked against real banners from
+  several modules (ssh, http, https, ntp), and `hash:<n>` searches work. `norm.bannerHash()`
+  calculates it, so any `inet:banner` can be searched for (`slib.shodan.hash`,
+  `$shodan.bannerHash()`, or pipe it to `slib.shodan.search`). Banners are stored whole, even
+  very long ones (Synapse handles multi-MB `inet:banner:text` fine), so the hash of the node's
+  text always matches Shodan's.
+- **Favicon and HTML hashes.** `http.favicon.hash` is the MurmurHash3 of the favicon's base64
+  with a newline every 76 characters and a trailing newline (`base64.encodebytes()`), not of the
+  raw bytes. `http.html_hash` is the MurmurHash3 of the raw HTML. Both were checked against real
+  banners. `slib.shodan.search` and `slib.shodan.hash` pick one for a `file:bytes` by its `:mime`
+  (or `--file-hash`); Shodan doesn't support OR between filters (`(a OR b)` matches nothing), and
+  the two hash different inputs anyway.
+- **Search filter values.** A comma in a filter's value is Shodan's OR (`port:22,80`), so
+  `org:"GitHub, Inc."` matches nearly everything; it must be escaped (`org:"GitHub\, Inc."`).
+  `ssl.cert.fingerprint` only matches a cert's SHA-1, never its SHA-256. The `cpe` filter
+  ignores the CPE's version (a made up `openssh:99.9.9` matches every OpenSSH), so the version
+  is searched with `version:`.
+- **HTTP banners.** A banner's `data` is the final response's status line and headers, and its
+  `http` field has the rest: the page (`html`, a string whose UTF-8 bytes are what `html_hash`
+  hashes), `robots`, `securitytxt`, `sitemap`, the favicon (`data` is base64 with newlines,
+  `location` is a full URL that can be on another server), and the `redirects` Shodan followed
+  (each with the hop's `host`, `location`, and raw response `data`). `location` is the page's
+  path, and `host` the Host header Shodan sent (the IP, or the name it was redirected to). An
+  empty page has `html: ""` and `html_hash: 0`. Search drops `html` with `minify=true`. Only
+  banners with an `ssl` field are HTTPS: the `https-simple-new` module scans plain HTTP ports too.
+  The `html_hash` of `html`'s UTF-8 bytes matched Shodan's for 12 of 13 real banners, the other
+  (1.1.1.1:80) didn't match any variant of the text, so Shodan's fields can disagree.
+- **Open directories.** `open_dir.data` maps each entry's name to its `type` (`file` or
+  `folder`, whose names end in `/`), `size`, and `timestamp`. It only has the directory Shodan
+  fetched (the page at `http.location`), not its subfolders, and listings can have hundreds of
+  entries. `open_dir.extensions` and `open_dir.hash` are search filters.
+- **SSH keys.** `ssh.key` is the base64 key blob with newlines every 76 characters. Its MD5 is
+  Shodan's `ssh.fingerprint`. The algorithm is read from the blob, falling back to `ssh.type`.
+- **Host history.** `GET /shodan/host/{ip}?history=true` returned a 404 ("No information
+  available for that IP.") for `8.8.8.8` and `1.1.1.1`, which have data without `history`.
+- **Unavailable endpoints.** `/shodan/query/search` and `/shodan/query/tags` returned a 503
+  ("unavailable at the moment"), checked again 2026-11-14. `slib.shodan.queries --search` falls
+  back to matching the directory pages it lists. `GET /shodan/query` still works, with 6,965
+  queries at 10 a page, none newer than 2021-05.
+- **InternetDB** returns a 404 for IPs it hasn't seen, but some private IPs (ex. `10.0.0.1`) do
+  have data.
+- **CVEDB** returns shortened CPE 2.3 strings, IDs are case-insensitive, and GHSA references
+  are `{"type": ..., "url": ...}` objects instead of strings.
+
+Layout:
+
+- `src/shodansvc/client.py` - The HTTP transport shared by every Shodan API (keys, rate limiting, retries, errors, streams).
+- `src/shodansvc/svc.py` - `ShodanSvc`, with a method per Shodan endpoint.
+- `src/shodansvc/api.py` - `ShodanCellApi`, the Telepath API. Wraps every method in a `TelepathRetn`.
+- `src/shodansvc/norm.py` - Flattens Shodan's responses into dicts that are easy to model in Storm.
+- `src/shodansvc/pkgproto/` - The `slib.shodan` Storm package.

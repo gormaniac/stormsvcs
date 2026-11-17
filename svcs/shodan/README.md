@@ -72,9 +72,9 @@ need the normal node permissions for the nodes the commands create.
 
 | Command | Description |
 |---|---|
-| `slib.shodan.host` | Look up IPs and model everything Shodan knows (ASN, location, hostnames, tags, vulns, every banner). Takes IPs, or the IPs of `inet:server`, `inet:banner`, and `inet:dns:a`/`aaaa` nodes (each IP is looked up once). `--history`, `--timeline`, `--minify`, `--internetdb`. |
+| `slib.shodan.host` | Look up IPs and model everything Shodan knows (ASN, location, hostnames, tags, vulns, every banner). Takes IPs, or the IPs of `inet:server`, `inet:banner`, `inet:dns:a`/`aaaa`, and `inet:dns:rev`/`rev6` nodes (each IP is looked up once). `--history`, `--timeline`, `--minify`, `--internetdb`. |
 | `slib.shodan.enrich` | Enrich any supported node with the best API: IPs → host, `inet:fqdn` → DNS, `risk:vuln`/`it:sec:cve` → CVEDB, `it:sec:cpe` → CVEs. |
-| `slib.shodan.search` | Search Shodan, model each banner, and yield the IPs. `--count` and `--facets` are free, `--tokens` explains a query, `--filters` lists filters/facets. Inbound nodes are searched for with a query built for their form (see below), AND'd with any query. |
+| `slib.shodan.search` | Search Shodan, model each banner, and yield the IPs. `--count` and `--facets` are free, `--tokens` explains a query, `--filters` lists filters/facets. Inbound nodes are searched for with a query built for their form (see below), AND'd with any query. A page past the deepest one your plan can read ends the results (Shodan answers it with an error), so `--limit 0` stops there quietly. |
 | `slib.shodan.count` | List the IPs matching a query with the free count API (no query credits), model them, and yield them. One request per query, up to your plan's facet limit in IPs. `--facets` prints extra facets for context. Takes the same inbound nodes as `search`. |
 | `slib.shodan.stream` | Read banners from the Streaming API (`banners`, `asn`, `countries`, `ports`, `tags`, `vulns`, `custom`, `alert`) for `--limit` banners or `--timeout` seconds. Inbound `inet:asn`, `risk:vuln`/`it:sec:cve`, `pol:country`, and `meta:rule` nodes are streamed together (one subscription). |
 | `slib.shodan.hash` | Print Shodan's hash filter for `inet:banner` nodes or `--text` (`hash:<n>`), and favicon or HTML `file:bytes` (`http.favicon.hash:<n>`, `http.html_hash:<n>`). Local only, no API calls. |
@@ -93,13 +93,17 @@ need the normal node permissions for the nodes the commands create.
 | `slib.shodan.scan.internet` | Request an Internet-wide scan of a port/protocol. |
 | `slib.shodan.alert.list` | List alerts, or show one. |
 | `slib.shodan.alert.add` | Create an alert for the inbound IPs/CIDRs, enabling `--trigger`s and attaching `--notifier`s in one step. |
-| `slib.shodan.alert.edit` | Replace/`--append` IPs, `--enable`/`--disable` triggers, `--ignore`/`--unignore` services, and add/remove notifiers in one step. |
+| `slib.shodan.alert.edit` | Replace/`--append` IPs, `--enable`/`--disable` triggers, `--ignore`/`--unignore` services (`<trigger>/<ip>:<port>`, anything else is refused), and add/remove notifiers in one step. |
 | `slib.shodan.alert.del` | Delete alerts. |
-| `slib.shodan.notifier.list` / `.add` / `.edit` / `.del` | Manage notifiers. |
+| `slib.shodan.notifier.list` | List notifiers, or show one. |
+| `slib.shodan.notifier.add` | Create a notifier for a provider, with `--arg name=value` provider arguments. |
+| `slib.shodan.notifier.edit` | Change a notifier's provider arguments. |
+| `slib.shodan.notifier.del` | Delete notifiers. |
 | `slib.shodan.admin.apikey` | Set/clear/check the service-wide key. |
 | `slib.shodan.admin.tags` | Set the tag `--prefix` (default `rep.shodan`), `--enable` or `--disable` tagging. |
 | `slib.shodan.admin.org` | Show the organization, or `--add`/`--remove` members. |
 | `slib.shodan.admin.data` | List bulk datasets and their files. |
+| `slib.shodan.admin.dns.cleanup` | Replace the `inet:dns:a`/`aaaa` nodes versions before 0.17.0 made from Shodan's hostnames with `inet:dns:rev`/`rev6` nodes. A dry run unless `--apply`, see [Cleaning up hostname DNS records](#cleaning-up-hostname-dns-records). |
 | `slib.shodan.admin.request` | Send a raw request to any Shodan API, for anything not covered above. |
 
 Run any command with `--help` for all of its options and examples.
@@ -267,8 +271,8 @@ the full list:
 | Shodan data | Synapse |
 |---|---|
 | IP, ASN, org, location | `inet:ipv4`/`inet:ipv6` (`:asn`, `:latlong`, `:loc`), `inet:asn:owner` → `ou:org` |
-| Hostnames | `inet:dns:a`/`inet:dns:aaaa` |
-| Services and banners | `inet:server`, `inet:banner` (the full banner text, never truncated) |
+| Hostnames | `inet:dns:rev`/`inet:dns:rev6` (the IP, the hostname). Shodan's hostnames come from reverse DNS and TLS/HTTP observations, not forward lookups, so they aren't `inet:dns:a`/`aaaa` records (those come only from `slib.shodan.dns.domain` and `slib.shodan.dns.lookup` of a hostname). `slib.shodan.dns.lookup` of an IP also sets the IP's `:dns:rev`. Before 0.17.0 they were modeled as `inet:dns:a`/`aaaa`, see `slib.shodan.admin.dns.cleanup`. |
+| Services and banners | `inet:server`, `inet:banner` (the full banner text, never truncated). Minified host lookups and InternetDB only list port numbers, without a transport: they're modeled as `tcp://` servers, except the ports Shodan crawls over UDP (ex. 53, 123, 161, 500, 1900, 5353, see `shodansvc.norm.UDP_PORTS`), which aren't modeled since their transport is unknown. |
 | HTTP response headers | `inet:http:response:header`, with `inet:banner -(refs)> inet:http:response:header`. Parsed from HTTP banners, except `Date` headers (they change every scan). |
 | SSH host keys | `file:bytes` of the key as OpenSSH saves it (`<algo> <base64 key>\n`), served by the server via `inet:servfile`, both tagged `#rep.shodan.banner`. The bytes are saved in the Axon for users with `axon.upload`. |
 | HTTP requests | `inet:http:request` for each response Shodan got from a web server (`:server`, `:time`, `:url`, `:path`, `:header:host`, `:response:code`, `:response:reason`, `:response:headers`, `:response:body`). Each redirect Shodan followed to reach the page is another one. Pivot with `inet:server -> inet:http:request`. |
@@ -278,12 +282,62 @@ the full list:
 | Products and CPEs | `it:prod:softver` (`:cpe`, `:name`, `:vers`), with `inet:server -(uses)> it:prod:softver` |
 | Vulnerabilities | `risk:vuln` (via `$lib.gen.vulnByCve`), `risk:vulnerable` for the IP and the server |
 | TLS certificates | `crypto:x509:cert` (deconflicted by `:sha256`), `inet:tls:servercert` |
+| TLS fingerprints | `inet:ssl:jarmsample` (the server's JARM, skipped when it's all zeros) and `inet:tls:ja3s:sample` (its JA3S) |
 | DNS records | `inet:dns:a/aaaa/cname/mx/ns/txt/soa` |
-| CVEDB | `risk:vuln` `:cve:desc`, `:cve:references`, `:cvss:v3_1:score`, `:cvss:v2_0:score`, `:timeline:published`, GHSA/EUVD IDs in `:names`, GHSA CWEs in `:cwes`; `it:prod:softver:cves` with `--cpes`. Advisories without a CVE are deconflicted by `risk:vuln:id`. |
+| CVEDB | `risk:vuln` `:cve:desc`, `:cve:references`, `:cvss:v2_0:score`, `:cvss:v3_0:score` or `:cvss:v3_1:score` (picked by the CVSS version: CVEDB's own `cvss_version` is only the major version, so its v3 scores go in `:cvss:v3_1:score`, while EUVD's version and a GHSA's CVSS vector are exact; a GHSA's score is computed from its v3 vector; a score without a version, or a v4.0 one, is left unset), `:timeline:published`, GHSA/EUVD IDs in `:names`, GHSA CWEs in `:cwes`; `it:prod:softver:cves` with `--cpes`. Advisories without a CVE are deconflicted by `risk:vuln:id`. |
 | Shodan tags, CISA KEV | Tags under the prefix, ex. `#rep.shodan.cloud`, `#rep.shodan.honeypot`, `#rep.shodan.kev` |
 
-Every node is linked to the service's `meta:source` with a `-(seen)>` edge, and has `.seen`
-updated from Shodan's timestamps.
+Every node is linked to the service's `meta:source` with a `-(seen)>` edge (including the
+`inet:asn`, its `ou:org` owner, `it:prod:softver`, and `risk:vuln` nodes), and has `.seen`
+updated from Shodan's timestamps, when Shodan saw it. CVEDB's publish dates are only
+`:timeline:published`, never the `.seen` of a `risk:vuln` or `it:sec:cve`.
+
+## Upgrading to 0.17.0
+
+0.17.0 changes how some Shodan data is modeled. Nodes made by older versions aren't changed,
+except by `slib.shodan.admin.dns.cleanup`:
+
+- Shodan's hostnames are `inet:dns:rev`/`rev6` records, not `inet:dns:a`/`aaaa` (see below).
+- Bare ports from minified host lookups and InternetDB that Shodan crawls over UDP (ex. 53) are
+  no longer guessed as `tcp://` servers.
+- CVEDB scores go in the prop of their CVSS version (`:cvss:v3_0:score` or `:cvss:v3_1:score`),
+  and scores without a version are left unset. GHSAs without a CVE get the score of their CVSS
+  v3 vector. CVEDB publish dates are no longer `.seen`.
+- `inet:asn`, `ou:org`, `it:prod:softver`, and `risk:vuln` nodes are linked to the `meta:source`.
+- JARM and JA3S fingerprints are modeled (`inet:ssl:jarmsample`, `inet:tls:ja3s:sample`).
+- `slib.shodan.alert.edit` refuses `--ignore`/`--unignore` services that aren't `<ip>:<port>`,
+  `slib.shodan.admin.tags` refuses an invalid `--prefix`, `slib.shodan.scan --wait` stops at a
+  `FAILED` scan, and `slib.shodan.search` ends quietly at Shodan's deep-paging limit.
+- The package requires Synapse 2.256.0 or newer.
+
+## Cleaning up hostname DNS records
+
+Before 0.17.0, Shodan's hostnames (from host lookups, search and stream banners, InternetDB, and
+reverse `slib.shodan.dns.lookup`s) were modeled as forward `inet:dns:a`/`aaaa` records, which
+assert resolutions that may never have happened. They're now `inet:dns:rev`/`rev6` records (see
+[Data model](#data-model)). `slib.shodan.admin.dns.cleanup` (needs `slib.shodan.admin`, and
+`node.del` permissions to delete nodes) fixes the nodes older versions made:
+
+```
+// Print what would change, and why each kept node is kept.
+slib.shodan.admin.dns.cleanup
+
+// Make the changes. Running it again changes nothing.
+slib.shodan.admin.dns.cleanup --apply
+```
+
+Only `inet:dns:a`/`aaaa` nodes linked to the service's `meta:source` (`-(seen)>`) are checked,
+and only those that can only be from a hostname are changed: their IP is linked to the
+`meta:source` too, they have a `.seen`, their hostname isn't a `meta:source` linked `inet:fqdn`
+(a `dns.domain` subdomain or reverse DNS name), and the service has no NS, SOA, MX, TXT, or CNAME
+records for the hostname or its parent domains. Anything else may be a real DNS record from
+`slib.shodan.dns.domain` or a forward `slib.shodan.dns.lookup`, and is kept. So are InternetDB
+hostnames, which have no `.seen` to tell them from lookups, and hostnames from reverse lookups
+(their `inet:fqdn` is linked to the `meta:source`).
+
+Each changed node gets its `inet:dns:rev`/`rev6` (with the node's `.seen`, linked to the
+`meta:source`). Then the old node is deleted, or, if it's tagged or has any other edge (ex.
+another source's `-(seen)>`), only the service's `-(seen)>` edge is removed.
 
 ## Shodan API coverage
 

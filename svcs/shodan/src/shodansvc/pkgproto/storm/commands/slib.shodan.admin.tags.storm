@@ -5,11 +5,17 @@ init {
         $lib.raise(BadArg, "slib.shodan.admin.tags: Use --enable or --disable, not both.")
     }
 
-    if ($cmdopts.prefix != $lib.null) { $privadmin.setTagPrefix($cmdopts.prefix) }
+    if ($cmdopts.prefix != null) {
+        // An invalid prefix (ex. "" or one with spaces) would make every tag edit fail.
+        ($ok, $prefix) = $lib.trycast(syn:tag, $cmdopts.prefix)
+        if ((not $ok) or ($prefix != $lib.cast(str, $cmdopts.prefix).strip().lower())) {
+            $lib.raise(BadArg, `slib.shodan.admin.tags: {$cmdopts.prefix} isn't a valid tag name.`)
+        }
+        $privadmin.setTagPrefix($prefix)
+    }
     if $cmdopts.enable { $privadmin.setTagsEnabled((true)) }
     if $cmdopts.disable { $privadmin.setTagsEnabled((false)) }
 
     $settings = $privadmin.tagSettings()
-    $lib.print("slib.shodan tags: enabled={enabled} prefix={prefix}",
-        enabled=$settings.enabled, prefix=$settings.prefix)
+    $lib.print(`slib.shodan tags: enabled={$settings.enabled} prefix={$settings.prefix}`)
 }

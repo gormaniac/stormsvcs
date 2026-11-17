@@ -7,17 +7,17 @@ init {
     if $cmdopts.filters {
         $retn = $priv.trendsFilters()
         if (not $util.failed($retn, "Listing Trends filters")) {
-            $lib.print("Filters: {filters}", filters=(", ").join($retn.data))
+            $lib.print(`Filters: {(", ").join($retn.data)}`)
         }
         $retn = $priv.trendsFacets()
         if (not $util.failed($retn, "Listing Trends facets")) {
-            $lib.print("Facets: {facets}", facets=(", ").join($retn.data))
+            $lib.print(`Facets: {(", ").join($retn.data)}`)
         }
     }
 
     // nodes is set once there are inbound nodes, so the query isn't also run on its own.
     // ran holds each query run, dupes counts repeats.
-    $state = ({"nodes": (false), "ran": ({}), "dupes": (0)})
+    $state = ({"nodes": false, "ran": {}, "dupes": 0})
 }
 
 // Print the monthly totals and facets of a Trends search.
@@ -26,7 +26,7 @@ function run(query) {
     $retn = $priv.trendsSearch($query, facets=$cmdopts.facets)
     if $util.failed($retn, "Trends search") { return() }
 
-    $lib.print("Total results: {total} ({query})", total=$retn.data.total, query=$query)
+    $lib.print(`Total results: {$retn.data.total} ({$query})`)
 
     $rows = ([])
     for $month in $retn.data.matches {
@@ -52,7 +52,7 @@ function run(query) {
 // NOTE: The flag is set in an if on $node so it only runs for inbound nodes (see slib.shodan.search).
 if $node { $state.nodes = (true) }
 $nodequery = $shodan.trendsQuery($node, filehash=$cmdopts.file_hash)
-if ($nodequery = $lib.null) { spin }
+if ($nodequery = null) { spin }  // noqa: P001 (drops inbound nodes on purpose)
 $nodequery = (" ").join(($nodequery, $query)).strip()
 
 // Inbound nodes that build the same query as an earlier one don't run it again.
@@ -69,7 +69,6 @@ else { $run($nodequery) }
 
 fini {
     if $state.dupes {
-        $lib.print("slib.shodan.trends: {n} inbound nodes had the same query as an earlier one, each query was run once.",
-                   n=$state.dupes)
+        $lib.print(`slib.shodan.trends: {$state.dupes} inbound nodes had the same query as an earlier one, each query was run once.`)
     }
 }

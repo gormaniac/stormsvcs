@@ -2,8 +2,8 @@ init {
     $shodan = $lib.import(slib.shodan.lib)
 }
 
-spin |
+spin |  // noqa: P001 (drops inbound nodes on purpose)
 
 $rule = $shodan.saveQuery($cmdopts.query, $cmdopts.name, desc=$cmdopts.desc)
-$lib.print("slib.shodan.query.save: Saved {name} ({query}).", name=$rule.props.name, query=$rule.props.text)
+$lib.print(`slib.shodan.query.save: Saved {$rule.props.name} ({$rule.props.text}).`)
 if $cmdopts.yield { yield $rule }

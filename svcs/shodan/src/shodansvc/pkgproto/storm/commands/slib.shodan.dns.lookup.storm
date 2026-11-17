@@ -20,14 +20,14 @@ function lookup(n) {
     return(([]))
 }
 
-switch $node.form() {
+switch $node.form() {  // noqa: R002 (a method on Synapse 2.x)
     "inet:fqdn": { }
     "inet:ipv4": { }
     "inet:ipv6": { }
     *: {
-        $lib.warn("slib.shodan.dns.lookup: The node form {form} is not supported.", form=$node.form())
+        $lib.warn(`slib.shodan.dns.lookup: The node form {$node.form()} is not supported.`)  // noqa: R002 (a method on Synapse 2.x)
         // Without --yield, unsupported nodes pass through.
-        if $cmdopts.yield { spin }
+        if $cmdopts.yield { spin }  // noqa: P001 (drops inbound nodes on purpose)
     }
 }
 
@@ -40,10 +40,10 @@ elif $cmdopts.stream_inbound {
     divert $cmdopts.yield $model.nodes($lookup($node))
 } else {
     $pending.append($node)
-    spin
+    spin  // noqa: P001 (drops inbound nodes on purpose)
 }
 
-| if $pending {
+| if $pending {  // noqa: S008 (the guard passes nodes through in --stream-inbound mode)
     for $n in $pending {
         if $cmdopts.yield { yield $model.nodes($lookup($n)) }
         else {

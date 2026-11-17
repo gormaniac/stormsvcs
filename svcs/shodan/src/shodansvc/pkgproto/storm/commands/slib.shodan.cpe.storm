@@ -7,7 +7,7 @@ init {
     $retn = $priv.cpes($cmdopts.product, limit=$cmdopts.limit, count=$cmdopts.count)
     if (not $util.failed($retn, `CPE search for {$cmdopts.product}`)) {
         if $cmdopts.count {
-            $lib.print("Total CPEs: {total}", total=$retn.data.total)
+            $lib.print(`Total CPEs: {$retn.data.total}`)
         } else {
             $cpes = $retn.data.cpes
             for $cpe in $cpes { $lib.print($cpe) }
@@ -15,7 +15,7 @@ init {
     }
 }
 
-spin |
+spin |  // noqa: P001 (drops inbound nodes on purpose)
 
 if $cmdopts.yield {
     for $cpe in $cpes {

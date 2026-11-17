@@ -4,6 +4,6 @@ init {
 
     $retn = $privscan.scanInternet($cmdopts.port, $cmdopts.protocol)
     if (not $util.failed($retn, "Submitting the Internet scan")) {
-        $lib.print("slib.shodan.scan.internet: Submitted scan {id}.", id=$retn.data.id)
+        $lib.print(`slib.shodan.scan.internet: Submitted scan {$retn.data.id}.`)
     }
 }

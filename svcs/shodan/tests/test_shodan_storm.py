@@ -1,8 +1,12 @@
 """Pytests for the slib.shodan Storm package (commands, modules, modeling, and perms)."""
 
 import base64
+import copy
+
+import aiohttp.web
 import hashlib
 import pathlib
+import time
 from unittest import mock
 
 import synapse.exc as s_exc
@@ -16,6 +20,7 @@ from .fakeshodan import (
     FAVICON_B64,
     HISTORY_IP,
     FAVICON_HASH,
+    HOST_8888,
     HOST_HTTP,
     HOST_SSH,
     HTTP_IP,
@@ -49,6 +54,25 @@ class TestShodanStormPkg(s_tests.SynTest):
         # and the service's uv.lock entry.
         assert assertVersionsMatch(pathlib.Path(__file__).parents[1]) == __version__
 
+    def test_synapse_version(self):
+        # SHODAN-02: vaults, $lib.gen.vulnByCve, inet:http:response:header, and the Synapse the
+        # service is built and tested with (2.256.0) need a recent 2.x.
+        assert PKGDEFS[0]["synapse_version"] == ">=2.256.0,<3.0.0"
+        assert "synapse_minversion" not in PKGDEFS[0]
+
+    def test_readmes_match(self):
+        # The package's README (shown in the Cortex) is a copy of the service's README.
+        svcdir = pathlib.Path(__file__).parents[1]
+        pkgreadme = svcdir / "src" / "shodansvc" / "pkgproto" / "README.md"
+        assert pkgreadme.read_text() == (svcdir / "README.md").read_text(), (
+            "Copy README.md to src/shodansvc/pkgproto/README.md"
+        )
+
+    def test_readme_names_every_command(self):
+        readme = (pathlib.Path(__file__).parents[1] / "README.md").read_text()
+        missing = [cmd for cmd in CMDS if f"`{cmd}`" not in readme]
+        assert not missing, f"README.md doesn't name these commands: {missing}"
+
     def test_main_help(self):
         assertMainHelp("shodansvc")
 
@@ -76,7 +100,7 @@ class TestShodanStormPkg(s_tests.SynTest):
                 self.eq([mesg], [i async for i in prox.stream("banners", limit=1)])
 
     async def test_pkg(self):
-        assert len(CMDS) == 32
+        assert len(CMDS) == 33
 
         async with shodanSvc(self) as (core, svc, fake):
             msgs = await core.stormlist("service.list")
@@ -137,7 +161,9 @@ class TestShodanStormHost(s_tests.SynTest):
             assert nodes[0].get(".seen") is not None
             query = f"meta:source={SVC_GUID} -(seen)> inet:http:response:header"
             assert len(await core.nodes(query)) == 2
-            assert len(await core.nodes("inet:dns:a=(dns.google, 8.8.8.8)")) == 1
+            # SHODAN-05: Shodan's hostnames are reverse DNS names, never forward A records.
+            assert len(await core.nodes("inet:dns:rev=(8.8.8.8, dns.google)")) == 1
+            assert len(await core.nodes("inet:dns:a")) == 0
 
             nodes = await core.nodes(
                 "inet:server=tcp://8.8.8.8:443 -(uses)> it:prod:softver +:name"
@@ -171,6 +197,10 @@ class TestShodanStormHost(s_tests.SynTest):
             # Everything is linked back to the service's meta:source.
             assert len(await core.nodes(f"meta:source={SVC_GUID} -(seen)> inet:ipv4")) == 1
             assert len(await core.nodes(f"meta:source={SVC_GUID} -(seen)> inet:server")) == 2
+            # SHODAN-10: including the ASN, its owner, the software, and the vulns.
+            for form, count in (("inet:asn", 1), ("ou:org", 1), ("it:prod:softver", 2), ("risk:vuln", 1)):
+                assert len(await core.nodes(f"meta:source={SVC_GUID} -(seen)> {form}")) == count, form
+            assert (await core.nodes("inet:asn=15169"))[0].get(".seen") is not None
 
             # Running it again doesn't duplicate guid nodes.
             await core.nodes("slib.shodan.host --ip 8.8.8.8")
@@ -225,13 +255,50 @@ class TestShodanStormHost(s_tests.SynTest):
 
             nodes = await core.nodes("inet:ipv4=1.1.1.1")
             assert "rep.shodan.cdn" in nodes[0].tags
+            # SHODAN-04: InternetDB ports have no transport, so 53 (crawled over UDP) isn't
+            # guessed as a TCP server.
             assert await nodeset(core, "inet:ipv4=1.1.1.1 -> inet:server") == {
-                ("inet:server", "tcp://1.1.1.1:53"),
                 ("inet:server", "tcp://1.1.1.1:80"),
             }
             assert len(await core.nodes("inet:ipv4=1.1.1.1 -(uses)> it:prod:softver")) == 1
-            assert len(await core.nodes("inet:dns:a=(one.one.one.one, 1.1.1.1)")) == 1
+            assert len(await core.nodes("inet:dns:rev=(1.1.1.1, one.one.one.one)")) == 1
+            assert len(await core.nodes("inet:dns:a")) == 0
             assert len(await core.nodes("risk:vulnerable:node=(inet:ipv4, 1.1.1.1)")) == 1
+
+    async def test_host_minify(self):
+        # SHODAN-04: a minified lookup only has bare ports. The ones Shodan crawls over UDP aren't
+        # guessed as TCP servers, the others are TCP.
+        async with shodanSvc(self) as (core, svc, fake):
+            minified = {"ip_str": "8.8.8.8", "ports": [53, 123, 443], "hostnames": ["dns.google"]}
+            fake.routes[("GET", "/api/shodan/host/8.8.8.8")] = (200, minified)
+            msgs = await core.stormlist("slib.shodan.host --ip 8.8.8.8 --minify")
+            self.stormHasNoWarnErr(msgs)
+            assert await nodeset(core, "inet:server") == {("inet:server", "tcp://8.8.8.8:443")}
+            assert len(await core.nodes("inet:dns:rev=(8.8.8.8, dns.google)")) == 1
+
+    async def test_host_tls_fingerprints(self):
+        # SHODAN-14: a TLS banner's JARM and JA3S are modeled, an all-zero JARM (no answer) isn't.
+        async with shodanSvc(self) as (core, svc, fake):
+            jarm = "29d29d00029d29d00041d41d0000005ef3b1d2b3dba6f6c3a4d3e7c8f1a2b3c"[:62]
+            host = copy.deepcopy(HOST_8888)
+            host["data"][0]["ssl"]["jarm"] = jarm.upper()
+            host["data"][0]["ssl"]["ja3s"] = "ec74a5c51106f0419184d0dd08fb05bc"
+            fake.routes[("GET", "/api/shodan/host/8.8.8.8")] = (200, host)
+            msgs = await core.stormlist("slib.shodan.host --ip 8.8.8.8")
+            self.stormHasNoErr(msgs)
+            nodes = await core.nodes("inet:server=tcp://8.8.8.8:443 -> inet:ssl:jarmsample")
+            assert [n.get("jarmhash") for n in nodes] == [jarm]
+            nodes = await core.nodes("inet:server=tcp://8.8.8.8:443 -> inet:tls:ja3s:sample")
+            assert [n.get("ja3s") for n in nodes] == ["ec74a5c51106f0419184d0dd08fb05bc"]
+            assert len(await core.nodes(f"meta:source={SVC_GUID} -(seen)> inet:ssl:jarmsample")) == 1
+
+            host["data"][0]["ssl"]["jarm"] = "0" * 62
+            host["data"][0]["ssl"]["ja3s"] = None
+            host["data"][0]["ip_str"] = host["ip_str"] = "8.8.4.4"
+            fake.routes[("GET", "/api/shodan/host/8.8.4.4")] = (200, host)
+            await core.nodes("slib.shodan.host --ip 8.8.4.4")
+            assert not await core.nodes("inet:server=tcp://8.8.4.4:443 -> inet:ssl:jarmsample")
+            assert not await core.nodes("inet:server=tcp://8.8.4.4:443 -> inet:tls:ja3s:sample")
 
     async def test_host_no_key_falls_back(self):
         async with shodanSvc(self, apikey=None) as (core, svc, fake):
@@ -274,12 +341,16 @@ class TestShodanStormHost(s_tests.SynTest):
             model = "$model = $lib.import(slib.shodan.model)"
             await core.nodes(f"{model} $model.ipNode(8.8.8.8)")
             await core.nodes(f"{model} $model.dnsNode(vertex.link, 8.8.8.8)")
+            await core.nodes(f"{model} $model.revNode(8.8.8.8, vertex.link)")
             await core.nodes(f"{model} $model.serverNode(8.8.8.8, (80))")
             assert len(await core.nodes("inet:ipv4=8.8.8.8")) == 1
             assert len(await core.nodes("inet:dns:a=(vertex.link, 8.8.8.8)")) == 1
             assert len(await core.nodes("inet:server=tcp://8.8.8.8:80")) == 1
             assert len(await core.nodes("inet:ipv6")) == 0
             assert len(await core.nodes("inet:dns:aaaa")) == 0
+            assert len(await core.nodes("inet:dns:rev=(8.8.8.8, vertex.link)")) == 1
+            await core.nodes(f"{model} $model.revNode(2001:db8::1, v6.vertex.link)")
+            assert len(await core.nodes("inet:dns:rev6=(2001:db8::1, v6.vertex.link)")) == 1
 
 
 class TestShodanStormHttp(s_tests.SynTest):
@@ -839,6 +910,36 @@ class TestShodanStormSearch(s_tests.SynTest):
             msgs = await core.stormlist("slib.shodan.stream ports")
             self.stormIsInWarn("requires at least one value", msgs)
 
+    async def test_api_errors_in_storm(self):
+        # SHODAN-12: Shodan's error shapes reach Storm as warnings: HTML 401 pages, a 429 that
+        # is retried, and Streaming API errors.
+        async with shodanSvc(self) as (core, svc, fake):
+            html = aiohttp.web.Response(text="<html><title>401 Unauthorized</title></html>", status=401)
+            fake.routes[("GET", "/api/api-info")] = html
+            msgs = await core.stormlist("slib.shodan.info")
+            self.stormIsInWarn("Shodan rejected the API key", msgs)
+
+            calls = []
+
+            def flaky(request):
+                calls.append(1)
+                if len(calls) == 1:
+                    return (429, {"error": "Rate limit reached"})
+                return (200, [22, 80])
+
+            fake.routes[("GET", "/api/shodan/ports")] = flaky
+            msgs = await core.stormlist("slib.shodan.ref ports")
+            self.stormHasNoWarnErr(msgs)
+            assert len(calls) == 2
+
+            async def denied(request):
+                return aiohttp.web.Response(text="", status=401)
+
+            fake.streamhandler = denied
+            msgs = await core.stormlist("slib.shodan.stream --timeout 5")
+            self.stormIsInWarn("Shodan rejected the API key", msgs)
+            assert not await core.nodes("it:exec:query")
+
 
 FOUND_FORMS = {"inet:server", "inet:banner", "inet:ipv4", "inet:ipv6"}
 
@@ -1117,6 +1218,9 @@ class TestShodanStormHistory(s_tests.SynTest):
             assert len(tls) == 1
             assert tls[0].get("title") == f"Shodan history: {HISTORY_IP}"
             assert tls[0].get("type") == "svc.shodan.host.history."
+            # The guid is the same as $lib.guid(slib.shodan, history, <ip>) made before 0.17.0.
+            guid = await core.callStorm("return($lib.guid(slib.shodan, history, $ip))", opts={"vars": {"ip": HISTORY_IP}})
+            assert tls[0].ndef[1] == guid
             assert "90 days" in tls[0].get("summary")
             assert await nodeset(core, "meta:timeline -(refs)> *") == {("inet:ipv4", HISTORY_IP)}
             assert len(await core.nodes(f"meta:timeline <(seen)- meta:source={SVC_GUID}")) == 1
@@ -1605,6 +1709,23 @@ class TestShodanStormDns(s_tests.SynTest):
             msgs = await core.stormlist("inet:fqdn=vertex.link | slib.shodan.dns.domain")
             assert [m[1][0] for m in msgs if m[0] == "node"] == [("inet:fqdn", "vertex.link")]
 
+    async def test_dns_domain_all_pages(self):
+        # --pages 0 reads every page.
+        async with shodanSvc(self) as (core, svc, fake):
+
+            def paged(request):
+                page = int(request.query["page"])
+                data = [{"subdomain": f"s{page}", "type": "A", "value": f"1.2.3.{page}"}]
+                return (200, {"domain": "vertex.link", "subdomains": [f"s{page}"], "more": page < 12, "data": data})
+
+            fake.routes[("GET", "/api/dns/domain/vertex.link")] = paged
+            msgs = await core.stormlist("slib.shodan.dns.domain --domain vertex.link --pages 0")
+            self.stormHasNoWarnErr(msgs)
+            assert len(await core.nodes("inet:fqdn:domain=vertex.link -> inet:dns:a")) == 12
+
+            msgs = await core.stormlist("slib.shodan.dns.domain --domain vertex.link")
+            self.stormIsInWarn("has more DNS results than were retrieved", msgs)
+
     async def test_dns_domain_unsupported_node(self):
         # An unsupported inbound node only warns: it isn't sent to Shodan and doesn't stop the others.
         async with shodanSvc(self) as (core, svc, fake):
@@ -1640,7 +1761,9 @@ class TestShodanStormDns(s_tests.SynTest):
                 ("inet:fqdn", "dns.google"),
             }
             assert len(await core.nodes("inet:dns:a=(vertex.link, 1.2.3.4)")) == 1
-            assert len(await core.nodes("inet:dns:a=(dns.google, 8.8.8.8)")) == 1
+            # A reverse lookup is a reverse DNS record, not a forward one.
+            assert len(await core.nodes("inet:dns:rev=(8.8.8.8, dns.google)")) == 1
+            assert len(await core.nodes("inet:dns:a:fqdn=dns.google")) == 0
             assert (await core.nodes("inet:ipv4=8.8.8.8"))[0].get("dns:rev") == "dns.google"
 
 
@@ -1661,12 +1784,17 @@ class TestShodanStormVulns(s_tests.SynTest):
             )
             assert vuln.get("timeline:published") is not None
             assert "rep.shodan.kev" in vuln.tags
+            # SHODAN-10: the publish date isn't when Shodan saw it.
+            assert vuln.get(".seen") is None
+            assert (await core.nodes("it:sec:cve=cve-2021-44228"))[0].get(".seen") is None
+            assert len(await core.nodes(f"meta:source={SVC_GUID} -(seen)> risk:vuln")) == 1
 
             assert len(await core.nodes("it:sec:cve=cve-2021-44228")) == 1
 
             nodes = await core.nodes("it:prod:softver:cpe")
             assert len(nodes) == 1
             assert nodes[0].get("cves") == ("cve-2021-44228",)
+            assert len(await core.nodes(f"meta:source={SVC_GUID} -(seen)> it:prod:softver:cves")) == 1
 
     async def test_cve_inbound_and_search(self):
         async with shodanSvc(self) as (core, svc, fake):
@@ -1715,6 +1843,11 @@ class TestShodanStormVulns(s_tests.SynTest):
             assert vuln.get("names") == ("euvd-2021-34768", "ghsa-jfh8-c2jp-5v3q")
             assert vuln.get("cwes") == ("CWE-20", "CWE-502")
             assert "https://nvd.nist.gov/vuln/detail/CVE-2021-44228" in vuln.get("cve:references")
+            # SHODAN-06: CVEDB's cvss_version of 3.0 means any v3.x, and goes in v3_1 (Log4Shell's
+            # score is v3.1), not v3_0.
+            assert vuln.get("cvss:v3_1:score") == 10.0
+            assert vuln.get("cvss:v3_0:score") is None
+            assert vuln.get("cvss:v2_0:score") == 9.3
 
             # An advisory without a CVE is deconflicted by its ID.
             nodes = await core.nodes("risk:vuln:id=EUVD-2099-0001")
@@ -1724,6 +1857,16 @@ class TestShodanStormVulns(s_tests.SynTest):
 
             await core.nodes("slib.shodan.cve --cve EUVD-2099-0001")
             assert len(await core.nodes("risk:vuln:id=EUVD-2099-0001")) == 1
+
+            # An advisory with an unversioned score leaves the score props unset.
+            fake.routes[("GET", "/cvedb/euvd/EUVD-2099-0002")] = (
+                200,
+                {"euvd_id": "EUVD-2099-0002", "description": "No version.", "cvss": 9.0, "cve": None},
+            )
+            await core.nodes("slib.shodan.cve --cve EUVD-2099-0002")
+            nodes = await core.nodes("risk:vuln:id=EUVD-2099-0002")
+            assert len(nodes) == 1
+            assert not [p for p in nodes[0].props if p.startswith("cvss:")]
 
     async def test_cve_count(self):
         async with shodanSvc(self) as (core, svc, fake):
@@ -1817,6 +1960,29 @@ class TestShodanStormScanAlerts(s_tests.SynTest):
             msgs = await core.stormlist("slib.shodan.scan")
             self.stormIsInWarn("Nothing to scan", msgs)
 
+    async def test_scan_wait(self):
+        # SHODAN-08: --wait doesn't overshoot (it sleeps at most until the deadline, then checks
+        # one last time), and a FAILED scan stops waiting right away.
+        async with shodanSvc(self) as (core, svc, fake):
+            statuses = lambda: [r for r in fake.requests if r["path"] == "/api/shodan/scan/SCAN1"]
+            route = ("GET", "/api/shodan/scan/SCAN1")
+
+            fake.routes[route] = (200, {"id": "SCAN1", "status": "PROCESSING"})
+            start = time.monotonic()
+            msgs = await core.stormlist("slib.shodan.scan --ip 9.9.9.9 --wait 1")
+            assert time.monotonic() - start < 5
+            self.stormIsInWarn("Scan SCAN1 is still PROCESSING", msgs)
+            assert len(statuses()) == 2
+
+            fake.requests.clear()
+            fake.routes[route] = (200, {"id": "SCAN1", "status": "FAILED"})
+            start = time.monotonic()
+            msgs = await core.stormlist("slib.shodan.scan --ip 9.9.9.9 --wait 300")
+            assert time.monotonic() - start < 5
+            self.stormIsInWarn("Scan SCAN1 failed, nothing to ingest", msgs)
+            assert len(statuses()) == 1
+            assert not [r for r in fake.requests if r["path"].startswith("/api/shodan/host/")]
+
     async def test_alerts(self):
         async with shodanSvc(self) as (core, svc, fake):
             await core.nodes("[ inet:cidr4=1.2.3.0/24 inet:ipv4=5.6.7.8 ]")
@@ -1857,6 +2023,27 @@ class TestShodanStormScanAlerts(s_tests.SynTest):
             self.stormIsInWarn("bad is not in the format", msgs)
             body = fake.last("/api/shodan/alert/ALERT1", "POST")["json"]
             assert sorted(body["filters"]["ip"]) == ["1.2.3.0/24", "9.9.9.0/24"]
+
+            # SHODAN-07: an ignored service can't add path segments to reach other endpoints.
+            fake.requests.clear()
+            for valu in (
+                "new_service/1.2.3.4:80/../../../../org/member/visi",
+                "new_service/../../org/member/visi",
+                "new_service/1.2.3.4:80?x=1",
+                "new_service/notanip:80",
+                "new_service/1.2.3.4:99999",
+                "/1.2.3.4:80",
+            ):
+                msgs = await core.stormlist(f"slib.shodan.alert.edit ALERT1 --ignore '{valu}' --unignore '{valu}'")
+                self.stormIsInWarn(f"{valu} is not in the format", msgs)
+            assert not fake.requests
+            fake.routes[("PUT", "/api/shodan/alert/ALERT1/trigger/open_database/ignore/[2001:db8::1]:443")] = (
+                200,
+                {"success": True},
+            )
+            msgs = await core.stormlist("slib.shodan.alert.edit ALERT1 --ignore 'open_database/[2001:db8::1]:443'")
+            self.stormHasNoWarnErr(msgs)
+            assert fake.last()["path"] == "/api/shodan/alert/ALERT1/trigger/open_database/ignore/[2001:db8::1]:443"
 
             msgs = await core.stormlist("slib.shodan.alert.del ALERT1")
             self.stormIsInPrint("Deleted alert ALERT1", msgs)
@@ -1931,6 +2118,129 @@ class TestShodanStormAdmin(s_tests.SynTest):
 
             msgs = await core.stormlist("slib.shodan.admin.tags --enable --disable")
             self.stormIsInErr("not both", msgs)
+
+            # SHODAN-11: an invalid prefix is refused, and the old one is kept.
+            for prefix in ("bad prefix", "", "rep..shodan", "#rep.shodan"):
+                msgs = await core.stormlist("slib.shodan.admin.tags --prefix $p", opts={"vars": {"p": prefix}})
+                self.stormIsInErr("isn't a valid tag name", msgs)
+            # Case is normalized, like tags.
+            msgs = await core.stormlist("slib.shodan.admin.tags --prefix My.Shodan")
+            self.stormIsInPrint("prefix=my.shodan", msgs)
+            msgs = await core.stormlist("slib.shodan.admin.tags --prefix 'bad prefix'")
+            self.stormIsInErr("isn't a valid tag name", msgs)
+            msgs = await core.stormlist("slib.shodan.admin.tags")
+            self.stormIsInPrint("prefix=my.shodan", msgs)
+
+
+class TestShodanStormDnsCleanup(s_tests.SynTest):
+    """slib.shodan.admin.dns.cleanup replaces the inet:dns:a/aaaa that older versions made from
+    Shodan's hostnames (SHODAN-05)."""
+
+    async def _oldHost(self, core, fqdn, ip, time="2026-10-01T12:00:00"):
+        # What slib.shodan < 0.17.0 did with a host's hostnames.
+        model = "$model = $lib.import(slib.shodan.model)"
+        await core.nodes(f"{model} $model.ipNode($ip, $time) $model.dnsNode($fqdn, $ip, $time)", opts={"vars": {"fqdn": fqdn, "ip": ip, "time": time}})
+
+    async def test_dns_cleanup(self):
+        async with shodanSvc(self) as (core, svc, fake):
+            # Old-style nodes from host lookups (IPv4 and IPv6), and two with another source.
+            await self._oldHost(core, "dns.google", "8.8.8.8")
+            await self._oldHost(core, "v6.example.com", "2001:db8::1")
+            await self._oldHost(core, "shared.example.com", "8.8.8.8")
+            await core.nodes("[ inet:dns:a=(shared.example.com, 8.8.8.8) <(seen)+ { [ meta:source=* :name=other ] } ]")
+            await self._oldHost(core, "tagged.example.com", "8.8.8.8")
+            await core.nodes("[ inet:dns:a=(tagged.example.com, 8.8.8.8) +#my.analysis ]")
+
+            # Real DNS records: from slib.shodan.dns.domain and a forward slib.shodan.dns.lookup.
+            self.stormHasNoErr(await core.stormlist("slib.shodan.dns.domain --domain vertex.link"))
+            self.stormHasNoErr(await core.stormlist("[ inet:fqdn=vertex.link ] | slib.shodan.dns.lookup"))
+            # A dns.domain A record for an IP that slib.shodan also looked up.
+            await core.nodes("slib.shodan.host --ip 1.2.3.4")
+            # An InternetDB hostname has no .seen, so it can't be told from a lookup, and is kept.
+            await self._oldHost(core, "one.one.one.one", "1.1.1.1", time=None)
+            # Not from slib.shodan at all.
+            await core.nodes("[ inet:dns:a=(other.example.com, 8.8.8.8) ]")
+
+            def snapshot():
+                return core.nodes("inet:dns:a inet:dns:aaaa inet:dns:rev inet:dns:rev6")
+
+            before = {n.ndef for n in await snapshot()}
+            dnsdomain = {n.ndef for n in await core.nodes("inet:dns:a:fqdn=vertex.link inet:dns:a:fqdn=www.vertex.link inet:dns:aaaa:fqdn=api.vertex.link")}
+            assert dnsdomain
+
+            # A dry run changes nothing.
+            msgs = await core.stormlist("slib.shodan.admin.dns.cleanup")
+            self.stormHasNoWarnErr(msgs)
+            self.stormIsInPrint("delete inet:dns:a=('dns.google', '8.8.8.8')", msgs)
+            self.stormIsInPrint("Dry run: would delete 2, unlink 2, keep", msgs)
+            assert {n.ndef for n in await snapshot()} == before
+
+            msgs = await core.stormlist("slib.shodan.admin.dns.cleanup --apply")
+            self.stormHasNoWarnErr(msgs)
+            self.stormIsInPrint("Deleted 2, unlinked 2, kept", msgs)
+
+            # The hostname nodes are replaced by reverse DNS records, with their .seen and source.
+            assert not await core.nodes("inet:dns:a=(dns.google, 8.8.8.8)")
+            assert not await core.nodes("inet:dns:aaaa=(v6.example.com, 2001:db8::1)")
+            nodes = await core.nodes(f"meta:source={SVC_GUID} -(seen)> inet:dns:rev=(8.8.8.8, dns.google)")
+            assert len(nodes) == 1 and nodes[0].get(".seen") is not None
+            assert len(await core.nodes(f"meta:source={SVC_GUID} -(seen)> inet:dns:rev6=(2001:db8::1, v6.example.com)")) == 1
+
+            # Nodes with another source keep it, only slib.shodan's edge is removed.
+            for fqdn in ("shared.example.com", "tagged.example.com"):
+                assert len(await core.nodes(f"inet:dns:a=({fqdn}, 8.8.8.8)")) == 1
+                assert not await core.nodes(f"inet:dns:a=({fqdn}, 8.8.8.8) <(seen)- meta:source={SVC_GUID}")
+                assert len(await core.nodes(f"inet:dns:rev=(8.8.8.8, {fqdn})")) == 1
+            assert len(await core.nodes("inet:dns:a=(shared.example.com, 8.8.8.8) <(seen)- meta:source:name=other")) == 1
+
+            # Real DNS records, InternetDB hostnames, and other nodes are kept.
+            for ndef in dnsdomain:
+                assert len(await core.nodes(f"{ndef[0]}=$v", opts={"vars": {"v": ndef[1]}})) == 1
+            assert len(await core.nodes("inet:dns:a=(vertex.link, 1.2.3.4) <(seen)- meta:source")) == 1
+            assert len(await core.nodes("inet:dns:a=(one.one.one.one, 1.1.1.1)")) == 1
+            assert len(await core.nodes("inet:dns:a=(other.example.com, 8.8.8.8)")) == 1
+
+            # A second run changes nothing.
+            after = {n.ndef for n in await snapshot()}
+            msgs = await core.stormlist("slib.shodan.admin.dns.cleanup --apply")
+            self.stormIsInPrint("Deleted 0, unlinked 0, kept", msgs)
+            assert {n.ndef for n in await snapshot()} == after
+
+            # It's an admin command.
+            user = await core.auth.addUser("user")
+            await user.addRule((True, ("node",)))
+            await user.addRule((True, USER_PERM))
+            msgs = await core.stormlist("slib.shodan.admin.dns.cleanup --apply", opts={"user": user.iden})
+            self.stormIsInErr("requires permission: slib.shodan.admin", msgs)
+
+
+    async def test_dns_cleanup_refs(self):
+        # Nodes another node refers to (by a prop, or by an edge other than the meta:source's
+        # -(seen)>, even one from the meta:source) can't be deleted, so they're only unlinked.
+        async with shodanSvc(self) as (core, svc, fake):
+            await self._oldHost(core, "answer.example.com", "8.8.8.8")
+            await core.nodes("[ inet:dns:answer=* :a=(answer.example.com, 8.8.8.8) ]")
+            await self._oldHost(core, "refs.example.com", "8.8.8.8")
+            await core.nodes(f"meta:source={SVC_GUID} [ +(refs)> {{ inet:dns:a=(refs.example.com, 8.8.8.8) }} ]")
+            await self._oldHost(core, "dns.google", "8.8.8.8")
+
+            msgs = await core.stormlist("slib.shodan.admin.dns.cleanup")
+            self.stormHasNoWarnErr(msgs)
+            self.stormIsInPrint("unlink inet:dns:a=('answer.example.com', '8.8.8.8')", msgs)
+            self.stormIsInPrint("unlink inet:dns:a=('refs.example.com', '8.8.8.8')", msgs)
+            self.stormIsInPrint("Dry run: would delete 1, unlink 2, keep 0", msgs)
+
+            msgs = await core.stormlist("slib.shodan.admin.dns.cleanup --apply")
+            self.stormHasNoWarnErr(msgs)
+            self.stormIsInPrint("Deleted 1, unlinked 2, kept 0", msgs)
+
+            assert not await core.nodes("inet:dns:a=(dns.google, 8.8.8.8)")
+            assert len(await core.nodes("inet:dns:answer:a=(answer.example.com, 8.8.8.8)")) == 1
+            assert len(await core.nodes(f"meta:source={SVC_GUID} -(refs)> inet:dns:a=(refs.example.com, 8.8.8.8)")) == 1
+            for fqdn in ("answer.example.com", "refs.example.com"):
+                assert len(await core.nodes(f"inet:dns:a=({fqdn}, 8.8.8.8)")) == 1
+                assert not await core.nodes(f"inet:dns:a=({fqdn}, 8.8.8.8) <(seen)- meta:source={SVC_GUID}")
+                assert len(await core.nodes(f"meta:source={SVC_GUID} -(seen)> inet:dns:rev=(8.8.8.8, {fqdn})")) == 1
 
 
 class TestShodanStormPerms(s_tests.SynTest):

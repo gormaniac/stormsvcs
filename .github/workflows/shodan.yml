@@ -21,4 +21,6 @@ jobs:
       service: shodan
       # Also run the tests in the test image built on the new production image.
       docker_tests: true
+      # The Storm lint is clean, so new findings fail CI.
+      storm_lint: block
     secrets: inherit

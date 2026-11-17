@@ -11,11 +11,11 @@ init {
     if $cmdopts.filters {
         $retn = $priv.searchFilters()
         if (not $util.failed($retn, "Listing search filters")) {
-            $lib.print("Filters: {filters}", filters=(", ").join($retn.data))
+            $lib.print(`Filters: {(", ").join($retn.data)}`)
         }
         $retn = $priv.searchFacets()
         if (not $util.failed($retn, "Listing search facets")) {
-            $lib.print("Facets: {facets}", facets=(", ").join($retn.data))
+            $lib.print(`Facets: {(", ").join($retn.data)}`)
         }
     }
 
@@ -34,7 +34,7 @@ init {
     // ran maps each query to ({"query": <it:exec:query or null>, "nodes": [<inbound nodes>]}),
     // pending holds the queries to run once every inbound node is read (without --stream-inbound),
     // and dupes counts the inbound nodes with a query seen before.
-    $state = ({"nodes": (false), "ran": ({}), "pending": ([]), "dupes": (0)})
+    $state = ({"nodes": false, "ran": {}, "pending": [], "dupes": 0})
 }
 
 // Run a search. Prints the --tokens/--count/--facets output, then (unless only printing)
@@ -43,9 +43,9 @@ init {
 // was built from (see $state.ran).
 // NOTE: No return() here, it would make this a function that returns a value instead of yielding nodes.
 function run(query) {
-    if ($state.ran.$query = $lib.null) { $state.ran.$query = ({"query": $lib.null, "nodes": ([])}) }
+    if ($state.ran.$query = null) { $state.ran.$query = ({"query": null, "nodes": []}) }
     $entry = $state.ran.$query
-    $ref = $lib.null
+    $ref = (null)
     if $entry.nodes { $ref = $entry.nodes.0 }
 
     if $cmdopts.tokens {
@@ -55,7 +55,7 @@ function run(query) {
         // Facets come from a dedicated call to the free count API so we don't fetch page 1 twice.
         $retn = $priv.count($query, facets=$cmdopts.facets)
         if (not $util.failed($retn, "Counting results")) {
-            $lib.print("Total results: {total} ({query})", total=$retn.data.total, query=$query)
+            $lib.print(`Total results: {$retn.data.total} ({$query})`)
             $util.printFacets($retn.data.facets)
         }
     }
@@ -85,7 +85,7 @@ function run(query) {
 // "$state.nodes = (true)" is runtsafe and would also run (once) without any inbound nodes.
 if $node { $state.nodes = (true) }
 $nodequery = $shodan.searchQuery($node, filehash=$cmdopts.file_hash)
-if ($nodequery = $lib.null) { spin }
+if ($nodequery = null) { spin }  // noqa: P001 (drops inbound nodes on purpose)
 
 // NOTE: Not "if $query {...}", which is runtsafe and would run without inbound nodes too.
 $nodequery = (" ").join(($nodequery, $query)).strip()
@@ -93,13 +93,13 @@ $nodequery = (" ").join(($nodequery, $query)).strip()
 // Inbound nodes that build the same query as an earlier one (ex. inet:banner nodes with the same
 // text, servers presenting the same cert) don't run it again. Its it:exec:query refs them too.
 $prev = $state.ran.$nodequery
-if ($prev != $lib.null) {
+if ($prev != null) {
     $prev.nodes.append($node)
     if $prev.query { $model.linkRefs($prev.query, $node) }
     $state.dupes = ($state.dupes + 1)
-    spin
+    spin  // noqa: P001 (drops inbound nodes on purpose)
 }
-$state.ran.$nodequery = ({"query": $lib.null, "nodes": ([$node])})
+$state.ran.$nodequery = ({"query": null, "nodes": [$node]})
 
 // By default, every inbound node is read before any search runs, so the nodes a search creates
 // can't come back in from a lift that's still running (ex. "inet:banner | slib.shodan.search"
@@ -109,7 +109,7 @@ if $cmdopts.stream_inbound {
     divert (true) $run($nodequery)
 } else {
     $state.pending.append($nodequery)
-    spin
+    spin  // noqa: P001 (drops inbound nodes on purpose)
 }
 
 // Without inbound nodes, run the query on its own (once).
@@ -132,7 +132,6 @@ if $cmdopts.stream_inbound {
 
 fini {
     if $state.dupes {
-        $lib.print("slib.shodan.search: {n} inbound nodes had the same query as an earlier one, each query was searched once.",
-                   n=$state.dupes)
+        $lib.print(`slib.shodan.search: {$state.dupes} inbound nodes had the same query as an earlier one, each query was searched once.`)
     }
 }

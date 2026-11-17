@@ -11,14 +11,14 @@ function isIpv6(ip) {
 // Split a "name=value" string into a (name, value) list. Returns null if there is no "=".
 function splitArg(arg) {
     $parts = $arg.split("=", maxsplit=(1))
-    if ($lib.len($parts) != 2) { return($lib.null) }
+    if ($lib.len($parts) != 2) { return() }
     return($parts)
 }
 
 // Warn about a failed service call. Returns true if the call failed.
 function failed(retn, what) {
     if $retn.status { return((false)) }
-    $lib.warn("slib.shodan: {what} failed: {err}", what=$what, err=$retn.mesg)
+    $lib.warn(`slib.shodan: {$what} failed: {$retn.mesg}`)
     return((true))
 }
 

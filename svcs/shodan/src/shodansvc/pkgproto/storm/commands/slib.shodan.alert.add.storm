@@ -8,20 +8,19 @@ function addAlert(name, ips) {
     if $util.failed($retn, "Creating the alert") { return() }
 
     $aid = $retn.data.id
-    $lib.print("slib.shodan.alert.add: Created alert {id} monitoring {count} IPs/netblocks.",
-        id=$aid, count=$lib.len($ips))
+    $lib.print(`slib.shodan.alert.add: Created alert {$aid} monitoring {$lib.len($ips)} IPs/netblocks.`)
 
     for $trigger in $cmdopts.trigger {
         $tretn = $privalert.alertTriggerEnable($aid, $trigger)
         if (not $util.failed($tretn, `Enabling trigger {$trigger}`)) {
-            $lib.print("slib.shodan.alert.add: Enabled trigger {trigger}.", trigger=$trigger)
+            $lib.print(`slib.shodan.alert.add: Enabled trigger {$trigger}.`)
         }
     }
 
     for $nid in $cmdopts.notifier {
         $nretn = $privalert.alertNotifierAdd($aid, $nid)
         if (not $util.failed($nretn, `Adding notifier {$nid}`)) {
-            $lib.print("slib.shodan.alert.add: Added notifier {nid}.", nid=$nid)
+            $lib.print(`slib.shodan.alert.add: Added notifier {$nid}.`)
         }
     }
 }
@@ -44,12 +43,12 @@ init {
 }
 
 // Inbound nodes are collected and added to a single alert in the fini block.
-switch $node.form() {
+switch $node.form() {  // noqa: R002 (a method on Synapse 2.x)
     "inet:ipv4": { $addTarget($node.repr()) }
     "inet:ipv6": { $addTarget($node.repr()) }
     "inet:cidr4": { $addTarget($node.repr()) }
     "inet:cidr6": { $addTarget($node.repr()) }
-    *: { $lib.warn("slib.shodan.alert.add: The node form {form} is not supported.", form=$node.form()) }
+    *: { $lib.warn(`slib.shodan.alert.add: The node form {$node.form()} is not supported.`) }  // noqa: R002 (a method on Synapse 2.x)
 }
 
 fini { $addAlert($cmdopts.name, $ips) }
