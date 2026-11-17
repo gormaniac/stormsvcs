@@ -1,21 +1,17 @@
 init {
-    $user = $lib.auth.users.get()
-    $layer = $lib.layer.get().iden
-    for $form in (media:news, risk:threat, risk:tool:software, it:app:yara:rule) {
-        if (not $user.allowed(`node.add.{$form}`, gateiden=$layer)) {
-            $lib.raise(AuthDeny, `slib.malpedia.refresh edits nodes in the current view, it needs permission to add {$form} nodes to its layer.`)
-        }
-    }
-    if ($cmdopts.no_limit and not $user.allowed(slib.malpedia.admin)) {
-        $lib.raise(AuthDeny, "slib.malpedia.refresh --no-limit needs the slib.malpedia.admin permission.")
-    }
     $sync = $lib.import(slib.malpedia.priv.sync)
     $util = $lib.import(slib.malpedia.util)
     $name = "slib.malpedia.refresh"
 
+    // slib.malpedia.priv.sync.refresh() checks these too, this fails before any output.
+    $sync.reqEdit($name)
+    if ($cmdopts.no_limit and not $lib.auth.users.get().allowed(slib.malpedia.admin)) {
+        $lib.raise(AuthDeny, "slib.malpedia.refresh --no-limit needs the slib.malpedia.admin permission.")
+    }
+
     // The most actors and families one run refreshes (2-3 requests to Malpedia each), unless
     // --no-limit is used. Malpedia is a free community resource, the daily sync gets everything.
-    $limit = (25)
+    $limit = $sync.refreshLimit()
     // Shared by every inbound node: how many came in, and which IDs were refreshed already.
     $state = ({"nodes": 0, "done": $lib.set(), "capped": false})
 }
@@ -44,7 +40,7 @@ if ($cmdopts.actor or $cmdopts.family) {
     if ($count > $limit and not $cmdopts.no_limit) {
         $lib.warn(`{$name}: Not refreshing {$count} actors and families at once, the limit is {$limit}. Use slib.malpedia.sync, or --no-limit (needs slib.malpedia.admin).`)
     } else {
-        $s = $sync.refresh($actors.list(), $families.list())
+        $s = $sync.refresh($actors.list(), $families.list(), nolimit=$cmdopts.no_limit)
         $report($s)
         if $cmdopts.yield { yield $util.nodes($s.nodes) }
     }
@@ -80,8 +76,8 @@ else {
             if $cmdopts.yield { spin }  // noqa: P001
         } else {
             $state.done.add($key)
-            if ($what = "actor") { $s = $sync.refresh(($id,), ([])) }
-            else { $s = $sync.refresh(([]), ($id,)) }
+            if ($what = "actor") { $s = $sync.refresh(($id,), ([]), nolimit=$cmdopts.no_limit) }
+            else { $s = $sync.refresh(([]), ($id,), nolimit=$cmdopts.no_limit) }
             $report($s)
             divert $cmdopts.yield $util.nodes($s.nodes)
         }

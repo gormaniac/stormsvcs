@@ -1,20 +1,15 @@
 init {
-    // The sync edits nodes as root in this view, so only users that can add Malpedia's nodes
-    // to the view's layer may run it here.
-    $user = $lib.auth.users.get()
-    $layer = $lib.layer.get().iden
-    for $form in (media:news, risk:threat, risk:tool:software, it:app:yara:rule) {
-        if (not $user.allowed(`node.add.{$form}`, gateiden=$layer)) {
-            $lib.raise(AuthDeny, `slib.malpedia.sync edits nodes in the current view, it needs permission to add {$form} nodes to its layer.`)
-        }
-    }
-    if ($cmdopts.force and not $user.allowed(slib.malpedia.admin)) {
-        $lib.raise(AuthDeny, "slib.malpedia.sync --force needs the slib.malpedia.admin permission.")
-    }
-
     $sync = $lib.import(slib.malpedia.priv.sync)
     $util = $lib.import(slib.malpedia.util)
     $name = "slib.malpedia.sync"
+
+    // The sync edits nodes as root in this view, so only users that can add Malpedia's nodes
+    // to the view's layer may run it here. slib.malpedia.priv.sync.sync() checks this too,
+    // this fails before any output.
+    $sync.reqEdit($name)
+    if ($cmdopts.force and not $lib.auth.users.get().allowed(slib.malpedia.admin)) {
+        $lib.raise(AuthDeny, "slib.malpedia.sync --force needs the slib.malpedia.admin permission.")
+    }
 
     if (not $cmdopts.no_pull) {
         $retn = $sync.pull(force=$cmdopts.force)

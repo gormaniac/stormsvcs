@@ -698,6 +698,48 @@ class TestMalpediaStormAuditFixes(s_tests.SynTest):
             msgs = await core.stormlist("slib.malpedia.refresh --actor apt28 --no-limit", opts={"user": visi.iden})
             self.stormIsInErr("--no-limit needs the slib.malpedia.admin permission", msgs)
 
+    async def test_module_checks(self):
+        # Anyone with slib.malpedia.sync can import slib.malpedia.priv.sync, so its functions
+        # check the same permissions and limits as the commands.
+        async with fm.malpediaSvc(self) as (core, svc, fake):
+            self.stormHasNoErr(await core.stormlist("slib.malpedia.sync"))
+            visi = await core.auth.addUser("visi")
+            await visi.addRule((True, ("slib", "malpedia", "sync")))
+            opts = {"user": visi.iden}
+            mod = "$sync = $lib.import(slib.malpedia.priv.sync) "
+
+            async def raises(query, mesg):
+                with self.raises(Exception) as cm:
+                    await core.callStorm(mod + query, opts=opts)
+                assert mesg in str(cm.exception), str(cm.exception)
+
+            # Modeling as root needs permission to add the nodes.
+            start = len(fake.requests)
+            await raises("return($sync.sync(pull=(false)))", "needs permission to add media:news nodes")
+            await raises("return($sync.refresh((apt28,), ([])))", "needs permission to add media:news nodes")
+            for form in ("media:news", "risk:threat", "risk:tool:software", "it:app:yara:rule"):
+                await visi.addRule((True, ("node", "add", form)))
+
+            # Forced pulls and refreshes past the limit are for admins.
+            await raises("return($sync.pull(force=(true)))", "--force needs the slib.malpedia.admin permission")
+            await raises("return($sync.sync(force=(true)))", "--force needs the slib.malpedia.admin permission")
+            ids = [f"a{i}" for i in range(26)]
+            q = "return($sync.refresh($ids, ([])))"
+            with self.raises(Exception) as cm:
+                await core.callStorm(mod + q, opts={**opts, "vars": {"ids": ids}})
+            assert "Not refreshing 26 actors and families at once, the limit is 25." in str(cm.exception)
+            q = "return($sync.refresh($ids, ([]), nolimit=(true)))"
+            with self.raises(Exception) as cm:
+                await core.callStorm(mod + q, opts={**opts, "vars": {"ids": ids}})
+            assert "--no-limit needs the slib.malpedia.admin permission" in str(cm.exception)
+            assert fake.requests[start:] == []
+
+            # Within the limit, it works.
+            summary = await core.callStorm(mod + "return($sync.refresh((apt28,), ([])))", opts=opts)
+            assert summary["counts"]["actor"] == 1
+            summary = await core.callStorm(mod + "return($sync.sync(pull=(false)))", opts=opts)
+            assert summary["error"] is None
+
     async def test_refresh_no_input(self):
         # MALP-20: a refresh with nothing to refresh says so.
         async with fm.malpediaSvc(self) as (core, svc, fake):

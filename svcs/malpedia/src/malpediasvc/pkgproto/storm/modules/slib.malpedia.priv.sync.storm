@@ -5,6 +5,9 @@
 // slib.malpedia.model, as root, so slib.malpedia.sync holders don't need node permissions),
 // and tells the service which ones were modeled. A record that fails to model isn't marked
 // as synced, so the next sync tries it again.
+//
+// Anyone with slib.malpedia.sync can import this module, so its functions check the same
+// permissions and limits as the commands, instead of relying on the commands to.
 
 init {
     $svc = $lib.service.get("slib.malpedia")
@@ -12,10 +15,41 @@ init {
     $kinds = (news, actor, family, yara)
     // The most per-record errors a sync reports, the rest are only counted.
     $maxerrs = (10)
+    // The most actors and families one refresh() asks Malpedia for (2-3 requests each),
+    // unless an admin uses nolimit. Malpedia is a free community resource, the daily sync
+    // gets everything.
+    $maxrefresh = (25)
+}
+
+// The most actors and families one refresh() gets, without nolimit.
+function refreshLimit() { return($maxrefresh) }
+
+// Raise AuthDeny unless the user may model Malpedia's nodes in the current view. The edits
+// run as root, so only users that can add Malpedia's nodes to the view's layer may run them.
+function reqEdit(name) {
+    $user = $lib.auth.users.get()
+    $layer = $lib.layer.get().iden
+    for $form in (media:news, risk:threat, risk:tool:software, it:app:yara:rule) {
+        if (not $user.allowed(`node.add.{$form}`, gateiden=$layer)) {
+            $lib.raise(AuthDeny, `{$name} edits nodes in the current view, it needs permission to add {$form} nodes to its layer.`)
+        }
+    }
+    return()
+}
+
+function _reqAdmin(what) {
+    if (not $lib.auth.users.get().allowed(slib.malpedia.admin)) {
+        $lib.raise(AuthDeny, `{$what} needs the slib.malpedia.admin permission.`)
+    }
+    return()
 }
 
 // Pull Malpedia into the service's snapshot (if it's due). Returns the service's retn.
-function pull(force=(false)) { return($svc.pull(force=$force)) }
+// Forcing a pull is for admins.
+function pull(force=(false)) {
+    if $force { $_reqAdmin("slib.malpedia.sync --force") }
+    return($svc.pull(force=$force))
+}
 
 function _err(summary, mesg) {
     if ($lib.len($summary.errors) < $maxerrs) { $summary.errors.append($mesg) }
@@ -68,6 +102,8 @@ function _batch(view, kind, batch, conf, summary) {
 // full=(true)) and loses the tags it got under the old prefix. If any record fails to model,
 // the next sync does that again.
 function sync(force=(false), full=(false), pull=(true), progress=(false)) {
+    $reqEdit("slib.malpedia.sync")
+    if ($force and $pull) { $_reqAdmin("slib.malpedia.sync --force") }
     $view = $lib.view.get().iden
     $summary = ({"pull": null, "pullerror": null, "error": null, "kinds": {}, "errors": [], "retagged": false})
     for $kind in $kinds {
@@ -133,10 +169,20 @@ function sync(force=(false), full=(false), pull=(true), progress=(false)) {
 }
 
 // Get actors and families straight from Malpedia and model them (see slib.malpedia.refresh).
+// At most refreshLimit() at once, unless an admin uses nolimit.
 //
 // Returns {"nodes": [the risk:threat and risk:tool:software nodes], "counts": {kind: n},
 // "errors": [...], "warnings": [...]}.
-function refresh(actors, families) {
+function refresh(actors, families, nolimit=(false)) {
+    $reqEdit("slib.malpedia.refresh")
+    if $nolimit {
+        $_reqAdmin("slib.malpedia.refresh --no-limit")
+    } else {
+        $count = ($lib.len($actors) + $lib.len($families))
+        if ($count > $maxrefresh) {
+            $lib.raise(BadArg, `Not refreshing {$count} actors and families at once, the limit is {$maxrefresh}.`)
+        }
+    }
     $conf = $model.conf()
     $summary = ({"nodes": [], "counts": {}, "errors": [], "warnings": []})
     for $kind in $kinds { $summary.counts.$kind = (0) }
