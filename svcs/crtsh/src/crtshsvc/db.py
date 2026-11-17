@@ -163,8 +163,13 @@ def _lookup(params: Params, lookups: dict[str, list]) -> str:
 
 
 # The functions that take session level advisory locks, which a ROLLBACK doesn't release.
-# Matches quoted and schema qualified names too (ex. pg_catalog."pg_advisory_lock" (1)).
-SESSION_LOCK_RE = re.compile(r'\bpg_(try_)?advisory_lock(_shared)?"?\s*\(', re.IGNORECASE)
+# Any mention of their names is refused, not only calls (``name(``), since comments can sit
+# between a function and its parenthesis (``pg_advisory_lock/**/(1)``). An identifier can't
+# be split by a comment, and quoted names (``"pg_advisory_lock"(1)``) contain the name, so
+# only Unicode escaped names (``U&"pg\0061dvisory_lock"``) can hide one; those are refused.
+SESSION_LOCK_RE = re.compile(
+    r'(?<![a-z0-9_$])pg_(try_)?advisory_lock(_shared)?(?![a-z0-9_$])|\bu&"', re.IGNORECASE
+)
 
 
 def _alias(cond: str, alias: str = "c") -> str:
@@ -704,7 +709,8 @@ class CrtshDb:
         Functions can still change the session from inside a query, so the transaction is
         rolled back instead of committed, which undoes every setting a query changed (ex.
         ``set_config(name, value, false)``) before the connection is used again. Session
-        advisory locks outlive a rollback, so the functions that take them are refused.
+        advisory locks outlive a rollback, so queries that name the functions that take
+        them are refused.
         """
 
         args = list(args or ())
@@ -714,7 +720,8 @@ class CrtshDb:
         if SESSION_LOCK_RE.search(sql):
             raise CrtshDbError(
                 "Session advisory locks (pg_advisory_lock) would outlive the query, "
-                "use the pg_advisory_xact_lock functions."
+                "use the pg_advisory_xact_lock functions. Queries can't mention their "
+                'names or use Unicode escaped identifiers (U&"...").'
             )
         wrapped = f"SELECT * FROM (\n{sql}\n) q LIMIT ${len(args) + 1}"
         return await self.fetch(wrapped, *args, int(limit), commit=False)

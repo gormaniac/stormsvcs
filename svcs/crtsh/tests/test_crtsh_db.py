@@ -651,10 +651,22 @@ async def test_sql_raw():
         "SELECT pg_advisory_lock(1)",
         "select PG_TRY_ADVISORY_LOCK_SHARED (1, 2)",
         'SELECT pg_catalog."pg_advisory_lock"(1)',
+        # Comments and whitespace between the name and its parenthesis.
+        "SELECT pg_advisory_lock/**/(1)",
+        "SELECT pg_advisory_lock /* a /* nested */ comment */ (1)",
+        "SELECT pg_try_advisory_lock\n-- a comment\n\t (1)",
+        "SELECT pg_advisory_lock_shared\n\n(1)",
+        'SELECT "pg_advisory_lock"/**/(1)',
+        # Unicode escaped names (U&"pg\0061dvisory_lock"), in either case.
+        r'SELECT U&"pg\0061dvisory_lock"(1)',
+        "SELECT u&\"pg!0061dvisory_lock\" UESCAPE '!' (1)",
     ):
         with pytest.raises(CrtshDbError, match="advisory locks"):
             await db.raw(sql)
+    # Other advisory lock functions, and names that only contain a refused one, are fine.
     await db.raw("SELECT pg_advisory_xact_lock(1), pg_advisory_unlock(1)")
+    await db.raw("SELECT pg_try_advisory_xact_lock_shared(1) AS pg_advisory_lock_count")
+    await db.raw('SELECT "u&x" FROM t')
 
 
 async def test_raw_rolls_back():

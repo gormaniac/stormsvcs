@@ -175,6 +175,9 @@ class TestPostgres(s_tests.SynTest):
             for sql in (
                 "SELECT pg_advisory_lock(1)",
                 'SELECT pg_catalog."pg_try_advisory_lock_shared" (1, 2)',
+                "SELECT pg_advisory_lock/**/(1)",
+                "SELECT pg_advisory_lock\n-- a comment\n(1)",
+                r'SELECT U&"pg\0061dvisory_lock"(1)',
             ):
                 with pytest.raises(CrtshDbError, match="advisory"):
                     await svc.rawQuery(sql)

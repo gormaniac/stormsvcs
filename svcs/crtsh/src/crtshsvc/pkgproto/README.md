@@ -105,7 +105,9 @@ whole field values.
 transaction that's rolled back once the rows are fetched. So it can't change data or session
 settings, even with a writable `crtsh:dsn`: a function that changes a setting (ex.
 `set_config('search_path', ..., false)`) only lasts for the query. Session advisory locks outlive
-a rollback, so `pg_advisory_lock` and friends are refused (the `pg_advisory_xact_lock` ones work).
+a rollback, so queries that mention `pg_advisory_lock` and friends anywhere (even in a comment or
+string) are refused, as are Unicode escaped identifiers (`U&"..."`) that could spell them; the
+`pg_advisory_xact_lock` ones work.
 Statements like `SHOW` or `EXPLAIN` aren't accepted.
 
 The library behind the commands is the `slib.crtsh.lib` Storm module, ex.
