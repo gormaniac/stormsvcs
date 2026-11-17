@@ -48,6 +48,10 @@ jobs:
           # Save the built image (with both tags) so later steps can either
           # attach it to the run or push it, without rebuilding.
           outputs: type=docker,dest=/tmp/stormsvcs-base.tar
+          # The weekly _main.yml run exists to pick up system package updates, but nothing in
+          # the Dockerfile changes when the apt repositories do, so a cached apt-get upgrade
+          # layer would republish the old packages. Build scheduled runs without the cache.
+          no-cache: ${{ github.event_name == 'schedule' }}
           cache-from: type=gha,scope=base
           cache-to: type=gha,mode=max,scope=base
 
