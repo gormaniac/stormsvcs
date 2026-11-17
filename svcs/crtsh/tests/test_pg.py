@@ -19,7 +19,7 @@ import synapse.tests.utils as s_tests
 from cryptography import x509
 
 from crtshsvc import CrtshSvc
-from crtshsvc.db import CrtshDbError, Params, _filters, tsquery
+from crtshsvc.db import CrtshDbError, Params, _filters, prefixQuery, tsquery
 
 from . import pgstub
 from .fakecrtsh import PKI, identityText, tsTokens
@@ -84,7 +84,7 @@ class TestPostgres(s_tests.SynTest):
                     cn="vert*", issuer="Issuing", expires_after=notafter(10), expires_before=2**52
                 )
             ) == [10, 9, 11]
-            # A trailing * is a prefix (to_tsquery 'vert':*), no user text is tsquery syntax.
+            # A trailing * is a prefix ('vert':*::tsquery), no user text is tsquery syntax.
             assert await ids(svc.searchGenr(cn="vert*")) == [10, 9, 15, 11, 12]
             assert await ids(svc.searchGenr(cn="vert*", valid=True, since=0)) == [10, 9, 11]
             assert await ids(svc.searchGenr(org="The Vert*", issuer="Issuing")) == [
@@ -272,6 +272,26 @@ class TestPostgres(s_tests.SynTest):
                 )
                 words = {w.strip("'") for w in query.split(" & ")}
                 assert tsTokens(tsquery(text)[0]) == words, text
+            # A prefix with punctuation matches the one word crt.sh indexes for it, in a
+            # position-stripped vector like identities() returns (to_tsquery made a phrase of
+            # it, which never matched).
+            for text, prefix, match in (
+                ("microsoft-support.ph", "Microsoft-Sup", True),
+                ("foo-bar x", "foo-bar", True),
+                ("bar foo x", "foo-bar", False),
+                ("login.microsoftonline.com microsoftonline.com com", "microsoft", True),
+            ):
+                found = await conn.fetchval(
+                    "SELECT strip(to_tsvector('simple', $1)) @@ $2::tsquery",
+                    text,
+                    prefixQuery([prefix]),
+                )
+                assert found is match, (text, prefix)
+            # What to_tsquery made of the same operand: a phrase a stripped vector never matches.
+            assert not await conn.fetchval(
+                "SELECT strip(to_tsvector('simple', 'foo-bar x')) @@ to_tsquery('simple', $1)",
+                prefixQuery(["foo-bar"]),
+            )
         finally:
             await conn.close()
 

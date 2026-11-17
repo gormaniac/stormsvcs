@@ -99,13 +99,14 @@ doesn't match `visi@vertex.link`. `--dns` matches the domain and its subdomains 
 `.` is ignored), `--ip` matches the address exactly (in any notation), and `--exact` requires
 whole field values.
 
-A trailing `*` makes the last word a prefix (`to_tsquery('certwatch', 'microsoft':*)`):
+A trailing `*` makes the last word a prefix (the tsquery `'microsoft':*`):
 `--cn "microsoft*"` matches any indexed word that starts with `microsoft`, and crt.sh indexes
 every parent domain as a word, so it matches `microsoftonline.com` and
 `login.microsoftonline.com`. Other words in the value are still whole words (`--org "Vertex
 Proj*"`). There's no suffix or substring search: `fakemicrosoft.com` doesn't match
-`microsoft*`. A prefix can't be `--exact`. The prefix is passed as a quoted `to_tsquery`
-operand, so no user text is read as tsquery syntax.
+`microsoft*`. A prefix can't be `--exact`. The prefix is one quoted, lowercased
+tsquery operand, so no user text is read as tsquery syntax, and punctuation stays in the word
+(`microsoft-sup*` matches `microsoft-support.ph`).
 
 Prefixes of common words are much heavier than exact words, and with `--valid` or `--since` on
 recent certificates (the newest partitions) they may time out. Heavy searches can time out on

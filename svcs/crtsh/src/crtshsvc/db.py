@@ -264,16 +264,18 @@ def tsquery(text: str) -> tuple[str, list[str]]:
 
 
 def prefixQuery(words: list[str]) -> str:
-    """A ``to_tsquery`` query matching indexed words that start with each of ``words``.
+    """A ``tsquery`` literal matching indexed words that start with each of ``words``.
 
-    Each word is quoted as one ``to_tsquery`` operand (``'word':*``, its quotes and
-    backslashes escaped), so no user text is ever read as tsquery syntax (``&|!():<>``).
-    PostgreSQL parses a quoted operand with the config's parser like any text, and every
-    word it makes of it is a prefix: ``'login.microsoft':*`` is one host word, ``'foo-bar':*``
-    is ``'foo-bar':* <-> 'foo':* <-> 'bar':*``.
+    Each word is quoted as one operand (``'word':*``, its quotes and backslashes escaped), so
+    no user text is ever read as tsquery syntax (``&|!():<>``). The literal is cast straight to
+    ``tsquery``, not passed to ``to_tsquery``: ``to_tsquery`` runs a quoted operand through the
+    text parser again, so ``'foo-bar':*`` became the phrase ``'foo-bar':* <-> 'foo':* <->
+    'bar':*``, which never matches crt.sh's ``identities()`` (it strips word positions) and
+    misses hosts indexed as one word (``microsoft-support.ph``). The certwatch config only
+    lowercases words, so lowercasing here gives the same lexeme.
     """
 
-    quoted = ("'" + w.replace("\\", "\\\\").replace("'", "''") + "':*" for w in words)
+    quoted = ("'" + w.lower().replace("\\", "\\\\").replace("'", "''") + "':*" for w in words)
     return " & ".join(quoted)
 
 
@@ -637,7 +639,7 @@ class CrtshDb:
         if plain or not prefixes:
             queries.append(f"plainto_tsquery('certwatch', {params.add(plain)})")
         if prefixes:
-            queries.append(f"to_tsquery('certwatch', {params.add(prefixQuery(prefixes))})")
+            queries.append(f"{params.add(prefixQuery(prefixes))}::tsquery")
         query = queries[0] if len(queries) == 1 else f"({' && '.join(queries)})"
         clauses = [f"{query} @@ identities(c.CERTIFICATE)"]
         if like is not None:

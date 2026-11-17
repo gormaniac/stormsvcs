@@ -885,12 +885,12 @@ class FakeCrtshDb:
             expires_after=expires_after,
             expires_before=expires_before,
         )
-        # plainto_tsquery(plain) && to_tsquery('prefix':*) @@ identities(...): every word of the
-        # plain text is a word of the cert, and every word of each prefix starts one of its words
-        # (a prefix's words are a phrase, their order isn't checked).
+        # plainto_tsquery(plain) && 'prefix':*::tsquery @@ identities(...): every word of the
+        # plain text is a word of the cert, and each prefix (lowercased, as one lexeme) starts
+        # one of its words.
         plain, prefixes = tsquery(text)
         words = tsTokens(plain)
-        starts = {w for prefix in prefixes for w in tsTokens(prefix)}
+        starts = {prefix.lower() for prefix in prefixes}
         if not words and not starts:
             return []  # An empty tsquery matches nothing.
         regex = _likeRegex(like) if like is not None else None

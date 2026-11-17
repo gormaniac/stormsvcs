@@ -213,7 +213,7 @@ async def record(samples: dict, caname: str) -> Recorder:
         f'Search --cn {word} --issuer "{rare}" (a common word and a rare issuer)',
         db.certsByIdentity(text, like=like, nametypes=NAME_TYPES["cn"], issuer=rare, limit=10000),
     )
-    # Prefixes: to_tsquery('certwatch', '<word>':*) matches indexed words that start with it.
+    # Prefixes: '<word>':*::tsquery matches indexed words that start with it.
     text, like = identityQuery("cn", word + "*")
     await q(
         f"Search --cn '{word}*' (a prefix)",

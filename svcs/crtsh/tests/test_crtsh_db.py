@@ -596,17 +596,18 @@ async def test_sql_identity():
     assert f"{NOTAFTER_KEY} < to_timestamp($2) AT TIME ZONE 'UTC'" in db.sql
     assert f"{NOTAFTER_KEY} >=" not in db.sql
 
-    # A prefix is a to_tsquery operand, quoted so no user text is tsquery syntax.
+    # A prefix is a tsquery literal (not to_tsquery, see prefixQuery), quoted so no user text
+    # is tsquery syntax.
     await db.certsByIdentity("microsoft*", valid=True, limit=5)
     assert (
-        "WHERE to_tsquery('certwatch', $1) @@ identities(c.CERTIFICATE) AND "
+        "WHERE $1::tsquery @@ identities(c.CERTIFICATE) AND "
         f"{NOTAFTER_KEY} >= date_trunc('year', now() AT TIME ZONE 'UTC')"
     ) in db.sql
     assert db.args == ("'microsoft':*", 5)
     # With plain words, both are required.
     await db.certsByIdentity("login micro*", like="%micro%", since=1000, limit=5)
     assert (
-        "(plainto_tsquery('certwatch', $1) && to_tsquery('certwatch', $2)) @@ identities(c.CERTIFICATE)"
+        "(plainto_tsquery('certwatch', $1) && $2::tsquery) @@ identities(c.CERTIFICATE)"
         " AND c.NAME_VALUE ILIKE $3 AND x509_notBefore(c.CERTIFICATE) >= to_timestamp($4)"
     ) in db.sql
     assert db.args == ("login", "'micro':*", "%micro%", 1.0, 5)
@@ -835,9 +836,11 @@ def test_tsquery():
     assert tsquery("login.Microsoft** corp") == ("corp", ["login.Microsoft"])
     assert tsquery("a*b* c") == ("a c", ["b"])
     assert tsquery("-* *") == ("-", [])
-    assert prefixQuery(["microsoft", "it's", "a\\b", "x') | !(y"]) == (
+    assert prefixQuery(["Microsoft", "it's", "a\\b", "x') | !(y"]) == (
         "'microsoft':* & 'it''s':* & 'a\\\\b':* & 'x'') | !(y':*"
     )
+    # Punctuation stays in the one lexeme, it isn't split into a phrase.
+    assert prefixQuery(["Microsoft-Sup"]) == "'microsoft-sup':*"
     assert likeEscape("a_b%c\\") == "a\\_b\\%c\\\\"
 
 
