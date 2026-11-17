@@ -208,6 +208,12 @@ class TestBgpHeSvc(s_tests.SynTest):
                 svc.certs = boomGenr
                 items = [item async for item in prox.certs("gormo.co")]
                 self.eq(
-                    [{"status": False, "mesg": "Unexpected error: RuntimeError: boom", "data": None}],
+                    [
+                        {
+                            "status": False,
+                            "mesg": "Unexpected error: RuntimeError: boom",
+                            "data": None,
+                        }
+                    ],
                     items,
                 )

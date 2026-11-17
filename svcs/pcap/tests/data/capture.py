@@ -12,7 +12,6 @@ talks to them, and writes ``<scenario>.pcapng``. The files transferred in the ca
 deterministic, so the tests can check their hashes; keys and certificates are generated per run.
 """
 
-
 import contextlib
 import email.message
 import ftplib
@@ -64,7 +63,8 @@ class Capture:
         self.path.unlink(missing_ok=True)
         self.proc = subprocess.Popen(
             ["dumpcap", "-q", "-i", "lo", "-f", self.bpf, "-w", str(self.path)],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
         time.sleep(1.5)
         return self
@@ -111,11 +111,34 @@ def scenario_http(tmp: pathlib.Path) -> None:
     upload = tmp / "upload.txt"
     upload.write_bytes(UPLOAD)
     with Capture("http", "tcp port 80"):
-        subprocess.run(["curl", "-s", "-o", "/dev/null", "-A", "curl/8.5.0",
-                        "http://127.0.0.1:80/files/sample.bin"], check=True)
-        subprocess.run(["curl", "-s", "-o", "/dev/null", "-A", "curl/8.5.0",
-                        "-H", "Content-Type: text/plain", "--data-binary", f"@{upload}",
-                        "http://127.0.0.1:80/upload/report.txt"], check=True)
+        subprocess.run(
+            [
+                "curl",
+                "-s",
+                "-o",
+                "/dev/null",
+                "-A",
+                "curl/8.5.0",
+                "http://127.0.0.1:80/files/sample.bin",
+            ],
+            check=True,
+        )
+        subprocess.run(
+            [
+                "curl",
+                "-s",
+                "-o",
+                "/dev/null",
+                "-A",
+                "curl/8.5.0",
+                "-H",
+                "Content-Type: text/plain",
+                "--data-binary",
+                f"@{upload}",
+                "http://127.0.0.1:80/upload/report.txt",
+            ],
+            check=True,
+        )
     srv.shutdown()
 
 
@@ -123,26 +146,77 @@ def scenario_tls(tmp: pathlib.Path) -> None:
     """A TLS 1.2 session (certificates are only cleartext before TLS 1.3) with a client cert."""
 
     def mkcert(name: str, cn: str) -> None:
-        subprocess.run(["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt",
-                        "ec_paramgen_curve:prime256v1", "-nodes", "-days", "3650",
-                        "-subj", f"/O=Test/CN={cn}", "-addext", f"subjectAltName=DNS:{cn}",
-                        "-keyout", str(tmp / f"{name}.key"), "-out", str(tmp / f"{name}.pem")],
-                       check=True, capture_output=True)
+        subprocess.run(
+            [
+                "openssl",
+                "req",
+                "-x509",
+                "-newkey",
+                "ec",
+                "-pkeyopt",
+                "ec_paramgen_curve:prime256v1",
+                "-nodes",
+                "-days",
+                "3650",
+                "-subj",
+                f"/O=Test/CN={cn}",
+                "-addext",
+                f"subjectAltName=DNS:{cn}",
+                "-keyout",
+                str(tmp / f"{name}.key"),
+                "-out",
+                str(tmp / f"{name}.pem"),
+            ],
+            check=True,
+            capture_output=True,
+        )
 
     mkcert("server", "vertex.link")
     mkcert("client", "client.vertex.link")
     server = subprocess.Popen(
-        ["openssl", "s_server", "-quiet", "-accept", "443", "-tls1_2",
-         "-cert", str(tmp / "server.pem"), "-key", str(tmp / "server.key"),
-         "-Verify", "1", "-CAfile", str(tmp / "client.pem")],
-        stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        [
+            "openssl",
+            "s_server",
+            "-quiet",
+            "-accept",
+            "443",
+            "-tls1_2",
+            "-cert",
+            str(tmp / "server.pem"),
+            "-key",
+            str(tmp / "server.key"),
+            "-Verify",
+            "1",
+            "-CAfile",
+            str(tmp / "client.pem"),
+        ],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
     waitPort(443)
     with Capture("tls", "tcp port 443"):
-        subprocess.run(["openssl", "s_client", "-quiet", "-no_ign_eof", "-connect", "127.0.0.1:443",
-                        "-tls1_2", "-servername", "vertex.link",
-                        "-cert", str(tmp / "client.pem"), "-key", str(tmp / "client.key")],
-                       input=b"hello\n", capture_output=True, check=False, timeout=10)
+        subprocess.run(
+            [
+                "openssl",
+                "s_client",
+                "-quiet",
+                "-no_ign_eof",
+                "-connect",
+                "127.0.0.1:443",
+                "-tls1_2",
+                "-servername",
+                "vertex.link",
+                "-cert",
+                str(tmp / "client.pem"),
+                "-key",
+                str(tmp / "client.key"),
+            ],
+            input=b"hello\n",
+            capture_output=True,
+            check=False,
+            timeout=10,
+        )
     server.kill()
 
 
@@ -158,12 +232,30 @@ def scenario_tls13(tmp: pathlib.Path) -> None:
     from hypercorn.asyncio import serve
     from hypercorn.config import Config
 
-    subprocess.run(["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt",
-                    "ec_paramgen_curve:prime256v1", "-nodes", "-days", "3650",
-                    "-subj", "/O=Test/CN=secure.vertex.link",
-                    "-addext", "subjectAltName=DNS:secure.vertex.link",
-                    "-keyout", str(tmp / "key.pem"), "-out", str(tmp / "cert.pem")],
-                   check=True, capture_output=True)
+    subprocess.run(
+        [
+            "openssl",
+            "req",
+            "-x509",
+            "-newkey",
+            "ec",
+            "-pkeyopt",
+            "ec_paramgen_curve:prime256v1",
+            "-nodes",
+            "-days",
+            "3650",
+            "-subj",
+            "/O=Test/CN=secure.vertex.link",
+            "-addext",
+            "subjectAltName=DNS:secure.vertex.link",
+            "-keyout",
+            str(tmp / "key.pem"),
+            "-out",
+            str(tmp / "cert.pem"),
+        ],
+        check=True,
+        capture_output=True,
+    )
 
     async def app(scope, receive, send):
         if scope["type"] != "http":
@@ -175,9 +267,17 @@ def scenario_tls13(tmp: pathlib.Path) -> None:
             if not event.get("more_body"):
                 break
         resp = DOWNLOAD if scope["method"] == "GET" else b"thanks"
-        await send({"type": "http.response.start", "status": 200, "headers": [
-            (b"content-type", b"application/octet-stream"), (b"server", b"hypercorn-h11"),
-            (b"content-length", str(len(resp)).encode())]})
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 200,
+                "headers": [
+                    (b"content-type", b"application/octet-stream"),
+                    (b"server", b"hypercorn-h11"),
+                    (b"content-length", str(len(resp)).encode()),
+                ],
+            }
+        )
         await send({"type": "http.response.body", "body": resp})
 
     config = Config()
@@ -187,8 +287,11 @@ def scenario_tls13(tmp: pathlib.Path) -> None:
     config.include_server_header = False
     loop = asyncio.new_event_loop()
     stop = asyncio.Event()
-    thread = threading.Thread(target=loop.run_until_complete,
-                              args=(serve(app, config, shutdown_trigger=stop.wait),), daemon=True)
+    thread = threading.Thread(
+        target=loop.run_until_complete,
+        args=(serve(app, config, shutdown_trigger=stop.wait),),
+        daemon=True,
+    )
     thread.start()
     waitPort(443)
 
@@ -198,13 +301,33 @@ def scenario_tls13(tmp: pathlib.Path) -> None:
     upload = tmp / "upload.txt"
     upload.write_bytes(UPLOAD)
     url = "https://secure.vertex.link/files/sample.bin"
-    resolve = ["--noproxy", "*", "--resolve", "secure.vertex.link:443:127.0.0.1", "-k", "-s",
-               "-o", "/dev/null",
-               "--tlsv1.3", "-A", "curl/8.5.0"]
+    resolve = [
+        "--noproxy",
+        "*",
+        "--resolve",
+        "secure.vertex.link:443:127.0.0.1",
+        "-k",
+        "-s",
+        "-o",
+        "/dev/null",
+        "--tlsv1.3",
+        "-A",
+        "curl/8.5.0",
+    ]
     with Capture("tls13", "tcp port 443"):
         subprocess.run(["curl", *resolve, "--http1.1", url], check=True, env=env)
-        subprocess.run(["curl", *resolve, "--http2", "--data-binary", f"@{upload}",
-                        "https://secure.vertex.link/upload/report.txt"], check=True, env=env)
+        subprocess.run(
+            [
+                "curl",
+                *resolve,
+                "--http2",
+                "--data-binary",
+                f"@{upload}",
+                "https://secure.vertex.link/upload/report.txt",
+            ],
+            check=True,
+            env=env,
+        )
     loop.call_soon_threadsafe(stop.set)
     thread.join(5)
     os.chmod(keylog, 0o644)
@@ -217,17 +340,47 @@ def scenario_ssh(tmp: pathlib.Path) -> None:
     subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(key)], check=True)
     os.makedirs("/run/sshd", exist_ok=True)
     server = subprocess.Popen(
-        ["/usr/sbin/sshd", "-D", "-p", "22", "-h", str(key), "-o", "ListenAddress=127.0.0.1",
-         "-o", f"PidFile={tmp / 'sshd.pid'}", "-o", "PasswordAuthentication=no",
-         "-o", "KbdInteractiveAuthentication=no"],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        [
+            "/usr/sbin/sshd",
+            "-D",
+            "-p",
+            "22",
+            "-h",
+            str(key),
+            "-o",
+            "ListenAddress=127.0.0.1",
+            "-o",
+            f"PidFile={tmp / 'sshd.pid'}",
+            "-o",
+            "PasswordAuthentication=no",
+            "-o",
+            "KbdInteractiveAuthentication=no",
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
     waitPort(22)
     with Capture("ssh", "tcp port 22"):
-        subprocess.run(["ssh", "-p", "22", "-o", "BatchMode=yes",
-                        "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
-                        "-o", "HostKeyAlgorithms=ssh-ed25519", "nobody@127.0.0.1", "true"],
-                       capture_output=True, check=False, timeout=20)
+        subprocess.run(
+            [
+                "ssh",
+                "-p",
+                "22",
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                "StrictHostKeyChecking=no",
+                "-o",
+                "UserKnownHostsFile=/dev/null",
+                "-o",
+                "HostKeyAlgorithms=ssh-ed25519",
+                "nobody@127.0.0.1",
+                "true",
+            ],
+            capture_output=True,
+            check=False,
+            timeout=20,
+        )
     server.kill()
 
 
@@ -280,8 +433,7 @@ def scenario_smtp(tmp: pathlib.Path) -> None:
     msg["Subject"] = "the report"
     msg["User-Agent"] = "Thunderbird/115.6.0"
     msg.set_content("See attached.\n")
-    msg.add_attachment(ATTACHMENT, maintype="application", subtype="pdf",
-                       filename="report.pdf")
+    msg.add_attachment(ATTACHMENT, maintype="application", subtype="pdf", filename="report.pdf")
     with Capture("smtp", "tcp port 25"), smtplib.SMTP("127.0.0.1", 25) as client:
         client.send_message(msg)
     ctrl.stop()
@@ -324,7 +476,9 @@ def rdpConnectInitial(name: str, layout: int) -> bytes:
         return b"\x30" + bytes([len(body)]) + body
 
     mcs = (
-        b"\x04\x01\x01" + b"\x04\x01\x01" + b"\x01\x01\xff"
+        b"\x04\x01\x01"
+        + b"\x04\x01\x01"
+        + b"\x01\x01\xff"
         + domainParams(34, 2, 0, 1, 0, 1, 0xFFFF, 2)
         + domainParams(1, 1, 1, 1, 0, 1, 0x420, 2)
         + domainParams(0xFFFF, 0xFC17, 0xFFFF, 1, 0, 1, 0xFFFF, 2)
@@ -382,9 +536,7 @@ def scenario_dns(tmp: pathlib.Path) -> None:
         ("vertex.link.", "MX"): [
             RR("vertex.link.", QTYPE.MX, rdata=MX("mail.vertex.link.", 10), ttl=300)
         ],
-        ("vertex.link.", "TXT"): [
-            RR("vertex.link.", QTYPE.TXT, rdata=TXT("v=spf1 -all"), ttl=300)
-        ],
+        ("vertex.link.", "TXT"): [RR("vertex.link.", QTYPE.TXT, rdata=TXT("v=spf1 -all"), ttl=300)],
         ("www.vertex.link.", "A"): [
             RR("www.vertex.link.", QTYPE.CNAME, rdata=CNAME("vertex.link."), ttl=60),
             RR("vertex.link.", QTYPE.A, rdata=A("93.184.216.34"), ttl=300),
@@ -408,9 +560,13 @@ def scenario_dns(tmp: pathlib.Path) -> None:
     tcp.start_thread()
     waitPort(53)
     with Capture("dns", "port 53"):
-        for name, qtype in (("vertex.link", "A"), ("vertex.link", "AAAA"),
-                            ("vertex.link", "MX"), ("www.vertex.link", "A"),
-                            ("nope.vertex.link", "A")):
+        for name, qtype in (
+            ("vertex.link", "A"),
+            ("vertex.link", "AAAA"),
+            ("vertex.link", "MX"),
+            ("www.vertex.link", "A"),
+            ("nope.vertex.link", "A"),
+        ):
             DNSRecord.question(name, qtype).send("127.0.0.1", 53, timeout=5)
             time.sleep(0.1)
         DNSRecord.question("vertex.link", "TXT").send("127.0.0.1", 53, tcp=True, timeout=5)
@@ -430,10 +586,28 @@ def scenario_quic(tmp: pathlib.Path) -> None:
 
     key, cert = tmp / "key.pem", tmp / "cert.pem"
     subprocess.run(
-        ["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256",
-         "-nodes", "-keyout", str(key), "-out", str(cert), "-days", "3650",
-         "-subj", "/O=Test/CN=quic.vertex.link", "-addext", "subjectAltName=DNS:quic.vertex.link"],
-        check=True, capture_output=True,
+        [
+            "openssl",
+            "req",
+            "-x509",
+            "-newkey",
+            "ec",
+            "-pkeyopt",
+            "ec_paramgen_curve:P-256",
+            "-nodes",
+            "-keyout",
+            str(key),
+            "-out",
+            str(cert),
+            "-days",
+            "3650",
+            "-subj",
+            "/O=Test/CN=quic.vertex.link",
+            "-addext",
+            "subjectAltName=DNS:quic.vertex.link",
+        ],
+        check=True,
+        capture_output=True,
     )
 
     async def run() -> None:
@@ -444,11 +618,13 @@ def scenario_quic(tmp: pathlib.Path) -> None:
             async def echo():
                 writer.write(await reader.read())
                 writer.write_eof()
+
             asyncio.ensure_future(echo())
 
         server = await serve("127.0.0.1", 443, configuration=sconf, stream_handler=onStream)
-        cconf = QuicConfiguration(is_client=True, alpn_protocols=["h3"],
-                                  server_name="quic.vertex.link", verify_mode=0)
+        cconf = QuicConfiguration(
+            is_client=True, alpn_protocols=["h3"], server_name="quic.vertex.link", verify_mode=0
+        )
         # aioquic's connect() needs IPv6 (a dual stack socket), so the client is set up here.
         loop = asyncio.get_running_loop()
         _, client = await loop.create_datagram_endpoint(
@@ -544,6 +720,7 @@ def scenario_krb5(tmp: pathlib.Path) -> None:
                 return
             with conn:
                 import traceback
+
                 try:
                     size = struct.unpack(">I", conn.recv(4))[0]
                     data = b""
@@ -585,22 +762,54 @@ def scenario_ssh_pq(tmp: pathlib.Path) -> None:
     """
 
     key = tmp / "host_rsa"
-    subprocess.run(["ssh-keygen", "-q", "-t", "rsa", "-b", "2048", "-N", "", "-f", str(key)],
-                   check=True)
+    subprocess.run(
+        ["ssh-keygen", "-q", "-t", "rsa", "-b", "2048", "-N", "", "-f", str(key)], check=True
+    )
     os.makedirs("/run/sshd", exist_ok=True)
     server = subprocess.Popen(
-        ["/usr/sbin/sshd", "-D", "-p", "2200", "-h", str(key), "-o", "ListenAddress=127.0.0.1",
-         "-o", f"PidFile={tmp / 'sshd.pid'}", "-o", "PasswordAuthentication=no",
-         "-o", "KbdInteractiveAuthentication=no"],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        [
+            "/usr/sbin/sshd",
+            "-D",
+            "-p",
+            "2200",
+            "-h",
+            str(key),
+            "-o",
+            "ListenAddress=127.0.0.1",
+            "-o",
+            f"PidFile={tmp / 'sshd.pid'}",
+            "-o",
+            "PasswordAuthentication=no",
+            "-o",
+            "KbdInteractiveAuthentication=no",
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
     waitPort(2200)
     with Capture("ssh_pq", "tcp port 2200"):
-        subprocess.run(["ssh", "-p", "2200", "-o", "BatchMode=yes",
-                        "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
-                        "-o", "KexAlgorithms=sntrup761x25519-sha512@openssh.com",
-                        "-o", "HostKeyAlgorithms=rsa-sha2-512", "nobody@127.0.0.1", "true"],
-                       capture_output=True, check=False, timeout=20)
+        subprocess.run(
+            [
+                "ssh",
+                "-p",
+                "2200",
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                "StrictHostKeyChecking=no",
+                "-o",
+                "UserKnownHostsFile=/dev/null",
+                "-o",
+                "KexAlgorithms=sntrup761x25519-sha512@openssh.com",
+                "-o",
+                "HostKeyAlgorithms=rsa-sha2-512",
+                "nobody@127.0.0.1",
+                "true",
+            ],
+            capture_output=True,
+            check=False,
+            timeout=20,
+        )
     server.kill()
 
 
@@ -628,9 +837,11 @@ def scenario_sip(tmp: pathlib.Path) -> None:
         data, addr = server.recvfrom(65535)
         lines = data.decode().split("\r\n")
         keep = [ln for ln in lines if ln.split(":")[0] in ("Via", "To", "From", "Call-ID", "CSeq")]
-        resp = ("SIP/2.0 200 OK\r\n" + "\r\n".join(keep) + "\r\n"
-                "Server: Asterisk PBX 20.5.0\r\nAllow: INVITE, ACK, CANCEL, OPTIONS, BYE\r\n"
-                "Content-Length: 0\r\n\r\n")
+        resp = (
+            "SIP/2.0 200 OK\r\n" + "\r\n".join(keep) + "\r\n"
+            "Server: Asterisk PBX 20.5.0\r\nAllow: INVITE, ACK, CANCEL, OPTIONS, BYE\r\n"
+            "Content-Length: 0\r\n\r\n"
+        )
         server.sendto(resp.encode(), addr)
 
     thread = threading.Thread(target=serve, daemon=True)
@@ -738,11 +949,22 @@ def scenario_multi(tmp: pathlib.Path) -> None:
         path = tmp / f"{iface}.pcapng"
         proc = subprocess.Popen(
             ["dumpcap", "-q", "-i", iface, "-f", "tcp port 8081", "-w", str(path)],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
         time.sleep(1.5)
-        subprocess.run(["curl", "-s", "--noproxy", "*", "-o", "/dev/null",
-                        f"http://127.0.0.1:8081/files/{iface}.bin"], check=True)
+        subprocess.run(
+            [
+                "curl",
+                "-s",
+                "--noproxy",
+                "*",
+                "-o",
+                "/dev/null",
+                f"http://127.0.0.1:8081/files/{iface}.bin",
+            ],
+            check=True,
+        )
         time.sleep(1.5)
         proc.terminate()
         proc.wait()
@@ -779,7 +1001,8 @@ def scenario_vlan(tmp: pathlib.Path) -> None:
 
 SCENARIOS = {
     name.removeprefix("scenario_"): func
-    for name, func in globals().copy().items() if name.startswith("scenario_")
+    for name, func in globals().copy().items()
+    if name.startswith("scenario_")
 }
 
 

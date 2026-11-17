@@ -28,7 +28,6 @@ SVCDIR = pathlib.Path(__file__).parents[1]
 
 
 class TestVersions(s_tests.SynTest):
-
     def test_readmes_match(self):
         # The package's README (shown in the Cortex) is a copy of the service's README.
         pkgreadme = SVCDIR / "src" / "hatchingsvc" / "pkgproto" / "README.md"
@@ -54,7 +53,6 @@ class TestVersions(s_tests.SynTest):
 
 
 class TestNorm(s_tests.SynTest):
-
     def test_helpers(self):
         assert norm.tagPart("Cobalt Strike!") == "cobalt_strike"
         assert norm.tagPart("") is None
@@ -72,13 +70,28 @@ class TestNorm(s_tests.SynTest):
         assert norm.decoyUrl("decoy.example.com/abc") == "http://decoy.example.com/abc"
         assert norm.decoyUrl("https://a.com/") == "https://a.com/" and norm.decoyUrl(" ") is None
         assert norm.hostPortUrl("udp", "::1", 53) == "udp://[::1]:53"
-        assert norm.hostPortUrl("tcp", None) is None and norm.hostPortUrl("tcp", "a.com", "x") == "tcp://a.com"
+        assert (
+            norm.hostPortUrl("tcp", None) is None
+            and norm.hostPortUrl("tcp", "a.com", "x") == "tcp://a.com"
+        )
         assert norm.headers(["Host: a.com", "bad", "X-A: b: c", "Host: a.com"]) == [
-            ["host", "a.com"], ["x-a", "b: c"]]
-        assert norm.normCreds({"protocol": "FTP", "host": "ftp.a.com", "port": 21, "username": "u",
-                               "password": "p"}) == [{
-            "protocol": "ftp", "host": "ftp.a.com", "port": 21, "url": "ftp://ftp.a.com:21",
-            "username": "u", "password": "p", "email": None, "emailto": None}]
+            ["host", "a.com"],
+            ["x-a", "b: c"],
+        ]
+        assert norm.normCreds(
+            {"protocol": "FTP", "host": "ftp.a.com", "port": 21, "username": "u", "password": "p"}
+        ) == [
+            {
+                "protocol": "ftp",
+                "host": "ftp.a.com",
+                "port": 21,
+                "url": "ftp://ftp.a.com:21",
+                "username": "u",
+                "password": "p",
+                "email": None,
+                "emailto": None,
+            }
+        ]
         assert norm.normCreds([{"protocol": "smtp", "username": "", "password": ""}, "x"]) == []
         assert norm.c2Url("1.2.3.4:443") == "tcp://1.2.3.4:443"
         assert norm.c2Url("[::1]:80") == "tcp://[::1]:80"
@@ -89,7 +102,11 @@ class TestNorm(s_tests.SynTest):
         assert norm.ipVersion("::1") == "ipv6" and norm.ipVersion("a.com") is None
         assert norm.basename("C:\\a\\b.exe") == "b.exe" and norm.basename(None) is None
         assert norm.cmdLine(["a", "b"]) == "a b" and norm.cmdLine("") is None
-        assert norm.rrType("IN A") == "A" and norm.rrType("cname") == "CNAME" and norm.rrType("") is None
+        assert (
+            norm.rrType("IN A") == "A"
+            and norm.rrType("cname") == "CNAME"
+            and norm.rrType("") is None
+        )
         assert norm.isPublicIp("198.51.100.7") is False  # TEST-NET-2 isn't globally routable.
         assert norm.isPublicIp("8.8.8.8") and norm.isPublicIp("2001:4860:4860::8888")
         assert not norm.isPublicIp("10.127.0.5") and not norm.isPublicIp("fe80::1")
@@ -127,7 +144,9 @@ class TestNorm(s_tests.SynTest):
         report = copy.deepcopy(ft.TASK_REPORT)
         report["analysis"]["tags"] = [None, "backdoor", 1]
         data = norm.normSample(sample, overview, None, {"behavioral1": report})
-        assert "cobaltstrike" in data["families"] and all(isinstance(f, str) for f in data["families"])
+        assert "cobaltstrike" in data["families"] and all(
+            isinstance(f, str) for f in data["families"]
+        )
         assert "backdoor" in data["tags"] and "trojan" in data["tags"]
 
     def test_norm_sample(self):
@@ -138,71 +157,141 @@ class TestNorm(s_tests.SynTest):
         assert data["score"] == 10 and data["verdict"] == 40
         assert data["ival"] == [1793448000000, 1793448300000] and data["time"] == 1793448300000
         assert data["file"] == {
-            "sha256": ft.SAMPLE_SHA256, "md5": ft.SAMPLE_MD5, "sha1": ft.SAMPLE_SHA1,
-            "sha512": ft.SAMPLE_SHA512, "ssdeep": ft.SAMPLE_SSDEEP, "size": len(ft.SAMPLE_BYTES),
-            "name": "invoice.exe", "mime": "application/x-dosexec",
+            "sha256": ft.SAMPLE_SHA256,
+            "md5": ft.SAMPLE_MD5,
+            "sha1": ft.SAMPLE_SHA1,
+            "sha512": ft.SAMPLE_SHA512,
+            "ssdeep": ft.SAMPLE_SSDEEP,
+            "size": len(ft.SAMPLE_BYTES),
+            "name": "invoice.exe",
+            "mime": "application/x-dosexec",
         }
         # The only target is the sample itself.
         assert data["members"] == [] and data["reported"] == []
         assert data["families"] == ["cobaltstrike", "lockbit"]
-        assert data["tags"] == ["cobaltstrike", "backdoor", "trojan", "persistence", "upx", "lockbit"]
+        assert data["tags"] == [
+            "cobaltstrike",
+            "backdoor",
+            "trojan",
+            "persistence",
+            "upx",
+            "lockbit",
+        ]
         assert "family:cobaltstrike" not in data["categories"] and "backdoor" in data["categories"]
         assert data["ttps"] == ["T1056.001", "T1547.001"]
-        assert data["iocs"] == {"urls": ["http://198.51.100.7/jquery-3.3.1.min.js"],
-                                "hosts": ["evil.example.com", "198.51.100.7"]}
+        assert data["iocs"] == {
+            "urls": ["http://198.51.100.7/jquery-3.3.1.min.js"],
+            "hosts": ["evil.example.com", "198.51.100.7"],
+        }
 
         # The overview and the task report hold the same config, it's only included once.
         (config,) = data["configs"]
-        assert config["servers"] == ["http://198.51.100.7:443/jquery-3.3.1.min.js", "tcp://evil.example.com:8080"]
+        assert config["servers"] == [
+            "http://198.51.100.7:443/jquery-3.3.1.min.js",
+            "tcp://evil.example.com:8080",
+        ]
         assert config["hosts"] == ["198.51.100.7", "evil.example.com"]
         assert config["mutexes"] == ["Global\\cs-mutex"] and config["family"] == "cobaltstrike"
         assert config["raw"] == ft.CONFIG
         assert config["version"] == "4.9" and config["botnet"] == "1359593325"
-        smtp = {"protocol": "smtp", "host": "mail.example.com", "port": 587,
-                "url": "smtp://mail.example.com:587", "username": "bot@example.com",
-                "password": "hunter2", "email": "bot@example.com", "emailto": None}
+        smtp = {
+            "protocol": "smtp",
+            "host": "mail.example.com",
+            "port": 587,
+            "url": "smtp://mail.example.com:587",
+            "username": "bot@example.com",
+            "password": "hunter2",
+            "email": "bot@example.com",
+            "emailto": None,
+        }
         assert config["creds"] == [smtp] and data["creds"] == [smtp]
         assert config["listens"] == [] and config["resolvers"] == [] and config["decoys"] == []
 
         # Signatures are unique, ordered by score.
         assert [s["key"] for s in data["signatures"]] == [
-            "cobaltstrike", "persistence_runkey", "suspicious use of setwindowshookex"]
+            "cobaltstrike",
+            "persistence_runkey",
+            "suspicious use of setwindowshookex",
+        ]
         sig = data["signatures"][1]
-        assert sig == {"key": "persistence_runkey", "name": "Adds Run key to start application",
-                       "score": 6, "verdict": 30, "categories": ["persistence"],
-                       "ttps": ["T1547.001"], "desc": None}
+        assert sig == {
+            "key": "persistence_runkey",
+            "name": "Adds Run key to start application",
+            "score": 6,
+            "verdict": 30,
+            "categories": ["persistence"],
+            "ttps": ["T1547.001"],
+            "desc": None,
+        }
         assert data["signatures"][0]["categories"] == ["backdoor", "trojan"]
-        assert data["droppers"] == [{"family": None, "language": "ps1", "urls": ["http://203.0.113.9/a.ps1"]}]
-        assert data["ransom"][0]["family"] == "lockbit" and data["ransom"][0]["emails"] == ["pay@example.org"]
+        assert data["droppers"] == [
+            {"family": None, "language": "ps1", "urls": ["http://203.0.113.9/a.ps1"]}
+        ]
+        assert data["ransom"][0]["family"] == "lockbit" and data["ransom"][0]["emails"] == [
+            "pay@example.org"
+        ]
         assert data["ransom"][0]["wallets"] == ["bc1qexamplewallet"]
 
         (task,) = data["tasks"]
         assert task["name"] == "behavioral1" and task["target"] == ft.SAMPLE_SHA256
-        assert task["procs"][1] == {"procid": 2, "parent": 1, "pid": 3120, "sample": False,
-                                    "orig": task["procs"][1]["orig"],
-                                    "cmd": "C:\\Windows\\System32\\cmd.exe /c whoami",
-                                    "path": "C:\\Windows\\System32\\cmd.exe"}
+        assert task["procs"][1] == {
+            "procid": 2,
+            "parent": 1,
+            "pid": 3120,
+            "sample": False,
+            "orig": task["procs"][1]["orig"],
+            "cmd": "C:\\Windows\\System32\\cmd.exe /c whoami",
+            "path": "C:\\Windows\\System32\\cmd.exe",
+        }
         # Parents that weren't reported are dropped.
         assert task["procs"][0]["parent"] is None and task["procs"][0]["sample"]
         assert task["flows"][0] == {
             # The sandbox VM's private address isn't kept as the client.
-            "id": 1, "server": "tcp://198.51.100.7:443", "client": None,
-            "proto": "tcp", "ip": "198.51.100.7", "ipver": "ipv4", "port": 443, "procid": 1,
-            "txbytes": 512, "rxbytes": 1024, "txcount": None, "rxcount": None,
-            "protocols": ["tls", "http"], "domain": "evil.example.com", "sni": "evil.example.com",
-            "ja3": "a0e9f5d64349fb13191bc781f81f42e1", "ja3s": "15af977ce25de452b96affa2addb1036",
+            "id": 1,
+            "server": "tcp://198.51.100.7:443",
+            "client": None,
+            "proto": "tcp",
+            "ip": "198.51.100.7",
+            "ipver": "ipv4",
+            "port": 443,
+            "procid": 1,
+            "txbytes": 512,
+            "rxbytes": 1024,
+            "txcount": None,
+            "rxcount": None,
+            "protocols": ["tls", "http"],
+            "domain": "evil.example.com",
+            "sni": "evil.example.com",
+            "ja3": "a0e9f5d64349fb13191bc781f81f42e1",
+            "ja3s": "15af977ce25de452b96affa2addb1036",
         }
         assert task["flows"][1]["server"] == "udp://8.8.8.8:53" and task["flows"][1]["ja3"] is None
         assert task["ips"] == [{"ip": "198.51.100.7", "ipver": "ipv4", "asn": 64500, "cc": "us"}]
-        assert task["dns"] == [{"flow": 2, "index": 1, "name": "evil.example.com", "type": "A",
-                                "server": "udp://8.8.8.8:53"}]
-        assert task["answers"] == [{"type": "a", "name": "evil.example.com", "value": "198.51.100.7"}]
-        assert task["http"] == [{
-            "flow": 1, "index": 3, "method": "GET", "url": "http://evil.example.com/jquery-3.3.1.min.js",
-            "headers": [["host", "evil.example.com"], ["user-agent", "Mozilla/5.0 (fake)"]],
-            "server": "tcp://198.51.100.7:443", "code": 200, "reason": "OK",
-            "rheaders": [["server", "nginx"]],
-        }]
+        assert task["dns"] == [
+            {
+                "flow": 2,
+                "index": 1,
+                "name": "evil.example.com",
+                "type": "A",
+                "server": "udp://8.8.8.8:53",
+            }
+        ]
+        assert task["answers"] == [
+            {"type": "a", "name": "evil.example.com", "value": "198.51.100.7"}
+        ]
+        assert task["http"] == [
+            {
+                "flow": 1,
+                "index": 3,
+                "method": "GET",
+                "url": "http://evil.example.com/jquery-3.3.1.min.js",
+                "headers": [["host", "evil.example.com"], ["user-agent", "Mozilla/5.0 (fake)"]],
+                "server": "tcp://198.51.100.7:443",
+                "code": 200,
+                "reason": "OK",
+                "rheaders": [["server", "nginx"]],
+            }
+        ]
         (dropped,) = task["files"]
         assert dropped["sha256"] == ft.DROPPED_SHA256 and dropped["basename"] == "upd.exe"
         assert dropped["procid"] == 1
@@ -218,12 +307,16 @@ class TestNorm(s_tests.SynTest):
             proc["orig"] = True
         for req in report["network"]["requests"]:
             for key in ("dns_request", "dns_response"):
-                for rec in (req.get(key) or {}).get("questions", []) + (req.get(key) or {}).get("answers", []):
+                for rec in (req.get(key) or {}).get("questions", []) + (req.get(key) or {}).get(
+                    "answers", []
+                ):
                     rec["type"] = f"IN {rec['type']}"
         task = norm.normTask("behavioral1", report)
         assert [p["sample"] for p in task["procs"]] == [True, False]
         assert [d["type"] for d in task["dns"]] == ["A"]
-        assert task["answers"] == [{"type": "a", "name": "evil.example.com", "value": "198.51.100.7"}]
+        assert task["answers"] == [
+            {"type": "a", "name": "evil.example.com", "value": "198.51.100.7"}
+        ]
 
         for proc in report["processes"]:
             proc["orig"] = False
@@ -231,28 +324,57 @@ class TestNorm(s_tests.SynTest):
 
     def test_norm_archive_and_configs(self):
         # An archive sample with two members, one of them a known family.
-        member = {"tasks": ["behavioral1"], "target": "payload/evil.dll", "sha256": "AA" * 32,
-                  "md5": "bb" * 16, "size": 10, "ssdeep": "3:a:b", "score": 10,
-                  "family": ["Emotet"], "tags": ["family:emotet", "banker"],
-                  "signatures": [{"name": "Emotet", "score": 10, "tags": ["family:emotet"]}]}
+        member = {
+            "tasks": ["behavioral1"],
+            "target": "payload/evil.dll",
+            "sha256": "AA" * 32,
+            "md5": "bb" * 16,
+            "size": 10,
+            "ssdeep": "3:a:b",
+            "score": 10,
+            "family": ["Emotet"],
+            "tags": ["family:emotet", "banker"],
+            "signatures": [{"name": "Emotet", "score": 10, "tags": ["family:emotet"]}],
+        }
         overview = {
-            "sample": {"sha256": "cc" * 32, "target": "a.zip", "submitted": "2026-10-31T12:00:00Z",
-                       "completed": "0001-01-01T00:00:00Z"},
+            "sample": {
+                "sha256": "cc" * 32,
+                "target": "a.zip",
+                "submitted": "2026-10-31T12:00:00Z",
+                "completed": "0001-01-01T00:00:00Z",
+            },
             "analysis": {"score": 5, "tags": []},
             "targets": [member, dict(member), {"target": "a.zip", "sha256": "CC" * 32}],
             "errors": [{"task": "behavioral2", "backend": "x", "reason": "the VM crashed"}],
             "extracted": [
-                {"credentials": {"protocol": "ftp", "host": "ftp.a.com", "username": "u",
-                                 "password": "p"}},
-                {"config": {"family": "Formbook", "c2": ["www.a.com/x/"],
-                            "decoy": ["decoy.example.com/abc", "https://b.com/"],
-                            "dns": ["8.8.8.8", "1.1.1.1:5353", "dns.example.com"],
-                            "listen_addr": "0.0.0.0", "listen_port": 4444,
-                            "wallet": ["bc1qwallet"], "mutex": "one"}},
+                {
+                    "credentials": {
+                        "protocol": "ftp",
+                        "host": "ftp.a.com",
+                        "username": "u",
+                        "password": "p",
+                    }
+                },
+                {
+                    "config": {
+                        "family": "Formbook",
+                        "c2": ["www.a.com/x/"],
+                        "decoy": ["decoy.example.com/abc", "https://b.com/"],
+                        "dns": ["8.8.8.8", "1.1.1.1:5353", "dns.example.com"],
+                        "listen_addr": "0.0.0.0",
+                        "listen_port": 4444,
+                        "wallet": ["bc1qwallet"],
+                        "mutex": "one",
+                    }
+                },
             ],
         }
-        info = {"id": "261031-zip", "kind": "file", "filename": "a.zip",
-                "submitted": "2026-10-31T12:00:00Z"}
+        info = {
+            "id": "261031-zip",
+            "kind": "file",
+            "filename": "a.zip",
+            "submitted": "2026-10-31T12:00:00Z",
+        }
         data = norm.normSample(info, overview)
         assert data["verdict"] == 30 and data["time"] == 1793448000000
         (mem,) = data["members"]
@@ -274,8 +396,10 @@ class TestNorm(s_tests.SynTest):
 
     def test_norm_url_sample(self):
         sample = dict(ft.SAMPLE, kind="url", url="https://example.com/login", filename=None)
-        overview = {"sample": {"target": "https://example.com/login"},
-                    "analysis": {"score": 6, "tags": ["phishing"]}}
+        overview = {
+            "sample": {"target": "https://example.com/login"},
+            "analysis": {"score": 6, "tags": ["phishing"]},
+        }
         data = norm.normSample(sample, overview)
         assert data["url"] == "https://example.com/login" and data["file"] is None
         assert data["verdict"] == 30 and data["tags"] == ["phishing"]
@@ -283,7 +407,6 @@ class TestNorm(s_tests.SynTest):
 
 
 class TestHatchingSvc(s_tests.SynTest):
-
     async def test_apikeys(self):
         async with hatchingSvc(self, apikey=None) as (core, svc, fake):
             assert not await svc.hasApiKey()
@@ -347,7 +470,9 @@ class TestHatchingSvc(s_tests.SynTest):
                 retn = await prox.summary(ft.SAMPLE_ID)
                 assert retn["data"]["score"] == 10
 
-                assert (await prox.overview(ft.SAMPLE_ID))["data"]["analysis"]["family"] == ("cobaltstrike",)
+                assert (await prox.overview(ft.SAMPLE_ID))["data"]["analysis"]["family"] == (
+                    "cobaltstrike",
+                )
                 assert (await prox.staticReport(ft.SAMPLE_ID))["data"]["files"][0]["mime"]
                 retn = await prox.taskReport(ft.SAMPLE_ID, "behavioral1")
                 assert retn["data"]["network"]["flows"][0]["tls_sni"] == "evil.example.com"
@@ -360,19 +485,33 @@ class TestHatchingSvc(s_tests.SynTest):
                 assert [dict(e["data"]) for e in events] == ft.KERNEL_EVENTS
                 events = [r async for r in prox.kernelReport(ft.SAMPLE_ID, "behavioral1", limit=1)]
                 assert len(events) == 1
-                events = [r async for r in prox.kernelReport(ft.SAMPLE_ID, "behavioral1", log="stahp")]
+                events = [
+                    r async for r in prox.kernelReport(ft.SAMPLE_ID, "behavioral1", log="stahp")
+                ]
                 assert len(events) == 1 and not events[0]["status"]
 
                 retn = await prox.dumpedFiles(ft.SAMPLE_ID)
                 assert retn["data"]["errors"] == ()
-                assert [dict(d) for d in retn["data"]["files"]] == [{"task": "behavioral1", "name": "files/0x0003000000022c2b-1.dat",
-                                         "path": "C:\\Users\\Admin\\AppData\\Roaming\\upd.exe",
-                                         "sha256": ft.DROPPED_SHA256, "size": len(ft.DROPPED_BYTES)}]
+                assert [dict(d) for d in retn["data"]["files"]] == [
+                    {
+                        "task": "behavioral1",
+                        "name": "files/0x0003000000022c2b-1.dat",
+                        "path": "C:\\Users\\Admin\\AppData\\Roaming\\upd.exe",
+                        "sha256": ft.DROPPED_SHA256,
+                        "size": len(ft.DROPPED_BYTES),
+                    }
+                ]
 
-                retn = await prox.rawRequest("get", "v0/samples", params={"subset": "org", "limit": 1})
+                retn = await prox.rawRequest(
+                    "get", "v0/samples", params={"subset": "org", "limit": 1}
+                )
                 assert retn["data"]["data"][0]["id"] == ft.SAMPLE_ID
                 retn = await prox.rawRequest("get", "/v0/samples/nope")
-                assert not retn["status"] and "NOT_FOUND" in retn["mesg"] and "HTTP 404" in retn["mesg"]
+                assert (
+                    not retn["status"]
+                    and "NOT_FOUND" in retn["mesg"]
+                    and "HTTP 404" in retn["mesg"]
+                )
 
                 # One unavailable task report doesn't block the others' dropped files.
                 report = fake.task_reports.pop((ft.SAMPLE_ID, "behavioral1"))
@@ -418,7 +557,9 @@ class TestHatchingSvc(s_tests.SynTest):
                 assert (await prox.resolve(ft.SAMPLE_ID))["data"] == ft.SAMPLE_ID
 
                 # A hash resolves to its newest reported sample, even when it was resubmitted.
-                fake.samples["261031-resubmit"] = dict(ft.SAMPLE, id="261031-resubmit", status="pending")
+                fake.samples["261031-resubmit"] = dict(
+                    ft.SAMPLE, id="261031-resubmit", status="pending"
+                )
                 fake.overviews["261031-resubmit"] = fake.overviews[ft.SAMPLE_ID]
                 assert (await prox.resolve(ft.SAMPLE_SHA256))["data"] == ft.SAMPLE_ID
                 fake.samples[ft.SAMPLE_ID]["status"] = "failed"
@@ -466,18 +607,28 @@ class TestHatchingSvc(s_tests.SynTest):
             upload = await svc.submitFileInit()
             assert await svc.submitFileChunk(upload, b"MZ") == 2
             assert await svc.submitFileChunk(upload, b" chunks") == 9
-            sample = await svc.submitFile(upload, "a.exe", password="infected",
-                                          profiles=["win10-internet:a.exe", {"profile": "w7"}],
-                                          tags=["case:1"], timeout=60, network="drop")
+            sample = await svc.submitFile(
+                upload,
+                "a.exe",
+                password="infected",
+                profiles=["win10-internet:a.exe", {"profile": "w7"}],
+                tags=["case:1"],
+                timeout=60,
+                network="drop",
+            )
             assert sample["filename"] == "a.exe"
             req = fake.last("post", "/samples")
             assert req["files"]["file"] == ("a.exe", b"MZ chunks")
             assert req["form"]["_json"]
             import json
+
             assert json.loads(req["form"]["_json"]) == {
-                "kind": "file", "target": "a.exe", "password": "infected",
+                "kind": "file",
+                "target": "a.exe",
+                "password": "infected",
                 "profiles": [{"profile": "win10-internet", "pick": "a.exe"}, {"profile": "w7"}],
-                "user_tags": ["case:1"], "defaults": {"timeout": 60, "network": "drop"},
+                "user_tags": ["case:1"],
+                "defaults": {"timeout": 60, "network": "drop"},
             }
 
             # An upload is gone once it's submitted.
@@ -503,8 +654,11 @@ class TestHatchingSvc(s_tests.SynTest):
 
             sample = await svc.submitUrl("http://example.com/a.exe", fetch=True, interactive=True)
             assert sample["kind"] == "fetch" and sample["status"] == "static_analysis"
-            assert fake.last()["json"] == {"kind": "fetch", "url": "http://example.com/a.exe",
-                                           "interactive": True}
+            assert fake.last()["json"] == {
+                "kind": "fetch",
+                "url": "http://example.com/a.exe",
+                "interactive": True,
+            }
 
             assert await svc.setProfile(sample["id"], profiles=["w10"])
             assert fake.last()["json"] == {"auto": False, "profiles": [{"profile": "w10"}]}
@@ -583,41 +737,65 @@ class TestHatchingSvc(s_tests.SynTest):
             assert svc_mod.resultLimit(-1) == 1000 and svc_mod.resultLimit("7") == 7
 
             # Only reported behavioral tasks are used.
-            overview = {"tasks": [{"name": "s-behavioral1", "kind": "behavioral", "status": "reported"},
-                                  {"name": "s-behavioral2", "kind": "behavioral", "status": "failed"},
-                                  {"name": "s-behavioral3", "kind": "behavioral"},
-                                  {"name": "s-static1", "kind": "static", "status": "reported"}]}
+            overview = {
+                "tasks": [
+                    {"name": "s-behavioral1", "kind": "behavioral", "status": "reported"},
+                    {"name": "s-behavioral2", "kind": "behavioral", "status": "failed"},
+                    {"name": "s-behavioral3", "kind": "behavioral"},
+                    {"name": "s-static1", "kind": "static", "status": "reported"},
+                ]
+            }
             assert svc.behavioralTasks("s", overview) == ["behavioral1"]
 
     async def test_downloads(self):
         async with hatchingSvc(self) as (core, svc, fake):
-            assert b"".join([c async for c in svc.downloadSample(ft.SAMPLE_SHA256)]) == ft.SAMPLE_BYTES
-            byts = b"".join([c async for c in svc.downloadTaskFile(ft.SAMPLE_ID, "behavioral1", "dump.pcap")])
+            assert (
+                b"".join([c async for c in svc.downloadSample(ft.SAMPLE_SHA256)]) == ft.SAMPLE_BYTES
+            )
+            byts = b"".join(
+                [c async for c in svc.downloadTaskFile(ft.SAMPLE_ID, "behavioral1", "dump.pcap")]
+            )
             assert byts == ft.PCAP_BYTES
             byts = b"".join([c async for c in svc.downloadArchive(ft.SAMPLE_ID, fmt="zip")])
             assert byts[:2] == b"PK"
 
             async with svc.getLocalProxy() as prox:
-                items = [r async for r in prox.downloadTaskFile(ft.SAMPLE_ID, "behavioral1", "nope")]
-                assert len(items) == 1 and not items[0]["status"] and "NOT_FOUND" in items[0]["mesg"]
+                items = [
+                    r async for r in prox.downloadTaskFile(ft.SAMPLE_ID, "behavioral1", "nope")
+                ]
+                assert (
+                    len(items) == 1 and not items[0]["status"] and "NOT_FOUND" in items[0]["mesg"]
+                )
 
     async def test_profiles_rules_users(self):
         async with hatchingSvc(self) as (core, svc, fake):
             assert [p["name"] for p in await svc.profiles()] == ["win10-internet"]
             new = await svc.addProfile("new", tags=["windows7"], timeout=60, network="drop")
             edited = await svc.editProfile("new", timeout=90)
-            assert edited["timeout"] == 90 and edited["tags"] == ["windows7"] and edited["network"] == "drop"
-            assert fake.last("put")["json"] == {"name": "new", "tags": ["windows7"], "timeout": 90,
-                                                 "network": "drop"}
+            assert (
+                edited["timeout"] == 90
+                and edited["tags"] == ["windows7"]
+                and edited["network"] == "drop"
+            )
+            assert fake.last("put")["json"] == {
+                "name": "new",
+                "tags": ["windows7"],
+                "timeout": 90,
+                "network": "drop",
+            }
             assert fake.last("put")["path"].endswith(new["id"])
 
             # VPN profiles keep their region when edited, and drop it when the network changes.
-            vpn = await svc.addProfile("vpn", tags=["os:windows10"], network="vpn", geolocation="us")
+            vpn = await svc.addProfile(
+                "vpn", tags=["os:windows10"], network="vpn", geolocation="us"
+            )
             assert fake.last("post")["json"]["geolocation"] == "us" and vpn["geolocation"] == "us"
             edited = await svc.editProfile("vpn", timeout=120)
             assert edited["geolocation"] == "us" and fake.last("put")["json"]["geolocation"] == "us"
             edited = await svc.editProfile("vpn", network="drop")
-            assert "geolocation" not in edited and fake.last("put")["json"].get("geolocation") is None
+            assert (
+                "geolocation" not in edited and fake.last("put")["json"].get("geolocation") is None
+            )
             with self.raises(HatchingApiError) as cm:
                 await svc.addProfile("bad", network="drop", geolocation="us")
             assert "vpn" in cm.exception.mesg
@@ -629,7 +807,9 @@ class TestHatchingSvc(s_tests.SynTest):
             for i in range(250):
                 fake.profiles[f"p{i}"] = {"id": f"p{i}", "name": f"p{i}", "tags": [], "network": ""}
             assert len(await svc.profiles()) == 252
-            assert fake.last()["query"]["limit"] == "200" and fake.last()["query"]["offset"] == "200"
+            assert (
+                fake.last()["query"]["limit"] == "200" and fake.last()["query"]["offset"] == "200"
+            )
             for i in range(250):
                 del fake.profiles[f"p{i}"]
             assert await svc.delProfile("new")
@@ -641,7 +821,10 @@ class TestHatchingSvc(s_tests.SynTest):
             assert await svc.editRule("a.yara", "rule a { condition: false }")
             assert (await svc.rule("a.yara"))["rule"] == "rule a { condition: false }"
             assert await svc.renameRule("a.yara", "b.yara")
-            assert fake.last("put")["json"] == {"name": "b.yara", "rule": "rule a { condition: false }"}
+            assert fake.last("put")["json"] == {
+                "name": "b.yara",
+                "rule": "rule a { condition: false }",
+            }
             assert fake.last("put")["path"].endswith("/v0/yara/a.yara")
             assert "b.yara" in fake.rules and "a.yara" not in fake.rules
             # Renaming a rule that doesn't exist, or with text that doesn't compile, fails.
@@ -661,11 +844,18 @@ class TestHatchingSvc(s_tests.SynTest):
 
             # Users are created with a username or an email address, never both.
             user = await svc.addUser("bob", password="pw", name="Bob", role="org_basic")
-            assert fake.last("post")["json"] == {"username": "bob", "password": "pw", "name": "Bob",
-                                                  "role": "org_basic"}
+            assert fake.last("post")["json"] == {
+                "username": "bob",
+                "password": "pw",
+                "name": "Bob",
+                "role": "org_basic",
+            }
             assert (await svc.user(user["id"]))["name"] == "Bob"
             other = await svc.addUser("eve@example.com", confirmed=True)
-            assert fake.last("post")["json"] == {"email": "eve@example.com", "email_confirmed": True}
+            assert fake.last("post")["json"] == {
+                "email": "eve@example.com",
+                "email_confirmed": True,
+            }
             assert await svc.delUser(other["id"])
             with self.raises(HatchingApiError):
                 await svc.addUser(" ")
@@ -727,7 +917,10 @@ class TestHatchingSvc(s_tests.SynTest):
             await asyncio.gather(
                 svc.submitFileChunk(upload, b"second"), svc.submitFile(upload, "race.exe")
             )
-            assert fake.last("post", "/samples")["files"]["file"] == ("race.exe", b"MZ first second")
+            assert fake.last("post", "/samples")["files"]["file"] == (
+                "race.exe",
+                b"MZ first second",
+            )
 
             # A cancelled upload start leaves no spool file that isn't tracked.
             task = asyncio.create_task(svc.submitFileInit())
@@ -756,10 +949,13 @@ class TestHatchingSvc(s_tests.SynTest):
 
 
 class TestErrorPaths(s_tests.SynTest):
-
     async def test_request_errors(self):
         # A failed connection (not an API error) is still a HatchingApiError.
-        async with hatchingSvc(self, conf={"hatching:url": "http://127.0.0.1:1"}) as (core, svc, fake):
+        async with hatchingSvc(self, conf={"hatching:url": "http://127.0.0.1:1"}) as (
+            core,
+            svc,
+            fake,
+        ):
             with self.raises(HatchingApiError) as cm:
                 await svc.sample(ft.SAMPLE_ID)
             assert cm.exception.mesg.startswith("Hatching Triage: Error making an HTTP request")
@@ -806,7 +1002,9 @@ class TestErrorPaths(s_tests.SynTest):
             # A static report error other than "not available" isn't hidden.
             async def static500(apikey, meth, *args, **kwargs):
                 if meth == "static_report":
-                    raise HatchingApiError("Hatching Triage: INTERNAL", error="INTERNAL", status=500)
+                    raise HatchingApiError(
+                        "Hatching Triage: INTERNAL", error="INTERNAL", status=500
+                    )
                 return await orig(apikey, meth, *args, **kwargs)
 
             with mock.patch.object(svc, "_call", static500):

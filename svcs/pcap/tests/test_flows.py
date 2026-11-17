@@ -1,6 +1,5 @@
 """Pytests for pcapsvc.flows, the capture file readers and flow aggregation."""
 
-
 import gzip
 import io
 import struct
@@ -23,7 +22,6 @@ def byPort(flows: list[dict], port: int) -> list[dict]:
 
 
 class TestReaders:
-
     def test_pcap_session(self):
         flows, summary = analyze(g.pcap(g.session()), seed="x")
 
@@ -98,8 +96,9 @@ class TestReaders:
         ):
             flows, summary = analyze(data)
             assert summary["packets"] == 16
-            assert [(f["time"], f["last"], f["bytes"]) for f in flows] == \
-                [(f["time"], f["last"], f["bytes"]) for f in base]
+            assert [(f["time"], f["last"], f["bytes"]) for f in flows] == [
+                (f["time"], f["last"], f["bytes"]) for f in base
+            ]
 
         _, summary = analyze(gzip.compress(g.pcap(g.session())))
         assert summary["compressed"]
@@ -120,23 +119,26 @@ class TestReaders:
     def test_pcapng(self):
         ip = g.udp("10.0.0.1", 5000, "10.0.0.2", 6000)
         frame = g.eth(ip)
-        data = b"".join((
-            g.shb(),
-            g.idb(1),  # Ethernet, microseconds.
-            g.idb(101, tsresol=9),  # Raw IP, nanoseconds.
-            g.idb(1, tsresol=0x80 | 10, tsoffset=10),  # Ethernet, 2^-10 seconds, +10 seconds.
-            g.other(),
-            g.epb(0, g.usec(0), frame),
-            g.epb(1, (g.BASE + 1) * 1_000_000_000 + 500_000_000, bytes(ip)),
-            g.epb(2, g.BASE * 1024 + 512, frame),
-            g.pb(0, g.usec(3), frame),
-            g.spb(frame),
-            g.epb(9, g.usec(4), frame),  # No such interface.
-        ))
+        data = b"".join(
+            (
+                g.shb(),
+                g.idb(1),  # Ethernet, microseconds.
+                g.idb(101, tsresol=9),  # Raw IP, nanoseconds.
+                g.idb(1, tsresol=0x80 | 10, tsoffset=10),  # Ethernet, 2^-10 seconds, +10 seconds.
+                g.other(),
+                g.epb(0, g.usec(0), frame),
+                g.epb(1, (g.BASE + 1) * 1_000_000_000 + 500_000_000, bytes(ip)),
+                g.epb(2, g.BASE * 1024 + 512, frame),
+                g.pb(0, g.usec(3), frame),
+                g.spb(frame),
+                g.epb(9, g.usec(4), frame),  # No such interface.
+            )
+        )
         flows, summary = analyze(data, timeout=0)
         assert summary["format"] == "pcapng"
         assert summary["linktypes"] == [
-            {"type": 1, "name": "ethernet"}, {"type": 101, "name": "raw"},
+            {"type": 1, "name": "ethernet"},
+            {"type": 101, "name": "raw"},
         ]
         assert summary["packets"] == 5
         assert summary["skipped"] == {"badiface": 1}
@@ -149,11 +151,16 @@ class TestReaders:
     def test_pcapng_sections(self):
         # A new section resets the interfaces, and can change the byte order.
         frame = g.eth(g.udp("10.0.0.1", 5000, "10.0.0.2", 6000))
-        data = b"".join((
-            g.shb(), g.idb(1), g.epb(0, g.usec(0), frame),
-            g.shb(">"), g.idb(101, endian=">"),
-            g.epb(0, g.usec(1), bytes(g.udp("10.0.0.3", 1, "10.0.0.4", 2)), endian=">"),
-        ))
+        data = b"".join(
+            (
+                g.shb(),
+                g.idb(1),
+                g.epb(0, g.usec(0), frame),
+                g.shb(">"),
+                g.idb(101, endian=">"),
+                g.epb(0, g.usec(1), bytes(g.udp("10.0.0.3", 1, "10.0.0.4", 2)), endian=">"),
+            )
+        )
         flows, summary = analyze(data)
         assert summary["packets"] == 2
         assert len(flows) == 2
@@ -186,7 +193,7 @@ class TestReaders:
             assert summary["error"]
 
         # Everything before the cut is kept.
-        flows, summary = analyze(data[:len(data) - 5])
+        flows, summary = analyze(data[: len(data) - 5])
         assert summary["packets"] == 15
         assert len(flows) == 4
 
@@ -215,29 +222,39 @@ class TestReaders:
 
 
 class TestDecode:
-
     def test_linktypes(self):
         ip4 = bytes(g.udp("10.0.0.1", 5000, "10.0.0.2", 6000))
         ip6 = bytes(g.udp("2001:db8::1", 5000, "2001:db8::2", 6000))
-        sll = dpkt.sll.SLL(ethtype=dpkt.ethernet.ETH_TYPE_IP, data=g.udp("10.0.0.1", 5000, "10.0.0.2", 6000))
-        sll2 = dpkt.sll2.SLL2(ethtype=dpkt.ethernet.ETH_TYPE_IP6,
-                              data=g.udp("2001:db8::1", 5000, "2001:db8::2", 6000))
+        sll = dpkt.sll.SLL(
+            ethtype=dpkt.ethernet.ETH_TYPE_IP, data=g.udp("10.0.0.1", 5000, "10.0.0.2", 6000)
+        )
+        sll2 = dpkt.sll2.SLL2(
+            ethtype=dpkt.ethernet.ETH_TYPE_IP6, data=g.udp("2001:db8::1", 5000, "2001:db8::2", 6000)
+        )
         ppp = dpkt.ppp.PPP(p=dpkt.ppp.PPP_IP, data=g.udp("10.0.0.1", 5000, "10.0.0.2", 6000))
-        vlan = dpkt.ethernet.Ethernet(src=g.MAC_A, dst=g.MAC_B,
-                                      vlan_tags=[dpkt.ethernet.VLANtag8021Q(id=7)],
-                                      type=dpkt.ethernet.ETH_TYPE_IP,
-                                      data=g.udp("10.0.0.1", 5000, "10.0.0.2", 6000))
-        qinq = dpkt.ethernet.Ethernet(src=g.MAC_A, dst=g.MAC_B,
-                                      vlan_tags=[dpkt.ethernet.VLANtag8021Q(id=7, type=0x8100),
-                                                 dpkt.ethernet.VLANtag8021Q(id=8)],
-                                      type=dpkt.ethernet.ETH_TYPE_IP6,
-                                      data=g.udp("2001:db8::1", 5000, "2001:db8::2", 6000))
-        pppoeppp = dpkt.pppoe.PPP(p=dpkt.ppp.PPP_IP,
-                                  data=g.udp("10.0.0.1", 5000, "10.0.0.2", 6000))
+        vlan = dpkt.ethernet.Ethernet(
+            src=g.MAC_A,
+            dst=g.MAC_B,
+            vlan_tags=[dpkt.ethernet.VLANtag8021Q(id=7)],
+            type=dpkt.ethernet.ETH_TYPE_IP,
+            data=g.udp("10.0.0.1", 5000, "10.0.0.2", 6000),
+        )
+        qinq = dpkt.ethernet.Ethernet(
+            src=g.MAC_A,
+            dst=g.MAC_B,
+            vlan_tags=[
+                dpkt.ethernet.VLANtag8021Q(id=7, type=0x8100),
+                dpkt.ethernet.VLANtag8021Q(id=8),
+            ],
+            type=dpkt.ethernet.ETH_TYPE_IP6,
+            data=g.udp("2001:db8::1", 5000, "2001:db8::2", 6000),
+        )
+        pppoeppp = dpkt.pppoe.PPP(p=dpkt.ppp.PPP_IP, data=g.udp("10.0.0.1", 5000, "10.0.0.2", 6000))
         pppoe = dpkt.pppoe.PPPoE(code=0, session=1, data=pppoeppp)
         pppoe.len = len(bytes(pppoeppp))
-        pppoe = dpkt.ethernet.Ethernet(src=g.MAC_A, dst=g.MAC_B,
-                                       type=dpkt.ethernet.ETH_TYPE_PPPoE, data=pppoe)
+        pppoe = dpkt.ethernet.Ethernet(
+            src=g.MAC_A, dst=g.MAC_B, type=dpkt.ethernet.ETH_TYPE_PPPoE, data=pppoe
+        )
 
         cases = (
             (1, bytes(qinq), 6),
@@ -292,13 +309,18 @@ class TestDecode:
         later.len = 36
 
         frag6 = dpkt.ip6.IP6FragmentHeader(nxt=17, frag_off=5)
-        ip6 = dpkt.ip6.IP6(src=b"\x20\x01" + b"\x00" * 13 + b"\x01",
-                           dst=b"\x20\x01" + b"\x00" * 13 + b"\x02",
-                           nxt=44, hlim=64, data=bytes(frag6) + b"C" * 16)
+        ip6 = dpkt.ip6.IP6(
+            src=b"\x20\x01" + b"\x00" * 13 + b"\x01",
+            dst=b"\x20\x01" + b"\x00" * 13 + b"\x02",
+            nxt=44,
+            hlim=64,
+            data=bytes(frag6) + b"C" * 16,
+        )
         ip6.plen = len(ip6.data)
 
-        flows, summary = analyze(g.pcap([(0, bytes(first)), (0.1, bytes(later)),
-                                         (0.2, bytes(ip6))], linktype=101))
+        flows, summary = analyze(
+            g.pcap([(0, bytes(first)), (0.1, bytes(later)), (0.2, bytes(ip6))], linktype=101)
+        )
         assert summary["skipped"] == {"fragment": 2}
         assert len(flows) == 1
         assert flows[0]["src"]["bytes"] == 20 + 8 + 32
@@ -308,8 +330,12 @@ class TestDecode:
         esp = g.ipPkt("10.0.0.1", "10.0.0.2", b"\x00" * 16, 50)
         unknown = g.ipPkt("10.0.0.1", "10.0.0.2", b"\x00" * 4, 253)
         bareicmp = g.ipPkt("10.0.0.1", "10.0.0.2", b"", 1)
-        flows, _ = analyze(g.pcap([(0, bytes(gre)), (1, bytes(esp)), (2, bytes(unknown)),
-                                   (3, bytes(bareicmp))], linktype=101))
+        flows, _ = analyze(
+            g.pcap(
+                [(0, bytes(gre)), (1, bytes(esp)), (2, bytes(unknown)), (3, bytes(bareicmp))],
+                linktype=101,
+            )
+        )
         assert [f["proto"] for f in flows] == ["gre", "esp", None, "icmp"]
         assert flows[0]["src"]["addr"] == "gre://10.0.0.1"
         assert flows[1]["src"]["addr"] is None
@@ -328,7 +354,6 @@ class TestDecode:
 
 
 class TestFlowTable:
-
     def test_direction(self):
         c, s = "10.0.0.1", "10.0.0.2"
         pkts = [
@@ -353,8 +378,16 @@ class TestFlowTable:
         flows, _ = analyze(g.pcap([(t, bytes(p)) for t, p in pkts], linktype=101))
         srcs = [(f["src"]["ip"], f["src"]["port"]) for f in flows]
         assert srcs == [
-            (c, 50001), (c, 50002), (c, 50003), (s, 8080), (c, 50005), (c, 50006), (s, 53),
-            (c, None), ("2001:db8::1", None), (c, None),
+            (c, 50001),
+            (c, 50002),
+            (c, 50003),
+            (s, 8080),
+            (c, 50005),
+            (c, 50006),
+            (s, 53),
+            (c, None),
+            ("2001:db8::1", None),
+            (c, None),
         ]
         assert flows[8]["icmp:types"] == [128, 129]
         assert flows[0]["tcp:syn"] is True
@@ -428,7 +461,6 @@ class TestFlowTable:
 
 
 class TestHelpers:
-
     def test_tsToNs(self):
         assert p_flows.tsToNs(5, (10, 6)) == 5_000
         assert p_flows.tsToNs(5, (10, 9)) == 5
@@ -447,7 +479,16 @@ class TestHelpers:
 
     def test_tcpFlagNames(self):
         assert p_flows.tcpFlagNames(0) == []
-        assert p_flows.tcpFlagNames(0xFF) == ["fin", "syn", "rst", "psh", "ack", "urg", "ece", "cwr"]
+        assert p_flows.tcpFlagNames(0xFF) == [
+            "fin",
+            "syn",
+            "rst",
+            "psh",
+            "ack",
+            "urg",
+            "ece",
+            "cwr",
+        ]
 
     def test_addrValu(self):
         assert p_flows.addrValu("tcp", "1.2.3.4", 80) == "tcp://1.2.3.4:80"
@@ -467,35 +508,43 @@ class TestHelpers:
     def test_unwrap_depth(self):
         # Packets that never reach an IP layer aren't IP.
         assert p_flows._unwrapIp(b"bytes") is None
-        arp = dpkt.ethernet.Ethernet(src=g.MAC_A, dst=g.MAC_B, type=dpkt.ethernet.ETH_TYPE_ARP,
-                                     data=dpkt.arp.ARP())
+        arp = dpkt.ethernet.Ethernet(
+            src=g.MAC_A, dst=g.MAC_B, type=dpkt.ethernet.ETH_TYPE_ARP, data=dpkt.arp.ARP()
+        )
         assert p_flows._unwrapIp(arp) is None
 
 
 class TestIdentity:
-
     def test_communityId(self):
         from pcapsvc import communityid as p_cid
 
         def ip(valu):
             import ipaddress
+
             return ipaddress.ip_address(valu).packed
 
         # The Community ID spec's example, and its reverse direction.
-        assert p_cid.communityId(6, ip("128.232.110.120"), ip("66.35.250.204"), 34855, 80) == \
-            "1:LQU9qZlK+B5F3KDmev6m5PMibrg="
-        assert p_cid.communityId(6, ip("66.35.250.204"), ip("128.232.110.120"), 80, 34855) == \
-            "1:LQU9qZlK+B5F3KDmev6m5PMibrg="
+        assert (
+            p_cid.communityId(6, ip("128.232.110.120"), ip("66.35.250.204"), 34855, 80)
+            == "1:LQU9qZlK+B5F3KDmev6m5PMibrg="
+        )
+        assert (
+            p_cid.communityId(6, ip("66.35.250.204"), ip("128.232.110.120"), 80, 34855)
+            == "1:LQU9qZlK+B5F3KDmev6m5PMibrg="
+        )
         # Values checked against the reference implementation (pip install communityid).
-        assert p_cid.communityId(1, ip("10.0.0.1"), ip("1.1.1.1"), 8, 0) == \
-            p_cid.communityId(1, ip("1.1.1.1"), ip("10.0.0.1"), 0, 0)
-        assert p_cid.communityId(47, ip("10.0.0.1"), ip("10.0.0.2")) == \
-            p_cid.communityId(47, ip("10.0.0.2"), ip("10.0.0.1"))
+        assert p_cid.communityId(1, ip("10.0.0.1"), ip("1.1.1.1"), 8, 0) == p_cid.communityId(
+            1, ip("1.1.1.1"), ip("10.0.0.1"), 0, 0
+        )
+        assert p_cid.communityId(47, ip("10.0.0.1"), ip("10.0.0.2")) == p_cid.communityId(
+            47, ip("10.0.0.2"), ip("10.0.0.1")
+        )
         # Like Suricata, a type without a counterpart (ex. 3, unreachable) is hashed with 0 (not
         # its code), and the endpoints are ordered like any other flow's.
         import base64
         import hashlib
         import struct
+
         def cid(sport, dport):
             data = struct.pack(">H", 0) + ip("10.0.0.1") + ip("10.0.0.9")
             data += struct.pack(">BBHH", 1, 0, sport, dport)
@@ -508,7 +557,8 @@ class TestIdentity:
         flows, _ = analyze(g.pcap(g.session()))
         http, dns, ping, ssh = flows
         assert http["community_id"] == p_cid.communityId(
-            6, ip("10.0.0.1"), ip("93.184.216.34"), 50000, 80)
+            6, ip("10.0.0.1"), ip("93.184.216.34"), 50000, 80
+        )
         assert ping["community_id"] == p_cid.communityId(1, ip("10.0.0.1"), ip("1.1.1.1"), 8, 0)
         assert all(f["community_id"].startswith("1:") for f in flows)
 
@@ -517,19 +567,25 @@ class TestIdentity:
 
         def ip(valu):
             import ipaddress
+
             return ipaddress.ip_address(valu).packed
 
         # SCTP flows keep their ports, and their Community ID hashes them (like the engines).
-        flows, _ = analyze(g.pcap([
-            (0, g.eth(g.sctp("10.0.0.1", 5000, "10.0.0.2", 3868))),
-            (0.1, g.eth(g.sctp("10.0.0.2", 3868, "10.0.0.1", 5000))),
-        ]))
+        flows, _ = analyze(
+            g.pcap(
+                [
+                    (0, g.eth(g.sctp("10.0.0.1", 5000, "10.0.0.2", 3868))),
+                    (0.1, g.eth(g.sctp("10.0.0.2", 3868, "10.0.0.1", 5000))),
+                ]
+            )
+        )
         assert len(flows) == 1
         flow = flows[0]
         assert flow["proto"] == "sctp"
         assert (flow["src"]["port"], flow["dst"]["port"]) == (5000, 3868)
         assert flow["community_id"] == p_cid.communityId(
-            132, ip("10.0.0.1"), ip("10.0.0.2"), 5000, 3868)
+            132, ip("10.0.0.1"), ip("10.0.0.2"), 5000, 3868
+        )
 
     def test_vlans(self):
         udp = g.udp("10.0.0.1", 5000, "10.0.0.2", 53)
@@ -538,12 +594,24 @@ class TestIdentity:
             tags = [dpkt.ethernet.VLANtag8021Q(id=i, type=0x8100) for i in ids]
             if tags:
                 tags[-1].type = dpkt.ethernet.ETH_TYPE_IP
-            return bytes(dpkt.ethernet.Ethernet(src=g.MAC_A, dst=g.MAC_B, vlan_tags=tags,
-                                                type=dpkt.ethernet.ETH_TYPE_IP, data=udp))
+            return bytes(
+                dpkt.ethernet.Ethernet(
+                    src=g.MAC_A,
+                    dst=g.MAC_B,
+                    vlan_tags=tags,
+                    type=dpkt.ethernet.ETH_TYPE_IP,
+                    data=udp,
+                )
+            )
 
         pkts = [(0, tagged(7)), (1, tagged(7)), (2, tagged(8)), (3, tagged()), (4, tagged(7, 9))]
         flows, _ = analyze(g.pcap(pkts))
-        assert [(f["vlans"], f["pkts"]) for f in flows] == [([7], 2), ([8], 1), ([], 1), ([7, 9], 1)]
+        assert [(f["vlans"], f["pkts"]) for f in flows] == [
+            ([7], 2),
+            ([8], 1),
+            ([], 1),
+            ([7, 9], 1),
+        ]
         # The VLAN IDs are part of the iden, the Community ID (endpoints only) isn't.
         assert len({f["iden"] for f in flows}) == 4
         assert len({f["community_id"] for f in flows}) == 1
@@ -553,9 +621,20 @@ class TestIdentity:
 
         flows, _ = analyze(g.pcap(g.session()), seed="abc")
         http = flows[0]
-        assert http["iden"] == s_common.guid((
-            "slib.pcap.flow", p_flows.FLOW_IDEN_VERSION, "abc", 6, "10.0.0.1", 50000,
-            "93.184.216.34", 80, [], g.BASE * 1_000_000_000))
+        assert http["iden"] == s_common.guid(
+            (
+                "slib.pcap.flow",
+                p_flows.FLOW_IDEN_VERSION,
+                "abc",
+                6,
+                "10.0.0.1",
+                50000,
+                "93.184.216.34",
+                80,
+                [],
+                g.BASE * 1_000_000_000,
+            )
+        )
 
 
 class TestOwnEvents:
@@ -563,10 +642,15 @@ class TestOwnEvents:
         # Suricata events logged on another flow's packet are re-matched by Community ID.
         mine, other = "1:mine", "1:other"
         rec = {
-            "_eve": [{"community_id": mine, "event_type": "dns"},
-                     {"community_id": other, "event_type": "fileinfo",
-                      "timestamp": "2024-01-01T00:00:00.000000+0000"},
-                     {"event_type": "stats"}],
+            "_eve": [
+                {"community_id": mine, "event_type": "dns"},
+                {
+                    "community_id": other,
+                    "event_type": "fileinfo",
+                    "timestamp": "2024-01-01T00:00:00.000000+0000",
+                },
+                {"event_type": "stats"},
+            ],
             "_alerts": [("suricata", {"community_id": other}), ("snort", {"gid": 1})],
             "http.host": ["x"],
         }
@@ -580,7 +664,6 @@ class TestOwnEvents:
         # The original record isn't changed, and records with only their own events are kept.
         assert len(rec["_eve"]) == 3
         assert p_flows._ownEvents(kept, mine, []) is kept
-
 
 
 def _pcapRecords(path) -> tuple[tuple, list[tuple]]:
@@ -607,8 +690,11 @@ class TestSplitLinktypes:
         # libpcap rejects a pcapng on an IDB of another link type, even one with no packets.
         path = tmp_path / "x.pcapng"
         path.write_bytes(
-            g.shb() + g.idb(1) + g.idb(113)
-            + g.epb(0, g.usec(0), self.frame(1000)) + g.epb(0, g.usec(1), self.frame(1001))
+            g.shb()
+            + g.idb(1)
+            + g.idb(113)
+            + g.epb(0, g.usec(0), self.frame(1000))
+            + g.epb(0, g.usec(1), self.frame(1001))
         )
         parts = p_flows.splitLinktypes(str(path), str(tmp_path))
         assert parts is not None
@@ -638,15 +724,20 @@ class TestSplitLinktypes:
         path.write_bytes(
             g.shb()
             # Interface 0 is offset back before the epoch.
-            + g.idb(1, tsoffset=-2 * g.BASE) + g.idb(113)
+            + g.idb(1, tsoffset=-2 * g.BASE)
+            + g.idb(113)
             + g.epb(0, g.usec(0), self.frame(1000))
             + g.epb(1, future, b"\x00" * 16 + self.frame(1001)[14:])
             + g.epb(0, g.usec(2), big)
         )
-        parts = {p.rsplit("/", 1)[-1]: (p, nums) for p, nums in
-                 p_flows.splitLinktypes(str(path), str(tmp_path))}
-        assert {k: v[1] for k, v in parts.items()} == {"linktype-1.pcap": [1, 3],
-                                                       "linktype-113.pcap": [2]}
+        parts = {
+            p.rsplit("/", 1)[-1]: (p, nums)
+            for p, nums in p_flows.splitLinktypes(str(path), str(tmp_path))
+        }
+        assert {k: v[1] for k, v in parts.items()} == {
+            "linktype-1.pcap": [1, 3],
+            "linktype-113.pcap": [2],
+        }
 
         header, recs = _pcapRecords(parts["linktype-1.pcap"][0])
         assert header == (0xA1B23C4D, 2, 4, 0, 0, p_flows.SPLIT_SNAPLEN, 1)
@@ -669,8 +760,13 @@ class TestMatchLoose:
     """pcapsvc.flows.matchLoose, engine records without a frame number."""
 
     def flow(self, iden: str, start: int, last: int, vlans=()) -> dict:
-        return {"iden": iden, "community_id": "1:x", "time": start, "last": last,
-                "vlans": list(vlans)}
+        return {
+            "iden": iden,
+            "community_id": "1:x",
+            "time": start,
+            "last": last,
+            "vlans": list(vlans),
+        }
 
     def match(self, flows, tick, rec=None) -> str:
         matched, unmatched = p_flows.matchLoose(flows, [("1:x", tick, "eve", rec or {})])
@@ -702,6 +798,9 @@ class TestMatchLoose:
         assert self.match(flows, 500, {"gid": 1, "vlan": 0}) == "untagged"
         assert self.match(flows, 500, {"gid": 1, "vlan": 10}) == "tagged"
         # A VLAN no flow has doesn't drop the record.
-        assert self.match(flows, 500, {"event_type": "flow", "vlan": [99]}) in ("tagged", "untagged")
+        assert self.match(flows, 500, {"event_type": "flow", "vlan": [99]}) in (
+            "tagged",
+            "untagged",
+        )
         assert p_flows._recVlans({"gid": 1}) is None
         assert p_flows._recVlans({"vlan": ["x"]}) is None

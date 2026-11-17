@@ -1,6 +1,5 @@
 """Pytests for the slib.pcap Storm package (the command, modules, modeling, and perms)."""
 
-
 import contextlib
 import hashlib
 import os
@@ -31,7 +30,6 @@ async def pcapCore(test: s_tests.SynTest, *blobs: bytes):
 
 
 class TestPcapStorm(s_tests.SynTest):
-
     async def test_flows_cmd(self):
         async with pcapCore(self, g.pcap(g.session())) as (core, _, (sha,)):
             await core.nodes(f"[ file:bytes={sha} ]")
@@ -40,7 +38,8 @@ class TestPcapStorm(s_tests.SynTest):
             msgs = await core.stormlist(f"file:bytes={sha} | slib.pcap.flows")
             self.stormHasNoWarnErr(msgs)
             self.stormIsInPrint(
-                f"slib.pcap: Modeled 4 flows (0 rule matches) from 16 packets in file:bytes=sha256:{sha}", msgs
+                f"slib.pcap: Modeled 4 flows (0 rule matches) from 16 packets in file:bytes=sha256:{sha}",
+                msgs,
             )
             # Without --yield the inbound nodes pass through.
             nodes = [m[1] for m in msgs if m[0] == "node"]
@@ -119,7 +118,9 @@ class TestPcapStorm(s_tests.SynTest):
             self.len(8, nodes)
 
             # The file:bytes nodes are created.
-            self.len(2, await core.nodes(f"file:bytes:sha256={shas[0]} file:bytes:sha256={shas[1]}"))
+            self.len(
+                2, await core.nodes(f"file:bytes:sha256={shas[0]} file:bytes:sha256={shas[1]}")
+            )
             self.len(8, await core.nodes("inet:flow#cno.case.x"))
             self.len(8, await core.nodes(f"inet:flow:capture:host={host}"))
             self.len(4, await core.nodes(f"file:bytes={shas[1]} -(refs)> inet:flow"))
@@ -129,14 +130,18 @@ class TestPcapStorm(s_tests.SynTest):
             # With inbound nodes, the SHA-256s are analyzed once (not once per inbound node),
             # and the inbound nodes are dropped, as before.
             await core.nodes("[ inet:fqdn=a.vertex.link inet:fqdn=b.vertex.link ]")
-            msgs = await core.stormlist(f"inet:fqdn=a.vertex.link inet:fqdn=b.vertex.link | slib.pcap.flows {shas[0]}")
+            msgs = await core.stormlist(
+                f"inet:fqdn=a.vertex.link inet:fqdn=b.vertex.link | slib.pcap.flows {shas[0]}"
+            )
             self.stormHasNoWarnErr(msgs)
             prints = [m[1]["mesg"] for m in msgs if m[0] == "print" and "Modeled" in m[1]["mesg"]]
             self.len(1, prints)
             nodes = [m[1] for m in msgs if m[0] == "node"]
             assert sorted(n[0][0] for n in nodes) == ["inet:flow"] * 4
             # Not even when nothing is yielded (ex. every inbound node is filtered out after).
-            msgs = await core.stormlist(f"inet:fqdn=a.vertex.link inet:fqdn=b.vertex.link | slib.pcap.flows {shas[0]} | spin")
+            msgs = await core.stormlist(
+                f"inet:fqdn=a.vertex.link inet:fqdn=b.vertex.link | slib.pcap.flows {shas[0]} | spin"
+            )
             self.len(1, [m for m in msgs if m[0] == "print" and "Modeled" in m[1]["mesg"]])
 
             # --limit
@@ -159,9 +164,11 @@ class TestPcapStorm(s_tests.SynTest):
             self.stormIsInPrint("Modeled 4 flows (0 rule matches) from 15 packets", msgs)
             self.stormIsInWarn(f"slib.pcap: {cut} is truncated, read up to the error", msgs)
 
-            for sha, err in ((bad, "The file is not a pcap or pcapng file"),
-                             (missing, "is not in the Axon"),
-                             ("nope", "Invalid SHA-256: nope")):
+            for sha, err in (
+                (bad, "The file is not a pcap or pcapng file"),
+                (missing, "is not in the Axon"),
+                ("nope", "Invalid SHA-256: nope"),
+            ):
                 msgs = await core.stormlist(f"slib.pcap.flows {sha}")
                 self.stormHasNoErr(msgs)
                 self.stormIsInWarn(f"slib.pcap: Unable to analyze {sha}", msgs)
@@ -241,7 +248,6 @@ CAPTURES = ("http", "tls", "ssh", "ftp", "smtp", "rdp")
 
 @needsTshark
 class TestPcapStormTshark(s_tests.SynTest):
-
     async def test_enrichment(self):
         blobs = [(DATA / f"{name}.pcapng").read_bytes() for name in CAPTURES]
         async with pcapCore(self, *blobs) as (core, _, shas):
@@ -251,13 +257,17 @@ class TestPcapStormTshark(s_tests.SynTest):
 
             # TLS: both certificates, the SNI, and the fingerprints in :raw.
             tls = (await core.nodes("inet:flow:dst:port=443"))[0]
-            dstcert = (await core.nodes("inet:flow:dst:port=443 :dst:ssl:cert -> crypto:x509:cert"))[0]
+            dstcert = (
+                await core.nodes("inet:flow:dst:port=443 :dst:ssl:cert -> crypto:x509:cert")
+            )[0]
             assert dstcert.get("subject") == "CN=vertex.link,O=Test"
             assert dstcert.get("identities:fqdns") == ("vertex.link",)
             assert dstcert.get("ext:sans") == (("dns", "vertex.link"),)
             assert dstcert.get("selfsigned") == 1
             assert dstcert.get("file") == f"sha256:{dstcert.get('sha256')}"
-            srccert = (await core.nodes("inet:flow:dst:port=443 :src:ssl:cert -> crypto:x509:cert"))[0]
+            srccert = (
+                await core.nodes("inet:flow:dst:port=443 :src:ssl:cert -> crypto:x509:cert")
+            )[0]
             assert srccert.get("subject") == "CN=client.vertex.link,O=Test"
             self.len(1, await core.nodes("inet:flow:dst:port=443 -(refs)> inet:fqdn=vertex.link"))
             self.len(2, await core.nodes("inet:flow:dst:port=443 -(refs)> crypto:x509:cert"))
@@ -286,23 +296,38 @@ class TestPcapStormTshark(s_tests.SynTest):
             filenode = (await core.nodes(f"file:bytes=sha256:{download}"))[0]
             assert filenode.get("size") == 16384
             assert filenode.get("mime") == "application/octet-stream"
-            self.len(1, await core.nodes(
-                f"inet:flow:dst:port=80 :src:txfiles -> file:attachment +:file=sha256:{upload}"))
-            self.len(2, await core.nodes(
-                f"inet:flow :dst:txfiles -> file:attachment +:file=sha256:{download}"))
+            self.len(
+                1,
+                await core.nodes(
+                    f"inet:flow:dst:port=80 :src:txfiles -> file:attachment +:file=sha256:{upload}"
+                ),
+            )
+            self.len(
+                2,
+                await core.nodes(
+                    f"inet:flow :dst:txfiles -> file:attachment +:file=sha256:{download}"
+                ),
+            )
             # The HTTP and FTP uploads are the same file, so the same file:bytes.
-            self.len(2, await core.nodes(
-                f"inet:flow :src:txfiles -> file:attachment +:name=report.txt +:file=sha256:{upload} "
-                "-> file:bytes +:mime=text/plain"))
+            self.len(
+                2,
+                await core.nodes(
+                    f"inet:flow :src:txfiles -> file:attachment +:name=report.txt +:file=sha256:{upload} "
+                    "-> file:bytes +:mime=text/plain"
+                ),
+            )
             q = "inet:flow:dst:port=25 :src:txfiles -> file:attachment"
             names = {(n.get("name"), n.get("text")) for n in await core.nodes(q)}
             assert names == {(None, "the report"), ("report.pdf", None)}
             assert (await core.nodes(f"file:bytes={sha['smtp']} -(refs)> inet:flow"))[0].get(
-                "src:softnames") == ("thunderbird/115.6.0",)
+                "src:softnames"
+            ) == ("thunderbird/115.6.0",)
 
             # Running again doesn't duplicate anything.
-            counts = {f: len(await core.nodes(f)) for f in
-                      ("inet:flow", "file:attachment", "crypto:x509:cert", "crypto:key")}
+            counts = {
+                f: len(await core.nodes(f))
+                for f in ("inet:flow", "file:attachment", "crypto:x509:cert", "crypto:key")
+            }
             msgs = await core.stormlist("slib.pcap.flows " + " ".join(shas))
             self.stormHasNoWarnErr(msgs)
             for form, count in counts.items():
@@ -311,7 +336,9 @@ class TestPcapStormTshark(s_tests.SynTest):
     async def test_options(self):
         async with pcapCore(self, (DATA / "http.pcapng").read_bytes()) as (core, svc, (sha,)):
             await core.nodes("[ file:bytes=sha256:" + "a" * 64 + " ]")
-            msgs = await core.stormlist(f"slib.pcap.flows {sha} --no-tshark --no-suricata --sandbox-file {'a' * 64}")
+            msgs = await core.stormlist(
+                f"slib.pcap.flows {sha} --no-tshark --no-suricata --sandbox-file {'a' * 64}"
+            )
             self.stormHasNoWarnErr(msgs)
             nodes = await core.nodes("inet:flow")
             assert all(n.get("src:softnames") is None for n in nodes)
@@ -330,6 +357,7 @@ class TestPcapStormTshark(s_tests.SynTest):
 
             async def broken(path, **kwargs):
                 raise p_tshark.TsharkError("boom")
+
             svc.tshark.frames = broken
             msgs = await core.stormlist(f"slib.pcap.flows {sha}")
             self.stormIsInWarn(f"slib.pcap: tshark had a problem with {sha}: boom", msgs)
@@ -342,7 +370,6 @@ class TestPcapStormTshark(s_tests.SynTest):
 
 
 class TestPcapStormSettings(s_tests.SynTest):
-
     async def test_admin_decode(self):
         async with pcapCore(self, g.pcap(g.session())) as (core, svc, (sha,)):
             msgs = await core.stormlist("slib.pcap.admin.decode")
@@ -352,28 +379,36 @@ class TestPcapStormSettings(s_tests.SynTest):
             msgs = await core.stormlist(q)
             self.stormHasNoWarnErr(msgs)
             self.stormIsInPrint("    tcp.port==8443,tls", msgs)
-            assert await core.callStorm('return($lib.globals.get("slib:pcap:decode"))') == \
-                ("tcp.port==8443,tls", "tcp.port==2222,ssh")
+            assert await core.callStorm('return($lib.globals.get("slib:pcap:decode"))') == (
+                "tcp.port==8443,tls",
+                "tcp.port==2222,ssh",
+            )
 
-            msgs = await core.stormlist("slib.pcap.admin.decode --del 'tcp.port==2222,ssh' "
-                                        "--add 'tcp.port==8443,tls'")
+            msgs = await core.stormlist(
+                "slib.pcap.admin.decode --del 'tcp.port==2222,ssh' --add 'tcp.port==8443,tls'"
+            )
             self.stormNotInPrint("2222", msgs)
 
             # Invalid rules aren't saved.
             msgs = await core.stormlist("slib.pcap.admin.decode --add '-X lua_script:x.lua'")
             self.stormIsInWarn("Invalid Decode As rule", msgs)
-            assert await core.callStorm('return($lib.globals.get("slib:pcap:decode"))') == \
-                ("tcp.port==8443,tls",)
+            assert await core.callStorm('return($lib.globals.get("slib:pcap:decode"))') == (
+                "tcp.port==8443,tls",
+            )
 
             # Every run uses the admin's rules, plus its own.
             seen = []
+
             async def frames(path, keylog=None, decode=(), gaps=False):
                 seen.append(list(decode))
                 return {}, {"version": "fake", "error": None}
+
             svc.tshark.path = "/bin/true"
             svc.tshark.frames = frames
-            msgs = await core.stormlist(f"slib.pcap.flows {sha} --decode-as 'udp.port==5000,rtp' "
-                                        "--decode-as 'tcp.port==8443,tls'")
+            msgs = await core.stormlist(
+                f"slib.pcap.flows {sha} --decode-as 'udp.port==5000,rtp' "
+                "--decode-as 'tcp.port==8443,tls'"
+            )
             self.stormHasNoWarnErr(msgs)
             assert seen == [["tcp.port==8443,tls", "udp.port==5000,rtp"]]
 
@@ -390,8 +425,9 @@ class TestPcapStormSettings(s_tests.SynTest):
             msgs = await core.stormlist("slib.pcap.admin.decode", opts={"user": user.iden})
             self.stormIsInErr("slib.pcap.admin", msgs)
             seen.clear()
-            msgs = await core.stormlist(f"slib.pcap.flows {sha} --decode-as 'tcp.port==22,ssh'",
-                                        opts={"user": user.iden})
+            msgs = await core.stormlist(
+                f"slib.pcap.flows {sha} --decode-as 'tcp.port==22,ssh'", opts={"user": user.iden}
+            )
             self.stormHasNoWarnErr(msgs)
             assert seen == [["tcp.port==22,ssh"]]
 
@@ -400,13 +436,16 @@ class TestPcapStormSettings(s_tests.SynTest):
             msgs = await core.stormlist("slib.pcap.admin.vars")
             self.stormIsInPrint("slib.pcap has no network variables for every run", msgs)
 
-            q = ('slib.pcap.admin.vars --set "home_net=[10.9.0.0/16]" '
-                 '--set "DNS_SERVERS=[10.9.0.53]"')
+            q = (
+                'slib.pcap.admin.vars --set "home_net=[10.9.0.0/16]" '
+                '--set "DNS_SERVERS=[10.9.0.53]"'
+            )
             msgs = await core.stormlist(q)
             self.stormHasNoErr(msgs)
             self.stormIsInPrint("    HOME_NET = [10.9.0.0/16]", msgs)
             assert await core.callStorm('return($lib.globals.get("slib:pcap:vars"))') == {
-                "HOME_NET": "[10.9.0.0/16]", "DNS_SERVERS": "[10.9.0.53]",
+                "HOME_NET": "[10.9.0.0/16]",
+                "DNS_SERVERS": "[10.9.0.53]",
             }
             msgs = await core.stormlist("slib.pcap.admin.vars --del dns_servers")
             self.stormNotInPrint("DNS_SERVERS", msgs)
@@ -460,15 +499,19 @@ class TestPcapStormSettings(s_tests.SynTest):
                 assert [a["kind"] for a in summary["sandbox"]["alerts"]] == ["crash"]
 
     async def test_keylog_no_tshark(self):
-        async with pcapCore(self, g.pcap(g.session()), b"CLIENT_RANDOM 00 00\n") as \
-                (core, svc, (sha, keylog)):
+        async with pcapCore(self, g.pcap(g.session()), b"CLIENT_RANDOM 00 00\n") as (
+            core,
+            svc,
+            (sha, keylog),
+        ):
             msgs = await core.stormlist(f"slib.pcap.flows {sha} --keylog {keylog} --no-tshark")
-            self.stormIsInWarn(f"slib.pcap: TLS key logs need tshark, {sha} wasn't decrypted.", msgs)
+            self.stormIsInWarn(
+                f"slib.pcap: TLS key logs need tshark, {sha} wasn't decrypted.", msgs
+            )
 
 
 @needsTshark
 class TestPcapStormDecrypt(s_tests.SynTest):
-
     async def test_keylog(self):
         blobs = ((DATA / "tls13.pcapng").read_bytes(), (DATA / "tls13.keylog").read_bytes())
         async with pcapCore(self, *blobs) as (core, _, (sha, keylog)):
@@ -483,11 +526,19 @@ class TestPcapStormDecrypt(s_tests.SynTest):
             assert {n.get("subject") for n in cert} == {"CN=secure.vertex.link,O=Test"}
             download = hashlib.sha256(bytes(range(256)) * 64).hexdigest()
             upload = hashlib.sha256(b"uploaded file contents\n" * 100).hexdigest()
-            self.len(1, await core.nodes(
-                f"inet:flow :dst:txfiles -> file:attachment +:file=sha256:{download}"))
-            self.len(1, await core.nodes(
-                f"inet:flow :src:txfiles -> file:attachment +:name=report.txt "
-                f"+:file=sha256:{upload}"))
+            self.len(
+                1,
+                await core.nodes(
+                    f"inet:flow :dst:txfiles -> file:attachment +:file=sha256:{download}"
+                ),
+            )
+            self.len(
+                1,
+                await core.nodes(
+                    f"inet:flow :src:txfiles -> file:attachment +:name=report.txt "
+                    f"+:file=sha256:{upload}"
+                ),
+            )
             self.len(2, await core.nodes("inet:flow +:src:softnames*[=curl/8.5.0]"))
 
 
@@ -506,22 +557,32 @@ class TestPcapStormSuricata(s_tests.SynTest):
             # DNS: every query, its answers, and the response code.
             reqs = await core.nodes("inet:dns:request")
             assert sorted((n.get("query:name"), n.get("query:type")) for n in reqs) == [
-                ("nope.vertex.link", 1), ("vertex.link", 1), ("vertex.link", 15),
-                ("vertex.link", 16), ("vertex.link", 28), ("www.vertex.link", 1),
+                ("nope.vertex.link", 1),
+                ("vertex.link", 1),
+                ("vertex.link", 15),
+                ("vertex.link", 16),
+                ("vertex.link", 28),
+                ("www.vertex.link", 1),
             ]
             nope = (await core.nodes("inet:dns:request:query:name=nope.vertex.link"))[0]
             assert nope.get("reply:code") == 3
             assert nope.get("server") == "udp://127.0.0.1:53"
             client, name, qtype = nope.get("query")
-            assert client.startswith("udp://127.0.0.1:") and (name, qtype) == ("nope.vertex.link", 1)
-            self.len(0, await core.nodes("inet:dns:request:query:name=nope.vertex.link "
-                                         "-> inet:dns:answer"))
+            assert client.startswith("udp://127.0.0.1:") and (name, qtype) == (
+                "nope.vertex.link",
+                1,
+            )
+            self.len(
+                0,
+                await core.nodes("inet:dns:request:query:name=nope.vertex.link -> inet:dns:answer"),
+            )
             q = "inet:dns:request:query:name=vertex.link +:query:type=1 -> inet:dns:answer"
             ans = (await core.nodes(q))[0]
             assert ans.get("a") == ("vertex.link", 0x5DB8D822) and ans.get("ttl") == 300
             q = "inet:dns:request:query:name=www.vertex.link -> inet:dns:answer"
             assert {n.get("cname") or n.get("a") for n in await core.nodes(q)} == {
-                ("www.vertex.link", "vertex.link"), ("vertex.link", 0x5DB8D822),
+                ("www.vertex.link", "vertex.link"),
+                ("vertex.link", 0x5DB8D822),
             }
             q = "inet:dns:request:query:type=28 -> inet:dns:answer"
             assert (await core.nodes(q))[0].get("aaaa") == ("vertex.link", "2001:db8::34")
@@ -530,8 +591,12 @@ class TestPcapStormSuricata(s_tests.SynTest):
             # The TXT query was over TCP.
             q = "inet:dns:request:query:type=16 <(refs)- inet:flow"
             assert (await core.nodes(q))[0].get("ip:proto") == 6
-            self.len(6, await core.nodes(f"file:bytes={sha['dns']} -(refs)> inet:flow "
-                                         "-(refs)> inet:dns:request"))
+            self.len(
+                6,
+                await core.nodes(
+                    f"file:bytes={sha['dns']} -(refs)> inet:flow -(refs)> inet:dns:request"
+                ),
+            )
 
             # QUIC: the SNI and fingerprints.
             quic = (await core.nodes("inet:flow:dst:port=443 +:ip:proto=17"))[0]
@@ -539,16 +604,21 @@ class TestPcapStormSuricata(s_tests.SynTest):
             assert raw["app_proto"] == ("quic",)
             assert raw["quic"][0]["sni"] == "quic.vertex.link"
             assert raw["tls"]["ja4"] and raw["tls"]["ja3s"] and raw["tls"]["alpn"] == ("h3",)
-            self.len(1, await core.nodes("inet:flow:dst:port=443 +:ip:proto=17 "
-                                         "-(refs)> inet:fqdn=quic.vertex.link"))
+            self.len(
+                1,
+                await core.nodes(
+                    "inet:flow:dst:port=443 +:ip:proto=17 -(refs)> inet:fqdn=quic.vertex.link"
+                ),
+            )
 
             # SMB: the files read and written.
             download = hashlib.sha256(bytes(range(256)) * 64).hexdigest()
             upload = hashlib.sha256(b"uploaded file contents\n" * 100).hexdigest()
             smb = (await core.nodes("inet:flow:dst:port=445"))[0]
             assert smb.get("raw")["app_proto"] == ("smb",)
-            assert {"share": "\\\\127.0.0.1\\DATA", "share_type": "FILE"}.items() <= \
-                next(e for e in smb.get("raw")["smb"] if e.get("share")).items()
+            assert {"share": "\\\\127.0.0.1\\DATA", "share_type": "FILE"}.items() <= next(
+                e for e in smb.get("raw")["smb"] if e.get("share")
+            ).items()
             att = (await core.nodes("inet:flow:dst:port=445 :dst:txfiles -> file:attachment"))[0]
             assert att.get("file") == f"sha256:{download}" and att.get("name") == "sample.bin"
             att = (await core.nodes("inet:flow:dst:port=445 :src:txfiles -> file:attachment"))[0]
@@ -559,15 +629,21 @@ class TestPcapStormSuricata(s_tests.SynTest):
             self.len(2, krbs)
             for krb in krbs:
                 msgs = krb.get("raw")["krb5"]
-                assert msgs[0] == {"msg_type": "KRB_AS_REQ", "cname": "alice",
-                                   "realm": "VERTEX.LINK", "sname": "krbtgt/VERTEX.LINK",
-                                   "weak_encryption": False}
+                assert msgs[0] == {
+                    "msg_type": "KRB_AS_REQ",
+                    "cname": "alice",
+                    "realm": "VERTEX.LINK",
+                    "sname": "krbtgt/VERTEX.LINK",
+                    "weak_encryption": False,
+                }
                 assert msgs[1]["error_code"] == "KDC_ERR_PREAUTH_REQUIRED"
                 assert "cname" not in msgs[1]
 
             # Running again doesn't duplicate anything.
-            counts = {f: len(await core.nodes(f)) for f in
-                      ("inet:flow", "inet:dns:request", "inet:dns:answer", "file:attachment")}
+            counts = {
+                f: len(await core.nodes(f))
+                for f in ("inet:flow", "inet:dns:request", "inet:dns:answer", "file:attachment")
+            }
             msgs = await core.stormlist("slib.pcap.flows " + " ".join(shas))
             self.stormHasNoWarnErr(msgs)
             for form, count in counts.items():

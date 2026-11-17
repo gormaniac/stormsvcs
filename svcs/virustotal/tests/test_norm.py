@@ -13,7 +13,13 @@ def test_file():
     assert f["compiled"] == 1290243788000
     assert f["first_seen"] == 1494579471000
     assert f["scan"]["verdict"] == norm.MALICIOUS
-    assert f["scan"]["counts"] == {"total": 75, "malicious": 68, "suspicious": 0, "benign": 3, "unknown": 4}
+    assert f["scan"]["counts"] == {
+        "total": 75,
+        "malicious": 68,
+        "suspicious": 0,
+        "benign": 3,
+        "unknown": 4,
+    }
     assert f["threat"] == {
         "label": "trojan.wannacry/wanna",
         "names": ["wannacry", "wanna", "wannacrypt"],
@@ -74,17 +80,40 @@ def test_network():
 def test_related_objects():
     res = norm.normObjects(fv.load("domain_resolutions")["data"])
     assert res[0] == {
-        "type": "resolution", "id": "8.47.69.5example.com", "fqdn": "example.com",
-        "ip": "8.47.69.5", "version": 4, "time": 1791826907000, "resolver": "CAPE Sandbox",
+        "type": "resolution",
+        "id": "8.47.69.5example.com",
+        "fqdn": "example.com",
+        "ip": "8.47.69.5",
+        "version": 4,
+        "time": 1791826907000,
+        "resolver": "CAPE Sandbox",
     }
     com = norm.normObjects(fv.load("file_comments")["data"])
     assert com[0]["text"] == "lgtm" and com[0]["time"] == 1789789529000
     assert norm.normObject({"type": "graph", "id": "g1"}) == {"type": "graph", "id": "g1"}
     assert norm.normObject({}) is None
-    w = norm.normObject({"type": "whois", "id": "w", "attributes": {"last_updated": 1, "whois_map": {"Registrar": "X", "Creation Date": "2020-01-01T00:00:00Z"}}})
+    w = norm.normObject(
+        {
+            "type": "whois",
+            "id": "w",
+            "attributes": {
+                "last_updated": 1,
+                "whois_map": {"Registrar": "X", "Creation Date": "2020-01-01T00:00:00Z"},
+            },
+        }
+    )
     assert w["created"] == 1577836800000 and w["registrar"] == "X" and w["asof"] == 1000
     assert norm.normObject({"type": "whois", "attributes": {}}) is None
-    cert = norm.normObject({"type": "ssl_cert", "id": "c", "attributes": {"thumbprint_sha256": "A" * 64, "extensions": {"subject_alternative_name": ["*.x.com", "x.com"]}}})
+    cert = norm.normObject(
+        {
+            "type": "ssl_cert",
+            "id": "c",
+            "attributes": {
+                "thumbprint_sha256": "A" * 64,
+                "extensions": {"subject_alternative_name": ["*.x.com", "x.com"]},
+            },
+        }
+    )
     assert cert["sha256"] == "a" * 64 and cert["sans"] == ["x.com"]
 
 

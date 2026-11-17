@@ -65,8 +65,10 @@ def suri(tmp_path):
 def test_config(suri, tmp_path):
     out = str(tmp_path / "out")
     conf = suri.config(
-        out, decode=["tcp.port==8443,tls", "udp.port==5353,dns", "tcp.port==2222,ssh"],
-        filestore=True, maxbody=1000,
+        out,
+        decode=["tcp.port==8443,tls", "udp.port==5353,dns", "tcp.port==2222,ssh"],
+        filestore=True,
+        maxbody=1000,
     )
 
     # The service's outputs replace the base's.
@@ -110,9 +112,13 @@ def test_netvars_overrides(tmp_path):
         addrvars={"HOME_NET": "[192.168.0.0/16]", "EXTERNAL_NET": "any"},
         overrides={"stream.memcap": "2gb", "detect.profile": "high", "outputs": "nope"},
     )
-    conf = suri.config(str(tmp_path), netvars={"HOME_NET": "[10.9.0.0/16]", "DNS_SERVERS": "[10.9.0.53]"})
+    conf = suri.config(
+        str(tmp_path), netvars={"HOME_NET": "[10.9.0.0/16]", "DNS_SERVERS": "[10.9.0.53]"}
+    )
     assert conf["vars"]["address-groups"] == {
-        "HOME_NET": "[10.9.0.0/16]", "EXTERNAL_NET": "any", "DNS_SERVERS": "[10.9.0.53]",
+        "HOME_NET": "[10.9.0.0/16]",
+        "EXTERNAL_NET": "any",
+        "DNS_SERVERS": "[10.9.0.53]",
     }
     # The operator's overrides win, even over the service's settings.
     assert conf["stream"]["memcap"] == "2gb" and conf["detect"]["profile"] == "high"
@@ -211,19 +217,22 @@ class TestSuricata:
         # exceeded) to the flow of the packet they carry, these carry none, so they have no
         # events.
         icmp = tmp_path / "icmp.pcap"
-        icmp.write_bytes(g.pcap([
-            (0.0, g.eth(g.icmp("10.0.0.9", "10.0.0.1", 3))),
-            (0.1, g.eth(g.icmp("10.0.0.2", "10.0.0.8", 11))),
-            (0.2, g.eth(g.icmp("10.0.0.3", "10.0.0.7", 8))),
-            (0.3, g.eth(g.icmp("10.0.0.7", "10.0.0.3", 0))),
-            (0.4, g.eth(g.icmp("2001:db8::9", "2001:db8::1", 1))),
-        ]))
+        icmp.write_bytes(
+            g.pcap(
+                [
+                    (0.0, g.eth(g.icmp("10.0.0.9", "10.0.0.1", 3))),
+                    (0.1, g.eth(g.icmp("10.0.0.2", "10.0.0.8", 11))),
+                    (0.2, g.eth(g.icmp("10.0.0.3", "10.0.0.7", 8))),
+                    (0.3, g.eth(g.icmp("10.0.0.7", "10.0.0.3", 0))),
+                    (0.4, g.eth(g.icmp("2001:db8::9", "2001:db8::1", 1))),
+                ]
+            )
+        )
         (tmp_path / "icmpout").mkdir()
         res = await suri.run(str(icmp), str(tmp_path / "icmpout"))
         with open(icmp, "rb") as fd:
             flows, _ = p_flows.analyze(fd)
-        seen = {e["community_id"] for e in p_suricata.iterEve(res["eve"])
-                if e.get("community_id")}
+        seen = {e["community_id"] for e in p_suricata.iterEve(res["eve"]) if e.get("community_id")}
         byaddr = {(f["src"]["ip"], f["dst"]["ip"]): f["community_id"] for f in flows}
         assert seen == {byaddr[("10.0.0.3", "10.0.0.7")], byaddr[("2001:db8::9", "2001:db8::1")]}
 

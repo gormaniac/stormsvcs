@@ -103,7 +103,9 @@ class TestPkg(s_tests.SynTest):
             self.stormHasNoWarnErr(msgs)
             self.stormIsInPrint("the service loaded 0 of 1 rules (no engines)", msgs)
             msgs = await core.stormlist("slib.pcap.rule.errors")
-            self.stormIsInPrint("The service doesn't have Snort, so Snort rules can't be run.", msgs)
+            self.stormIsInPrint(
+                "The service doesn't have Snort, so Snort rules can't be run.", msgs
+            )
             msgs = await core.stormlist("slib.pcap.status")
             self.stormIsInPrint("Rules: 0 loaded of 1 pushed (no engines), 1 invalid", msgs)
 
@@ -295,15 +297,23 @@ class TestFeedSync(s_tests.SynTest):
         # Suricata rules are modeled without the Suricata engine (they have no :engine or
         # :family), from a feed and from slib.pcap.rule.add.
         async with snortSvc(self) as (core, _, feeds):
-            fdef = {"name": "test-suri", "url": f"{feeds.url}/suricata.tar.gz", "engine": "suricata"}
-            await core.callStorm("return($lib.service.get(slib.pcap).feedAdd($fdef))",
-                                 opts={"vars": {"fdef": fdef}})
+            fdef = {
+                "name": "test-suri",
+                "url": f"{feeds.url}/suricata.tar.gz",
+                "engine": "suricata",
+            }
+            await core.callStorm(
+                "return($lib.service.get(slib.pcap).feedAdd($fdef))", opts={"vars": {"fdef": fdef}}
+            )
             msgs = await core.stormlist("slib.pcap.sync --no-push --feed test-suri")
             self.stormHasNoWarnErr(msgs)
             self.stormIsInPrint("test-suri: synced 5 rules (5 added, 0 updated, 0 removed).", msgs)
             node = (await core.nodes(f"it:app:suricata:rule={rule('test-suri', 4000001)}"))[0]
             assert node.get("id") == "4000001" and node.get("enabled") == 1
-            assert await count(core, f"it:app:suricata:rule={rule('test-suri', 4000005)} +:enabled=0") == 1
+            assert (
+                await count(core, f"it:app:suricata:rule={rule('test-suri', 4000005)} +:enabled=0")
+                == 1
+            )
             assert (
                 await count(
                     core,
@@ -534,7 +544,9 @@ class TestFeedSync(s_tests.SynTest):
             self.stormHasNoErr(msgs)
 
             # Rescheduling in the fork moves the rules there.
-            await core.stormlist('slib.pcap.admin.schedule --period "daily@03:30"', opts={"view": fork})
+            await core.stormlist(
+                'slib.pcap.admin.schedule --period "daily@03:30"', opts={"view": fork}
+            )
             assert await core.callStorm(f"return($lib.globals.get({RULES_VIEW_GLOBAL}))") == fork
 
 
@@ -554,8 +566,10 @@ class TestPrepare(s_tests.SynTest):
                 guids[5]: (text.format(sid=2, rev=3), "snort3"),
             }
         )
-        assert prep["rules"]["snort3"] == {guids[1]: text.format(sid=1, rev=2),
-                                           guids[5]: text.format(sid=2, rev=3)}
+        assert prep["rules"]["snort3"] == {
+            guids[1]: text.format(sid=1, rev=2),
+            guids[5]: text.format(sid=2, rev=3),
+        }
         assert prep["rules"]["snort2"] == {}
         assert prep["rules"]["suricata"] == {guids[4]: text.format(sid=1, rev=1)}
         assert set(prep["errors"]) == {guids[0], guids[2], guids[3]}
@@ -565,8 +579,10 @@ class TestPrepare(s_tests.SynTest):
 
         # Ties go to the first guid.
         prep = _prepare(
-            {guids[1]: (text.format(sid=1, rev=1), "snort3"),
-             guids[0]: (text.format(sid=1, rev=1), "snort3")}
+            {
+                guids[1]: (text.format(sid=1, rev=1), "snort3"),
+                guids[0]: (text.format(sid=1, rev=1), "snort3"),
+            }
         )
         assert list(prep["rules"]["snort3"]) == [guids[0]] and list(prep["errors"]) == [guids[1]]
 
@@ -607,8 +623,9 @@ class TestSvcApi(s_tests.SynTest):
             rule = await svc.ruleParse('alert tcp any any -> any any (msg:"x"; sid:5; rev:2;)')
             assert rule["id"] == "5"
             assert rule["guid"] == s_common.guid(("slib.pcap.custom", "snort", 1, 5))
-            rule = await svc.ruleParse('alert tcp any any -> any any (msg:"x"; sid:5; rev:2;)',
-                                       engine="suricata")
+            rule = await svc.ruleParse(
+                'alert tcp any any -> any any (msg:"x"; sid:5; rev:2;)', engine="suricata"
+            )
             assert rule["guid"] == s_common.guid(("slib.pcap.custom", "suricata", 1, 5))
 
 
@@ -619,9 +636,7 @@ async def axonSvc(test):
     async with test.getTestAxon() as axon:
         url = axon.getLocalUrl()
         async with test.getTestCoreAndProxy(conf={"axon": url}) as (core, prox):
-            async with test.getTestCell(
-                PcapSvc, conf={"pcap:feeds": [], "axon:url": url}
-            ) as svc:
+            async with test.getTestCell(PcapSvc, conf={"pcap:feeds": [], "axon:url": url}) as svc:
                 await test.addSvcToCore(svc, core)
                 yield core, svc
 
@@ -662,7 +677,9 @@ class TestSnortRules(s_tests.SynTest):
             self.stormIsInPrint("Modeled 3 flows (9 rule matches)", msgs)
             # The HTTP bodies would have been saved to an Axon.
             self.stormIsInWarn("2 files in", msgs)
-            msgs = await core.stormlist(f"file:bytes=sha256:{sha256} | slib.pcap.flows --hits --no-files")
+            msgs = await core.stormlist(
+                f"file:bytes=sha256:{sha256} | slib.pcap.flows --hits --no-files"
+            )
             self.stormHasNoWarnErr(msgs)
 
             # Every rule that matched: 2 HTTP sessions x (URI, host, response body, user agent) + the UDP ping.
@@ -746,7 +763,9 @@ class TestSnortRules(s_tests.SynTest):
             msgs = await core.stormlist(f"file:bytes=sha256:{exe} | slib.pcap.flows --hits")
             self.stormIsInWarn("The file is not a pcap or pcapng file", msgs)
 
-            msgs = await core.stormlist(f"[ file:bytes=sha256:{'00' * 32} ] | slib.pcap.flows --hits")
+            msgs = await core.stormlist(
+                f"[ file:bytes=sha256:{'00' * 32} ] | slib.pcap.flows --hits"
+            )
             self.stormIsInWarn("is not in the Axon", msgs)
             msgs = await core.stormlist("[ file:bytes=* ] | slib.pcap.flows --hits")
             self.stormIsInWarn("it needs to be a file:bytes with a :sha256", msgs)
@@ -754,7 +773,9 @@ class TestSnortRules(s_tests.SynTest):
             self.stormIsInWarn("Unable to analyze inet:fqdn vertex.link", msgs)
 
             msgs = await core.stormlist("slib.pcap.status")
-            self.stormIsInPrint("Rules: 7 loaded of 8 pushed (snort 7, suricata 0), 1 invalid", msgs)
+            self.stormIsInPrint(
+                "Rules: 7 loaded of 8 pushed (snort 7, suricata 0), 1 invalid", msgs
+            )
 
     async def test_custom_rules(self):
         async with snortSvc(self, conf={"pcap:feeds": []}) as (core, svc, feeds):
@@ -860,7 +881,9 @@ class TestSnortRules(s_tests.SynTest):
             nodes = await core.nodes(f"file:bytes=sha256:{sha256} | slib.pcap.flows --hits --yield")
             assert len(nodes) == 1
 
-            msgs = await core.stormlist(f"[ file:bytes=sha256:{'00' * 32} ] | slib.pcap.flows --hits")
+            msgs = await core.stormlist(
+                f"[ file:bytes=sha256:{'00' * 32} ] | slib.pcap.flows --hits"
+            )
             self.stormIsInWarn("is not in the Axon", msgs)
 
     async def test_restart(self):
@@ -875,7 +898,9 @@ class TestSnortRules(s_tests.SynTest):
 
                 # The rules are loaded again at startup.
                 async with self.getTestCell(PcapSvc, dirn=dirn, conf={"pcap:feeds": []}) as svc:
-                    assert svc.active["snort"][0] == path and list(svc.active["snort"][1]) == ["1:1"]
+                    assert svc.active["snort"][0] == path and list(svc.active["snort"][1]) == [
+                        "1:1"
+                    ]
 
                 # The rules file is rebuilt if it's gone.
                 pathlib.Path(path).unlink()
@@ -898,8 +923,11 @@ class TestSuricataRules(s_tests.SynTest):
     """Suricata rules: a feed, custom rules from the graph, and their matches."""
 
     async def test_suricata_feed(self):
-        async with snortSvc(self, conf={"pcap:feeds": [], "snort:enabled": False}) as \
-                (core, svc, feeds):
+        async with snortSvc(self, conf={"pcap:feeds": [], "snort:enabled": False}) as (
+            core,
+            svc,
+            feeds,
+        ):
             msgs = await core.stormlist(
                 f"slib.pcap.admin.feed add {SU} {feeds.url}/suricata.tar.gz --engine suricata"
             )
@@ -913,12 +941,23 @@ class TestSuricataRules(s_tests.SynTest):
             node = (await core.nodes(f"it:app:suricata:rule={rule(SU, 4000001)}"))[0]
             assert node.get("id") == "4000001" and node.get("name") == "SLIB SURI beacon URI"
             assert node.get("enabled") == 1 and node.repr("version") == "2.0.0"
-            assert await count(core, f"it:app:suricata:rule={rule(SU, 4000001)} "
-                                     "-(detects)> it:sec:cve=cve-2021-44228") == 1
+            assert (
+                await count(
+                    core,
+                    f"it:app:suricata:rule={rule(SU, 4000001)} "
+                    "-(detects)> it:sec:cve=cve-2021-44228",
+                )
+                == 1
+            )
             assert (await core.nodes(f"it:app:suricata:rule={rule(SU, 4000005)}"))[0].get(
-                "enabled") == 0
-            assert await count(core, f"meta:ruleset={s_feeds.rulesetGuid(SU)} "
-                                     "-(has)> it:app:suricata:rule") == 5
+                "enabled"
+            ) == 0
+            assert (
+                await count(
+                    core, f"meta:ruleset={s_feeds.rulesetGuid(SU)} -(has)> it:app:suricata:rule"
+                )
+                == 5
+            )
 
             msgs = await core.stormlist("slib.pcap.rule.errors")
             self.stormIsInPrint(f"it:app:suricata:rule={rule(SU, 4000004)} (sid 4000004)", msgs)
@@ -933,11 +972,15 @@ class TestSuricataRules(s_tests.SynTest):
             for match in matches:
                 byrule.setdefault(match.get("rule"), []).append(match)
             assert {r: len(m) for r, m in byrule.items()} == {
-                rule(SU, 4000001): 2, rule(SU, 4000002): 2, rule(SU, 4000003): 1,
+                rule(SU, 4000001): 2,
+                rule(SU, 4000002): 2,
+                rule(SU, 4000003): 1,
             }
             udp = byrule[rule(SU, 4000003)][0]
             assert udp.repr("version") == "1.0.0"
-            flow = (await core.nodes(f"it:app:suricata:matched={udp.ndef[1]} :target -> inet:flow"))[0]
+            flow = (
+                await core.nodes(f"it:app:suricata:matched={udp.ndef[1]} :target -> inet:flow")
+            )[0]
             assert flow.get("dst") == "udp://198.51.100.7:9999"
             assert flow.get("raw")["hits"][0]["rule"] == rule(SU, 4000003)
 
@@ -951,8 +994,11 @@ class TestSuricataRules(s_tests.SynTest):
             self.stormIsInPrint("Modeled 3 flows (0 rule matches)", msgs)
 
     async def test_suricata_warnings(self):
-        async with snortSvc(self, conf={"pcap:feeds": [], "snort:enabled": False}) as \
-                (core, svc, feeds):
+        async with snortSvc(self, conf={"pcap:feeds": [], "snort:enabled": False}) as (
+            core,
+            svc,
+            feeds,
+        ):
             for text in (
                 'alert http any any -> any any (msg:"fine"; http.uri; content:"/x"; sid:7001;)',
                 'pass tcp any any -> any 80 (msg:"pass"; content:"x"; sid:7002;)',
@@ -967,8 +1013,12 @@ class TestSuricataRules(s_tests.SynTest):
             msgs = await core.stormlist("slib.pcap.rule.errors")
             self.stormHasNoWarnErr(msgs)
             self.stormIsInPrint("The engines loaded every rule.", msgs)
-            self.stormIsInPrint(f"it:app:suricata:rule={pass_} (sid 7002) warning: It's a pass rule", msgs)
-            self.stormIsInPrint(f"it:app:suricata:rule={pcre} (sid 7003) warning: It has a pcre", msgs)
+            self.stormIsInPrint(
+                f"it:app:suricata:rule={pass_} (sid 7002) warning: It's a pass rule", msgs
+            )
+            self.stormIsInPrint(
+                f"it:app:suricata:rule={pcre} (sid 7003) warning: It has a pcre", msgs
+            )
             self.stormIsInPrint("2 loaded rules have warnings.", msgs)
             msgs = await core.stormlist("slib.pcap.rule.errors --no-warnings")
             self.stormNotInPrint("warning:", msgs)
@@ -979,8 +1029,10 @@ class TestSuricataRules(s_tests.SynTest):
 
     async def test_suricata_custom(self):
         async with snortSvc(self, conf={"pcap:feeds": []}) as (core, svc, feeds):
-            text = ('alert udp any any -> any 9999 (msg:"Custom Suricata UDP"; content:"UDP-PING"; '
-                    'sid:1000003; rev:5;)')
+            text = (
+                'alert udp any any -> any 9999 (msg:"Custom Suricata UDP"; content:"UDP-PING"; '
+                "sid:1000003; rev:5;)"
+            )
             msgs = await core.stormlist(f"slib.pcap.rule.add --engine suricata '{text}'")
             self.stormHasNoWarnErr(msgs)
             self.stormIsInPrint("(sid 1000003, rev 5): Custom Suricata UDP", msgs)
@@ -993,8 +1045,10 @@ class TestSuricataRules(s_tests.SynTest):
             msgs = await core.stormlist(f"slib.pcap.rule.add '{snort}'")
             self.stormHasNoWarnErr(msgs)
 
-            msgs = await core.stormlist("slib.pcap.rule.check --engine suricata --text "
-                                        "'alert http any any -> any any (http.nope; sid:1;)'")
+            msgs = await core.stormlist(
+                "slib.pcap.rule.check --engine suricata --text "
+                "'alert http any any -> any any (http.nope; sid:1;)'"
+            )
             self.stormIsInWarn("The rule is invalid", msgs)
             msgs = await core.stormlist(f"it:app:suricata:rule={guid} | slib.pcap.rule.check")
             self.stormIsInPrint("is valid.", msgs)
@@ -1012,4 +1066,3 @@ class TestSuricataRules(s_tests.SynTest):
             self.stormHasNoWarnErr(msgs)
             nodes = await core.nodes(f"slib.pcap.flows {sha256} --hits --no-files --yield")
             assert "it:app:suricata:matched" not in {n.form.name for n in nodes}
-

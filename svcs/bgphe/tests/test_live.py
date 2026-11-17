@@ -16,7 +16,9 @@ from bgphesvc.client import BgpHeApiError, BgpHeClient
 
 LIVE = os.environ.get("SLIB_BGPHE_LIVE") == "1"
 
-pytestmark = pytest.mark.skipif(not LIVE, reason="Set SLIB_BGPHE_LIVE=1 to run live bgp.he.net tests.")
+pytestmark = pytest.mark.skipif(
+    not LIVE, reason="Set SLIB_BGPHE_LIVE=1 to run live bgp.he.net tests."
+)
 
 
 async def test_live_endpoints():

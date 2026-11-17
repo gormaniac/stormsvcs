@@ -1,6 +1,5 @@
 """Pytests for pcapsvc.enrich and pcapsvc.x509, with hand built tshark records (no tshark)."""
 
-
 import base64
 import datetime
 import hashlib
@@ -20,8 +19,9 @@ from pcapsvc import x509 as p_x509
 from . import pcapgen as g
 
 
-def mkcert(cn: str = "vertex.link", key=None, serial: int = 0x1234, sans=None,
-           issuer: str | None = None) -> bytes:
+def mkcert(
+    cn: str = "vertex.link", key=None, serial: int = 0x1234, sans=None, issuer: str | None = None
+) -> bytes:
     """A DER certificate."""
 
     key = key or ec.generate_private_key(ec.SECP256R1())
@@ -48,7 +48,9 @@ def sshString(valu: bytes) -> bytes:
 def apply(recs: list[tuple[bool, dict]], files=None) -> dict:
     """Run records through an Enricher and return the flow dict it produces."""
 
-    flows, _ = p_flows.analyze(io.BytesIO(g.pcap([(0, g.eth(g.udp("10.0.0.1", 1, "10.0.0.2", 2)))])))
+    flows, _ = p_flows.analyze(
+        io.BytesIO(g.pcap([(0, g.eth(g.udp("10.0.0.1", 1, "10.0.0.2", 2)))]))
+    )
     enricher = p_enrich.Enricher(files)
     for client, rec in recs:
         enricher.add(client, rec)
@@ -56,13 +58,14 @@ def apply(recs: list[tuple[bool, dict]], files=None) -> dict:
 
 
 class TestX509:
-
     def test_parse(self):
         import ipaddress
 
         sans = [
-            x509.DNSName("*.vertex.link"), x509.DNSName("vertex.link"),
-            x509.RFC822Name("Visi@Vertex.link"), x509.UniformResourceIdentifier("https://vertex.link"),
+            x509.DNSName("*.vertex.link"),
+            x509.DNSName("vertex.link"),
+            x509.RFC822Name("Visi@Vertex.link"),
+            x509.UniformResourceIdentifier("https://vertex.link"),
             x509.IPAddress(ipaddress.ip_address("1.2.3.4")),
             x509.IPAddress(ipaddress.ip_address("::1")),
             x509.DirectoryName(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "dir")])),
@@ -118,23 +121,41 @@ class TestX509:
 
 
 class TestEnrich:
-
     def test_tls(self):
         leaf, ca = mkcert("vertex.link", issuer="CA"), mkcert("CA")
-        flow = apply([
-            (True, {"tls.handshake.extensions_server_name": ["Vertex.Link"],
-                    "tls.handshake.ja3": ["aaa"], "tls.handshake.ja4": ["t13d"]}),
-            (False, {"tls.handshake.certificate": [leaf.hex(), ca.hex()],
-                     "tls.handshake.ja3s": ["bbb"]}),
-            # Only the first certificate message counts.
-            (False, {"tls.handshake.certificate": [ca.hex()]}),
-            (True, {"tls.handshake.certificate": [ca.hex()]}),
-        ])
-        assert flow["tls"] == {"sni": ["vertex.link"], "ja3": ["aaa"], "ja3s": ["bbb"],
-                               "ja4": ["t13d"]}
+        flow = apply(
+            [
+                (
+                    True,
+                    {
+                        "tls.handshake.extensions_server_name": ["Vertex.Link"],
+                        "tls.handshake.ja3": ["aaa"],
+                        "tls.handshake.ja4": ["t13d"],
+                    },
+                ),
+                (
+                    False,
+                    {
+                        "tls.handshake.certificate": [leaf.hex(), ca.hex()],
+                        "tls.handshake.ja3s": ["bbb"],
+                    },
+                ),
+                # Only the first certificate message counts.
+                (False, {"tls.handshake.certificate": [ca.hex()]}),
+                (True, {"tls.handshake.certificate": [ca.hex()]}),
+            ]
+        )
+        assert flow["tls"] == {
+            "sni": ["vertex.link"],
+            "ja3": ["aaa"],
+            "ja3s": ["bbb"],
+            "ja4": ["t13d"],
+        }
         assert flow["dst"]["ssl:cert"]["sha256"] == hashlib.sha256(leaf).hexdigest()
-        assert [c["sha256"] for c in flow["dst"]["ssl:certs"]] == \
-            [hashlib.sha256(leaf).hexdigest(), hashlib.sha256(ca).hexdigest()]
+        assert [c["sha256"] for c in flow["dst"]["ssl:certs"]] == [
+            hashlib.sha256(leaf).hexdigest(),
+            hashlib.sha256(ca).hexdigest(),
+        ]
         assert flow["src"]["ssl:cert"]["subject"] == "CN=CA"
         assert flow["http"] is None
 
@@ -147,8 +168,9 @@ class TestEnrich:
 
         ed = bytes(range(32))
         blob = sshString(b"ssh-ed25519") + sshString(ed)
-        flow = apply([(False, {**rec("ssh-ed25519", eddsa_key=ed),
-                               "ssh.host_key.length": [str(len(blob))]})])
+        flow = apply(
+            [(False, {**rec("ssh-ed25519", eddsa_key=ed), "ssh.host_key.length": [str(len(blob))]})]
+        )
         key = flow["dst"]["ssh:key"]
         assert key["algo"] == "ssh-ed25519"
         assert key["blob"] == blob.hex()
@@ -164,15 +186,18 @@ class TestEnrich:
         serialization.load_ssh_public_key(b"ssh-rsa " + base64.b64encode(blob))
 
         eckey = ec.generate_private_key(ec.SECP256R1()).public_key()
-        q = eckey.public_bytes(serialization.Encoding.X962,
-                               serialization.PublicFormat.UncompressedPoint)
+        q = eckey.public_bytes(
+            serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint
+        )
         r = rec("ecdsa-sha2-nistp256", ecdsa_q=q)
         r["ssh.host_key.ecdsa.id"] = ["nistp256"]
         blob = p_enrich.sshKeyBlob(r)
         serialization.load_ssh_public_key(b"ecdsa-sha2-nistp256 " + base64.b64encode(blob))
 
         dss = rec("ssh-dss", dsa_p=b"p", dsa_q=b"q", dsa_g=b"g", dsa_y=b"y")
-        assert p_enrich.sshKeyBlob(dss) == b"".join(sshString(x) for x in (b"ssh-dss", b"p", b"q", b"g", b"y"))
+        assert p_enrich.sshKeyBlob(dss) == b"".join(
+            sshString(x) for x in (b"ssh-dss", b"p", b"q", b"g", b"y")
+        )
 
         # Unknown types fall back to the key data, and incomplete or mismatched keys are skipped.
         assert p_enrich.sshKeyBlob(rec("ssh-foo", data=b"xyz")) == sshString(b"ssh-foo") + b"xyz"
@@ -182,24 +207,45 @@ class TestEnrich:
         assert p_enrich.sshKeyBlob(bad) is None
 
     def test_software(self):
-        flow = apply([
-            (True, {"ssh.protocol": ["SSH-2.0-OpenSSH_9.6p1 Ubuntu-3ubuntu13"],
-                    "http.user_agent": ["curl/8.5.0", "curl/8.5.0"]}),
-            (False, {"ssh.protocol": ["SSH-2.0-dropbear_2022.83", "not a banner"],
-                     "http.server": ["Apache/2.4.58 (Ubuntu) "], "sip.Server": ["Asterisk PBX"]}),
-            (False, {"http.server": ["Microsoft-IIS/10.0", "nginx/1.25.3", "lighttpd/1.4.73"]}),
-            (True, {"imf.ext.mailer": ["Wget/1.21.4"], "gquic.tag.uaid": ["  "]}),
-        ])
-        assert flow["src"]["softnames"] == ["openssh_9.6p1 ubuntu-3ubuntu13", "curl/8.5.0",
-                                            "wget/1.21.4"]
+        flow = apply(
+            [
+                (
+                    True,
+                    {
+                        "ssh.protocol": ["SSH-2.0-OpenSSH_9.6p1 Ubuntu-3ubuntu13"],
+                        "http.user_agent": ["curl/8.5.0", "curl/8.5.0"],
+                    },
+                ),
+                (
+                    False,
+                    {
+                        "ssh.protocol": ["SSH-2.0-dropbear_2022.83", "not a banner"],
+                        "http.server": ["Apache/2.4.58 (Ubuntu) "],
+                        "sip.Server": ["Asterisk PBX"],
+                    },
+                ),
+                (False, {"http.server": ["Microsoft-IIS/10.0", "nginx/1.25.3", "lighttpd/1.4.73"]}),
+                (True, {"imf.ext.mailer": ["Wget/1.21.4"], "gquic.tag.uaid": ["  "]}),
+            ]
+        )
+        assert flow["src"]["softnames"] == [
+            "openssh_9.6p1 ubuntu-3ubuntu13",
+            "curl/8.5.0",
+            "wget/1.21.4",
+        ]
         assert flow["src"]["cpes"] == [
             "cpe:2.3:a:openbsd:openssh:9.6:p1:*:*:*:*:*:*",
             "cpe:2.3:a:haxx:curl:8.5.0:*:*:*:*:*:*:*",
             "cpe:2.3:a:gnu:wget:1.21.4:*:*:*:*:*:*:*",
         ]
-        assert flow["dst"]["softnames"] == ["dropbear_2022.83", "apache/2.4.58 (ubuntu)",
-                                            "asterisk pbx", "microsoft-iis/10.0", "nginx/1.25.3",
-                                            "lighttpd/1.4.73"]
+        assert flow["dst"]["softnames"] == [
+            "dropbear_2022.83",
+            "apache/2.4.58 (ubuntu)",
+            "asterisk pbx",
+            "microsoft-iis/10.0",
+            "nginx/1.25.3",
+            "lighttpd/1.4.73",
+        ]
         assert flow["dst"]["cpes"] == [
             "cpe:2.3:a:dropbear_ssh_project:dropbear_ssh:2022.83:*:*:*:*:*:*:*",
             "cpe:2.3:a:apache:http_server:2.4.58:*:*:*:*:*:*:*",
@@ -210,7 +256,9 @@ class TestEnrich:
         assert p_enrich.softCpes("openssh_9.6") == ["cpe:2.3:a:openbsd:openssh:9.6:*:*:*:*:*:*:*"]
 
     def test_rdp(self):
-        flow = apply([(True, {"rdp.client.name": [" WORKSTATION-7 "], "rdp.keyboardLayout": ["1031"]})])
+        flow = apply(
+            [(True, {"rdp.client.name": [" WORKSTATION-7 "], "rdp.keyboardLayout": ["1031"]})]
+        )
         assert flow["src"]["rdp:hostname"] == "workstation-7"
         assert flow["src"]["rdp:keyboard:layout"] == "de_de"
         # Layouts that aren't a plain locale (ex. US Dvorak) are their KLID.
@@ -220,28 +268,59 @@ class TestEnrich:
     def test_http(self, tmp_path):
         files = p_enrich.FileStore(str(tmp_path))
         multipart = (
-            b"--XYZ\r\nContent-Disposition: form-data; name=\"note\"\r\n\r\nhello\r\n"
-            b"--XYZ\r\nContent-Disposition: form-data; name=\"f\"; filename=\"C:\\\\evil.exe\"\r\n"
+            b'--XYZ\r\nContent-Disposition: form-data; name="note"\r\n\r\nhello\r\n'
+            b'--XYZ\r\nContent-Disposition: form-data; name="f"; filename="C:\\\\evil.exe"\r\n'
             b"Content-Type: application/x-msdownload\r\n\r\nMZ\x90\x00\r\n--XYZ--\r\n"
         )
-        flow = apply([
-            (True, {"http.request.method": ["GET"], "http.request.uri": ["/a/b/payload.bin?x=1"],
-                    "http.host": ["Vertex.Link"]}),
-            (False, {"http.response_for.uri": ["http://vertex.link/a/b/payload.bin?x=1"],
-                     "http.file_data": [b"payload".hex()],
-                     "http.content_type": ["application/octet-stream; charset=x"]}),
-            (True, {"http.request.method": ["POST"], "http.request.uri": ["/upload"],
-                    "http.file_data": [multipart.hex()],
-                    "http.content_type": ["multipart/form-data; boundary=XYZ"]}),
-            # The POST's response isn't the file at its URI.
-            (False, {"http.response_for.uri": ["http://vertex.link/upload"],
-                     "http.file_data": [b"ok".hex()], "http.content_type": ["text/plain"]}),
-            (True, {"http.request.method": ["GET"], "http.request.uri": ["/"]}),
-            (False, {"http.response_for.uri": ["http://vertex.link/"]}),  # No body.
-            (True, {"http.request.method": ["GET"], "http.request.uri": ["/again"]}),
-            (False, {"http.response_for.uri": ["http://vertex.link/again"],
-                     "http.file_data": [b"again".hex()]}),
-        ], files=files)
+        flow = apply(
+            [
+                (
+                    True,
+                    {
+                        "http.request.method": ["GET"],
+                        "http.request.uri": ["/a/b/payload.bin?x=1"],
+                        "http.host": ["Vertex.Link"],
+                    },
+                ),
+                (
+                    False,
+                    {
+                        "http.response_for.uri": ["http://vertex.link/a/b/payload.bin?x=1"],
+                        "http.file_data": [b"payload".hex()],
+                        "http.content_type": ["application/octet-stream; charset=x"],
+                    },
+                ),
+                (
+                    True,
+                    {
+                        "http.request.method": ["POST"],
+                        "http.request.uri": ["/upload"],
+                        "http.file_data": [multipart.hex()],
+                        "http.content_type": ["multipart/form-data; boundary=XYZ"],
+                    },
+                ),
+                # The POST's response isn't the file at its URI.
+                (
+                    False,
+                    {
+                        "http.response_for.uri": ["http://vertex.link/upload"],
+                        "http.file_data": [b"ok".hex()],
+                        "http.content_type": ["text/plain"],
+                    },
+                ),
+                (True, {"http.request.method": ["GET"], "http.request.uri": ["/"]}),
+                (False, {"http.response_for.uri": ["http://vertex.link/"]}),  # No body.
+                (True, {"http.request.method": ["GET"], "http.request.uri": ["/again"]}),
+                (
+                    False,
+                    {
+                        "http.response_for.uri": ["http://vertex.link/again"],
+                        "http.file_data": [b"again".hex()],
+                    },
+                ),
+            ],
+            files=files,
+        )
         assert flow["http"]["hosts"] == ["vertex.link"]
         assert [r["method"] for r in flow["http"]["requests"]] == ["GET", "POST", "GET", "GET"]
 
@@ -261,15 +340,30 @@ class TestEnrich:
 
         # A frame can hold several reassembled responses: every body is kept, and each pairs
         # up with its own request.
-        flow = apply([
-            (True, {"http.request.method": ["GET", "POST", "GET"],
-                    "http.request.uri": ["/one.bin", "/upload", "/two.bin"]}),
-            (False, {"http.response_for.uri": ["http://vertex.link/one.bin",
-                                               "http://vertex.link/upload",
-                                               "http://vertex.link/two.bin"],
-                     "http.file_data": [b"one".hex(), b"posted".hex(), b"two".hex()],
-                     "http.content_type": ["text/plain", "text/plain", "text/plain"]}),
-        ], files=p_enrich.FileStore(str(tmp_path)))
+        flow = apply(
+            [
+                (
+                    True,
+                    {
+                        "http.request.method": ["GET", "POST", "GET"],
+                        "http.request.uri": ["/one.bin", "/upload", "/two.bin"],
+                    },
+                ),
+                (
+                    False,
+                    {
+                        "http.response_for.uri": [
+                            "http://vertex.link/one.bin",
+                            "http://vertex.link/upload",
+                            "http://vertex.link/two.bin",
+                        ],
+                        "http.file_data": [b"one".hex(), b"posted".hex(), b"two".hex()],
+                        "http.content_type": ["text/plain", "text/plain", "text/plain"],
+                    },
+                ),
+            ],
+            files=p_enrich.FileStore(str(tmp_path)),
+        )
         dst = {f["name"]: f for f in flow["dst"]["txfiles"]}
         assert dst["one.bin"]["sha256"] == hashlib.sha256(b"one").hexdigest()
         assert dst["two.bin"]["sha256"] == hashlib.sha256(b"two").hexdigest()
@@ -277,20 +371,43 @@ class TestEnrich:
         assert dst[None]["sha256"] == hashlib.sha256(b"posted").hexdigest()
 
         # Responses without a body in the frame still advance the pairing.
-        flow = apply([
-            (True, {"http.request.method": ["POST", "GET"],
-                    "http.request.uri": ["/post", "/get.bin"]}),
-            (False, {"http.response_for.uri": ["http://vertex.link/post"]}),  # No body.
-            (False, {"http.response_for.uri": ["http://vertex.link/get.bin"],
-                     "http.file_data": [b"got".hex()]}),
-        ], files=p_enrich.FileStore(str(tmp_path)))
+        flow = apply(
+            [
+                (
+                    True,
+                    {
+                        "http.request.method": ["POST", "GET"],
+                        "http.request.uri": ["/post", "/get.bin"],
+                    },
+                ),
+                (False, {"http.response_for.uri": ["http://vertex.link/post"]}),  # No body.
+                (
+                    False,
+                    {
+                        "http.response_for.uri": ["http://vertex.link/get.bin"],
+                        "http.file_data": [b"got".hex()],
+                    },
+                ),
+            ],
+            files=p_enrich.FileStore(str(tmp_path)),
+        )
         assert [f["name"] for f in flow["dst"]["txfiles"]] == ["get.bin"]
 
         # A multipart body with no files is kept whole.
-        flow = apply([(True, {"http.request.method": ["POST"], "http.request.uri": ["/f"],
-                              "http.file_data": [b"--B\r\n\r\nx\r\n--B--".hex()],
-                              "http.content_type": ["multipart/form-data; boundary=B"]})],
-                     files=p_enrich.FileStore(str(tmp_path)))
+        flow = apply(
+            [
+                (
+                    True,
+                    {
+                        "http.request.method": ["POST"],
+                        "http.request.uri": ["/f"],
+                        "http.file_data": [b"--B\r\n\r\nx\r\n--B--".hex()],
+                        "http.content_type": ["multipart/form-data; boundary=B"],
+                    },
+                )
+            ],
+            files=p_enrich.FileStore(str(tmp_path)),
+        )
         assert flow["src"]["txfiles"][0]["name"] == "f"
         assert p_enrich.uriName(None) is None and p_enrich.uriName("/dir/") is None
         assert p_enrich.uriName("/a%20b.txt") == "a b.txt"
@@ -302,22 +419,34 @@ class TestEnrich:
         def seg(seq, data, cmd="RETR dir/sample.bin"):
             return {"ftp-data.command": [cmd], "tcp.seq": [str(seq)], "tcp.payload": [data.hex()]}
 
-        flow = apply([
-            (False, seg(1, b"hello ")),
-            (False, seg(7, b"world")),
-            (False, seg(4, b"lo wor")),  # Overlapping retransmission.
-            (False, seg(1, b"HELLO ")),  # Duplicate, the first copy wins.
-            (True, seg(1, b"x", cmd="LIST")),  # Directory listings aren't files.
-            (True, {"ftp-data.command": ["RETR x"]}),  # No payload.
-        ], files=files)
-        assert flow["dst"]["txfiles"] == [{
-            "sha256": hashlib.sha256(b"hello world").hexdigest(), "size": 11, "name": "sample.bin",
-            "mime": None, "text": None, "proto": "ftp", "complete": True,
-        }]
+        flow = apply(
+            [
+                (False, seg(1, b"hello ")),
+                (False, seg(7, b"world")),
+                (False, seg(4, b"lo wor")),  # Overlapping retransmission.
+                (False, seg(1, b"HELLO ")),  # Duplicate, the first copy wins.
+                (True, seg(1, b"x", cmd="LIST")),  # Directory listings aren't files.
+                (True, {"ftp-data.command": ["RETR x"]}),  # No payload.
+            ],
+            files=files,
+        )
+        assert flow["dst"]["txfiles"] == [
+            {
+                "sha256": hashlib.sha256(b"hello world").hexdigest(),
+                "size": 11,
+                "name": "sample.bin",
+                "mime": None,
+                "text": None,
+                "proto": "ftp",
+                "complete": True,
+            }
+        ]
         assert flow["src"]["txfiles"] == []
 
-        flow = apply([(True, seg(1, b"abc", cmd="STOR up.txt")),
-                      (True, seg(10, b"xyz", cmd="STOR up.txt"))], files=files)
+        flow = apply(
+            [(True, seg(1, b"abc", cmd="STOR up.txt")), (True, seg(10, b"xyz", cmd="STOR up.txt"))],
+            files=files,
+        )
         assert flow["src"]["txfiles"][0]["complete"] is False
         assert flow["src"]["txfiles"][0]["size"] == 6
 
@@ -325,13 +454,16 @@ class TestEnrich:
         files = p_enrich.FileStore(str(tmp_path))
         raw = (
             b"From: a@vertex.link\r\nSubject: hi\r\nMIME-Version: 1.0\r\n"
-            b"Content-Type: multipart/mixed; boundary=\"B\"\r\n\r\n--B\r\nContent-Type: text/plain"
+            b'Content-Type: multipart/mixed; boundary="B"\r\n\r\n--B\r\nContent-Type: text/plain'
             b"\r\n\r\nbody\r\n--B\r\nContent-Type: application/pdf\r\nContent-Disposition: "
-            b"attachment; filename=\"../r.pdf\"\r\nContent-Transfer-Encoding: base64\r\n\r\n"
-            + base64.b64encode(b"%PDF") + b"\r\n--B--\r\n"
+            b'attachment; filename="../r.pdf"\r\nContent-Transfer-Encoding: base64\r\n\r\n'
+            + base64.b64encode(b"%PDF")
+            + b"\r\n--B--\r\n"
         )
-        flow = apply([(True, {"imf.raw": [raw.hex()], "imf.user_agent": ["Thunderbird/115.6.0"]})],
-                     files=files)
+        flow = apply(
+            [(True, {"imf.raw": [raw.hex()], "imf.user_agent": ["Thunderbird/115.6.0"]})],
+            files=files,
+        )
         msg, att = flow["src"]["txfiles"]
         assert msg["mime"] == "message/rfc822" and msg["text"] == "hi" and msg["name"] is None
         assert msg["sha256"] == hashlib.sha256(raw).hexdigest()
@@ -346,8 +478,18 @@ class TestEnrich:
     def test_no_files(self):
         # Without a FileStore files aren't extracted, but everything else is.
         der = mkcert()
-        flow = apply([(False, {"tls.handshake.certificate": [der.hex()],
-                               "http.response_for.uri": ["/x"], "http.file_data": ["00"]})])
+        flow = apply(
+            [
+                (
+                    False,
+                    {
+                        "tls.handshake.certificate": [der.hex()],
+                        "http.response_for.uri": ["/x"],
+                        "http.file_data": ["00"],
+                    },
+                )
+            ]
+        )
         assert flow["dst"]["ssl:cert"]["sha256"] == hashlib.sha256(der).hexdigest()
         assert flow["dst"]["txfiles"] == []
 
@@ -364,8 +506,10 @@ class TestEnrich:
         assert pathlib.Path(store.path(a)).read_bytes() == b"a"
 
         # Files over the limits are left out of the flow.
-        flow = apply([(False, {"http.response_for.uri": ["/x"],
-                               "http.file_data": [b"123456".hex()]})], files=store)
+        flow = apply(
+            [(False, {"http.response_for.uri": ["/x"], "http.file_data": [b"123456".hex()]})],
+            files=store,
+        )
         assert flow["dst"]["txfiles"] == []
 
     def test_empty(self):
@@ -373,43 +517,83 @@ class TestEnrich:
         assert flow["tls"] is None and flow["http"] is None
         assert {k: flow["src"][k] for k in p_enrich.emptySide()} == p_enrich.emptySide()
 
-    @pytest.mark.parametrize("banner,soft", [
-        ("SSH-2.0-OpenSSH_9.6", "OpenSSH_9.6"), ("SSH-1.99-Cisco-1.25", "Cisco-1.25"),
-        ("garbage", None), ("HTTP-1.1-x", None),
-    ])
+    @pytest.mark.parametrize(
+        "banner,soft",
+        [
+            ("SSH-2.0-OpenSSH_9.6", "OpenSSH_9.6"),
+            ("SSH-1.99-Cisco-1.25", "Cisco-1.25"),
+            ("garbage", None),
+            ("HTTP-1.1-x", None),
+        ],
+    )
     def test_sshSoftware(self, banner, soft):
         assert p_enrich.sshSoftware(banner) == soft
 
 
 class TestHttp2:
-
     def test_streams(self, tmp_path):
         files = p_enrich.FileStore(str(tmp_path))
-        flow = apply([
-            # Two requests in one packet: HEADERS on streams 1 and 3, then a DATA on 3.
-            (True, {"http2.type": ["4", "1", "1", "0"], "http2.streamid": ["0", "1", "3", "3"],
-                    "http2.headers.method": ["GET", "POST"],
-                    "http2.headers.path": ["/a/one.bin", "/up/two.txt"],
-                    "http2.headers.authority": ["Vertex.Link"],
-                    "http2.headers.user_agent": ["curl/8.5.0"],
-                    "http2.data.data": [b"upload".hex()]}),
-            # The responses: stream 1's body over two DATA frames, stream 3's reassembled.
-            (False, {"http2.type": ["1", "0"], "http2.streamid": ["1", "1"],
-                     "http2.headers.content_type": ["application/x-thing"],
-                     "http2.headers.server": ["nginx/1.25.3"],
-                     "http2.data.data": [b"one-".hex()]}),
-            (False, {"http2.type": ["0"], "http2.streamid": ["1"],
-                     "http2.data.data": [b"body".hex()]}),
-            (False, {"http2.type": ["0"], "http2.streamid": ["3"], "http2.data.data": ["00"],
-                     "http2.body.reassembled.data": [b"ok".hex()]}),
-            # Mismatched lists are skipped rather than guessed at.
-            (False, {"http2.type": ["0", "0"], "http2.streamid": ["5"]}),
-            (False, {"http2.type": ["0", "0"], "http2.streamid": ["5", "5"],
-                     "http2.data.data": ["00"]}),
-        ], files=files)
+        flow = apply(
+            [
+                # Two requests in one packet: HEADERS on streams 1 and 3, then a DATA on 3.
+                (
+                    True,
+                    {
+                        "http2.type": ["4", "1", "1", "0"],
+                        "http2.streamid": ["0", "1", "3", "3"],
+                        "http2.headers.method": ["GET", "POST"],
+                        "http2.headers.path": ["/a/one.bin", "/up/two.txt"],
+                        "http2.headers.authority": ["Vertex.Link"],
+                        "http2.headers.user_agent": ["curl/8.5.0"],
+                        "http2.data.data": [b"upload".hex()],
+                    },
+                ),
+                # The responses: stream 1's body over two DATA frames, stream 3's reassembled.
+                (
+                    False,
+                    {
+                        "http2.type": ["1", "0"],
+                        "http2.streamid": ["1", "1"],
+                        "http2.headers.content_type": ["application/x-thing"],
+                        "http2.headers.server": ["nginx/1.25.3"],
+                        "http2.data.data": [b"one-".hex()],
+                    },
+                ),
+                (
+                    False,
+                    {
+                        "http2.type": ["0"],
+                        "http2.streamid": ["1"],
+                        "http2.data.data": [b"body".hex()],
+                    },
+                ),
+                (
+                    False,
+                    {
+                        "http2.type": ["0"],
+                        "http2.streamid": ["3"],
+                        "http2.data.data": ["00"],
+                        "http2.body.reassembled.data": [b"ok".hex()],
+                    },
+                ),
+                # Mismatched lists are skipped rather than guessed at.
+                (False, {"http2.type": ["0", "0"], "http2.streamid": ["5"]}),
+                (
+                    False,
+                    {
+                        "http2.type": ["0", "0"],
+                        "http2.streamid": ["5", "5"],
+                        "http2.data.data": ["00"],
+                    },
+                ),
+            ],
+            files=files,
+        )
         assert flow["http"]["hosts"] == ["vertex.link"]
-        assert flow["http"]["requests"] == [{"method": "GET", "uri": "/a/one.bin"},
-                                            {"method": "POST", "uri": "/up/two.txt"}]
+        assert flow["http"]["requests"] == [
+            {"method": "GET", "uri": "/a/one.bin"},
+            {"method": "POST", "uri": "/up/two.txt"},
+        ]
         assert flow["src"]["softnames"] == ["curl/8.5.0"]
         assert flow["dst"]["cpes"] == ["cpe:2.3:a:f5:nginx:1.25.3:*:*:*:*:*:*:*"]
 

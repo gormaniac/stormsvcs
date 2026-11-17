@@ -41,7 +41,9 @@ class Kv(dict):
 
 def limiter(kv=None, clock=None, **kwargs):
     clock = clock or Clock()
-    return QuotaLimiter(kv if kv is not None else Kv(), clock=clock, sleep=clock.sleep, **kwargs), clock
+    return QuotaLimiter(
+        kv if kv is not None else Kv(), clock=clock, sleep=clock.sleep, **kwargs
+    ), clock
 
 
 class TestQuota(s_tests.SynTest):

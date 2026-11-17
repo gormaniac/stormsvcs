@@ -1779,8 +1779,19 @@ class TestAuditFixes(s_tests.SynTest):
 
         for path in ("", "x/y/", "urls/recent/limit/3/"):
             assert checkRawPath(path) == path
-        for path in ("../../x", "a/../b", "%2e%2e/x", "./x", "http://evil/x", "a\\b", "a?b=1",
-                     "a#b", "a b", "a\n", 5):
+        for path in (
+            "../../x",
+            "a/../b",
+            "%2e%2e/x",
+            "./x",
+            "http://evil/x",
+            "a\\b",
+            "a?b=1",
+            "a#b",
+            "a b",
+            "a\n",
+            5,
+        ):
             with self.raises(AbuseChApiError):
                 checkRawPath(path)
 
@@ -1841,9 +1852,7 @@ class TestAuditFixes(s_tests.SynTest):
 
                 fake._bazaar = err500
                 with self.raises(AbuseChApiError):
-                    await client.query(
-                        "bazaar", apikey="k", form={"query": "x"}, idempotent=False
-                    )
+                    await client.query("bazaar", apikey="k", form={"query": "x"}, idempotent=False)
                 assert len(calls) == 1
                 # A read is retried, then gives up with the last error.
                 with self.raises(AbuseChApiError) as cm:

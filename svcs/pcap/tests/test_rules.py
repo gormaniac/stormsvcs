@@ -115,7 +115,9 @@ def test_parse_rules_blank_line_continuation():
     )
     parsed = list(s_rules.parseRules(text))
     assert [r["sid"] for r, _, _ in parsed if r] == [1, 2]
-    assert [err for _, _, err in parsed if err] == ["A Snort rule's options must be in parentheses."]
+    assert [err for _, _, err in parsed if err] == [
+        "A Snort rule's options must be in parentheses."
+    ]
 
 
 def test_split_options():
@@ -131,21 +133,29 @@ def test_rule_warnings():
     warn = s_rules.ruleWarnings
     assert warn('alert http any any -> any any (msg:"a"; http.uri; content:"/x"; sid:1;)') == []
     # IP only rules (ex. blocklists) don't need content.
-    assert warn("alert ip [1.2.3.4] any -> $HOME_NET any (msg:\"c2\"; sid:2;)") == []
-    assert "no content" in warn('alert tcp any any -> any 80 (msg:"a"; flow:established; sid:3;)')[0]
+    assert warn('alert ip [1.2.3.4] any -> $HOME_NET any (msg:"c2"; sid:2;)') == []
+    assert (
+        "no content" in warn('alert tcp any any -> any 80 (msg:"a"; flow:established; sid:3;)')[0]
+    )
     assert "no fast pattern" in warn('alert http any any -> any any (pcre:"/a+b/"; sid:4;)')[0]
     assert any("pass rule" in w for w in warn('pass tcp any any -> any any (content:"a"; sid:5;)'))
     assert any(
         "noalert" in w
-        for w in warn('alert tcp any any -> any any (content:"a"; flowbits:set,x; flowbits:noalert; sid:6;)')
+        for w in warn(
+            'alert tcp any any -> any any (content:"a"; flowbits:set,x; flowbits:noalert; sid:6;)'
+        )
     )
-    assert any("only logged" in w for w in warn('drop tcp any any -> any any (content:"a"; sid:7;)'))
+    assert any(
+        "only logged" in w for w in warn('drop tcp any any -> any any (content:"a"; sid:7;)')
+    )
     assert warn("not a rule") == []
 
 
 def test_check_net_vars():
     assert s_rules.checkNetVars(None) == {}
-    assert s_rules.checkNetVars({"home_net": " [10.0.0.0/8, !10.1.0.0/16] ", "EXTERNAL_NET": "!$HOME_NET"}) == {
+    assert s_rules.checkNetVars(
+        {"home_net": " [10.0.0.0/8, !10.1.0.0/16] ", "EXTERNAL_NET": "!$HOME_NET"}
+    ) == {
         "HOME_NET": "[10.0.0.0/8, !10.1.0.0/16]",
         "EXTERNAL_NET": "!$HOME_NET",
     }

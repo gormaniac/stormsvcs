@@ -86,7 +86,13 @@ class TestYaraStorm(s_tests.SynTest):
 
                 retns = [r async for r in prox.matchFile("a" * 64)]
                 self.eq(
-                    [{"status": False, "mesg": "Unexpected error: RuntimeError: boom", "data": None}],
+                    [
+                        {
+                            "status": False,
+                            "mesg": "Unexpected error: RuntimeError: boom",
+                            "data": None,
+                        }
+                    ],
                     retns,
                 )
 
@@ -293,9 +299,7 @@ class TestYaraStorm(s_tests.SynTest):
                 self.eq(f"sha256:{sha256.hex()}", nodes[0].get("file"))
                 self.nn(nodes[0].get(".seen"))
                 self.len(0, await core.nodes(f"it:app:yara:match:rule={miss}"))
-                self.len(
-                    1, await core.nodes(f"meta:source={SVC_GUID} -(seen)> it:app:yara:match")
-                )
+                self.len(1, await core.nodes(f"meta:source={SVC_GUID} -(seen)> it:app:yara:match"))
 
                 # $lib.debug prints the rules that didn't match.
                 msgs = await core.stormlist(f"file:bytes | {SVC_NAME}.scan", opts={"debug": True})

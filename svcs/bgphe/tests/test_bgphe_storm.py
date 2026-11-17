@@ -160,7 +160,9 @@ class TestBgpHeStormPkg(s_tests.SynTest):
             assert len([m for m in msgs if m[0] == "node"]) == 3
 
             msgs = await core.stormlist("slib.bgphe.certs nope.com")
-            self.stormIsInWarn("slib.bgphe: bgp.he.net has no matching certificates for nope.com.", msgs)
+            self.stormIsInWarn(
+                "slib.bgphe: bgp.he.net has no matching certificates for nope.com.", msgs
+            )
 
             msgs = await core.stormlist("slib.bgphe.certs 'bad domain'")
             self.stormIsInWarn(
@@ -175,11 +177,16 @@ class TestBgpHeStormPkg(s_tests.SynTest):
             self.stormHasNoErr(msgs)
 
             msgs = await core.stormlist("[ inet:ipv4=1.2.3.4 ] | slib.bgphe.certs")
-            self.stormIsInWarn("slib.bgphe.certs: Unable to look up inet:ipv4 1.2.3.4, it needs an inet:fqdn.", msgs)
+            self.stormIsInWarn(
+                "slib.bgphe.certs: Unable to look up inet:ipv4 1.2.3.4, it needs an inet:fqdn.",
+                msgs,
+            )
             assert [m[1][0][0] for m in msgs if m[0] == "node"] == ["inet:ipv4"]
 
             msgs = await core.stormlist("$lib.debug = (true) slib.bgphe.certs gormo.co --limit 2")
-            self.stormIsInPrint("slib.bgphe: gormo.co: 2 certificates (0 filtered) from 1 pages, of 12", msgs)
+            self.stormIsInPrint(
+                "slib.bgphe: gormo.co: 2 certificates (0 filtered) from 1 pages, of 12", msgs
+            )
 
     async def test_subdomains(self):
         async with fb.bgpheSvc(self) as (core, svc, fake):
@@ -208,7 +215,9 @@ class TestBgpHeStormPkg(s_tests.SynTest):
             assert len(nodes) == 12
 
             msgs = await core.stormlist("slib.bgphe.certs.subdomains nope.com")
-            self.stormIsInWarn("bgp.he.net has no certificates for nope.com or its subdomains.", msgs)
+            self.stormIsInWarn(
+                "bgp.he.net has no certificates for nope.com or its subdomains.", msgs
+            )
             self.stormHasNoErr(msgs)
 
             fake.state["certlist"]["big.com"] = {
@@ -217,10 +226,14 @@ class TestBgpHeStormPkg(s_tests.SynTest):
                 "total_certificates": 1,
             }
             msgs = await core.stormlist("slib.bgphe.certs.subdomains big.com")
-            self.stormIsInWarn("bgp.he.net truncated the subdomains of big.com, some may be missing.", msgs)
+            self.stormIsInWarn(
+                "bgp.he.net truncated the subdomains of big.com, some may be missing.", msgs
+            )
 
             msgs = await core.stormlist("slib.bgphe.certs.subdomains bad")
-            self.stormIsInWarn("Looking up the subdomains of bad failed: Invalid domain: 'bad'", msgs)
+            self.stormIsInWarn(
+                "Looking up the subdomains of bad failed: Invalid domain: 'bad'", msgs
+            )
             self.stormHasNoErr(msgs)
 
             msgs = await core.stormlist("[ inet:ipv4=1.2.3.4 ] | slib.bgphe.certs.subdomains")
@@ -252,7 +265,9 @@ class TestBgpHeStormPkg(s_tests.SynTest):
             assert [n.ndef for n in nodes] == [("inet:cidr4", "8.8.8.0/24")]
             assert await count(core, "inet:dns:a") == 9
 
-            nodes = await core.nodes("[ inet:ipv6=2001:4860:4860::8888 ] | slib.bgphe.certs.ip --yield | -> inet:fqdn")
+            nodes = await core.nodes(
+                "[ inet:ipv6=2001:4860:4860::8888 ] | slib.bgphe.certs.ip --yield | -> inet:fqdn"
+            )
             assert len(nodes) == nv6
 
             msgs = await core.stormlist("[ inet:ipv4=10.0.0.1 ] | slib.bgphe.certs.ip")
@@ -260,11 +275,17 @@ class TestBgpHeStormPkg(s_tests.SynTest):
             self.stormHasNoErr(msgs)
 
             msgs = await core.stormlist("slib.bgphe.certs.ip nope")
-            self.stormIsInWarn("Looking up the certificate hostnames on nope failed: Invalid IP or CIDR: 'nope'", msgs)
+            self.stormIsInWarn(
+                "Looking up the certificate hostnames on nope failed: Invalid IP or CIDR: 'nope'",
+                msgs,
+            )
             self.stormHasNoErr(msgs)
 
             msgs = await core.stormlist("[ inet:fqdn=x.com ] | slib.bgphe.certs.ip")
-            self.stormIsInWarn("slib.bgphe.certs.ip: Unable to look up inet:fqdn x.com, it needs an IP or CIDR.", msgs)
+            self.stormIsInWarn(
+                "slib.bgphe.certs.ip: Unable to look up inet:fqdn x.com, it needs an IP or CIDR.",
+                msgs,
+            )
 
     async def test_whois_rdap(self):
         async with fb.bgpheSvc(self) as (core, svc, fake):
@@ -327,8 +348,13 @@ class TestBgpHeStormPkg(s_tests.SynTest):
 
             # RDAP has the registrant the whois text redacts (a privacy service).
             nodes = await core.nodes("slib.bgphe.whois vertex.link")
-            assert nodes[0].get("registrant:name") == "privacy service provided by withheld for privacy llc"
-            nodes = await core.nodes("inet:whois:rec:fqdn=vertex.link -> inet:whois:contact +:type=registrant")
+            assert (
+                nodes[0].get("registrant:name")
+                == "privacy service provided by withheld for privacy llc"
+            )
+            nodes = await core.nodes(
+                "inet:whois:rec:fqdn=vertex.link -> inet:whois:contact +:type=registrant"
+            )
             assert nodes[0].get("state") == "delaware"
             assert nodes[0].get("id") == "038b463ab70e46320afa08d947a7cf73-namech"
 
@@ -345,7 +371,10 @@ class TestBgpHeStormPkg(s_tests.SynTest):
             msgs = await core.stormlist("$lib.debug = (true) slib.bgphe.whois microsoft.com")
             self.stormHasNoWarnErr(msgs)
             self.stormIsInPrint("slib.bgphe: The whois of microsoft.com is from whois.", msgs)
-            self.stormIsInPrint("RDAP wasn't used: bgp.he.net returned HTTP 404 for /rdap/dns/microsoft.com: could not find rdap record", msgs)
+            self.stormIsInPrint(
+                "RDAP wasn't used: bgp.he.net returned HTTP 404 for /rdap/dns/microsoft.com: could not find rdap record",
+                msgs,
+            )
 
             nodes = await core.nodes("inet:whois:rec")
             assert len(nodes) == 1
@@ -386,7 +415,9 @@ class TestBgpHeStormPkg(s_tests.SynTest):
 
             # --no-rdap only uses the whois text, even when there's RDAP.
             fake.requests.clear()
-            msgs = await core.stormlist("$lib.debug = (true) [ inet:fqdn=example.org ] | slib.bgphe.whois --no-rdap --yield")
+            msgs = await core.stormlist(
+                "$lib.debug = (true) [ inet:fqdn=example.org ] | slib.bgphe.whois --no-rdap --yield"
+            )
             self.stormIsInPrint("slib.bgphe: The whois of example.org is from whois.", msgs)
             self.stormNotInPrint("RDAP wasn't used", msgs)
             assert fake.requests == ["/whois/dns/example.org"]
@@ -428,9 +459,12 @@ class TestBgpHeStormPkg(s_tests.SynTest):
             msgs = await core.stormlist("slib.bgphe.asn AS15169 --print")
             self.stormHasNoWarnErr(msgs)
             self.stormIsInPrint(
-                "AS15169 GOOGLE: Google LLC (US), arin, registered 2000-03-30, updated 2012-02-24", msgs
+                "AS15169 GOOGLE: Google LLC (US), arin, registered 2000-03-30, updated 2012-02-24",
+                msgs,
             )
-            self.stormIsInPrint("abuse: ABUSE5250-ARIN Abuse network-abuse@google.com +1-650-253-0000", msgs)
+            self.stormIsInPrint(
+                "abuse: ABUSE5250-ARIN Abuse network-abuse@google.com +1-650-253-0000", msgs
+            )
             assert [m[1][0] for m in msgs if m[0] == "node"] == [("inet:asn", 15169)]
 
             nodes = await core.nodes("inet:asn=15169")
@@ -482,7 +516,9 @@ class TestBgpHeStormPkg(s_tests.SynTest):
             self.stormHasNoErr(msgs)
 
             msgs = await core.stormlist("[ inet:fqdn=x.com ] | slib.bgphe.asn")
-            self.stormIsInWarn("slib.bgphe.asn: Unable to look up inet:fqdn x.com, it needs an inet:asn.", msgs)
+            self.stormIsInWarn(
+                "slib.bgphe.asn: Unable to look up inet:fqdn x.com, it needs an inet:asn.", msgs
+            )
 
     async def test_prefixes(self):
         async with fb.bgpheSvc(self) as (core, svc, fake):
@@ -502,7 +538,9 @@ class TestBgpHeStormPkg(s_tests.SynTest):
 
             nodes = await core.nodes("[ inet:asn=15169 ] | slib.bgphe.asn.prefixes")
             assert [n.ndef for n in nodes] == [("inet:asn", 15169)]
-            nodes = await core.nodes("inet:asn=15169 | slib.bgphe.asn.prefixes --yield | +inet:asnet4")
+            nodes = await core.nodes(
+                "inet:asn=15169 | slib.bgphe.asn.prefixes --yield | +inet:asnet4"
+            )
             assert len(nodes) == 4
 
             msgs = await core.stormlist("slib.bgphe.asn.prefixes 99")
@@ -510,7 +548,9 @@ class TestBgpHeStormPkg(s_tests.SynTest):
             self.stormHasNoErr(msgs)
 
             msgs = await core.stormlist("slib.bgphe.asn.prefixes nope")
-            self.stormIsInWarn("Looking up the prefixes of ASN nope failed: Invalid ASN: 'nope'", msgs)
+            self.stormIsInWarn(
+                "Looking up the prefixes of ASN nope failed: Invalid ASN: 'nope'", msgs
+            )
             self.stormHasNoErr(msgs)
 
             msgs = await core.stormlist("[ inet:fqdn=x.com ] | slib.bgphe.asn.prefixes")
@@ -552,7 +592,9 @@ class TestBgpHeStormPkg(s_tests.SynTest):
                 msgs = await core.stormlist(query, opts={"user": noperms.iden})
                 self.stormIsInErr("requires permission: slib.bgphe.user", msgs)
 
-            msgs = await core.stormlist('$lib.service.get("slib.bgphe").whoisAsn(15169)', opts={"user": user.iden})
+            msgs = await core.stormlist(
+                '$lib.service.get("slib.bgphe").whoisAsn(15169)', opts={"user": user.iden}
+            )
             self.stormIsInErr("must have permission service.get", msgs)
 
             # Edits run as the user, so the user needs permission to make them.

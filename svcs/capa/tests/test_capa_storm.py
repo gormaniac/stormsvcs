@@ -754,7 +754,10 @@ class TestCapaStormModel(s_tests.SynTest):
             }
             await core.nodes(q, opts={"vars": second})
 
-            tids = {n.ndef[1] for n in await core.nodes(f"meta:rule={guid} -(refs)> it:mitre:attack:technique")}
+            tids = {
+                n.ndef[1]
+                for n in await core.nodes(f"meta:rule={guid} -(refs)> it:mitre:attack:technique")
+            }
             assert tids == {"T1027"}
             techs = await core.nodes(f"meta:rule={guid} -(refs)> ou:technique")
             assert {(n.get("reporter:name"), n.get("ext:id")) for n in techs} == {
@@ -869,8 +872,10 @@ class TestCapaStormFixes(s_tests.SynTest):
     async def test_scan_lazy_init(self):
         # An empty pipeline doesn't send the custom rules or get the rules info.
         async with capaSvc(self) as (core, svc, axon):
-            await core.nodes("[ meta:rule=* :name=mine :type=capa.custom :text=$t ]",
-                             opts={"vars": {"t": MARKER}})
+            await core.nodes(
+                "[ meta:rule=* :name=mine :type=capa.custom :text=$t ]",
+                opts={"vars": {"t": MARKER}},
+            )
             calls = {"custom": 0, "rulesInfo": 0}
             custom, rulesInfo = svc.custom, svc.rulesInfo
 

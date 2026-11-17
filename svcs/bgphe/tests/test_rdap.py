@@ -25,8 +25,18 @@ def test_rdap_matches_whois():
         assert rec["registrar"].keys() == whois.parseDomain(name, "")["registrar"].keys()
         for contact in rec["contacts"]:
             assert contact.keys() == {
-                "type", "id", "name", "orgname", "address", "city", "state", "postalcode",
-                "country", "phone", "fax", "email",
+                "type",
+                "id",
+                "name",
+                "orgname",
+                "address",
+                "city",
+                "state",
+                "postalcode",
+                "country",
+                "phone",
+                "fax",
+                "email",
             }
 
 
@@ -99,7 +109,12 @@ def test_rdap_vcards():
         "vcardArray": card(
             ["fn", {}, "text", "  "],
             ["org", {}, "text", "Org"],
-            ["adr", {"label": "1 Main St\nTown"}, "text", ["", "", "", "", "", "", "United States"]],
+            [
+                "adr",
+                {"label": "1 Main St\nTown"},
+                "text",
+                ["", "", "", "", "", "", "United States"],
+            ],
             ["tel", {"type": ["fax"]}, "uri", "tel:+1.555"],
             ["tel", {"type": "voice"}, "uri", "tel:+1.444"],
             ["email", {}, "text", "REDACTED FOR PRIVACY"],

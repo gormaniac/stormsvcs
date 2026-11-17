@@ -43,7 +43,11 @@ async def test_endpoints():
             assert "win.xagent_w0.yar" in (await cli.getYaraFamily("win.xagent"))["tlp_white"]
             assert await cli.getYaraAfter("2026-10-01") == {}
             rules = await cli.getYaraTlp("tlp_white")
-            assert set(rules) == {"win.xagent_w0.yar", "win.xagent_auto.yar", "win.wannacryptor_w0.yar"}
+            assert set(rules) == {
+                "win.xagent_w0.yar",
+                "win.xagent_auto.yar",
+                "win.wannacryptor_w0.yar",
+            }
 
             with pytest.raises(MalpediaApiError, match="Unknown YARA TLP"):
                 await cli.getYaraTlp("tlp_red")
@@ -71,7 +75,9 @@ async def test_errors_and_retries():
 
             # Gives up after MAX_RETRIES retries.
             fake.state["errors"]["/api/get/version"] = [502] * 10
-            with pytest.raises(MalpediaApiError, match="HTTP 502 for /get/version: fake error 502") as exc:
+            with pytest.raises(
+                MalpediaApiError, match="HTTP 502 for /get/version: fake error 502"
+            ) as exc:
                 await cli.version()
             assert exc.value.code == 502
             assert fake.countPaths("/api/get/version") == 4 + m_client.MAX_RETRIES + 1
@@ -126,15 +132,21 @@ async def test_retry_after():
     assert m_client.retryAfter("-5") == 0.0
     assert m_client.retryAfter(" 30 ") == 30.0
     assert m_client.retryAfter("Wed, 21 Oct 2015 07:28:00 GMT") == 0.0
-    assert 3500 < m_client.retryAfter(email.utils.format_datetime(
-        datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=1), usegmt=True)) <= 3600
+    assert (
+        3500
+        < m_client.retryAfter(
+            email.utils.format_datetime(
+                datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=1), usegmt=True
+            )
+        )
+        <= 3600
+    )
 
 
 async def test_counter():
     async with fm.FakeMalpedia() as fake:
         session, cli = await _client(fake)
         async with session:
-
             go = asyncio.Event()
 
             async def other():
@@ -158,7 +170,9 @@ async def test_counter():
 async def test_connection_errors():
     session = aiohttp.ClientSession()
     async with session:
-        cli = MalpediaClient(session, url="http://127.0.0.1:1/api", interval=0, backoff=0, timeout=5)
+        cli = MalpediaClient(
+            session, url="http://127.0.0.1:1/api", interval=0, backoff=0, timeout=5
+        )
         with pytest.raises(MalpediaApiError, match="Unable to connect to Malpedia"):
             await cli.version()
         assert cli.count == m_client.MAX_RETRIES + 1
@@ -185,7 +199,15 @@ async def test_large_bodies():
     # Bodies far bigger than one network read come back whole.
     async with fm.FakeMalpedia() as fake:
         fake.state["bib"] = [
-            ("online", f"key:{i}", "Author", "Title " + "x" * 200, "2020", "Org", f"https://example.com/{i}")
+            (
+                "online",
+                f"key:{i}",
+                "Author",
+                "Title " + "x" * 200,
+                "2020",
+                "Org",
+                f"https://example.com/{i}",
+            )
             for i in range(20000)
         ]
         session, cli = await _client(fake)

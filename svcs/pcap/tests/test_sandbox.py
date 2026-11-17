@@ -1,6 +1,5 @@
 """Pytests for pcapsvc.sandbox and pcapsvc._sbxexec, the sandbox engines run in."""
 
-
 import asyncio
 import contextlib
 import os
@@ -35,9 +34,13 @@ async def runPy(sbx, code, dirs, **kwargs):
     py = os.path.realpath(sys.executable)
     # Hands the directories to the engine's user, when it runs as one (as root).
     sbx.prepare(str(dirs / "allowed"), str(dirs / "out"))
-    return await sbx.run([py, "-I", "-S", "-c", code], read=[str(dirs / "allowed")],
-                         write=[str(dirs / "out")], execs=[sys.prefix, sys.base_prefix],
-                         **kwargs)
+    return await sbx.run(
+        [py, "-I", "-S", "-c", code],
+        read=[str(dirs / "allowed")],
+        write=[str(dirs / "out")],
+        execs=[sys.prefix, sys.base_prefix],
+        **kwargs,
+    )
 
 
 @contextlib.contextmanager
@@ -71,14 +74,17 @@ def zombies(pgid):
     found = []
     for pid in (int(n) for n in os.listdir("/proc") if n.isdigit()):
         status = p_sandbox._procStatus(pid)
-        if (status and status.get("PPid") == me and status["State"].startswith("Z")
-                and p_sandbox._procPgrp(pid) == pgid):
+        if (
+            status
+            and status.get("PPid") == me
+            and status["State"].startswith("Z")
+            and p_sandbox._procPgrp(pid) == pgid
+        ):
             found.append(pid)
     return found
 
 
 class TestSandbox:
-
     async def test_allowed(self, dirs):
         sbx = p_sandbox.Sandbox()
         res = await runPy(sbx, f"print(open({str(dirs / 'allowed/a.txt')!r}).read())", dirs)
@@ -97,50 +103,63 @@ class TestSandbox:
         assert not (dirs / "allowed/x").exists()
 
         # Off doesn't restrict anything.
-        res = await runPy(p_sandbox.Sandbox(mode="off"),
-                          f"print(open({str(dirs / 'secret.txt')!r}).read())", dirs)
+        res = await runPy(
+            p_sandbox.Sandbox(mode="off"), f"print(open({str(dirs / 'secret.txt')!r}).read())", dirs
+        )
         assert res.stdout.strip() == b"secret"
 
     async def test_seccomp(self, dirs):
         sbx = p_sandbox.Sandbox()
         for family in ("AF_INET", "AF_INET6"):
-            res = await runPy(sbx, f"import socket; socket.socket(socket.{family}, "
-                                   "socket.SOCK_DGRAM)", dirs)
+            res = await runPy(
+                sbx, f"import socket; socket.socket(socket.{family}, socket.SOCK_DGRAM)", dirs
+            )
             # Killed (SIGSYS), and reported: the engines never open network sockets.
             assert res.code == -signal.SIGSYS, family
             assert [a["kind"] for a in res.alerts] == ["seccomp"], family
         res = await runPy(sbx, "import socket; socket.socket(socket.AF_UNIX); print('ok')", dirs)
         assert res.stdout.strip() == b"ok"
         # Other families (ex. netlink) fail quietly, they aren't network access.
-        res = await runPy(sbx, "import socket\ntry:\n    socket.socket(socket.AF_NETLINK, "
-                               "socket.SOCK_RAW)\nexcept PermissionError:\n    print('denied')",
-                          dirs)
+        res = await runPy(
+            sbx,
+            "import socket\ntry:\n    socket.socket(socket.AF_NETLINK, "
+            "socket.SOCK_RAW)\nexcept PermissionError:\n    print('denied')",
+            dirs,
+        )
         assert res.stdout.strip() == b"denied" and res.alerts == []
 
         # Without seccomp, Landlock still blocks TCP connects (ABI 4+), UDP is allowed.
         nosec = p_sandbox.Sandbox(seccomp=False)
-        res = await runPy(nosec, "import socket; socket.socket(socket.AF_INET, "
-                                 "socket.SOCK_DGRAM); print('ok')", dirs)
+        res = await runPy(
+            nosec,
+            "import socket; socket.socket(socket.AF_INET, socket.SOCK_DGRAM); print('ok')",
+            dirs,
+        )
         assert res.stdout.strip() == b"ok"
 
     @needsLandlockTcp
     async def test_tcp(self, dirs):
         sbx = p_sandbox.Sandbox(seccomp=False)
-        code = ("import socket; s = socket.socket(); s.bind(('127.0.0.1', 0)); s.listen(); "
-                "print('listening')")
+        code = (
+            "import socket; s = socket.socket(); s.bind(('127.0.0.1', 0)); s.listen(); "
+            "print('listening')"
+        )
         res = await runPy(sbx, code, dirs)
         assert res.code != 0 and b"PermissionError" in res.stderr
 
     async def test_env_rlimits(self, dirs):
         sbx = p_sandbox.Sandbox(rlimits={"nofile": 77})
         # Python itself adds LC_CTYPE (PEP 538), nothing else comes from the service.
-        code = ("import os, resource; print(sorted(set(os.environ) - {'LC_CTYPE'}), "
-                "resource.getrlimit(resource.RLIMIT_NOFILE))")
+        code = (
+            "import os, resource; print(sorted(set(os.environ) - {'LC_CTYPE'}), "
+            "resource.getrlimit(resource.RLIMIT_NOFILE))"
+        )
         res = await runPy(sbx, code, dirs, env={"PATH": "/usr/bin:/bin", "ONLY": "this"})
         assert res.stdout.strip() == b"['ONLY', 'PATH'] (77, 77)"
 
-        res = await runPy(sbx, "import resource; print(resource.getrlimit(resource.RLIMIT_CORE))",
-                          dirs)
+        res = await runPy(
+            sbx, "import resource; print(resource.getrlimit(resource.RLIMIT_CORE))", dirs
+        )
         assert res.stdout.strip() == b"(0, 0)"
 
     async def test_bounds(self, dirs):
@@ -151,8 +170,10 @@ class TestSandbox:
             await runPy(sbx, "print('x' * 100000)", dirs, maxoutput=100)
 
         # The whole process group is killed, not only the engine.
-        code = ("import subprocess, sys, time; subprocess.Popen([sys.executable, '-c', "
-                "'import time; time.sleep(60)']); print('started', flush=True); time.sleep(60)")
+        code = (
+            "import subprocess, sys, time; subprocess.Popen([sys.executable, '-c', "
+            "'import time; time.sleep(60)']); print('started', flush=True); time.sleep(60)"
+        )
         with pytest.raises(p_sandbox.SandboxError):
             await runPy(p_sandbox.Sandbox(mode="off"), code, dirs, timeout=1)
 
@@ -197,14 +218,22 @@ class TestSandbox:
     def test_exec_usage(self):
         # Bad invocations exit with the sandbox's exit code.
         import subprocess
-        res = subprocess.run([sys.executable, "-I", _sbxexec.__file__, "{}"],
-                             capture_output=True, check=False)
+
+        res = subprocess.run(
+            [sys.executable, "-I", _sbxexec.__file__, "{}"], capture_output=True, check=False
+        )
         assert res.returncode == _sbxexec.EXIT_SANDBOX and b"usage" in res.stderr
-        res = subprocess.run([sys.executable, "-I", _sbxexec.__file__, "not json", "--", "true"],
-                             capture_output=True, check=False)
+        res = subprocess.run(
+            [sys.executable, "-I", _sbxexec.__file__, "not json", "--", "true"],
+            capture_output=True,
+            check=False,
+        )
         assert res.returncode == _sbxexec.EXIT_SANDBOX and b"invalid spec" in res.stderr
-        res = subprocess.run([sys.executable, "-I", _sbxexec.__file__, "{}", "--",
-                              "/nonexistent/x"], capture_output=True, check=False)
+        res = subprocess.run(
+            [sys.executable, "-I", _sbxexec.__file__, "{}", "--", "/nonexistent/x"],
+            capture_output=True,
+            check=False,
+        )
         assert res.returncode == _sbxexec.EXIT_SANDBOX and b"unable to run" in res.stderr
 
 
@@ -240,10 +269,18 @@ class TestProbes:
 
     async def test_reads(self, run):
         probe, tmp = run
-        for path in ("/etc/shadow", "/proc/1/environ", str(tmp / "other/capture.pcap"),
-                     "/root/.bashrc", "/vertex/storage/cell.yaml", str(tmp)):
-            res = await probe(f"import os; print(open({path!r}).read() if os.path.isfile({path!r}) "
-                              f"else os.listdir({path!r}))")
+        for path in (
+            "/etc/shadow",
+            "/proc/1/environ",
+            str(tmp / "other/capture.pcap"),
+            "/root/.bashrc",
+            "/vertex/storage/cell.yaml",
+            str(tmp),
+        ):
+            res = await probe(
+                f"import os; print(open({path!r}).read() if os.path.isfile({path!r}) "
+                f"else os.listdir({path!r}))"
+            )
             assert res.code != 0, (path, res.stdout)
             assert b"PermissionError" in res.stderr or b"FileNotFoundError" in res.stderr, path
         # Its own input is readable.
@@ -252,8 +289,7 @@ class TestProbes:
 
     async def test_writes(self, run):
         probe, tmp = run
-        for path in ("/tmp/x", str(tmp / "run/capture.pcap"), str(tmp / "other/x"),
-                     "/dev/shm/x"):
+        for path in ("/tmp/x", str(tmp / "run/capture.pcap"), str(tmp / "other/x"), "/dev/shm/x"):
             res = await probe(f"open({path!r}, 'w').write('x')")
             assert res.code != 0 and b"PermissionError" in res.stderr, path
         assert (tmp / "run/capture.pcap").read_bytes() == b"pcap"
@@ -296,13 +332,25 @@ class TestDetection:
         assert "no_new_privs" in res.applied and res.verified is True
 
     def test_check_status(self):
-        status = {"Uid": "2000\t2000\t2000\t2000", "Gid": "2000\t2000\t2000\t2000",
-                  "Groups": "", "NoNewPrivs": "1", "Seccomp": "2", "CapEff": "0000000000000000"}
+        status = {
+            "Uid": "2000\t2000\t2000\t2000",
+            "Gid": "2000\t2000\t2000\t2000",
+            "Groups": "",
+            "NoNewPrivs": "1",
+            "Seccomp": "2",
+            "CapEff": "0000000000000000",
+        }
         layers = ["rlimits", "user", "no_new_privs", "landlock", "seccomp"]
         check = p_sandbox.checkStatus
         assert check(status, layers, (2000, 2000), True) == []
-        bad = {**status, "Uid": "2000\t0\t2000\t2000", "NoNewPrivs": "0", "Seccomp": "0",
-               "Groups": "0", "CapEff": "000001ffffffffff"}
+        bad = {
+            **status,
+            "Uid": "2000\t0\t2000\t2000",
+            "NoNewPrivs": "0",
+            "Seccomp": "0",
+            "Groups": "0",
+            "CapEff": "000001ffffffffff",
+        }
         problems = check(bad, layers, (2000, 2000), True)
         assert len(problems) == 5
         assert any("uids 2000 0" in p for p in problems)
@@ -324,8 +372,10 @@ class TestDetection:
     async def test_leftover(self, dirs):
         # A child the engine leaves running in its process group is killed and reported.
         sbx2 = p_sandbox.Sandbox()
-        code = ("import subprocess, sys; subprocess.Popen([sys.executable, '-c', "
-                "'import time; time.sleep(60)']); print('left one')")
+        code = (
+            "import subprocess, sys; subprocess.Popen([sys.executable, '-c', "
+            "'import time; time.sleep(60)']); print('left one')"
+        )
         res = await runPy(sbx2, code, dirs)
         assert res.stdout.strip() == b"left one"
         assert [a["kind"] for a in res.alerts] == ["leftover"]
@@ -339,9 +389,11 @@ class TestDetection:
         if not sbx.subreaper and sbx.ids() is None:
             pytest.skip("the sweep finds nothing without a subreaper or a sandbox user")
         # The child doesn't hold the run's pipes, so the run ends as soon as the engine exits.
-        code = ("import subprocess, sys; subprocess.Popen([sys.executable, '-c', "
-                "'import time; time.sleep(60)'], stdout=subprocess.DEVNULL, "
-                "stderr=subprocess.DEVNULL); print('left one')")
+        code = (
+            "import subprocess, sys; subprocess.Popen([sys.executable, '-c', "
+            "'import time; time.sleep(60)'], stdout=subprocess.DEVNULL, "
+            "stderr=subprocess.DEVNULL); print('left one')"
+        )
         polled = []
         groupAlive = p_sandbox._groupAlive
 
@@ -365,16 +417,18 @@ class TestDetection:
         if not sbx.subreaper:
             pytest.skip("can't be a child subreaper here")
         go = dirs / "out" / "go"
-        code = ("import os, time\n"
-                "if os.fork() == 0:\n"
-                "    if os.fork() == 0:\n"
-                "        time.sleep(60)\n"
-                "    os._exit(0)\n"
-                "os.wait()\n"
-                "end = time.monotonic() + 30\n"
-                f"while not os.path.exists({str(go)!r}) and time.monotonic() < end:\n"
-                "    time.sleep(0.01)\n"
-                "print('done')")
+        code = (
+            "import os, time\n"
+            "if os.fork() == 0:\n"
+            "    if os.fork() == 0:\n"
+            "        time.sleep(60)\n"
+            "    os._exit(0)\n"
+            "os.wait()\n"
+            "end = time.monotonic() + 30\n"
+            f"while not os.path.exists({str(go)!r}) and time.monotonic() < end:\n"
+            "    time.sleep(0.01)\n"
+            "print('done')"
+        )
         run = asyncio.create_task(runPy(sbx, code, dirs))
         me = str(os.getpid())
 
@@ -385,8 +439,12 @@ class TestDetection:
                 if pid in sbx._live:
                     continue
                 status = p_sandbox._procStatus(pid)
-                if (status and status.get("PPid") == me and not status["State"].startswith("Z")
-                        and p_sandbox._procPgrp(pid) in sbx._live):
+                if (
+                    status
+                    and status.get("PPid") == me
+                    and not status["State"].startswith("Z")
+                    and p_sandbox._procPgrp(pid) in sbx._live
+                ):
                     found.append(pid)
             return found
 
@@ -411,9 +469,11 @@ class TestDetection:
         # A run cancelled while it waits for its leftovers to die still finishes: its group
         # stops being live (later sweeps would skip it for good) and is swept.
         sbx = p_sandbox.Sandbox()
-        code = ("import subprocess, sys; subprocess.Popen([sys.executable, '-c', "
-                "'import time; time.sleep(60)'], stdout=subprocess.DEVNULL, "
-                "stderr=subprocess.DEVNULL); print('left one')")
+        code = (
+            "import subprocess, sys; subprocess.Popen([sys.executable, '-c', "
+            "'import time; time.sleep(60)'], stdout=subprocess.DEVNULL, "
+            "stderr=subprocess.DEVNULL); print('left one')"
+        )
         run = asyncio.create_task(runPy(sbx, code, dirs))
         groupAlive = p_sandbox._groupAlive
         calls = []
@@ -438,13 +498,15 @@ class TestDetection:
         sbx = p_sandbox.Sandbox()
         if not sbx.subreaper:
             pytest.skip("can't be a child subreaper here")
-        code = ("import os, time\n"
-                "if os.fork() == 0:\n"
-                "    if os.fork() == 0:\n"
-                "        time.sleep(60)\n"
-                "    os._exit(0)\n"
-                "os.wait()\n"
-                "time.sleep(60)")
+        code = (
+            "import os, time\n"
+            "if os.fork() == 0:\n"
+            "    if os.fork() == 0:\n"
+            "        time.sleep(60)\n"
+            "    os._exit(0)\n"
+            "os.wait()\n"
+            "time.sleep(60)"
+        )
         with lateKill() as pgids, pytest.raises(p_sandbox.SandboxError, match="took longer"):
             await runPy(sbx, code, dirs, timeout=1)
         assert sbx._live == set()
@@ -456,31 +518,39 @@ class TestDetection:
         sbx = p_sandbox.Sandbox()
         if not sbx.subreaper:
             pytest.skip("can't be a child subreaper here")
-        code = ("import os, time\n"
-                "if os.fork() == 0:\n"
-                "    os.setsid()\n"
-                "    time.sleep(60)\n"
-                "    os._exit(0)\n"
-                "print('escaped')")
+        code = (
+            "import os, time\n"
+            "if os.fork() == 0:\n"
+            "    os.setsid()\n"
+            "    time.sleep(60)\n"
+            "    os._exit(0)\n"
+            "print('escaped')"
+        )
         res = await runPy(sbx, code, dirs)
         assert res.stdout.strip() == b"escaped"
         assert [a["kind"] for a in res.alerts] == ["escaped"]
-        assert "orphaned to the service" in res.alerts[0]["detail"] or \
-            "left its run's process group" in res.alerts[0]["detail"]
+        assert (
+            "orphaned to the service" in res.alerts[0]["detail"]
+            or "left its run's process group" in res.alerts[0]["detail"]
+        )
         pid = int(res.alerts[0]["detail"].split()[1])
-        assert not os.path.exists(f"/proc/{pid}") or \
-            "Z" in pathlib.Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
+        assert (
+            not os.path.exists(f"/proc/{pid}")
+            or "Z" in pathlib.Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
+        )
 
     async def test_escaped_timeout(self, dirs):
         # An engine that times out while a child that left its process group holds its pipes
         # open is still given up on (proc.wait() would wait for the pipes forever).
         sbx = p_sandbox.Sandbox()
-        code = ("import os, sys, time\n"
-                "if os.fork() == 0:\n"
-                "    os.setsid()\n"
-                "    time.sleep(60)\n"
-                "    os._exit(0)\n"
-                "time.sleep(60)")
+        code = (
+            "import os, sys, time\n"
+            "if os.fork() == 0:\n"
+            "    os.setsid()\n"
+            "    time.sleep(60)\n"
+            "    os._exit(0)\n"
+            "time.sleep(60)"
+        )
         loop = asyncio.get_running_loop()
         start = loop.time()
         with pytest.raises(p_sandbox.SandboxError, match="took longer than 1 seconds"):
@@ -505,9 +575,12 @@ class TestDetection:
         os.write(wfd, b"x")
         for _ in range(100):
             zombies = [
-                int(pid) for pid in os.listdir("/proc") if pid.isdigit()
+                int(pid)
+                for pid in os.listdir("/proc")
+                if pid.isdigit()
                 and (st := p_sandbox._procStatus(int(pid))) is not None
-                and st.get("PPid") == str(os.getpid()) and st.get("State", "").startswith("Z")
+                and st.get("PPid") == str(os.getpid())
+                and st.get("State", "").startswith("Z")
             ]
             if zombies:
                 break
@@ -534,8 +607,9 @@ class TestDetection:
         assert p_sandbox.sandboxed({"Seccomp_filters": "1", "NoNewPrivs": "1"}, own)
         # The service's other children (ex. Synapse's IO workers) aren't.
         assert not p_sandbox.sandboxed({"Seccomp_filters": "1", "NoNewPrivs": "0"}, own)
-        assert not p_sandbox.sandboxed({"Seccomp_filters": "1", "NoNewPrivs": "1"},
-                                       {"Seccomp_filters": "1", "NoNewPrivs": "1"})
+        assert not p_sandbox.sandboxed(
+            {"Seccomp_filters": "1", "NoNewPrivs": "1"}, {"Seccomp_filters": "1", "NoNewPrivs": "1"}
+        )
 
     async def test_sweep_spares_others(self, dirs):
         # A child of the service that wasn't started in the sandbox isn't touched.
@@ -544,7 +618,8 @@ class TestDetection:
         sbx = p_sandbox.Sandbox()
         # Popen only starts the child, and the test needs a plain child of this process.
         other = subprocess.Popen(  # noqa: ASYNC220
-[sys.executable, "-c", "import time; time.sleep(30)"])
+            [sys.executable, "-c", "import time; time.sleep(30)"]
+        )
         try:
             res = await runPy(sbx, "print('ok')", dirs)
             assert res.alerts == [] and other.poll() is None
@@ -580,7 +655,6 @@ class TestDetection:
         (tmp_path / "root-owned").write_text("x")
         assert sbx.sweepFiles([str(tmp_path)], exclude=[str(work)]) == [str(planted)]
         assert sbx.alerts[-1]["kind"] == "file"
-
 
 
 def test_landlock_log_flag(monkeypatch):

@@ -236,8 +236,11 @@ class TestCrossEngine(s_tests.SynTest):
             checked = 0
             for ev in events:
                 num, cid = ev.get("pcap_cnt"), ev.get("community_id")
-                if not num or not cid or ev.get("event_type") not in (
-                    "http", "tls", "sip", "fileinfo", "alert", "anomaly"
+                if (
+                    not num
+                    or not cid
+                    or ev.get("event_type")
+                    not in ("http", "tls", "sip", "fileinfo", "alert", "anomaly")
                 ):
                     continue
                 assert byframe.get(num) == cid, (name, ev)

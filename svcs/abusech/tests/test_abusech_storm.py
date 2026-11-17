@@ -1096,8 +1096,7 @@ class TestStormBlocklists(s_tests.SynTest):
             nodes = await core.nodes("slib.abusech.sslbl ja3 --yield")
             assert not [t for t in nodes[0].tags if t.startswith("rep.")]
             assert (
-                await count(core, "hash:md5 <(about)- meta:note +:type=slib.abusech.sslbl.ja3")
-                == 1
+                await count(core, "hash:md5 <(about)- meta:note +:type=slib.abusech.sslbl.ja3") == 1
             )
 
     async def test_fplist(self):

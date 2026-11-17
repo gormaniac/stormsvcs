@@ -1,6 +1,5 @@
 """Build packets and pcap/pcapng capture files for tests, so no binary fixtures are needed."""
 
-
 import io
 import ipaddress
 import struct
@@ -62,12 +61,15 @@ def icmp(src: str, dst: str, type_: int) -> dpkt.Packet:
 def eth(ip: dpkt.Packet) -> bytes:
     """Wrap an IP packet in an Ethernet frame."""
 
-    etype = dpkt.ethernet.ETH_TYPE_IP6 if isinstance(ip, dpkt.ip6.IP6) else dpkt.ethernet.ETH_TYPE_IP
+    etype = (
+        dpkt.ethernet.ETH_TYPE_IP6 if isinstance(ip, dpkt.ip6.IP6) else dpkt.ethernet.ETH_TYPE_IP
+    )
     return bytes(dpkt.ethernet.Ethernet(src=MAC_A, dst=MAC_B, type=etype, data=ip))
 
 
-def pcap(pkts: list[tuple[float, bytes]], linktype: int = 1, nano: bool = False,
-         endian: str = "<") -> bytes:
+def pcap(
+    pkts: list[tuple[float, bytes]], linktype: int = 1, nano: bool = False, endian: str = "<"
+) -> bytes:
     """A libpcap file of (seconds offset from BASE, frame) packets."""
 
     magic = 0xA1B23C4D if nano else 0xA1B2C3D4
@@ -98,8 +100,9 @@ def shb(endian: str = "<") -> bytes:
     return _block(0x0A0D0D0A, struct.pack(endian + "IHHq", 0x1A2B3C4D, 1, 0, -1), endian)
 
 
-def idb(linktype: int = 1, tsresol: int | None = None, tsoffset: int | None = None,
-        endian: str = "<") -> bytes:
+def idb(
+    linktype: int = 1, tsresol: int | None = None, tsoffset: int | None = None, endian: str = "<"
+) -> bytes:
     """A pcapng Interface Description Block."""
 
     body = struct.pack(endian + "HHI", linktype, 0, 65535)
@@ -116,8 +119,9 @@ def idb(linktype: int = 1, tsresol: int | None = None, tsoffset: int | None = No
 def epb(ifid: int, units: int, frame: bytes, endian: str = "<") -> bytes:
     """A pcapng Enhanced Packet Block, with a timestamp in the interface's units."""
 
-    body = struct.pack(endian + "IIIII", ifid, units >> 32, units & 0xFFFFFFFF, len(frame),
-                       len(frame))
+    body = struct.pack(
+        endian + "IIIII", ifid, units >> 32, units & 0xFFFFFFFF, len(frame), len(frame)
+    )
     return _block(6, body + frame, endian)
 
 
@@ -130,8 +134,9 @@ def spb(frame: bytes, endian: str = "<") -> bytes:
 def pb(ifid: int, units: int, frame: bytes, endian: str = "<") -> bytes:
     """An (obsolete) pcapng Packet Block."""
 
-    body = struct.pack(endian + "HHIIII", ifid, 0, units >> 32, units & 0xFFFFFFFF, len(frame),
-                       len(frame))
+    body = struct.pack(
+        endian + "HHIIII", ifid, 0, units >> 32, units & 0xFFFFFFFF, len(frame), len(frame)
+    )
     return _block(2, body + frame, endian)
 
 
@@ -174,10 +179,21 @@ def session() -> list[tuple[float, bytes]]:
         (1.0, eth(icmp(c, "1.1.1.1", 8))),
         (1.1, eth(icmp("1.1.1.1", c, 0))),
         (2.0, eth(tcp("2001:db8::1", 40000, "2001:db8::2", 22, SYN))),
-        (2.1, eth(tcp("2001:db8::2", 22, "2001:db8::1", 40000, SYN | ACK, b"SSH-2.0-OpenSSH_9.6\r\n"))),
+        (
+            2.1,
+            eth(
+                tcp("2001:db8::2", 22, "2001:db8::1", 40000, SYN | ACK, b"SSH-2.0-OpenSSH_9.6\r\n")
+            ),
+        ),
         (2.2, eth(tcp("2001:db8::1", 40000, "2001:db8::2", 22, RST))),
-        (2.5, bytes(dpkt.ethernet.Ethernet(src=MAC_A, dst=MAC_B, type=dpkt.ethernet.ETH_TYPE_ARP,
-                                           data=dpkt.arp.ARP()))),
+        (
+            2.5,
+            bytes(
+                dpkt.ethernet.Ethernet(
+                    src=MAC_A, dst=MAC_B, type=dpkt.ethernet.ETH_TYPE_ARP, data=dpkt.arp.ARP()
+                )
+            ),
+        ),
         (3.0, eth(tcp(c, 50000, s, 80, FIN | ACK))),
         (3.1, eth(tcp(s, 80, c, 50000, FIN | ACK))),
         (3.2, eth(tcp(c, 50000, s, 80, ACK))),

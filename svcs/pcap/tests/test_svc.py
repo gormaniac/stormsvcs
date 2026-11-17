@@ -1,6 +1,5 @@
 """Pytests for the slib.pcap service (PcapSvc) and its Telepath API."""
 
-
 import gzip
 import hashlib
 import pathlib
@@ -32,17 +31,21 @@ def test_alertCommunityId():
     def ip(valu):
         return ipaddress.ip_address(valu).packed
 
-    assert alertCommunityId("TCP", "1.2.3.4", "80", "5.6.7.8", 1024) == \
-        p_cid.communityId(6, ip("1.2.3.4"), ip("5.6.7.8"), 80, 1024)
+    assert alertCommunityId("TCP", "1.2.3.4", "80", "5.6.7.8", 1024) == p_cid.communityId(
+        6, ip("1.2.3.4"), ip("5.6.7.8"), 80, 1024
+    )
     # Snort reports the ICMP type and code in the port fields, and the flows' ICMP Community
     # IDs hash them, so an echo alert (either direction) matches its flow.
-    assert alertCommunityId("icmp", "10.0.0.1", 8, "1.1.1.1", 0) == \
-        p_cid.communityId(1, ip("10.0.0.1"), ip("1.1.1.1"), 8, 0)
-    assert alertCommunityId("icmp", "1.1.1.1", 0, "10.0.0.1", None) == \
-        p_cid.communityId(1, ip("10.0.0.1"), ip("1.1.1.1"), 8, 0)
+    assert alertCommunityId("icmp", "10.0.0.1", 8, "1.1.1.1", 0) == p_cid.communityId(
+        1, ip("10.0.0.1"), ip("1.1.1.1"), 8, 0
+    )
+    assert alertCommunityId("icmp", "1.1.1.1", 0, "10.0.0.1", None) == p_cid.communityId(
+        1, ip("10.0.0.1"), ip("1.1.1.1"), 8, 0
+    )
     assert alertCommunityId("icmp", "10.0.0.1", None, "1.1.1.1", None) is None
-    assert alertCommunityId("gre", "10.0.0.1", None, "10.0.0.2", None) == \
-        p_cid.communityId(47, ip("10.0.0.1"), ip("10.0.0.2"))
+    assert alertCommunityId("gre", "10.0.0.1", None, "10.0.0.2", None) == p_cid.communityId(
+        47, ip("10.0.0.1"), ip("10.0.0.2")
+    )
     assert alertCommunityId("nope", "10.0.0.1", 1, "10.0.0.2", 2) is None
     assert alertCommunityId("tcp", "not-an-ip", 1, "10.0.0.2", 2) is None
 
@@ -68,18 +71,18 @@ class SvcProx:
         retn = await self.call("uploadStart", kind=kind)
         assert retn["status"], retn
         for off in range(0, len(byts), size):
-            chunk = await self.call("uploadChunk", retn["data"], byts[off:off + size])
+            chunk = await self.call("uploadChunk", retn["data"], byts[off : off + size])
             assert chunk["status"], chunk
         return retn["data"]
 
 
 class TestPcapSvc(s_tests.SynTest):
-
     def test_readmes_match(self):
         # The package's README (shown in the Cortex) is a copy of the service's README.
         pkgreadme = SVCDIR / "src" / "pcapsvc" / "pkgproto" / "README.md"
-        assert pkgreadme.read_text() == (SVCDIR / "README.md").read_text(), \
+        assert pkgreadme.read_text() == (SVCDIR / "README.md").read_text(), (
             "Copy README.md to src/pcapsvc/pkgproto/README.md"
+        )
 
     def test_versions_match(self):
         # The version lives in pyproject.toml (the image tag), __init__.py, the package yaml,
@@ -129,12 +132,24 @@ class TestPcapSvc(s_tests.SynTest):
             self.stormIsInPrint(f"true (svc) ({SVC_NAME} @ {pcapsvc.__version__})", msgs)
 
             assert "slib.pcap.flows" in core.stormcmds
-            for cmd in ("slib.pcap.status", "slib.pcap.sync", "slib.pcap.rule.add",
-                        "slib.pcap.rule.check", "slib.pcap.admin.feed", "slib.pcap.admin.decode"):
+            for cmd in (
+                "slib.pcap.status",
+                "slib.pcap.sync",
+                "slib.pcap.rule.add",
+                "slib.pcap.rule.check",
+                "slib.pcap.admin.feed",
+                "slib.pcap.admin.decode",
+            ):
                 assert cmd in core.stormcmds
-            for mod in ("slib.pcap.lib", "slib.pcap.model", "slib.pcap.util",
-                        "slib.pcap.priv.user", "slib.pcap.priv.rules", "slib.pcap.priv.sync",
-                        "slib.pcap.priv.admin"):
+            for mod in (
+                "slib.pcap.lib",
+                "slib.pcap.model",
+                "slib.pcap.util",
+                "slib.pcap.priv.user",
+                "slib.pcap.priv.rules",
+                "slib.pcap.priv.sync",
+                "slib.pcap.priv.admin",
+            ):
                 assert mod in core.stormmods
                 self.stormHasNoErr(await core.stormlist(f"$mod = $lib.import({mod})"))
 
@@ -220,8 +235,7 @@ class TestPcapSvc(s_tests.SynTest):
             sha = hashlib.sha256(b"x").hexdigest()
             retns = await collect(prox.flows(sha))
             assert not retns[0]["status"]
-            assert retns[0]["mesg"] == \
-                "The service has no axon:url, the capture must be uploaded."
+            assert retns[0]["mesg"] == "The service has no axon:url, the capture must be uploaded."
             retns = await collect(prox.flows(sha, keylogs=[sha], upload="x"))
             assert retns[0]["mesg"] == "The service has no axon:url, key logs must be uploaded."
 
@@ -256,7 +270,6 @@ needsTshark = needs("tshark")
 
 
 class TestPcapSvcUploads(s_tests.SynTest):
-
     async def test_uploads(self):
         # Without an Axon, Storm streams the capture (and key logs) to the service.
         data = g.pcap(g.session())
@@ -277,8 +290,7 @@ class TestPcapSvcUploads(s_tests.SynTest):
             iden = await prox.upload(data)
             other = hashlib.sha256(b"other").hexdigest()
             retns = await collect(prox.flows(other, upload=iden))
-            assert retns[0]["mesg"] == \
-                f"The uploaded capture has the SHA-256 {sha}, not {other}."
+            assert retns[0]["mesg"] == f"The uploaded capture has the SHA-256 {sha}, not {other}."
             assert iden not in svc.uploads
 
             # Key logs are uploads too, and can't be used as captures (or the other way around).
@@ -298,8 +310,7 @@ class TestPcapSvcUploads(s_tests.SynTest):
             svc.conf["pcap:maxsize"] = 10
             iden = (await prox.call("uploadStart"))["data"]
             retn = await prox.call("uploadChunk", iden, b"x" * 11)
-            assert retn["mesg"] == \
-                "The capture is larger than the service's max size of 10 bytes."
+            assert retn["mesg"] == "The capture is larger than the service's max size of 10 bytes."
             assert iden not in svc.uploads
             svc.conf["pcap:maxsize"] = 1 << 30
 
@@ -345,22 +356,30 @@ NOENGINES = {"suricata:bin": "/nonexistent/suricata", "snort:bin": "/nonexistent
 
 
 class TestPcapSvcTshark(s_tests.SynTest):
-
     async def test_no_tshark(self):
         async with self.getTestAxon() as axon:
             _, sha = await axon.put(g.pcap(g.session()))
-            conf = {"axon:url": axon.getLocalUrl(), "tshark:path": "/nonexistent/tshark",
-                    **NOENGINES}
+            conf = {
+                "axon:url": axon.getLocalUrl(),
+                "tshark:path": "/nonexistent/tshark",
+                **NOENGINES,
+            }
             async with self.getTestCoreProxSvc(PcapSvc, ssvc_conf=conf) as (_, _, svc):
                 prox = SvcProx(svc)
                 retns = await collect(prox.flows(sha.hex()))
                 summary = retns[0]["data"]["summary"]
-                assert summary["engines"]["tshark"] == {"enabled": False,
-                                                        "error": "tshark is not installed"}
-                assert summary["engines"]["suricata"] == {"enabled": False,
-                                                          "error": "Suricata is not installed"}
-                assert summary["engines"]["snort"] == {"enabled": False,
-                                                       "error": "Snort is not installed"}
+                assert summary["engines"]["tshark"] == {
+                    "enabled": False,
+                    "error": "tshark is not installed",
+                }
+                assert summary["engines"]["suricata"] == {
+                    "enabled": False,
+                    "error": "Suricata is not installed",
+                }
+                assert summary["engines"]["snort"] == {
+                    "enabled": False,
+                    "error": "Snort is not installed",
+                }
                 assert summary["files"] == {"count": 0, "skipped": 0, "uploaded": 0}
                 assert summary["hits"] == 0
                 # Flows still have every key, just empty.
@@ -378,8 +397,10 @@ class TestPcapSvcTshark(s_tests.SynTest):
             _, sha = await axon.put(g.pcap(g.session()))
             conf = {"axon:url": axon.getLocalUrl(), **NOENGINES}
             async with self.getTestCoreProxSvc(PcapSvc, ssvc_conf=conf) as (_, _, svc):
+
                 async def broken(path, **kwargs):
                     raise p_tshark.TsharkError("boom")
+
                 svc.tshark.path = "/bin/true"
                 svc.tshark.frames = broken
                 retns = await collect(SvcProx(svc).flows(sha.hex()))
@@ -418,8 +439,11 @@ class TestPcapSvcTshark(s_tests.SynTest):
                 # Only the 6 byte response fits.
                 svc.conf["pcap:files:maxsize"] = 100
                 retns = await collect(prox.flows(sha.hex()))
-                assert retns[0]["data"]["summary"]["files"] == {"count": 1, "skipped": 2,
-                                                                "uploaded": 0}
+                assert retns[0]["data"]["summary"]["files"] == {
+                    "count": 1,
+                    "skipped": 2,
+                    "uploaded": 0,
+                }
 
                 svc.conf["tshark:enabled"] = False
                 retns = await collect(prox.flows(sha.hex()))
@@ -442,7 +466,6 @@ class TestPcapSvcTshark(s_tests.SynTest):
 
 
 class TestPcapSvcOptions(s_tests.SynTest):
-
     async def test_bad_suricata_set(self):
         # A suricata:set key that can't apply fails at startup, not on every run.
         with self.getTestDir() as dirn:
@@ -461,8 +484,11 @@ class TestPcapSvcOptions(s_tests.SynTest):
         async with self.getTestAxon() as axon:
             _, sha = await axon.put(g.pcap(g.session()))
             _, keylog = await axon.put(b"CLIENT_RANDOM 00 00\n")
-            conf = {"axon:url": axon.getLocalUrl(), "tshark:path": "/nonexistent/tshark",
-                    **NOENGINES}
+            conf = {
+                "axon:url": axon.getLocalUrl(),
+                "tshark:path": "/nonexistent/tshark",
+                **NOENGINES,
+            }
             async with self.getTestCoreProxSvc(PcapSvc, ssvc_conf=conf) as (_, _, svc):
                 prox = SvcProx(svc)
                 missing = hashlib.sha256(b"missing").hexdigest()
@@ -475,27 +501,37 @@ class TestPcapSvcOptions(s_tests.SynTest):
                     assert not retns[0]["status"] and mesg in retns[0]["mesg"], retns[0]["mesg"]
 
                 # Without tshark the key logs and rules aren't used, but are still reported.
-                retns = await collect(prox.flows(sha.hex(), keylogs=[keylog.hex()],
-                                                 decode=["TCP.port==8443,tls"]))
+                retns = await collect(
+                    prox.flows(sha.hex(), keylogs=[keylog.hex()], decode=["TCP.port==8443,tls"])
+                )
                 summary = retns[0]["data"]["summary"]
                 assert summary["keylogs"] == 1 and summary["decode"] == ("tcp.port==8443,tls",)
                 assert summary["engines"]["tshark"]["error"] == "tshark is not installed"
 
                 # With tshark, key logs have to be in the Axon and under the size limit.
                 svc.tshark.path = "/bin/true"
+
                 async def frames(path, keylog=None, decode=(), gaps=False):
                     assert pathlib.Path(keylog).read_bytes() == b"CLIENT_RANDOM 00 00\n\n" * 2
                     assert decode == ["tcp.port==8443,tls"]
                     assert not gaps
                     return {}, {"version": "fake", "error": None}
+
                 svc.tshark.frames = frames
-                retns = await collect(prox.flows(sha.hex(), keylogs=[keylog.hex(), keylog.hex()],
-                                                 decode=["tcp.port==8443,tls"]))
+                retns = await collect(
+                    prox.flows(
+                        sha.hex(),
+                        keylogs=[keylog.hex(), keylog.hex()],
+                        decode=["tcp.port==8443,tls"],
+                    )
+                )
                 assert retns[0]["status"] and retns[0]["data"]["summary"]["keylogs"] == 2
 
                 retns = await collect(prox.flows(sha.hex(), keylogs=[missing]))
-                assert retns[0]["mesg"] == \
-                    f"The TLS key log file:bytes:sha256={missing} is not in the Axon."
+                assert (
+                    retns[0]["mesg"]
+                    == f"The TLS key log file:bytes:sha256={missing} is not in the Axon."
+                )
                 svc.conf["tshark:keylog:maxsize"] = 5
                 retns = await collect(prox.flows(sha.hex(), keylogs=[keylog.hex()]))
                 assert "larger than the max size of 5 bytes" in retns[0]["mesg"]
@@ -519,8 +555,9 @@ class TestPcapSvcInputs(s_tests.SynTest):
             byts = bytearray(gzip.compress(data))
             byts[10:30] = b"\xff" * 20
             sha = hashlib.sha256(bytes(byts)).hexdigest()
-            retns = await collect(prox.flows(sha, upload=await prox.upload(bytes(byts)),
-                                             tshark=False))
+            retns = await collect(
+                prox.flows(sha, upload=await prox.upload(bytes(byts)), tshark=False)
+            )
             assert len(retns) == 1 and not retns[0]["status"]
             assert "Unable to decompress the capture" in retns[0]["mesg"]
 
@@ -528,12 +565,14 @@ class TestPcapSvcInputs(s_tests.SynTest):
             svc.conf["pcap:maxsize:decompressed"] = 1000
             byts = gzip.compress(data + b"\0" * 100_000)
             sha = hashlib.sha256(byts).hexdigest()
-            retns = await collect(prox.flows(sha, upload=await prox.upload(byts, size=4096),
-                                             tshark=False))
+            retns = await collect(
+                prox.flows(sha, upload=await prox.upload(byts, size=4096), tshark=False)
+            )
             assert not retns[0]["status"] and "pcap:maxsize:decompressed" in retns[0]["mesg"]
             svc.conf["pcap:maxsize:decompressed"] = 0
-            retns = await collect(prox.flows(sha, upload=await prox.upload(byts, size=4096),
-                                             tshark=False))
+            retns = await collect(
+                prox.flows(sha, upload=await prox.upload(byts, size=4096), tshark=False)
+            )
             assert retns[0]["status"], retns[0]
             assert list(pathlib.Path(svc.tmpdir).iterdir()) == []
 
@@ -585,26 +624,39 @@ class TestPcapSvcInputs(s_tests.SynTest):
 
             # A key log upload can carry the SHA-256 it must have.
             kiden = await prox.upload(klog, kind="keylog")
-            retns = await collect(prox.flows(sha, upload=await prox.upload(data), tshark=False,
-                                             keyloguploads=[{"upload": kiden, "sha256": ksha}]))
+            retns = await collect(
+                prox.flows(
+                    sha,
+                    upload=await prox.upload(data),
+                    tshark=False,
+                    keyloguploads=[{"upload": kiden, "sha256": ksha}],
+                )
+            )
             assert retns[0]["status"] and retns[0]["data"]["summary"]["keylogs"] == 1
 
             kiden = await prox.upload(klog, kind="keylog")
             other = hashlib.sha256(b"other").hexdigest()
-            retns = await collect(prox.flows(sha, upload=await prox.upload(data), tshark=False,
-                                             keyloguploads=[{"upload": kiden, "sha256": other}]))
-            assert retns[0]["mesg"] == \
-                f"The uploaded keylog has the SHA-256 {ksha}, not {other}."
+            retns = await collect(
+                prox.flows(
+                    sha,
+                    upload=await prox.upload(data),
+                    tshark=False,
+                    keyloguploads=[{"upload": kiden, "sha256": other}],
+                )
+            )
+            assert retns[0]["mesg"] == f"The uploaded keylog has the SHA-256 {ksha}, not {other}."
 
-            retns = await collect(prox.flows(sha, upload=await prox.upload(data),
-                                             keyloguploads=[{"nope": 1}]))
+            retns = await collect(
+                prox.flows(sha, upload=await prox.upload(data), keyloguploads=[{"nope": 1}])
+            )
             assert retns[0]["mesg"].startswith("Invalid key log upload")
 
             # tshark:keylog:maxsize caps a run's key logs together.
             svc.conf["tshark:keylog:maxsize"] = 30
             kidens = [await prox.upload(klog, kind="keylog") for _ in range(2)]
-            retns = await collect(prox.flows(sha, upload=await prox.upload(data), tshark=False,
-                                             keyloguploads=kidens))
+            retns = await collect(
+                prox.flows(sha, upload=await prox.upload(data), tshark=False, keyloguploads=kidens)
+            )
             assert "larger, together, than the max size of 30 bytes" in retns[0]["mesg"]
             svc._pruneUploads(idle=-1)
             assert list(pathlib.Path(svc.tmpdir).iterdir()) == []
