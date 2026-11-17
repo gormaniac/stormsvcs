@@ -1,5 +1,5 @@
 name: slib.abusech
-version: 0.4.1
+version: 0.5.0
 guid: e95841a657444e3691de476861eb2a94
 
 synapse_version: ">=2.256.0,<3.0.0"
