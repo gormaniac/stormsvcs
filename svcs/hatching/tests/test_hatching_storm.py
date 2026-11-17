@@ -1125,6 +1125,72 @@ class TestStormPaths(s_tests.SynTest):
             assert c2.get("decoys") == ("http://decoy.example.com/a", "https://b.example.com/")
             assert await core.count("inet:url=tcp://203.0.113.5:4444") == 1
 
+    async def test_model_merged_configs(self):
+        async with hatchingSvc(self) as (core, svc, fake):
+            # The overview and the task report carry the same config (family and C2s), each
+            # with fields the other left empty, or set differently.
+            overview = fake.overviews[SID]["extracted"][0]
+            report = fake.task_reports[(SID, "behavioral1")]["extracted"][0]
+            overview["config"] = dict(
+                ft.CONFIG,
+                mutex=[],
+                decoy=["decoy.example.com/a"],
+                dns=[],
+                campaign="overview-camp",
+                botnet="",
+            )
+            report["config"] = dict(
+                ft.CONFIG,
+                mutex=["Global\\cs-mutex"],
+                decoy=[],
+                dns=["8.8.8.8"],
+                campaign="task-camp",
+                listen_port=4444,
+            )
+
+            msgs = await core.stormlist(f"slib.hatching.enrich --sample {SID} --tasks")
+            self.stormHasNoWarnErr(msgs)
+
+            q = f"it:sec:c2:config:file=sha256:{ft.SAMPLE_SHA256}"
+            (c2,) = await core.nodes(q)
+            assert c2.get("mutex") == "Global\\cs-mutex"
+            assert c2.get("decoys") == ("http://decoy.example.com/a",)
+            assert c2.get("dns:resolvers") == ("udp://8.8.8.8:53",)
+            assert c2.get("listens") == ("tcp://0.0.0.0:4444",)
+            # Both copies have a campaign: the task report's wins.
+            assert c2.get("campaigncode") == "task-camp"
+            raw = c2.get("raw")
+            assert raw["botnet"] == "1359593325" and raw["campaign"] == "task-camp"
+            assert raw["decoy"] == ("decoy.example.com/a",) and raw["dns"] == ("8.8.8.8",)
+            assert await core.count(f"{q} -(refs)> auth:creds") == 1
+
+            # Modeling the sample again, from the overview alone, adds its new values but
+            # doesn't blank or replace what the task report set.
+            overview["config"] = dict(
+                ft.CONFIG, mutex=["other"], decoy=["https://b.example.com/"], campaign="newer"
+            )
+            msgs = await core.stormlist(f"slib.hatching.enrich --sample {SID}")
+            self.stormHasNoWarnErr(msgs)
+            (c2,) = await core.nodes(q)
+            assert c2.get("mutex") == "Global\\cs-mutex" and c2.get("campaigncode") == "task-camp"
+            assert c2.get("decoys") == ("http://decoy.example.com/a", "https://b.example.com/")
+            assert c2.get("dns:resolvers") == ("udp://8.8.8.8:53",)
+            assert c2.get("listens") == ("tcp://0.0.0.0:4444",)
+            assert c2.get("raw")["campaign"] == "task-camp"
+
+            # Again with the task report, whose values replace the earlier ones; its empty
+            # lists still don't blank anything.
+            overview["config"] = dict(ft.CONFIG)
+            report["config"] = dict(ft.CONFIG, mutex=[], campaign="task-newer")
+            msgs = await core.stormlist(f"slib.hatching.enrich --sample {SID} --tasks")
+            self.stormHasNoWarnErr(msgs)
+            (c2,) = await core.nodes(q)
+            assert c2.get("mutex") == "Global\\cs-mutex"
+            assert c2.get("campaigncode") == "task-newer"
+            assert c2.get("decoys") == ("http://decoy.example.com/a", "https://b.example.com/")
+            assert c2.get("dns:resolvers") == ("udp://8.8.8.8:53",)
+            assert c2.get("raw")["campaign"] == "task-newer"
+
     async def test_lookup_hashes(self):
         async with hatchingSvc(self) as (core, svc, fake):
             # file:bytes without a SHA256 are looked up by their other hashes.

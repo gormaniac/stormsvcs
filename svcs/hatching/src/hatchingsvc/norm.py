@@ -272,9 +272,13 @@ def normCreds(items: Any) -> list[dict]:
     return ret
 
 
-def normConfig(config: dict) -> dict:
+def normConfig(config: dict, detailed: bool = False) -> dict:
     """A malware config: its C2 servers as URLs (and their hosts), mutexes, decoys, listeners,
-    DNS resolvers, wallets, and credentials."""
+    DNS resolvers, wallets, and credentials.
+
+    ``detailed`` marks a config from a task report, rather than the overview (see
+    ``mergeConfig``).
+    """
 
     servers = uniq(c2Url(c) for c in config.get("c2") or [])
 
@@ -304,19 +308,87 @@ def normConfig(config: dict) -> dict:
         "botnet": config.get("botnet") or None,
         "version": config.get("version") or None,
         "raw": config,
+        "detailed": detailed,
     }
 
 
-def normExtracts(ret: dict, extracts: list[dict] | None) -> None:
-    """Add the configs, droppers, and ransom notes of a report's ``extracted`` section."""
+def isEmpty(valu: Any) -> bool:
+    """Whether a value is missing: None, an empty string, or an empty list or dict."""
+
+    return valu is None or (isinstance(valu, (str, list, dict)) and not valu)
+
+
+def mergeValu(old: Any, new: Any) -> Any:
+    """Merge two copies of a value, field by field.
+
+    An empty value never replaces a non-empty one. Lists are unioned (old's items first, then
+    new's, without duplicates), and dicts are merged key by key. When both are non-empty scalars
+    that differ, ``new`` wins.
+    """
+
+    if isEmpty(new):
+        return old
+    if isEmpty(old):
+        return new
+    if isinstance(old, list) and isinstance(new, list):
+        ret = list(old)
+        for item in new:
+            if item not in ret:
+                ret.append(item)
+        return ret
+    if isinstance(old, dict) and isinstance(new, dict):
+        ret = dict(old)
+        for key, valu in new.items():
+            ret[key] = mergeValu(old[key], valu) if key in old else valu
+        return ret
+    return new
+
+
+def configKey(config: dict) -> tuple:
+    """A normalized config's identity, its family and C2 servers.
+
+    The Storm model derives the config's ``it:sec:c2:config`` guid from the same values.
+    """
+
+    return (config["family"], tuple(config["servers"]))
+
+
+def mergeConfig(old: dict, new: dict) -> dict:
+    """Merge two normalized copies of the same malware config (see ``configKey``) field by field.
+
+    Triage reports a config in the overview and again in each task report that extracted it, and
+    the copies can differ (ex. a field one of them left empty). Empty values and lists never
+    blank the other copy's, lists are unioned, and when both copies hold a different scalar the
+    task report's (``detailed``) wins: it's extracted from that task's own memory dumps, while
+    the overview's copy is Triage's summary of every task. Between two copies from the same kind
+    of report, the later one wins. The ``raw`` config is merged by the same rules.
+    """
+
+    if old["detailed"] and not new["detailed"]:
+        old, new = new, old
+    ret = {key: mergeValu(old.get(key), valu) for key, valu in new.items()}
+    ret["detailed"] = old["detailed"] or new["detailed"]
+    return ret
+
+
+def normExtracts(ret: dict, extracts: list[dict] | None, detailed: bool = False) -> None:
+    """Add the configs, droppers, and ransom notes of a report's ``extracted`` section.
+
+    ``detailed`` is True for a task report's section, False for the overview's. A config with the
+    same identity as one already in ``ret`` is merged into it (see ``mergeConfig``).
+    """
 
     for extract in extracts or []:
         for cred in normCreds(extract.get("credentials")):
             if cred not in ret["creds"]:
                 ret["creds"].append(cred)
         if extract.get("config"):
-            config = normConfig(extract["config"])
-            if config not in ret["configs"]:
+            config = normConfig(extract["config"], detailed=detailed)
+            for i, item in enumerate(ret["configs"]):
+                if configKey(item) == configKey(config):
+                    ret["configs"][i] = mergeConfig(item, config)
+                    break
+            else:
                 ret["configs"].append(config)
         if extract.get("dropper"):
             dropper = extract["dropper"]
@@ -706,7 +778,7 @@ def normSample(
         for sig in report.get("signatures") or []:
             techs += ttps(sig.get("ttp"))
         normSigs(ret, report.get("signatures"))
-        normExtracts(ret, report.get("extracted"))
+        normExtracts(ret, report.get("extracted"), detailed=True)
         ret["tasks"].append(normTask(name, report))
 
     for config in ret["configs"]:

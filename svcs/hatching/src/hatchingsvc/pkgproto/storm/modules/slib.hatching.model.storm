@@ -227,12 +227,39 @@ function c2config(snode, data, config, prefix) {
     return($c2node)
 }
 
+// A config modeled by an earlier run is merged with this one like hatchingsvc.norm merges the
+// overview's and task reports' copies: array props are unioned, and a null or empty value never
+// blanks a prop. A scalar prop is replaced by a config from a task report (it wins over the
+// overview's copy), but only filled in, never replaced, by an overview-only one, so re-modeling
+// a sample without --tasks doesn't undo what its task reports added.
 function c2configNode(data, config, file, mutex) {
     [ it:sec:c2:config=(slib.hatching, $data.id, config, $config.family, $config.servers)
-        :family?=$config.family :file?=$file :servers?=$config.servers :mutex?=$mutex
-        :decoys?=$config.decoys :listens?=$config.listens :dns:resolvers?=$config.resolvers
-        :campaigncode?=$config.campaign :raw?=$config.raw ]
+        :family?=$config.family :file?=$file :servers?=$config.servers ]
+    $decoys = $union(:decoys, $config.decoys, inet:url)
+    $listens = $union(:listens, $config.listens, inet:url)
+    $resolvers = $union(:dns:resolvers, $config.resolvers, inet:server)
+    [ :decoys?=$decoys :listens?=$listens :dns:resolvers?=$resolvers ]
+    if $config.detailed {
+        [ :mutex?=$mutex :campaigncode?=$config.campaign :raw?=$config.raw ]
+    } else {
+        if (not :mutex) { [ :mutex?=$mutex ] }
+        if (not :campaigncode) { [ :campaigncode?=$config.campaign ] }
+        if (not :raw) { [ :raw?=$config.raw ] }
+    }
     return($seen($node))
+}
+
+// The union of an array prop's values (old) and new values normalized as type, in order, or
+// null if both are empty.
+function union(old, new, type) {
+    $ret = ([])
+    if $old { $ret.extend($old) }
+    for $item in $new {
+        ($ok, $norm) = $lib.trycast($type, $item)
+        if ($ok and not $ret.has($norm)) { $ret.append($norm) }
+    }
+    if $ret { return($ret) }
+    return()
 }
 
 function c2(n, prefix, famtag, ival) {
