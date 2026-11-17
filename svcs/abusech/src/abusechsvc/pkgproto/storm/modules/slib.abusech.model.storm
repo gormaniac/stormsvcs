@@ -43,6 +43,11 @@ function setPrefix(prefix) {
     return($prefix)
 }
 
+// The meta:source guid of each platform, ({"<platform>": "<guid>"}).
+function sourceGuids() {
+    return($sources)
+}
+
 // ---- Generic helpers, each returns a single node ----
 
 // Link the node to the platform's meta:source and update its .seen.
@@ -145,13 +150,14 @@ function serverNode(ip, port, plat, first=(null), last=(null), proto=tcp) {
     return($seen($node, $plat, $first, $last))
 }
 
-// A link to a report/reference about a node: inet:url -(refs)> node.
+// A link to a report/reference about a node: inet:url -(about)> node.
+// (Before 0.5.0 this was a -(refs)> edge, see slib.abusech.admin.edges.migrate.)
 function refNode(url, n, plat) {
     if ((not $url) or $n = null) { return() }
     [ inet:url?=$url ]
     if ($node = null) { return() }
     $refnode = $seen($node, $plat)
-    $edge($refnode, refs, $n)
+    $edge($refnode, about, $n)
     return($refnode)
 }
 
@@ -350,20 +356,21 @@ function scan(file, sc, plat) {
         }
     }
 
-    // C2s from the malware config the vendor extracted, and URLs it found in the file.
+    // C2s from the malware config the vendor extracted, and URLs it found in the file
+    // (file:bytes -(refs)> inet:url).
     for $c2 in $sc.c2s { $c2config($file, $c2, $plat) }
     for $u in $sc.urls { $edge($file, refs, $urlNode($u, $plat)) }
     return($scannode)
 }
 
 // A C2 from an extracted malware config (see norm.normC2Config), as an it:sec:c2:config for the
-// file with the C2 in :servers, and the C2 host/server tagged c2 and with the family.
+// file with the C2 in :servers (as an inet:url: the URL itself, tcp://host:port, or tcp://host
+// for a bare host), and the C2 host/server tagged c2 and with the family. The config node
+// records the file's relation to its C2s, so there's no edge from the file to the C2. (Before
+// 0.5.0 it was file:bytes -(refs)> the C2, see slib.abusech.admin.edges.migrate.)
 function c2config(file, c, plat) {
     $srv = $obsNode($c.obs, $plat)
-    if $srv {
-        $tagNode($srv, $plat, (c2, $c.family_tag))
-        $edge($file, refs, $srv)
-    }
+    if $srv { $tagNode($srv, $plat, (c2, $c.family_tag)) }
     $cfg = $c2ConfigNode($file, $c, $plat)
     if $c.url { $addArrayValu($cfg, servers, $c.url) }
     if $c.family { $family($plat, $c.family, $c.family_tag) }
@@ -473,10 +480,11 @@ function sample(s, plat) {
 
     for $link in $s.links { $refNode($link.url, $file, $plat) }
 
+    // Related samples, file:bytes -(linked)> file:bytes (the dropper -(linked)> the sample).
     for $rel in $s.related {
         $other = $fileNode($rel, $plat)
-        if ($rel.rel = "dropped_by") { $edge($other, refs, $file) }
-        else { $edge($file, refs, $other) }
+        if ($rel.rel = "dropped_by") { $edge($other, linked, $file) }
+        else { $edge($file, linked, $other) }
     }
 
     for $n in $s.notes { $noteAbout($file, `slib.abusech.{$plat}.info`, $n) }
@@ -484,7 +492,8 @@ function sample(s, plat) {
         $noteAbout($file, `slib.abusech.{$plat}.comment`, $cmt.text, $cmt.author, $cmt.time)
     }
 
-    if $s.archive_pw { $edge($file, refs, $passwdNode($s.archive_pw)) }
+    // The archive's password, file:bytes -(uses)> inet:passwd.
+    if $s.archive_pw { $edge($file, uses, $passwdNode($s.archive_pw)) }
 
     // YARAify unpacked files.
     for $unp in $s.unpacked {
@@ -581,15 +590,16 @@ function ioc(i, plat=threatfox) {
     if $i.family { $family($plat, $i.family, $i.family_tag, $i.aliases, $i.malware, $i.malpedia) }
     $reporter($i.reporter, $obsnode, $plat)
 
+    // The payloads listed with the IOC, file:bytes -(uses)> the observable.
     for $s in $i.samples {
         $file = $sample($s, $plat)
-        $edge($file, refs, $obsnode)
+        $edge($file, uses, $obsnode)
         if $i.family_tag { $tagNode($file, $plat, ($i.family_tag,), $s.seen) }
     }
     return($obsnode)
 }
 
-// The IOC record itself, as an it:sec:stix:indicator -(refs)> the observable.
+// The IOC record itself, as an it:sec:stix:indicator -(detects)> the observable.
 function indicator(i, obsnode, plat) {
     if (not $i.id) { return() }
     $desc = $i.threat_type_desc
@@ -617,7 +627,7 @@ function indicator(i, obsnode, plat) {
         :labels ?= $labels
     ]
     $ind = $seen($node, $plat, $i.first_seen, $i.last_seen)
-    $edge($ind, refs, $obsnode)
+    $edge($ind, detects, $obsnode)
     $refNode($i.reference, $ind, $plat)
     return($ind)
 }

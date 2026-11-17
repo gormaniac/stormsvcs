@@ -338,6 +338,21 @@ def serverUrl(host: str, port: int | None) -> str | None:
     return f"tcp://{host}:{port}"
 
 
+def c2Url(obs: dict, host: str, port: int | None) -> str:
+    """The inet:url an extracted C2 goes in ``it:sec:c2:config:servers`` as.
+
+    The C2's URL itself, ``tcp://host:port``, or ``tcp://host`` for a bare host (an IP or FQDN
+    without a port), so the config records every C2, however the vendor gave it.
+    """
+
+    if obs["form"] == "inet:url":
+        return obs["valu"]
+    if port:
+        return serverUrl(host, port)
+    ip = ipAddr(host)
+    return f"tcp://[{ip}]" if ip and ip.version == 6 else f"tcp://{host.lower()}"
+
+
 def normObservable(kind: str | None, valu: Any) -> dict | None:
     """Type an abuse.ch value into the Synapse form it should be modeled as.
 
@@ -655,7 +670,7 @@ def normC2Config(cfg: Any, family: str | None = None) -> dict | None:
         "obs": obs,
         "host": host.lower(),
         "port": port,
-        "url": None if obs["form"] == "inet:url" else serverUrl(host, port),
+        "url": c2Url(obs, host, port),
         "family": fam,
         "family_tag": normTag(fam),
     }

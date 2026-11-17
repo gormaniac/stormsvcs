@@ -7,7 +7,7 @@ import pytest
 import synapse.tests.utils as s_tests
 from stormlibpp.testing import assertMainHelp, assertVersionsMatch
 
-from abusechsvc import __version__
+from abusechsvc import __version__, norm
 from abusechsvc.client import AbuseChApiError
 from abusechsvc.defs import EXT_PROPS, PKGDEFS, SOURCES, SVC_NAME
 
@@ -111,7 +111,7 @@ class TestStormPkg(s_tests.SynTest):
             self.eq("abuse.ch bazaar: hash_not_found", retn["mesg"])
 
     async def test_pkg(self):
-        assert len(CMDS) == 33
+        assert len(CMDS) == 34
 
         async with abusechSvc(self) as (core, svc, fake):
             msgs = await core.stormlist("service.list")
@@ -218,7 +218,7 @@ class TestStormBazaar(s_tests.SynTest):
             assert "trojan" in scans["any.run"].get("categories")
 
             # Report links, and the file UnpacMe unpacked.
-            assert await nodeset(core, f"{FILE} <(refs)- inet:url") == {
+            assert await nodeset(core, f"{FILE} <(about)- inet:url") == {
                 ("inet:url", "https://app.any.run/tasks/1234"),
                 ("inet:url", "https://tria.ge/reports/1234/"),
                 ("inet:url", "https://www.unpac.me/results/1234/"),
@@ -230,8 +230,8 @@ class TestStormBazaar(s_tests.SynTest):
                 ("inet:url", "https://twitter.com/abuse_ch/status/1"),
             }
 
-            # URLs DocGuard found in the file.
-            assert await nodeset(core, f"{FILE} -(refs)> inet:url") == {
+            # URLs DocGuard found in the file (and only those: the C2s aren't edges).
+            assert await nodeset(core, f"{FILE} -(refs)> *") == {
                 ("inet:url", "http://docguard.example.net/payload.bin")
             }
 
@@ -239,10 +239,12 @@ class TestStormBazaar(s_tests.SynTest):
             cfg = (await core.nodes(f"it:sec:c2:config:file=sha256:{SHA256}"))[0]
             assert cfg.get("family") == "agenttesla"
             assert set(cfg.get("servers")) == {"tcp://c2.example.org:587", "tcp://9.8.7.6:2929"}
-            assert await nodeset(core, f"{FILE} -(refs)> * +#rep.abusech.bazaar.c2") == {
+            # The config records the file's C2s, so there's no edge from the file to them.
+            assert await nodeset(core, "#rep.abusech.bazaar.c2") == {
                 ("inet:fqdn", "c2.example.org"),
                 ("inet:server", "tcp://9.8.7.6:2929"),
             }
+            assert await count(core, f"{FILE} -(*)> * +#rep.abusech.bazaar.c2") == 0
             assert (
                 "rep.abusech.bazaar.agenttesla"
                 in (await core.nodes("inet:fqdn=c2.example.org"))[0].tags
@@ -264,7 +266,7 @@ class TestStormBazaar(s_tests.SynTest):
             assert "rep.abusech.bazaar.agenttesla" in nodes[0].tags
 
             # The sample's dropper.
-            nodes = await core.nodes(f"{FILE} <(refs)- file:bytes")
+            nodes = await core.nodes(f"{FILE} <(linked)- file:bytes")
             assert [n.get("sha256") for n in nodes] == [fd.DROPPER]
 
             # YARA matches.
@@ -558,7 +560,7 @@ class TestStormUrlhaus(s_tests.SynTest):
             assert (
                 await count(
                     core,
-                    f"inet:url={url} <(refs)- inet:url +inet:url=https://urlhaus.abuse.ch/url/105821/",
+                    f"inet:url={url} <(about)- inet:url +inet:url=https://urlhaus.abuse.ch/url/105821/",
                 )
                 == 1
             )
@@ -588,7 +590,7 @@ class TestStormUrlhaus(s_tests.SynTest):
             assert (
                 await count(
                     core,
-                    f"file:bytes={fd.PAYLOAD} <(refs)- inet:url +inet:url=https://www.virustotal.com/gui/file/x",
+                    f"file:bytes={fd.PAYLOAD} <(about)- inet:url +inet:url=https://www.virustotal.com/gui/file/x",
                 )
                 == 1
             )
@@ -619,7 +621,7 @@ class TestStormUrlhaus(s_tests.SynTest):
             assert (
                 await count(
                     core,
-                    "inet:ipv4=1.2.3.4 <(refs)- inet:url +inet:url=https://urlhaus.abuse.ch/host/1.2.3.4/",
+                    "inet:ipv4=1.2.3.4 <(about)- inet:url +inet:url=https://urlhaus.abuse.ch/host/1.2.3.4/",
                 )
                 == 1
             )
@@ -703,7 +705,7 @@ class TestStormThreatFox(s_tests.SynTest):
             for tag in ("botnet_cc", "dridex", "exe", "test"):
                 assert f"rep.abusech.threatfox.{tag}" in fqdn.tags, tag
 
-            nodes = await core.nodes("inet:fqdn=gaga.com <(refs)- it:sec:stix:indicator")
+            nodes = await core.nodes("inet:fqdn=gaga.com <(detects)- it:sec:stix:indicator")
             assert len(nodes) == 1
             ind = nodes[0]
             assert ind.get("id") == "threatfox--41" and ind.get("confidence") == 50
@@ -718,7 +720,7 @@ class TestStormThreatFox(s_tests.SynTest):
             assert (
                 await count(
                     core,
-                    "it:sec:stix:indicator <(refs)- inet:url +inet:url=https://twitter.com/abuse_ch/status/2",
+                    "it:sec:stix:indicator <(about)- inet:url +inet:url=https://twitter.com/abuse_ch/status/2",
                 )
                 == 1
             )
@@ -732,13 +734,14 @@ class TestStormThreatFox(s_tests.SynTest):
             assert (
                 await count(
                     core,
-                    "risk:tool:software <(refs)- inet:url +inet:url=https://malpedia.caad.fkie.fraunhofer.de/details/win.dridex",
+                    "risk:tool:software <(about)- inet:url +inet:url=https://malpedia.caad.fkie.fraunhofer.de/details/win.dridex",
                 )
                 == 1
             )
 
-            # The IOC's malware sample references it.
-            assert await count(core, f"{FILE} -(refs)> inet:fqdn +inet:fqdn=gaga.com") == 1
+            # The IOC's malware sample uses it.
+            assert await count(core, f"{FILE} -(uses)> inet:fqdn +inet:fqdn=gaga.com") == 1
+            assert await count(core, f"{FILE} -(refs)> *") == 0
             assert await count(core, "inet:service:account:user=abuse_ch -(refs)> inet:fqdn") == 1
 
     async def test_lookup_forms(self):
@@ -764,7 +767,7 @@ class TestStormThreatFox(s_tests.SynTest):
                 "cobalt strike",
             }
             ind = (
-                await core.nodes("inet:server=tcp://5.6.7.8:443 <(refs)- it:sec:stix:indicator")
+                await core.nodes("inet:server=tcp://5.6.7.8:443 <(detects)- it:sec:stix:indicator")
             )[0]
             assert ind.get("updated") == 1790985600000
 
@@ -1628,6 +1631,239 @@ class TestStormFamilies(s_tests.SynTest):
             self.stormIsInPrint("There are no old family nodes to merge", msgs)
             after = {n.ndef: (n.props, n.tags) for n in await core.nodes("risk:tool:software")}
             assert before == after
+
+
+async def edgeset(core):
+    """Every light edge in the Cortex, as (n1 ndef, verb, n2 ndef)."""
+    nodes = await core.nodes(".created")
+    ndefs = {node.iden(): node.ndef for node in nodes}
+    edges = set()
+    for node in nodes:
+        async for verb, iden in node.iterEdgesN1():
+            edges.add((node.ndef, verb, ndefs[iden]))
+    return edges
+
+
+class TestStormEdges(s_tests.SynTest):
+    """The light edges the model makes, and the migration from the old -(refs)> edges."""
+
+    async def test_model_edges(self):
+        # Archive passwords and C2s a vendor gave as a bare host or a URL.
+        async with abusechSvc(self) as (core, svc, fake):
+            s = {
+                "sha256": SHA256,
+                "archive_pw": "infected",
+                "related": [{"rel": "dropped_by", "sha256": fd.DROPPER}],
+                "scans": [
+                    {
+                        "vendor": "triage",
+                        "categories": [],
+                        "children": [],
+                        "urls": ["http://found.example.net/a"],
+                        "c2s": [
+                            norm.normC2Config({"c2": c2, "family": "agenttesla"})
+                            for c2 in (
+                                "c2.example.org:587",
+                                "5.5.5.5",
+                                "bare.example.org",
+                                "http://gate.example.org/gate.php",
+                            )
+                        ],
+                    }
+                ],
+            }
+            q = "$m = $lib.import(slib.abusech.model) $m.setPrefix(rep.abusech) $m.sample($s, bazaar)"
+            msgs = await core.stormlist(q, opts={"vars": {"s": s}})
+            self.stormHasNoErr(msgs)
+
+            assert await nodeset(core, f"{FILE} -(uses)> *") == {("inet:passwd", "infected")}
+            assert await nodeset(core, f"{FILE} <(linked)- *") == {
+                ("file:bytes", f"sha256:{fd.DROPPER}")
+            }
+            # Only the URL found in the file is an edge, the C2s are in the config.
+            assert await nodeset(core, f"{FILE} -(refs)> *") == {
+                ("inet:url", "http://found.example.net/a")
+            }
+            cfg = (await core.nodes(f"it:sec:c2:config:file=sha256:{SHA256}"))[0]
+            assert set(cfg.get("servers")) == {
+                "tcp://c2.example.org:587",
+                "tcp://5.5.5.5",
+                "tcp://bare.example.org",
+                "http://gate.example.org/gate.php",
+            }
+            assert await nodeset(core, "#rep.abusech.bazaar.c2") == {
+                ("inet:fqdn", "c2.example.org"),
+                ("inet:ipv4", "5.5.5.5"),
+                ("inet:fqdn", "bare.example.org"),
+                ("inet:url", "http://gate.example.org/gate.php"),
+            }
+
+    async def test_migrate(self):
+        async with abusechSvc(self) as (core, svc, fake):
+            opts = {"vars": {"bz": src("bazaar"), "tf": src("threatfox")}}
+            # Old style (< 0.5.0) data, everything linked to an abuse.ch meta:source.
+            await core.nodes(
+                f"""
+                [ file:bytes=sha256:{SHA256} file:bytes=sha256:{fd.DROPPER}
+                  inet:url=https://bazaar.abuse.ch/sample/x/ inet:fqdn=gaga.com
+                  inet:url=https://twitter.com/abuse_ch/status/2
+                  inet:server=tcp://9.8.7.6:2929 inet:ipv4=5.5.5.5 inet:fqdn=c2.example.org
+                  inet:url=http://found.example.net/a inet:url=http://gate.example.org/x
+                  it:sec:stix:indicator=({{"id": "threatfox--41"}})
+                ]
+                [ <(seen)+ {{ meta:source=$bz }} ]
+                """,
+                opts=opts,
+            )
+            await core.nodes(
+                f"""
+                [ it:sec:c2:config=({{"file": "sha256:{SHA256}", "family": "agenttesla"}})
+                    :servers=(tcp://9.8.7.6:2929, tcp://c2.example.org:587)
+                    <(seen)+ {{ meta:source=$bz }}
+                ]
+                """,
+                opts=opts,
+            )
+            await core.nodes(
+                f"""
+                file:bytes=sha256:{SHA256} it:sec:stix:indicator inet:fqdn=gaga.com
+                [ <(seen)+ {{ meta:source=$tf }} ]
+                """,
+                opts=opts,
+            )
+            await core.nodes(
+                f"""
+                file:bytes=sha256:{SHA256} [
+                    <(refs)+ {{ inet:url=https://bazaar.abuse.ch/sample/x/ }}
+                    <(refs)+ {{ file:bytes=sha256:{fd.DROPPER} }}
+                    <(refs)+ {{ [ inet:service:account=* ] }}
+                    +(refs)> {{ [ inet:passwd=infected ] }}
+                    +(refs)> {{ inet:fqdn=gaga.com }}
+                    +(refs)> {{ inet:server=tcp://9.8.7.6:2929 }}
+                    +(refs)> {{ inet:fqdn=c2.example.org }}
+                    +(refs)> {{ inet:ipv4=5.5.5.5 }}
+                    +(refs)> {{ inet:url=http://found.example.net/a }}
+                    +(refs)> {{ inet:url=http://gate.example.org/x }}
+                ]
+                """
+            )
+            await core.nodes(
+                """
+                it:sec:stix:indicator [
+                    +(refs)> { inet:fqdn=gaga.com }
+                    <(refs)+ { inet:url=https://twitter.com/abuse_ch/status/2 }
+                ]
+                """
+            )
+            # A file with two configs, and a bare host C2 (ambiguous, kept).
+            await core.nodes(
+                """
+                [ file:bytes=sha256:{h}
+                  it:sec:c2:config=({{"file": "sha256:{h}", "family": "a"}})
+                  it:sec:c2:config=({{"file": "sha256:{h}", "family": "b"}})
+                  inet:fqdn=amb.example.org
+                ]
+                [ <(seen)+ {{ meta:source=$bz }} ]
+                """.format(h="c" * 64),
+                opts=opts,
+            )
+            await core.nodes(
+                f"file:bytes=sha256:{'c' * 64} [ +(refs)> {{ inet:fqdn=amb.example.org }} ]"
+            )
+            # -(refs)> edges abuse.ch didn't make: nodes not linked to its meta:sources.
+            for q in (
+                f"[ inet:url=https://other.example.com/ +(refs)> {{ file:bytes=sha256:{SHA256} }} ]",
+                f"file:bytes=sha256:{SHA256} [ +(refs)> {{ [ inet:fqdn=other.example.com ] }} ]",
+                "inet:url=https://bazaar.abuse.ch/sample/x/ [ +(refs)> { [ inet:fqdn=mine.com ] } ]",
+                "it:sec:stix:indicator [ +(refs)> { [ inet:fqdn=mine2.com ] } ]",
+                f"[ file:bytes=sha256:{'e' * 64} +(refs)> {{ file:bytes=sha256:{SHA256} }} ]",
+            ):
+                await core.nodes(q)
+
+            fsha = ("file:bytes", f"sha256:{SHA256}")
+            dropper = ("file:bytes", f"sha256:{fd.DROPPER}")
+            ind = (await core.nodes("it:sec:stix:indicator"))[0].ndef
+            acct = (await core.nodes("inet:service:account"))[0].ndef
+            untouched = {
+                (acct, "refs", fsha),
+                (fsha, "refs", ("inet:url", "http://found.example.net/a")),
+                (fsha, "refs", ("inet:url", "http://gate.example.org/x")),
+                (("file:bytes", "sha256:" + "c" * 64), "refs", ("inet:fqdn", "amb.example.org")),
+                (("inet:url", "https://other.example.com/"), "refs", fsha),
+                (fsha, "refs", ("inet:fqdn", "other.example.com")),
+                (
+                    ("inet:url", "https://bazaar.abuse.ch/sample/x/"),
+                    "refs",
+                    ("inet:fqdn", "mine.com"),
+                ),
+                (ind, "refs", ("inet:fqdn", "mine2.com")),
+                (("file:bytes", "sha256:" + "e" * 64), "refs", fsha),
+            }
+
+            # A non-admin is refused.
+            user = await core.auth.addUser("analyst")
+            await user.addRule((True, ("slib", "abusech", "user")))
+            await user.addRule((True, ("node",)))
+            before = await edgeset(core)
+            msgs = await core.stormlist(
+                "slib.abusech.admin.edges.migrate --apply", opts={"user": user.iden}
+            )
+            self.stormIsInErr("permission", msgs)
+            assert await edgeset(core) == before
+
+            # The dry run prints the counts and changes nothing.
+            msgs = await core.stormlist("slib.abusech.admin.edges.migrate")
+            self.stormHasNoErr(msgs)
+            for line in (
+                "Would rewrite:",
+                "inet:url -(refs)> to -(about)>: 2",
+                "it:sec:stix:indicator -(refs)> to -(detects)>: 1",
+                "file:bytes -(refs)> file:bytes to -(linked)>: 1",
+                "file:bytes -(refs)> inet:passwd to -(uses)>: 1",
+                "file:bytes -(refs)> ThreatFox IOC to -(uses)>: 1",
+                "file:bytes -(refs)> C2 removed (in its it:sec:c2:config): 2",
+                "file:bytes -(refs)> C2 removed (added to its it:sec:c2:config): 1",
+                "file:bytes -(refs)> C2 kept (more than one it:sec:c2:config): 1",
+                "dry run",
+            ):
+                self.stormIsInPrint(line, msgs)
+            self.stormIsInWarn("amb.example.org", msgs)
+            assert await edgeset(core) == before
+            cfg = (await core.nodes(f"it:sec:c2:config:file=sha256:{SHA256}"))[0]
+            assert len(cfg.get("servers")) == 2
+
+            # --apply rewrites them.
+            msgs = await core.stormlist("slib.abusech.admin.edges.migrate --apply")
+            self.stormHasNoErr(msgs)
+            self.stormIsInPrint("Rewrote:", msgs)
+            self.stormIsInPrint("inet:url -(refs)> to -(about)>: 2", msgs)
+            after = await edgeset(core)
+            refs = {e for e in after if e[1] == "refs"}
+            assert refs == untouched
+            new = {e for e in after if e[1] in ("about", "detects", "linked", "uses")}
+            assert new == {
+                (("inet:url", "https://bazaar.abuse.ch/sample/x/"), "about", fsha),
+                (("inet:url", "https://twitter.com/abuse_ch/status/2"), "about", ind),
+                (ind, "detects", ("inet:fqdn", "gaga.com")),
+                (dropper, "linked", fsha),
+                (fsha, "uses", ("inet:passwd", "infected")),
+                (fsha, "uses", ("inet:fqdn", "gaga.com")),
+            }
+            cfg = (await core.nodes(f"it:sec:c2:config:file=sha256:{SHA256}"))[0]
+            assert set(cfg.get("servers")) == {
+                "tcp://9.8.7.6:2929",
+                "tcp://c2.example.org:587",
+                "tcp://5.5.5.5",
+            }
+
+            # A second run changes nothing.
+            msgs = await core.stormlist("slib.abusech.admin.edges.migrate --apply")
+            self.stormHasNoErr(msgs)
+            self.stormIsInPrint("inet:url -(refs)> to -(about)>: 0", msgs)
+            self.stormIsInPrint("C2 removed (added to its it:sec:c2:config): 0", msgs)
+            assert await edgeset(core) == after
+            cfg = (await core.nodes(f"it:sec:c2:config:file=sha256:{SHA256}"))[0]
+            assert len(cfg.get("servers")) == 3
 
 
 class TestStormAuditFixes(s_tests.SynTest):

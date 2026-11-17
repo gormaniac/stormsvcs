@@ -126,6 +126,7 @@ permission. Users still need the normal node permissions for the nodes the comma
 | `slib.abusech.admin.apikey` | Set/clear/check the service-wide Auth-Key. |
 | `slib.abusech.admin.tags` | Set the tag `--prefix` (default `rep.abusech`, it must be a valid tag name), `--enable` or `--disable` tagging. |
 | `slib.abusech.admin.families.merge` | Merge the malware family nodes made before 0.4.0 into the current ones, see [Malware families](#malware-families). A dry run unless `--apply`. |
+| `slib.abusech.admin.edges.migrate` | Rewrite the `-(refs)>` edges made before 0.5.0 into the current edges, see [Light edges](#light-edges). A dry run unless `--apply`. |
 | `slib.abusech.admin.request` | Send a raw request to any abuse.ch API, for anything not covered above. |
 
 Run any command with `--help` for all of its options and examples.
@@ -143,7 +144,7 @@ nodes: they run once per command, not once per inbound node, and the inbound nod
 slib.abusech.bazaar.search signature AgentTesla --limit 50 | slib.abusech.urlhaus.lookup
 
 // Cobalt Strike C2s from ThreatFox, and the samples that use them.
-slib.abusech.threatfox.search malware win.cobalt_strike | <(refs)- file:bytes
+slib.abusech.threatfox.search malware win.cobalt_strike | <(uses)- file:bytes
 
 // Model the recommended Feodo Tracker C2s and SSLBL's JA3 fingerprints.
 slib.abusech.feodo recommended
@@ -230,19 +231,19 @@ the platform's `meta:source` with a `-(seen)>` edge, and has `.seen` updated fro
 | Sample hashes, size, name, MIME type, imphash, ssdeep | `file:bytes` `:sha256`, `:sha1`, `:md5`, `:size`, `:name`, `:mime`, `:mime:pe:imphash`, `:ssdeeps` |
 | SHA3-384, TLSH, telfhash, gimphash, icon dhash | Extended props `file:bytes:_sha3_384`, `:_tlsh`, `:_telfhash`, `:_gimphash`, `:_dhash_icon` (added when the service is added) |
 | File type, tags, signature, delivery method, origin country | Tags, ex. `#rep.abusech.bazaar.type.exe`, `.agenttesla`, `.delivery.email_attachment`, `.origin.de` |
-| Malware families | `risk:tool:software` keyed on its name and reporter, see [Malware families](#malware-families) (`:soft:name`, `:soft:names` aliases, `:id` Malpedia ID, `:tag` the family's tag on the first platform it was tagged on), Malpedia link `inet:url -(refs)>` |
+| Malware families | `risk:tool:software` keyed on its name and reporter, see [Malware families](#malware-families) (`:soft:name`, `:soft:names` aliases, `:id` Malpedia ID, `:tag` the family's tag on the first platform it was tagged on), Malpedia link `inet:url -(about)>` |
 | Reporters | `inet:service:account` (on an `inet:service:platform` per abuse.ch platform) `-(refs)>` the node |
-| ClamAV, vendor intel, VirusTotal | `it:av:scan:result` (`:scanner:name`, `:signame`, `:verdict`, `:time`, `:categories`, `:multi:count`, `:multi:count:malicious`), report links as `inet:url -(refs)> file:bytes`. Each vendor (ANY.RUN, CAPE, CERT-PL MWDB, DocGuard, FileScan.IO, Intezer, Kaspersky, ReversingLabs, Spamhaus HBL, Triage, UnpacMe, YOROI) is read according to its own fields and scales |
-| Extracted malware configs (Triage) | `it:sec:c2:config` (`:file`, `:family`, `:servers`), the C2 host/server tagged `c2` and the family, `file:bytes -(refs)>` the C2 |
+| ClamAV, vendor intel, VirusTotal | `it:av:scan:result` (`:scanner:name`, `:signame`, `:verdict`, `:time`, `:categories`, `:multi:count`, `:multi:count:malicious`), report links as `inet:url -(about)> file:bytes`. Each vendor (ANY.RUN, CAPE, CERT-PL MWDB, DocGuard, FileScan.IO, Intezer, Kaspersky, ReversingLabs, Spamhaus HBL, Triage, UnpacMe, YOROI) is read according to its own fields and scales |
+| Extracted malware configs (Triage) | `it:sec:c2:config` (`:file`, `:family`, `:servers` with every C2: a URL C2 as itself, `host:port` as `tcp://host:port`, a bare host as `tcp://host`), the C2 host/server tagged `c2` and the family. The config records the file's C2s, there's no edge from the file to them |
 | File format, architecture, Magika type, OLE flags | Tags, ex. `#rep.abusech.bazaar.format.pe`, `.arch.amd64`, `.magika.pebin`, `.ole.vba_macros`; TrID, OLE details, and olevba findings as `meta:note`s. URLs DocGuard found in a file as `file:bytes -(refs)> inet:url` |
 | YARA rules and matches | `it:app:yara:rule` (`:name`, `:ext:id` YARAhub UUID, `:author`, `:url`, `:text`, `:created`, `:family`), matching and sharing TLP tags, description/license/reference as a `meta:note`; `it:app:yara:match`, including the sample the author wrote the rule for. Matches of non-public rules (masked as "xxx") aren't modeled. `:text` is only available for rules the author shares (TLP:WHITE), and is replaced when the author updates the rule. |
 | Code signing certificates | `crypto:x509:cert` (`:sha256`/`:sha1` thumbprint, `:serial`, `:subject`, `:issuer`, `:validity:*`), `crypto:x509:signedfile`; CSCB listings tagged `#rep.abusech.bazaar.cscb` with the reason as a `meta:note` |
-| Unpacked/related files | `file:subfile` (YARAify/UnpacMe unpacked files), droppers as `file:bytes -(refs)> file:bytes` |
+| Unpacked/related files | `file:subfile` (YARAify/UnpacMe unpacked files), related samples as `file:bytes -(linked)> file:bytes` (a dropper `-(linked)>` the file it dropped) |
 | Comments, file information, OLE info | `meta:note -(about)>` the node |
-| Archive passwords | `inet:passwd`, `file:bytes -(refs)> inet:passwd` |
-| URLhaus URLs | `inet:url` tagged with the threat, tags, `status.<online/offline>`, `larted` (all with the URL's first seen to last online); reference `inet:url -(refs)>`; payloads as `inet:urlfile` |
+| Archive passwords | `inet:passwd`, `file:bytes -(uses)> inet:passwd` |
+| URLhaus URLs | `inet:url` tagged with the threat, tags, `status.<online/offline>`, `larted` (all with the URL's first seen to last online); reference `inet:url -(about)>`; payloads as `inet:urlfile` |
 | URLhaus hosts | `inet:fqdn`/`inet:ipv4`/`inet:ipv6` tagged with Spamhaus DBL/SURBL listings (ex. `#rep.abusech.urlhaus.spamhaus_dbl.abused_legit_malware`), with the same time as the URL's tags. A `host:port` is modeled as the host |
-| ThreatFox IOCs | The observable (`inet:url`, `inet:fqdn`, `inet:server`, `inet:ipv4/6`, `file:bytes`) tagged with the threat type, family, tags, and `compromised`; the IOC record as an `it:sec:stix:indicator` (`:id`, `:confidence`, STIX `:pattern`, `:description` with the comment, `:labels`, `:created`, `:updated`) `-(refs)>` the observable; the reference as `inet:url -(refs)>`; samples as `file:bytes -(refs)>` the observable |
+| ThreatFox IOCs | The observable (`inet:url`, `inet:fqdn`, `inet:server`, `inet:ipv4/6`, `file:bytes`) tagged with the threat type, family, tags, and `compromised`; the IOC record as an `it:sec:stix:indicator` (`:id`, `:confidence`, STIX `:pattern`, `:description` with the comment, `:labels`, `:created`, `:updated`) `-(detects)>` the observable; the reference as `inet:url -(about)>`; samples as `file:bytes -(uses)>` the observable |
 | Feodo Tracker/SSLBL C2s | `inet:server` and `inet:ipv4` tagged `c2`, the family, and `status.<status>`; `inet:ipv4:asn` (with `inet:asn:name`), `:loc`; hostnames as `inet:dns:a` |
 | SSLBL certificates | `crypto:x509:cert:sha1` tagged `c2` and the family, with the listing reason as a `meta:note` |
 | SSLBL JA3 fingerprints | `hash:md5` tagged `ja3` and the family, with the listing reason as a `meta:note`, and a `meta:note` (`:type=slib.abusech.sslbl.ja3`) saying it's a JA3, since Synapse 2.x has no form for a bare JA3 (`inet:tls:ja3:sample` needs the client) |
@@ -288,6 +289,62 @@ second `--apply` finds nothing to do:
 slib.abusech.admin.families.merge
 slib.abusech.admin.families.merge --apply
 ```
+
+### Light edges
+
+| Edge | Meaning |
+|---|---|
+| `inet:url -(about)>` node | A reference/report link about a sample, URL, host, malware family, or IOC record |
+| `inet:service:account -(refs)>` node | The abuse.ch user who reported it |
+| `it:sec:stix:indicator -(detects)>` observable | The ThreatFox IOC record |
+| `file:bytes -(refs)> inet:url` | A URL a vendor's scan found in the file |
+| `file:bytes -(linked)> file:bytes` | A related sample (a dropper `-(linked)>` the file it dropped) |
+| `file:bytes -(uses)> inet:passwd` | The archive's password |
+| `file:bytes -(uses)>` observable | A ThreatFox payload listed with the IOC |
+
+A file's C2s from a vendor's extracted malware config are in its `it:sec:c2:config:servers`
+instead of an edge. Synapse 2.256 declares `-(refs)>` and `-(linked)>` between any forms, but not
+`-(about)>` from `inet:url`, `-(detects)>` from `it:sec:stix:indicator`, or `-(uses)>` from
+`file:bytes` to these forms (it declares `meta:note -(about)>`, `-(detects)>` from rule forms,
+and `file:bytes -(uses)> math:algorithm`). Synapse 2.x allows light edges it doesn't declare.
+
+Before 0.5.0 all of these were `-(refs)>`. `slib.abusech.admin.edges.migrate` rewrites the old
+edges into the current ones:
+
+- `inet:url -(refs)>` becomes `-(about)>`, `it:sec:stix:indicator -(refs)>` becomes
+  `-(detects)>`, `file:bytes -(refs)> file:bytes` becomes `-(linked)>` (same direction), and
+  `file:bytes -(refs)> inet:passwd` becomes `-(uses)>`.
+- A file's edge to an observable becomes `-(uses)>` when the file is from ThreatFox and a
+  ThreatFox `it:sec:stix:indicator` detects the observable (a payload listed with an IOC).
+- Otherwise, a file's edge to a C2 is removed when one of its `it:sec:c2:config` nodes has the C2
+  in `:servers`. Before 0.5.0 a C2 given as a bare host (no port) or as a URL wasn't put in
+  `:servers`: a bare host is added as `tcp://host` (when the file has one config, with more the
+  edge is kept with a warning), then the edge is removed. A URL C2 can't be told from a URL the
+  vendor found in the file, so its edge is kept until the next lookup of the file puts it in
+  `:servers`.
+- Reporters' and vendor-found URLs' `-(refs)>` edges are kept.
+
+Only edges between nodes linked to an abuse.ch `meta:source` (`-(seen)>`) are changed (an
+`inet:passwd` isn't linked to one, so only its file has to be), so `-(refs)>` edges anything else
+made are left alone. Without `--apply` it's a dry run that prints how many edges of each kind it
+would change, and a second `--apply` changes nothing. It needs the `node.edge.add` and
+`node.edge.del` permissions:
+
+```
+slib.abusech.admin.edges.migrate
+slib.abusech.admin.edges.migrate --apply
+```
+
+Bulk imports make the current edges (builder version 3). Imports made before 0.5.0 have the old
+ones, which the command also rewrites.
+
+### Changes in 0.5.0
+
+- The `-(refs)>` edges are replaced by `-(about)>`, `-(detects)>`, `-(linked)>`, and `-(uses)>`,
+  and a file's extracted C2s are only in its `it:sec:c2:config`, see [Light edges](#light-edges).
+  Run `slib.abusech.admin.edges.migrate` to rewrite the old edges.
+- Every extracted C2 is in `it:sec:c2:config:servers`, including those given as a URL or a bare
+  host.
 
 ### Changes in 0.4.0
 

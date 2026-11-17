@@ -1,0 +1,200 @@
+// Rewrite the generic -(refs)> light edges that slib.abusech < 0.5.0 made into the edges the
+// model uses now (see slib.abusech.model):
+//
+//   inet:url -(refs)> node                    -> inet:url -(about)> node (reference links)
+//   it:sec:stix:indicator -(refs)> node       -> -(detects)> (ThreatFox IOC records)
+//   file:bytes -(refs)> file:bytes            -> -(linked)>, same direction (related samples)
+//   file:bytes -(refs)> inet:passwd           -> -(uses)> (archive passwords)
+//   file:bytes -(refs)> ThreatFox IOC         -> -(uses)> (payloads listed with an IOC)
+//   file:bytes -(refs)> C2 host/server/URL    -> removed, the file's it:sec:c2:config has it
+//
+// inet:service:account -(refs)> (reporters) and file:bytes -(refs)> inet:url (URLs a vendor
+// found in the file) are kept. Only edges between nodes linked to an abuse.ch meta:source
+// (-(seen)>) are changed (an inet:passwd isn't linked to one, only its file is).
+//
+// Node edits run as the calling user. Functions are defined before init, which uses them.
+
+// Whether a node is linked to one of the abuse.ch meta:sources.
+function isAbuse(n) {
+    for $src in ${ yield $n <(seen)- meta:source } {
+        $guid = $src.value()
+        if $guids.$guid { return((true)) }
+    }
+    return((false))
+}
+
+function seenBy(n, guid) {
+    for $src in ${ yield $n <(seen)- meta:source +meta:source=$guid } { return((true)) }
+    return((false))
+}
+
+// Whether a node is a ThreatFox IOC: an it:sec:stix:indicator ThreatFox made refers to it (by
+// the old -(refs)> edge or the current -(detects)> edge).
+function isIoc(n) {
+    $tf = $sources.threatfox
+    for $ind in ${ yield $n <(refs)- it:sec:stix:indicator } {
+        if $seenBy($ind, $tf) { return((true)) }
+    }
+    for $ind in ${ yield $n <(detects)- it:sec:stix:indicator } {
+        if $seenBy($ind, $tf) { return((true)) }
+    }
+    return((false))
+}
+
+// The abuse.ch it:sec:c2:config nodes for a file.
+function configs(file) {
+    $cfgs = ([])
+    for $cfg in ${ it:sec:c2:config:file=$file.value() } {
+        if $isAbuse($cfg) { $cfgs.append($cfg) }
+    }
+    return($cfgs)
+}
+
+// Whether one of the configs has the C2 node in its :servers.
+function carries(cfgs, n2) {
+    $form = $n2.form()  // noqa: R002 - $node.form is a gtor in 3.x, 2.x needs the call.
+    $valu = $n2.value()
+    for $cfg in $cfgs {
+        for $u in ${ yield $cfg :servers -> inet:url } {
+            switch $form {
+                "inet:url": { if ($u.value() = $valu) { return((true)) } }
+                "inet:fqdn": { if ($u.props.fqdn = $valu) { return((true)) } }
+                "inet:ipv4": { if ($u.props.ipv4 = $valu) { return((true)) } }  // noqa: M001
+                "inet:ipv6": { if ($u.props.ipv6 = $valu) { return((true)) } }
+                "inet:server": {
+                    $sameip = ($u.props.ipv4 = $n2.props.ipv4 and $u.props.ipv6 = $n2.props.ipv6)
+                    if ($sameip and $u.props.port = $n2.props.port) { return((true)) }
+                }
+            }
+        }
+    }
+    return((false))
+}
+
+// The :servers URL for a C2 host or server (see norm.c2Url), or null.
+function c2Url(n2) {
+    $form = $n2.form()  // noqa: R002
+    switch $form {
+        "inet:fqdn": { return(`tcp://{$n2.value()}`) }
+        "inet:ipv4": { return(`tcp://{$n2.repr()}`) }  // noqa: M001
+        "inet:ipv6": { return(`tcp://[{$n2.value()}]`) }
+        "inet:server": { return($n2.repr()) }
+    }
+    return()
+}
+
+// What to do with a file:bytes -(refs)> node edge, ({"action": ..., ...}) or null to keep it.
+function fileAction(n1, n2) {
+    $form = $n2.form()  // noqa: R002
+    if ($form = "inet:passwd") { return(({"action": "passwd"})) }
+    if (not $isAbuse($n2)) { return() }
+    if ($form = "file:bytes") { return(({"action": "linked"})) }
+
+    // A ThreatFox payload listed with an IOC.
+    if ($seenBy($n1, $sources.threatfox) and $isIoc($n2)) { return(({"action": "ioc"})) }
+
+    // A C2 from a vendor's extracted malware config.
+    $cfgs = $configs($n1)
+    if (not $cfgs) { return() }
+    if $carries($cfgs, $n2) { return(({"action": "c2"})) }
+    // Before 0.5.0 a C2 given as a bare host (no port) or a URL wasn't put in :servers. A bare
+    // host can only be a C2 (vendors' URLs are inet:urls), so it's added to the config, when
+    // the file has only one. A URL C2 can't be told from a URL the vendor found in the file,
+    // so it's kept (a new lookup of the file puts it in :servers).
+    $url = $c2Url($n2)
+    if ($url = null) { return() }
+    if ($lib.len($cfgs) = 1) { return(({"action": "c2add", "cfg": $cfgs.0, "url": $url})) }
+    return(({"action": "ambiguous"}))
+}
+
+// What to do with a node -(refs)> node edge, or null to keep it.
+function action(n1, n2) {
+    $form = $n1.form()  // noqa: R002
+    switch $form {
+        "inet:url": {
+            if $isAbuse($n2) { return(({"action": "about"})) }
+        }
+        "it:sec:stix:indicator": {
+            if $isAbuse($n2) { return(({"action": "detects"})) }
+        }
+        "file:bytes": { return($fileAction($n1, $n2)) }
+    }
+    return()
+}
+
+function addServer(cfg, url) {
+    yield $cfg
+    [ :servers ?+= $url ]
+    return()
+}
+
+function apply(n1, iden, act) {
+    $name = $act.action
+    $verb = $verbs.$name
+    if $verb { $n1.addEdge($verb, $iden) }
+    if ($act.action = "c2add") { $addServer($act.cfg, $act.url) }
+    $n1.delEdge(refs, $iden)
+}
+
+// The abuse.ch nodes that may have old -(refs)> edges, all lifted before any are changed.
+function candidates() {
+    $nodes = ([])
+    $done = ({})
+    for ($plat, $guid) in $sources {
+        for $n in ${ meta:source=$guid -(seen)> (inet:url, it:sec:stix:indicator, file:bytes) } {
+            $iden = $n.iden()
+            if $done.$iden { continue }
+            $done.$iden = (true)
+            $nodes.append($n)
+        }
+    }
+    return($nodes)
+}
+
+function migrate() {
+    $counts = ({"about": 0, "detects": 0, "linked": 0, "passwd": 0, "ioc": 0, "c2": 0,
+                "c2add": 0, "ambiguous": 0})
+    for $n1 in $candidates() {
+        $edges = ([])
+        for $edge in $n1.edges(verb=refs) { $edges.append($edge) }
+        for ($verb, $iden) in $edges {
+            for $n2 in ${ yield $iden } {
+                $act = $action($n1, $n2)
+                if ($act = null) { continue }
+                $name = $act.action
+                $counts.$name = ($counts.$name + 1)
+                if ($name = "ambiguous") {
+                    $lib.warn(`slib.abusech.admin.edges.migrate: Kept {$n1.form()}={$n1.repr()} -(refs)> {$n2.form()}={$n2.repr()}, a C2 the file has more than one it:sec:c2:config for.`)  // noqa: R002
+                    continue
+                }
+                if $cmdopts.apply { $apply($n1, $iden, $act) }
+            }
+        }
+    }
+
+    if $cmdopts.apply { $verb = "Rewrote" }
+    else { $verb = "Would rewrite" }
+    $lib.print(`slib.abusech.admin.edges.migrate: {$verb}:`)
+    $lib.print(`    inet:url -(refs)> to -(about)>: {$counts.about}`)
+    $lib.print(`    it:sec:stix:indicator -(refs)> to -(detects)>: {$counts.detects}`)
+    $lib.print(`    file:bytes -(refs)> file:bytes to -(linked)>: {$counts.linked}`)
+    $lib.print(`    file:bytes -(refs)> inet:passwd to -(uses)>: {$counts.passwd}`)
+    $lib.print(`    file:bytes -(refs)> ThreatFox IOC to -(uses)>: {$counts.ioc}`)
+    $lib.print(`    file:bytes -(refs)> C2 removed (in its it:sec:c2:config): {$counts.c2}`)
+    $lib.print(`    file:bytes -(refs)> C2 removed (added to its it:sec:c2:config): {$counts.c2add}`)
+    if $counts.ambiguous {
+        $lib.print(`    file:bytes -(refs)> C2 kept (more than one it:sec:c2:config): {$counts.ambiguous}`)
+    }
+    if (not $cmdopts.apply) {
+        $lib.print("slib.abusech.admin.edges.migrate: This was a dry run, rerun with --apply to make the changes.")
+    }
+}
+
+init {
+    $sources = $lib.import(slib.abusech.model).sourceGuids()
+    $guids = ({})
+    for ($plat, $guid) in $sources { $guids.$guid = $plat }
+    $verbs = ({"about": "about", "detects": "detects", "linked": "linked", "passwd": "uses",
+               "ioc": "uses"})
+    $migrate()
+}

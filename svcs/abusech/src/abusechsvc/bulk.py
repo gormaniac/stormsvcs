@@ -55,7 +55,7 @@ PLATFORMS = {
 """The inet:service:platform name and URL of each platform (see the Storm model's ``$platnames``).
 """
 
-BUILDER_VERSION = 2
+BUILDER_VERSION = 3
 """Bumped when the nodes the builder creates change, recorded with each bulk import."""
 
 Ndef = tuple[str, Any]
@@ -245,12 +245,12 @@ class NodeBuilder:
         return self.seen(self.node("inet:server", server), plat, first, last)
 
     def refNode(self, url: str | None, ndef: Ndef | None, plat: str) -> Ndef | None:
-        """A reference URL about a node, inet:url -(refs)> node (see ``refNode()``)."""
+        """A reference URL about a node, inet:url -(about)> node (see ``refNode()``)."""
 
         if not url or ndef is None:
             return None
         ref = self.seen(self.node("inet:url", url), plat)
-        self.edge(ref, "refs", ndef)
+        self.edge(ref, "about", ndef)
         return ref
 
     def obsNode(
@@ -491,7 +491,7 @@ class NodeBuilder:
             self.prop(ind, "valid_from", first)
             self.prop(ind, "labels", labels)
             self.seen(ind, plat, first, last)
-            self.edge(ind, "refs", obs)
+            self.edge(ind, "detects", obs)
             self.refNode(i.get("reference"), ind, plat)
 
         if i.get("family"):
@@ -507,7 +507,7 @@ class NodeBuilder:
 
         for s in i.get("samples") or ():
             file = self.sample(s, plat)
-            self.edge(file, "refs", obs)
+            self.edge(file, "uses", obs)
             if i.get("family_tag"):
                 self.tags(file, plat, (i["family_tag"],), s.get("seen"))
         return obs
