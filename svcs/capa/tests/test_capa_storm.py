@@ -5,6 +5,7 @@ import subprocess
 import sys
 from unittest import mock
 
+import synapse.common as s_common
 import synapse.lib.stormtypes as s_stormtypes
 import synapse.tests.utils as s_tests
 from stormlibpp.testing import assertMainHelp, assertVersionsMatch
@@ -957,3 +958,197 @@ class TestCapaStormFixes(s_tests.SynTest):
             msgs = await core.stormlist("slib.capa.admin.sync")
             self.stormIsInPrint("Imported 6 capa rules", msgs)
             assert len(await core.nodes("meta:rule")) == 6
+
+
+async def count(core, query: str, opts: dict | None = None) -> int:
+    return len(await core.nodes(query, opts=opts))
+
+
+# Model a capa rule the way slib.capa.model does, with one author record (see
+# capasvc.rules.contact). Before 0.5.0, an @handle author's record was ({"name": "@handle"}).
+CAPA_RULE = """
+    $model = $lib.import(slib.capa.model)
+    $r = ({
+        "guid": $guid, "name": $name, "type": "capa", "techniques": ([]),
+        "mbc": ([]), "meta": ({}), "authors": ([$author]),
+    })
+    yield $model.rule($r)
+"""
+MIGRATE = "slib.capa.admin.contacts.migrate"
+
+
+class TestCapaStormContacts(s_tests.SynTest):
+    """slib.capa.admin.contacts.migrate moves the old @handle :name contacts to :user."""
+
+    async def addRule(self, core, guid, name, author):
+        opts = {"vars": {"guid": guid, "name": name, "author": author}}
+        return await core.nodes(CAPA_RULE, opts=opts)
+
+    async def snapshot(self, core):
+        return {
+            n.ndef: (n.props, n.tags)
+            for n in await core.nodes("ps:contact meta:rule meta:note inet:fqdn inet:url")
+        }
+
+    async def test_migrate(self):
+        async with capaSvc(self) as (core, svc, axon):
+            # Rules re-imported by 0.5.0+, so their :author is the new contact, leaving the old
+            # contact (made by the old ctor) behind.
+            await self.addRule(core, "a" * 32, "visi rule", {"user": "visi"})
+            new = (await core.nodes('ps:contact=({"user": "visi"})'))[0]
+            await core.nodes(f"ps:contact={new.ndef[1]} [ :email=visi@vertex.link ]")
+            old = await core.nodes(
+                """[ ps:contact=({"name": "@visi"})
+                    :email=old@example.com :title=researcher .seen=(2020, 2021)
+                    +#cno.visi=(2020, 2021) +#other.tag
+                    +(refs)> { [ inet:fqdn=visi.example.com ] }
+                    <(refs)+ { [ inet:url=https://example.com/visi ] }
+                ]
+                $node.data.set(mydata, ({"x": 1}))
+                """
+            )
+            oldvisi = old[0].ndef[1]
+            assert oldvisi == s_common.guid([("name", "@visi")])
+            await core.nodes(f"[ meta:note=* :text=visinote :author={oldvisi} ]")
+
+            # A rule that wasn't re-imported (ex. dropped from the rules), linked to its old
+            # contact the way old versions did.
+            await self.addRule(core, "b" * 32, "alice rule", {"name": "@alice"})
+            oldalice = (await core.nodes(f"meta:rule={'b' * 32} :author -> ps:contact"))[0]
+            assert oldalice.get("name") == "@alice" and oldalice.get("user") is None
+            oldalice = oldalice.ndef[1]
+            assert oldalice == s_common.guid([("name", "@alice")])
+
+            # An old contact someone already gave the handle as its :user.
+            await self.addRule(core, "c" * 32, "bob rule", {"name": "@bob"})
+            oldbob = (await core.nodes(f"meta:rule={'c' * 32} :author -> ps:contact"))[0]
+            await core.nodes(f"ps:contact={oldbob.ndef[1]} [ :user=bob ]")
+            oldbob = oldbob.ndef[1]
+
+            # Not capa's: an @name contact with a different guid, an old-style contact that's
+            # the :author of another source's rule, and one for a capa rule without the
+            # slib.capa meta:source's -(seen)> edge.
+            other = (await core.nodes('[ ps:contact=* :name="@visi" ]'))[0].ndef[1]
+            await core.nodes(
+                '[ meta:rule=* :type=yara :name=carol :author={[ ps:contact=({"name": "@carol"}) ]} ]'
+            )
+            await core.nodes(
+                '[ meta:rule=* :type=capa :name=dave :author={[ ps:contact=({"name": "@dave"}) ]} ]'
+            )
+            ncontacts = await count(core, "ps:contact")
+
+            # A non-admin is refused.
+            user = await core.auth.addUser("analyst")
+            await user.addRule((True, USER_PERM))
+            await user.addRule((True, ("node",)))
+            msgs = await core.stormlist(f"{MIGRATE} --apply", opts={"user": user.iden})
+            self.stormIsInErr("slib.capa.admin", msgs)
+
+            # The dry run lists them, and changes nothing.
+            before = await self.snapshot(core)
+            msgs = await core.stormlist(MIGRATE)
+            self.stormHasNoWarnErr(msgs)
+            newvisi = new.ndef[1]
+            newalice = s_common.guid([("user", "alice")])
+            self.stormIsInPrint(
+                f"Would migrate ps:contact={oldvisi} (:name=@visi) into "
+                f"ps:contact={newvisi} (:user=visi)",
+                msgs,
+            )
+            self.stormIsInPrint(
+                f"Would migrate ps:contact={oldalice} (:name=@alice) into a new "
+                f"ps:contact={newalice} (:user=alice)",
+                msgs,
+            )
+            self.stormIsInPrint(
+                f"Would migrate ps:contact={oldbob} (:name=@bob) by removing its :name", msgs
+            )
+            self.stormIsInPrint("Found 3 old contacts. This was a dry run", msgs)
+            for name in ("carol", "dave", other):
+                self.stormNotInPrint(name, msgs)
+            assert await self.snapshot(core) == before
+            assert await count(core, "ps:contact") == ncontacts
+
+            # --apply migrates them.
+            msgs = await core.stormlist(f"{MIGRATE} --apply")
+            self.stormHasNoWarnErr(msgs)
+            self.stormIsInPrint(f"Migrated ps:contact={oldvisi} (:name=@visi)", msgs)
+            self.stormIsInPrint(
+                "Migrated 3 old contacts, and re-pointed 2 nodes that referenced them", msgs
+            )
+
+            # visi's old contact is merged into the new one: props it didn't have are copied,
+            # its own are kept, and the tags, node data, edges, and references move.
+            assert await count(core, f"ps:contact={oldvisi}") == 0
+            node = (await core.nodes(f"ps:contact={newvisi}"))[0]
+            assert node.get("user") == "visi" and node.get("name") is None
+            assert node.get("email") == "visi@vertex.link"
+            assert node.get("title") == "researcher"
+            assert node.get(".seen") == (1577836800000, 1609459200000)
+            assert node.getTag("cno.visi") == (1577836800000, 1609459200000)
+            assert node.getTag("other.tag") == (None, None)
+            assert await core.callStorm(f"ps:contact={newvisi} return($node.data.get(mydata))") == {
+                "x": 1
+            }
+            assert await count(core, f"ps:contact={newvisi} -(refs)> inet:fqdn") == 1
+            assert await count(core, f"ps:contact={newvisi} <(refs)- inet:url") == 1
+            assert await count(core, "meta:note:text=visinote :author -> ps:contact") == 1
+            assert await count(core, f"meta:note:author={newvisi}") == 1
+            assert await count(core, f"meta:rule={'a' * 32} +:author={newvisi}") == 1
+
+            # alice's is merged into the contact the current code makes, and the rule's
+            # :author follows it, so re-importing the rule doesn't change it.
+            assert await count(core, f"ps:contact={oldalice}") == 0
+            node = (await core.nodes(f"meta:rule={'b' * 32} :author -> ps:contact"))[0]
+            assert node.ndef[1] == newalice
+            assert node.get("user") == "alice" and node.get("name") is None
+            await self.addRule(core, "b" * 32, "alice rule", {"user": "alice"})
+            assert await count(core, f"meta:rule={'b' * 32} +:author={newalice}") == 1
+
+            # bob's is the same node, only its @handle :name is removed.
+            node = (await core.nodes(f"meta:rule={'c' * 32} :author -> ps:contact"))[0]
+            assert node.ndef[1] == oldbob
+            assert node.get("user") == "bob" and node.get("name") is None
+
+            # The others are untouched.
+            for query in (
+                f'ps:contact={other} +:name="@visi"',
+                'meta:rule:name=carol :author -> ps:contact +:name="@carol" -:user',
+                'meta:rule:name=dave :author -> ps:contact +:name="@dave" -:user',
+            ):
+                assert await count(core, query) == 1, query
+            # Two old contacts merged into one existing and one new contact.
+            assert await count(core, "ps:contact") == ncontacts - 1
+
+            # A second run is a no-op.
+            before = await self.snapshot(core)
+            msgs = await core.stormlist(f"{MIGRATE} --apply")
+            self.stormHasNoWarnErr(msgs)
+            self.stormIsInPrint("Migrated 0 old contacts, and re-pointed 0 nodes", msgs)
+            msgs = await core.stormlist(MIGRATE)
+            self.stormIsInPrint("There are no old contacts to migrate", msgs)
+            assert await self.snapshot(core) == before
+
+    async def test_migrate_readonly_refs(self):
+        # An old contact referenced by a read-only prop (part of another node's primary value)
+        # can't be re-pointed, so it's skipped before anything changes, and the rest migrate.
+        async with capaSvc(self) as (core, svc, axon):
+            await self.addRule(core, "a" * 32, "visi rule", {"user": "visi"})
+            await self.addRule(core, "b" * 32, "alice rule", {"user": "alice"})
+            visi = (await core.nodes('[ ps:contact=({"name": "@visi"}) ]'))[0].ndef[1]
+            await core.nodes('[ ps:contact=({"name": "@alice"}) ]')
+            await core.nodes("[ ou:contest:result=(*, $g) ]", opts={"vars": {"g": visi}})
+
+            msgs = await core.stormlist(MIGRATE)
+            self.stormHasNoErr(msgs)
+            self.stormIsInWarn("referenced by read-only props", msgs)
+            self.stormIsInWarn("ou:contest:result:participant", msgs)
+            self.stormIsInPrint("Found 1 old contacts", msgs)
+            self.stormIsInPrint("Skipped 1 old contacts", msgs)
+
+            msgs = await core.stormlist(f"{MIGRATE} --apply")
+            self.stormHasNoErr(msgs)
+            self.stormIsInPrint("Migrated 1 old contacts", msgs)
+            assert await count(core, f'ps:contact={visi} +:name="@visi"') == 1
+            assert await count(core, 'ps:contact:name="@alice"') == 0
+            assert await count(core, f"ou:contest:result:participant={visi}") == 1

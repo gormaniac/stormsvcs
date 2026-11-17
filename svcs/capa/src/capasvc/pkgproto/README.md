@@ -22,6 +22,7 @@ The service pulls the files from the Axon itself, by `:sha256`, so they're never
 | `slib.capa.info` | `slib.capa.user` | Print the versions of capa and its rules, and the import and tag settings. |
 | `slib.capa.admin.sync` | `slib.capa.admin` | Import the rules and the tag docs (runs automatically when the package loads). |
 | `slib.capa.admin.tags` | `slib.capa.admin` | Change the tag prefix (`rep.capa`) or turn tagging on/off. |
+| `slib.capa.admin.contacts.migrate` | `slib.capa.admin` | Migrate the `@handle` `:name` author contacts made before 0.5.0 to `:user` (dry run without `--apply`). |
 
 ```
 // Scan files, already scanned files are skipped unless --force is used.
@@ -119,7 +120,22 @@ its `:name` (unless it already has one), and a method's behavior (`B0001`) as it
 
 Upgrading from 0.4.x imports the rules again on the next package load, to add the MBC behaviors and the
 handle `:user` contacts. Contacts made for handles by older versions (with the `@handle` as their `:name`)
-are left as they are, the rules' `:author` points at the new contacts.
+are left behind, the rules' `:author` points at the new contacts. To migrate them, run
+`slib.capa.admin.contacts.migrate` (a dry run that prints what it would change), then
+`slib.capa.admin.contacts.migrate --apply`.
+
+It only touches the old contacts slib.capa made: the node the old `({"name": "@handle"})` ctor made
+(its guid), for a handle that's the `:author` of a capa rule (`-(seen)>` by the `slib.capa`
+`meta:source`), either still the old contact or already the new one. Other `ps:contact` nodes, even
+with an `@` `:name`, are never touched. Each old contact is merged into the contact the current code
+makes for its handle (`({"user": "handle"})`, made if it doesn't exist): props it doesn't have are
+copied (not the `@handle` `:name`), array props are combined, and the tags (with their times), node
+data it doesn't have, light edges (both directions), and the props of other nodes that reference it
+(ex. a rule's `:author`) are moved, then the old node is deleted. An old contact that already has
+the handle as its `:user` just has its `:name` removed. An old contact referenced by a read-only prop
+(ex. `ou:contest:result:participant` or `meta:seen:node`, part of the referencing node's primary value) can't be
+re-pointed, so it's skipped with a warning naming those nodes: recreate or delete them, then rerun.
+Running it again after `--apply` finds nothing to migrate.
 
 ### Tags
 
