@@ -5,9 +5,13 @@ crt.sh's PgBouncer allows one connection per client, drops idle clients
 """
 
 import asyncio
+import base64
+import json
+import pathlib
 
 import asyncpg
 import pytest
+from cryptography import x509
 
 from crtshsvc.db import (
     LOOKUPS,
@@ -19,7 +23,7 @@ from crtshsvc.db import (
     tsquery,
 )
 
-from .fakecrtsh import PKI, identityText
+from .fakecrtsh import PKI, identityText, tsTokens
 
 
 class FakeRecord:
@@ -747,3 +751,43 @@ def test_identity_text():
         "1.2.3.4", "4.3.2.1",
         "us", "su",
     ]  # fmt: skip
+
+
+# crt.sh's live identities() tokens (strip(identities(CERTIFICATE)) on the live certwatch DB) for
+# a test certificate with every identity type and two real certificates (crt.sh IDs 29550673 and
+# 30258460), captured 2026-11-17 for the identities() port (identityText) and tsTokens().
+LIVE_IDENTITIES = json.loads(
+    (pathlib.Path(__file__).parent / "data" / "live_identities.json").read_text()
+)["certs"]
+
+
+@pytest.mark.parametrize("live", LIVE_IDENTITIES, ids=lambda live: live["name"])
+def test_identity_tokens_live(live):
+    cert = x509.load_der_x509_certificate(base64.b64decode(live["der"]))
+    assert tsTokens(identityText(cert)) == set(live["tokens"])
+
+
+def test_ts_tokens():
+    # PostgreSQL's default parser, as to_tsvector('simple', ...) gives them.
+    cases = {
+        # An @ whose domain has no dot isn't an email address; : separates words.
+        "knil.xetrev@ecila 1111:0:0:0074:6062:": {"knil.xetrev", "ecila", "1111", "0", "0074", "6062"},
+        "visi@mail.vertex.link a+b@x.com": {"visi@mail.vertex.link", "a", "b@x.com"},
+        # A URL is its host/path, host and path; a reversed one is a file path and its scheme.
+        "https://vertex.link:8443/a?b=1": {"vertex.link:8443/a?b=1", "vertex.link:8443", "/a?b=1"},
+        "htap/knil.xetrev.iru//:sptth": {"htap/knil.xetrev.iru", "sptth"},
+        # (A ./ or ~/ only starts a path at the start of a token, not after a blank.)
+        "a.b/c ./x ~/y /etc/passwd": {"a.b/c", "/x", "/y", "/etc/passwd"},
+        "./x": {"./x"},
+        # Hosts need a TLD of 2+ letters, else they're file paths (or numbers).
+        "a.b foo.com1 1.2.3.com 1.1.861.291 1e5.com": {
+            "a.b", "foo.com1", "1.2.3.com", "1.1.861.291", "1e5", "com",
+        },
+        "Let's Encrypt, AT&T Inc. &amp;": {"let", "s", "encrypt", "at", "t", "inc"},
+        "Foo-Bar co-op.coop a-b-12 x -5": {
+            "foo-bar", "foo", "bar", "co-op.coop", "a-b", "a", "b", "12", "x", "-5",
+        },
+        "über-straße 株式会社 naïve2": {"über-straße", "über", "straße", "株式会社", "naïve2"},
+    }  # fmt: skip
+    for text, tokens in cases.items():
+        assert tsTokens(text) == tokens, text

@@ -7,17 +7,21 @@ with the fake PKI, so this checks every query parses, plans, and returns what th
 FakeCrtshDb-backed tests expect, through asyncpg.
 """
 
+import base64
 import copy
 import os
 
+import asyncpg
 import pytest
 import synapse.tests.utils as s_tests
+from cryptography import x509
 
 from crtshsvc import CrtshSvc
-from crtshsvc.db import CrtshDbError
+from crtshsvc.db import CrtshDbError, tsquery
 
 from . import pgstub
-from .fakecrtsh import PKI
+from .fakecrtsh import PKI, identityText, tsTokens
+from .test_crtsh_db import LIVE_IDENTITIES
 
 DSN = os.environ.get("SLIB_CRTSH_PGDSN")
 
@@ -214,3 +218,27 @@ class TestPostgres(s_tests.SynTest):
                 "SELECT current_setting('statement_timeout') AS st, current_setting('transaction_read_only') AS ro"
             )
             assert rows == [{"st": "30s", "ro": "on"}]
+
+    async def test_identity_tokens(self):
+        # The fakes decide which certificates a search matches with tsTokens; check it makes the
+        # words PostgreSQL does of every certificate's identities() text (crt.sh's certwatch
+        # config is a copy of simple), and of search text as plainto_tsquery parses it.
+        texts = [identityText(c) for c in PKI.certs.values() if c is not None]
+        for live in LIVE_IDENTITIES:
+            der = base64.b64decode(live["der"])
+            texts.append(identityText(x509.load_der_x509_certificate(der)))
+        conn = await asyncpg.connect(DSN)
+        try:
+            for text in texts:
+                words = await conn.fetchval(
+                    "SELECT tsvector_to_array(to_tsvector('simple', $1))", text
+                )
+                assert tsTokens(text) == set(words), text
+            for text in ("*.vertex.link", "visi@vertex.link", "https://vertex.link/", "Test Trust"):
+                query = await conn.fetchval(
+                    "SELECT querytree(plainto_tsquery('simple', $1))", tsquery(text)
+                )
+                words = {w.strip("'") for w in query.split(" & ")}
+                assert tsTokens(tsquery(text)) == words, text
+        finally:
+            await conn.close()

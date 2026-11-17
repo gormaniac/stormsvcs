@@ -28,6 +28,7 @@ import ipaddress
 import json
 import re
 import struct
+import unicodedata
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -521,25 +522,215 @@ def identityText(cert) -> str:
     return text.lstrip()
 
 
-def tsTokens(text: str) -> set[str]:
-    """Roughly the tokens PostgreSQL's full text parser (the ``simple`` config) makes of text.
+# PostgreSQL's default text search parser (src/backend/tsearch/wparser_def.c), as far as the
+# fakes need it: what follows is its state machine's outcome for each kind of token, not the
+# state machine itself. Patterns are ASCII-only, like the parser's host, email, URL and file
+# states.
+_HOST = re.compile(  # Labels of [a-z0-9] joined by - or _, an all-letter TLD of 2+, a port.
+    r"[a-z0-9]+(?:[-_][a-z0-9]+)*(?:\.[a-z0-9]+(?:[-_][a-z0-9]+)*)*\.[a-z]{2,}(?![a-z0-9])"
+    r"(?::[0-9]+)?",
+    re.ASCII | re.IGNORECASE,
+)
+_LOCAL = re.compile(r"[a-z0-9]+(?:[-_.][a-z0-9]+)*(?=@)", re.ASCII | re.IGNORECASE)
+_URLPATH = re.compile(r"/[!#-;=?-\[\]_a-z~]+", re.ASCII | re.IGNORECASE)  # RFC 3986 chars.
+_NUMBER = re.compile(r"[0-9]+(?:\.[0-9]+(?:(?:\.[0-9]+)+|[eE][-+]?[0-9]+)?|[eE][-+]?[0-9]+)?")
+_SCIENTIFIC = re.compile(r"[0-9]+[eE][-+]?[0-9]+")  # Beats a host or email: 1e5.com is 1e5, com.
+_SIGNED = re.compile(r"[-+][0-9]+(?:\.[0-9]+)?(?:[eE][-+]?[0-9]+)?(?!\.[0-9])")
+_ENTITY = re.compile(r"&(?:[a-zA-Z:_][\w:.-]*|#[0-9]+|#[xX][0-9a-fA-F]+);")
+_TAG = re.compile(r"</?[a-zA-Z_:][\w:.-]*(?:\s[^<>'\"]*)?/?>")
 
-    Full text search matches whole tokens, not substrings: a host or email address is a
-    single token, so ``old`` doesn't match ``old.vertex.link`` and ``visi`` doesn't match
-    ``visi@vertex.link``. A URL is its ``host/path``, its host, and its path.
+
+def _ascdigit(c: str) -> bool:
+    return c.isascii() and c.isdigit()
+
+
+def _alnum(c: str) -> bool:
+    return c.isalpha() or _ascdigit(c)
+
+
+def _mark(c: str) -> bool:
+    """A combining mark, which continues a word but doesn't start one."""
+    return unicodedata.category(c) in ("Mn", "Mc", "Me")
+
+
+def _wordEnd(s: str, i: int) -> int:
+    while i < len(s) and (_alnum(s[i]) or _mark(s[i])):
+        i += 1
+    return i
+
+
+def _fchar(s: str, k: int) -> bool:
+    return k < len(s) and s[k].isascii() and (s[k].isalnum() or s[k] == "_")
+
+
+def _fileFirst(s: str, k: int) -> tuple[int, bool] | None:
+    """After a path's ``/``: (end, whether the path ends there), or None if it isn't a path."""
+    if _fchar(s, k):
+        return _inFile(s, k + 1), False
+    if k < len(s) and s[k] in ".~":
+        return _pathDot(s, k + 1) if s[k] == "." else _pathTwiddle(s, k + 1)
+    return None
+
+
+def _pathTwiddle(s: str, k: int) -> tuple[int, bool] | None:  # After ``~``.
+    if _fchar(s, k):
+        return _inFile(s, k + 1), False
+    return _fileFirst(s, k + 1) if k < len(s) and s[k] == "/" else None
+
+
+def _pathDot(s: str, k: int) -> tuple[int, bool] | None:  # After a path's leading ``.``.
+    if _fchar(s, k):
+        return _inFile(s, k + 1), False
+    if k < len(s) and s[k] == ".":
+        return _pathDots(s, k + 1)
+    return _fileFirst(s, k + 1) if k < len(s) and s[k] == "/" else None
+
+
+def _pathDots(s: str, k: int) -> tuple[int, bool] | None:  # After ``..``.
+    if k >= len(s) or s[k].isspace():
+        return k, True
+    if s[k] == "/":
+        return _fileFirst(s, k + 1) or (k, True)
+    return None
+
+
+def _inFile(s: str, k: int) -> int:
+    """The end of a file path whose name chars continue at s[k]."""
+    while k < len(s):
+        if _fchar(s, k) or s[k] == "-":
+            k += 1
+        elif s[k] == "." and _fchar(s, k + 1):
+            k += 2
+        elif s[k] == "/" and (nxt := _fileFirst(s, k + 1)):
+            if nxt[1]:
+                return nxt[0]
+            k = nxt[0]
+        else:
+            break
+    return k
+
+
+def _file(s: str, k: int) -> int | None:
+    """The end of the file path a word becomes at its ``.`` or ``/`` at s[k], if it does."""
+    if s[k] == "." and _fchar(s, k + 1):
+        return _inFile(s, k + 2)
+    nxt = _fileFirst(s, k + 1) if s[k] == "/" else None
+    return nxt[0] if nxt else None
+
+
+def _hyphenWord(s: str, i: int, k: int) -> tuple[int, list[str]] | None:
+    """A hyphenated word whose first part is s[i:k] (s[k] is ``-``): the word and its parts.
+
+    Every later part needs a letter, so ``a-b-12`` is ``a-b`` and then ``12`` (the ``-`` after a
+    hyphenated word is never a sign).
+    """
+    end = None
+    while k < len(s) and s[k] == "-":
+        j = k + 1
+        while j < len(s) and _ascdigit(s[j]):
+            j += 1
+        if j >= len(s) or not (s[j].isalpha() or (j > k + 1 and _mark(s[j]))):
+            break
+        k = end = _wordEnd(s, j)
+    if end is None:
+        return None
+    word = s[i:end]
+    if end + 1 < len(s) and s[end] == "-" and (_alnum(s[end + 1]) or _mark(s[end + 1])):
+        end += 1
+    return end, [word, *word.split("-")]
+
+
+def _wordTail(s: str, i: int, k: int) -> tuple[int, list[str]]:
+    """The token a word s[i:k] (with digits) makes with what follows it: an email, path, etc."""
+    if k < len(s) and s[k] == "@" and (host := _HOST.match(s, k + 1)):
+        return host.end(), [s[i : host.end()]]
+    if k < len(s) and s[k] in "./" and (end := _file(s, k)):
+        return end, [s[i:end]]
+    return (k < len(s) and s[k] == "-" and _hyphenWord(s, i, k)) or (k, [s[i:k]])
+
+
+def _token(s: str, i: int) -> tuple[int, list[str]]:
+    """The end of the token the parser reads at s[i], and the words it indexes for it."""
+
+    n, c = len(s), s[i]
+    if num := _SCIENTIFIC.match(s, i):
+        return num.end(), [num.group()]
+    if c.isascii() and c.isalnum():
+        # An email address (its domain must be a host), or a host, or a URL: its host/path,
+        # its host and its path.
+        if (local := _LOCAL.match(s, i)) and (host := _HOST.match(s, local.end() + 1)):
+            return host.end(), [s[i : host.end()]]
+        if host := _HOST.match(s, i):
+            if path := _URLPATH.match(s, host.end()):
+                return path.end(), [s[i : path.end()], host.group(), path.group()]
+            return host.end(), [host.group()]
+    if _ascdigit(c):
+        num = _NUMBER.match(s, i)
+        j = num.end()
+        if num.group().isdigit() and j < n:
+            if s[j] == "/" and (end := _file(s, j)):
+                return end, [s[i:end]]
+            if s[j].isalpha() or _mark(s[j]):
+                return _wordTail(s, i, _wordEnd(s, j))
+        return j, [num.group()]
+    if c.isalpha():
+        j = i
+        while j < n and c.isascii() and s[j].isascii() and s[j].isalpha():
+            j += 1
+        if j > i and (j == n or not (_alnum(s[j]) or _mark(s[j]))):  # An ASCII word.
+            if s.startswith("://", j):
+                return j + 3, []  # A protocol isn't indexed.
+            if j < n and s[j] in "./" and (end := _file(s, j)):
+                return end, [s[i:end]]
+            return (j < n and s[j] == "-" and _hyphenWord(s, i, j)) or (j, [s[i:j]])
+        j = max(j, i + 1)
+        while j < n and (s[j].isalpha() or _mark(s[j])):
+            j += 1
+        if j < n and _ascdigit(s[j]):
+            return _wordTail(s, i, _wordEnd(s, j))
+        return (j < n and s[j] == "-" and _hyphenWord(s, i, j)) or (j, [s[i:j]])
+    if c in "-+" and (num := _SIGNED.match(s, i)):
+        return num.end(), [num.group()]
+    path = None
+    if c == "/":
+        path = _fileFirst(s, i + 1)
+    elif c == "~":
+        path = _pathTwiddle(s, i + 1)
+    elif c == "." and i + 1 < n and s[i + 1] in "./":
+        path = _pathDots(s, i + 2) if s[i + 1] == "." else _fileFirst(s, i + 2)
+    if path:
+        return path[0], [s[i : path[0]]]
+    if (c == "&" and (skip := _ENTITY.match(s, i))) or (c == "<" and (skip := _TAG.match(s, i))):
+        return skip.end(), []  # XML entities and tags aren't indexed.
+    # Blank: this char and those after it that aren't alphanumeric or able to start a token.
+    j = i + 1
+    while j < n and not (_alnum(s[j]) or s[j] in "<-+&/"):
+        j += 1
+    return j, []
+
+
+def tsTokens(text: str) -> set[str]:
+    """The words ``to_tsvector('simple', text)`` (and ``plainto_tsquery``) makes of text.
+
+    A pure-Python stand-in for PostgreSQL's default text search parser, lowercased like the
+    ``simple`` dictionary, which is how crt.sh's ``certwatch`` config indexes ``identities()``.
+    It's checked against PostgreSQL (``tests/test_pg.py``, ``test_identity_tokens``) and agrees
+    on identity text: hosts and emails are single words (``old`` doesn't match
+    ``old.vertex.link``, ``visi`` doesn't match ``visi@vertex.link``), but an ``@`` whose domain
+    isn't a host (has no dot) splits; ``:`` separates words, so a crt.sh IPv6 address is its
+    groups; a URL is its ``host/path``, its host and its path, while a slash path that doesn't
+    start with a host (like a reversed URL) is one file path word; a hyphenated word is itself
+    and its parts; numbers, versions and signed numbers are words.
+
+    Known not to match PostgreSQL: a word that starts with a combining mark (PostgreSQL's
+    ``iswalpha`` counts some as letters), tags with characters PostgreSQL's tag states reject,
+    and other locale-dependent classes of non-ASCII characters.
     """
 
-    tokens = set()
-    for word in re.findall(r"[^\s,;=+\"'()<>]+", text.lower()):
-        word = word.strip(".-")
-        if not word:
-            continue
-        if "://" in word or ("/" in word and not word.startswith("/")):
-            rest = word.split("://", 1)[-1]
-            host, _, path = rest.partition("/")
-            tokens.update(t for t in (rest, host, "/" + path if _ else "") if t)
-            continue
-        tokens.add(word)
+    tokens, i = set(), 0
+    while i < len(text):
+        i, words = _token(text, i)
+        tokens.update(word.lower() for word in words)
     return tokens
 
 

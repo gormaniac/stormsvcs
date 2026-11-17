@@ -1,0 +1,64 @@
+{
+  "comment": "crt.sh's live identities() tokens for these certificates, captured 2026-11-17 for the fakecrtsh identities() port and tsTokens().",
+  "certs": [
+    {
+      "name": "test cert (every identity type)",
+      "crtsh": null,
+      "der": "MIICDzCCAbWgAwIBAgIBATAKBggqhkjOPQQDAjBXMRkwFwYDVQQDDBB0ZXN0LnZlcnRleC5saW5rMRQwEgYDVQQKDAtWZXJ0ZXggVGVzdDEkMCIGCSqGSIb3DQEJARYVdmlzaUBtYWlsLnZlcnRleC5saW5rMB4XDTI2MDEwMTAwMDAwMFoXDTI3MDEwMTAwMDAwMFowVzEZMBcGA1UEAwwQdGVzdC52ZXJ0ZXgubGluazEUMBIGA1UECgwLVmVydGV4IFRlc3QxJDAiBgkqhkiG9w0BCQEWFXZpc2lAbWFpbC52ZXJ0ZXgubGluazBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABGSglzjlAYvMySirwTJSpkYM9vQb2w9LQFlUnNUln4g+9Yeu76LjKP1auh5ZjCAa2BcNO+pOiY60uXBAClF3toyjcjBwMG4GA1UdEQRnMGWCFHd3dy50ZXN0LnZlcnRleC5saW5rgRFhbGljZUB2ZXJ0ZXgubGlua4cEAQEBAYcEwKgBAYcQJgZHAAAAAAAAAAAAAAAREYYcaHR0cHM6Ly91cmkudmVydGV4LmxpbmsvcGF0aDAKBggqhkjOPQQDAgNIADBFAiAlekzgjyg1Cw1ZTqu8gRf0D8YcmlIvZ6l6aQpxTLnRnAIhAN1Dm9BtyO2Fwr5rTH4t65QsKJZoir7v4kNCwoQy6bBU",
+      "tokens": [
+        "/path",
+        "0",
+        "0074",
+        "1.1.1.1",
+        "1.1.861.291",
+        "1111",
+        "192.168.1.1",
+        "2606",
+        "4700",
+        "6062",
+        "alice@vertex.link",
+        "ecila",
+        "htap/knil.xetrev.iru",
+        "isiv",
+        "knil.xetrev",
+        "knil.xetrev.liam",
+        "knil.xetrev.tset",
+        "link",
+        "mail.vertex.link",
+        "sptth",
+        "test",
+        "test.vertex.link",
+        "tset",
+        "uri.vertex.link",
+        "uri.vertex.link/path",
+        "vertex",
+        "vertex.link",
+        "visi@mail.vertex.link",
+        "www.test.vertex.link",
+        "xetrev"
+      ]
+    },
+    {
+      "name": "www.vertex.link (Let's Encrypt)",
+      "crtsh": 29550673,
+      "der": "MIIFAjCCA+qgAwIBAgISA0c3ACTGRWc9n7MW/FHweaMPMA0GCSqGSIb3DQEBCwUAMEoxCzAJBgNVBAYTAlVTMRYwFAYDVQQKEw1MZXQncyBFbmNyeXB0MSMwIQYDVQQDExpMZXQncyBFbmNyeXB0IEF1dGhvcml0eSBYMzAeFw0xNjA4MjMxNjE2MDBaFw0xNjExMjExNjE2MDBaMBoxGDAWBgNVBAMTD3d3dy52ZXJ0ZXgubGluazCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAMSQr42a4JeIZsMqZ/qdF5doZ2/ErWkxCRTM7/T2EHxQmO79RWX0lmaARzqy9XBqLL4J/7BZWD5PgnllvJpHA618KEJP17s3HhWuntJBDI87tAfKcQWrfsJJIAOYuHBucUrhEFr7ZTdPWFVK7koMmXbmm1nFJGO5CBVp5nygEsNXGYu/0SgceGMwoq0ukfPhuG2ySJXSer2jog1WlcRQ2Y5XnmpmfIITbZtcwU99u3zWqNGc1ISnpDUGhs28ofeULjUlquHGXKas6drWXtW9sufuloMjJunKTa/Lsh20O++BlXZ5Kun9sUnDPVuw1jZiIPkHGF7hz9xDDmUy8aZlGGsCAwEAAaOCAhAwggIMMA4GA1UdDwEB/wQEAwIFoDAdBgNVHSUEFjAUBggrBgEFBQcDAQYIKwYBBQUHAwIwDAYDVR0TAQH/BAIwADAdBgNVHQ4EFgQUUIqNB/1bHOeMKLATIDTLD3d3tn0wHwYDVR0jBBgwFoAUqEpqYwR93brm0Tm3pkVl7/Oo7KEwcAYIKwYBBQUHAQEEZDBiMC8GCCsGAQUFBzABhiNodHRwOi8vb2NzcC5pbnQteDMubGV0c2VuY3J5cHQub3JnLzAvBggrBgEFBQcwAoYjaHR0cDovL2NlcnQuaW50LXgzLmxldHNlbmNyeXB0Lm9yZy8wGgYDVR0RBBMwEYIPd3d3LnZlcnRleC5saW5rMIH+BgNVHSAEgfYwgfMwCAYGZ4EMAQIBMIHmBgsrBgEEAYLfEwEBATCB1jAmBggrBgEFBQcCARYaaHR0cDovL2Nwcy5sZXRzZW5jcnlwdC5vcmcwgasGCCsGAQUFBwICMIGeDIGbVGhpcyBDZXJ0aWZpY2F0ZSBtYXkgb25seSBiZSByZWxpZWQgdXBvbiBieSBSZWx5aW5nIFBhcnRpZXMgYW5kIG9ubHkgaW4gYWNjb3JkYW5jZSB3aXRoIHRoZSBDZXJ0aWZpY2F0ZSBQb2xpY3kgZm91bmQgYXQgaHR0cHM6Ly9sZXRzZW5jcnlwdC5vcmcvcmVwb3NpdG9yeS8wDQYJKoZIhvcNAQELBQADggEBAGY9AyAgJpR4lQdcb2g2/e2G4uVRuCOtI2JT5h8K6Nf07h98GsvRE57rpkJcg8mxC53fkKkfeoZkEOQs1qI6xeB2Mr4hU39emBG1Wq2XEHOPxogcW+rkhNWbCv4kWCHN617CIcacv4/zQqPFy4bFGqXOR5kQSgqcDYRPCvw/gY/q3rKJmioHfeI96CQimIvnvSU3stJWIDPQCQzf913Shxxu0ZaI6iCd3XXnkD/xNJ8H3coqbOtfj+Tuy9xh46aGnd1ICqgGnKfcKoOcA3+egLDQsMHPy8yynGsL3a8MUks2aK5jfh2tpjMgftA1dIaNI+17TlbejT5/sC4EBypc3aE=",
+      "tokens": [
+        "knil.xetrev",
+        "link",
+        "vertex.link",
+        "www.vertex.link"
+      ]
+    },
+    {
+      "name": "dev.vertex.link (Let's Encrypt)",
+      "crtsh": 30258460,
+      "der": "MIIFAjCCA+qgAwIBAgISA1XuTU9anuhHF9LC5Na4b6PRMA0GCSqGSIb3DQEBCwUAMEoxCzAJBgNVBAYTAlVTMRYwFAYDVQQKEw1MZXQncyBFbmNyeXB0MSMwIQYDVQQDExpMZXQncyBFbmNyeXB0IEF1dGhvcml0eSBYMzAeFw0xNjA4MzAxMTU3MDBaFw0xNjExMjgxMTU3MDBaMBoxGDAWBgNVBAMTD2Rldi52ZXJ0ZXgubGluazCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAOgJB6dNbnkTDeOSxxVpF7qryxq7Osj/cf8+O95ekjLVGCA/diVGN8Km2Qvi91ZKnpJnRdduIXst/A6CJ8xhWnHo8mOHUwuj9gmiWRY0c7fkBf6UKy/2I+ybqFnn9TE/xmZHlyN/TtIr/Sxyfh7IxVF5RiqzEucxJCfyI7xWI1ofS4rHE+OzSa0rbt9kcZ55jHHDWsGA/2HrwkR4/ZBv8IWNvxu8L5sJY852AfUWdIm+qgAB0OI0iUHEu2XvW1549n6duR9+90DX8pt8a0+xKHhpyA1jQMxTUGSJhOp7gL/M1rixSMQNkXyl1WnMCr3RmliJ6vyVhq5HF7rf6iFF3/MCAwEAAaOCAhAwggIMMA4GA1UdDwEB/wQEAwIFoDAdBgNVHSUEFjAUBggrBgEFBQcDAQYIKwYBBQUHAwIwDAYDVR0TAQH/BAIwADAdBgNVHQ4EFgQUEREYJRwlLwPvwrz28il6VYeH11IwHwYDVR0jBBgwFoAUqEpqYwR93brm0Tm3pkVl7/Oo7KEwcAYIKwYBBQUHAQEEZDBiMC8GCCsGAQUFBzABhiNodHRwOi8vb2NzcC5pbnQteDMubGV0c2VuY3J5cHQub3JnLzAvBggrBgEFBQcwAoYjaHR0cDovL2NlcnQuaW50LXgzLmxldHNlbmNyeXB0Lm9yZy8wGgYDVR0RBBMwEYIPZGV2LnZlcnRleC5saW5rMIH+BgNVHSAEgfYwgfMwCAYGZ4EMAQIBMIHmBgsrBgEEAYLfEwEBATCB1jAmBggrBgEFBQcCARYaaHR0cDovL2Nwcy5sZXRzZW5jcnlwdC5vcmcwgasGCCsGAQUFBwICMIGeDIGbVGhpcyBDZXJ0aWZpY2F0ZSBtYXkgb25seSBiZSByZWxpZWQgdXBvbiBieSBSZWx5aW5nIFBhcnRpZXMgYW5kIG9ubHkgaW4gYWNjb3JkYW5jZSB3aXRoIHRoZSBDZXJ0aWZpY2F0ZSBQb2xpY3kgZm91bmQgYXQgaHR0cHM6Ly9sZXRzZW5jcnlwdC5vcmcvcmVwb3NpdG9yeS8wDQYJKoZIhvcNAQELBQADggEBADNi3kwmmnjbpYZSJrBWNeaN3uwmLV1qt38WdaogcuvSuMG7G7Zblv4ohUXnqI8jrU4ySiwKsyVGWzxB0KDmvatfU92sP8D6HfO/kW+oJSNZn2GMlgy4YjvYHSb+gpiQfTI1w8sGoVtddQf4g3StzEE0dQ1lvLv2sFD4AoP9ozcpeYmLfxA56ujyOnIJx/LOUrt/MJUCtlddo3wf6uUOChIw3Jw4T3bND/MmoPgqj5ELIc7dkloHqQQRbaJS0tkwzqNzF5LZJEXAoksrhvjR/Pq8HdS9S9DpBbqLfINirS5YZmSHMDLA1540P/cKLt+eRuv0uXQ0B8cGToZEalOU/Kg=",
+      "tokens": [
+        "dev.vertex.link",
+        "knil.xetrev",
+        "link",
+        "vertex.link"
+      ]
+    }
+  ]
+}

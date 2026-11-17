@@ -133,7 +133,9 @@ The tests never touch crt.sh. `tests/fakecrtsh.py` is an in-memory crt.sh: a sma
 roots, an intermediate cross-signed by both, a leaf and its precertificate, plus revoked,
 expired, reissued, and unparsable certificates) answering every query `CrtshDb` makes. The
 tests cover 100% of the Python (lines and branches, `uv run pytest tests --cov`) and every Storm
-command, option, inbound form, and error path.
+command, option, inbound form, and error path. The fakes match full text searches the way crt.sh
+does: `identityText()` ports crt.sh's `identities()`, and `tsTokens()` makes the words PostgreSQL's
+parser does of it (checked against crt.sh's live output, and against PostgreSQL by `test_pg.py`).
 
 CI also runs every query against a real PostgreSQL (16 is fine), using a stub of crt.sh's schema (the same
 tables, partitions, indexes, and view, with SQL stubs for libx509pq's functions) loaded with the
