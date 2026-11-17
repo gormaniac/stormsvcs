@@ -75,6 +75,7 @@ This concept was introduced in Synapse example code and old "how-tos" but is now
   - Static names should also be documented with docstrings, especially if they are exposed to the Storm runtime. 
 - Lines should be kept to a maximum of 100 characters.
   - The ruff config in the root `pyproject.toml` sets this, and targets Python 3.11 (the services' Python) so `ruff check --fix` and `ruff format` never produce newer syntax.
+  - Ruff lints and format-checks tests too (CI runs it on each whole service dir). Tests ignore only a few rules that flag test idioms, listed with their reasons in the root `pyproject.toml`'s `per-file-ignores`.
 - Use type hints for all function signatures in Python code.
 
 ### Testing

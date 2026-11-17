@@ -132,12 +132,18 @@ stale lines the audit found there (REPO-14).
 - **Service scaffold**: a template (copier, or a `stormlibpp new-svc` command) that starts a
   service passing every enforced rule.
 - Cleanups the check can then cover: dead `SVC_SYN_MIN_VER` constants (abusech, capa,
-  shodan), `.dockerignore` and entrypoint shebangs (REPO-19), consistent `source-include`
-  (REPO-11), the root `requires-python` (REPO-18), ruff on tests (REPO-17).
+  shodan), entrypoint shebangs (REPO-19), the root `requires-python` (REPO-18).
+  - Done: every service's `.dockerignore` uses the same `**/` patterns (REPO-19's
+    `.dockerignore` part, hatching was the last), the dead `source-include` globs are gone
+    (REPO-11, uv_build ships the whole module dir), and ruff lints and format-checks tests
+    (REPO-17, with the test-only ignores in the root `pyproject.toml`).
 
 ## Audit follow-up
 
 The audit's remaining per-service findings are tracked in the audit doc's Status tab and fixed
 on one branch per service (`claude/epic-shannon-fqihq0-<svc>`), plus the repo-level branch.
-REPO-11 (dead `source-include` globs) and REPO-17 (ruff on tests) are left for a last cleanup
-PR after the service PRs merge, since they touch every service.
+REPO-11 (dead `source-include` globs) and REPO-17 (ruff on tests) were left for a last cleanup
+PR after the service PRs merged, since they touch every service. Both are done, along with
+REPO-19's `.dockerignore` part (hatching's root-only patterns): the wheel and sdist contents
+are identical without `source-include`, and tests are linted and formatted like the rest of
+the code, ignoring only RUF059, ASYNC230 and SIM117 (see the root `pyproject.toml`).
