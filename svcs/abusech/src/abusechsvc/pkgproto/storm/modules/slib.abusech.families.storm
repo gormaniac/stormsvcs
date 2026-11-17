@@ -30,6 +30,39 @@ function oldFamilies() {
     }
 }
 
+// The props of other nodes that reference the old node but are read-only, as a list of
+// "<form>:<prop> (<iden>)". These (ex. meta:seen:node, edge:refs:n1) are derived from the
+// referencing node's primary value, so they can't be re-pointed: a node referenced this way
+// must be skipped before anything is merged.
+function readOnlyRefs(old) {
+    $refs = ([])
+    $form = $old.form()  // noqa: R002 - $node.form is a gtor in 3.x, 2.x needs the call.
+    $oval = $old.value()
+    for $ref in ${ yield $old <- * } {
+        $refform = $ref.form()  // noqa: R002
+        for ($name, $valu) in $ref.props {
+            $prop = $lib.model.prop(`{$refform}:{$name}`)
+            if (not $prop) { continue }
+            if (not $_isReadOnly($prop.full)) { continue }
+            $refd = ($_swap($prop.type.name, $valu, $form, $oval, $oval) != null)
+            if ((not $refd) and $prop.type.name = "array") {
+                for $item in $valu {
+                    if ($_swap($prop.type.opts.type, $item, $form, $oval, $oval) != null) {
+                        $refd = (true)
+                    }
+                }
+            }
+            if $refd { $refs.append(`{$prop.full} ({$ref.iden()})`) }
+        }
+    }
+    return($refs)
+}
+
+function _isReadOnly(full) {
+    for $p in ${ syn:prop=$full +:ro=1 } { return((true)) }  // noqa: M001
+    return((false))
+}
+
 // Merge an old family node into the node keyed by guid. Returns how many nodes referenced
 // the old node by a prop (and now reference the new one).
 function merge(old, guid) {

@@ -1279,7 +1279,9 @@ commands:
       for its name: props the node doesn't have are copied, array props (ex. :soft:names) are
       combined, and the tags (with their times), light edges (both directions), and the props of
       other nodes that reference it are moved, then the old node is deleted. Tag props aren't
-      moved.
+      moved. An old node referenced by a read-only prop (ex. meta:seen:node or edge:refs:n1,
+      which are part of the referencing node's primary value) can't be re-pointed, so it's
+      skipped with a warning naming those nodes: recreate or delete them, then rerun.
 
       Without --apply it's a dry run, which only prints what would be merged. Running it again
       after --apply finds nothing to merge.

@@ -1,9 +1,19 @@
 init {
     $families = $lib.import(slib.abusech.families)
 
+    // Nodes referenced by read-only props are found first, and skipped: they can't be
+    // re-pointed, so merging would fail partway.
     $olds = ([])
     $targets = $lib.set()
+    $skipped = (0)
     for $item in $families.oldFamilies() {
+        $old = $item.node
+        $rorefs = $families.readOnlyRefs($old)
+        if $rorefs {
+            $skipped = ($skipped + 1)
+            $lib.warn(`slib.abusech.admin.families.merge: Skipping {$old.repr()} ({$old.props."soft:name"}, :tag={$old.props.tag}), it's referenced by read-only props that can't be re-pointed: {(", ").join($rorefs)}. Recreate (or delete) those nodes to reference risk:tool:software={$item.target} instead, then rerun.`)
+            continue
+        }
         $olds.append($item)
         $targets.add($item.target)
     }
@@ -22,6 +32,9 @@ init {
 
     $nold = $lib.len($olds)
     $nfam = $lib.len($targets)
+    if $skipped {
+        $lib.print(`slib.abusech.admin.families.merge: Skipped {$skipped} old family nodes referenced by read-only props.`)
+    }
     if $cmdopts.apply {
         $lib.print(`slib.abusech.admin.families.merge: Merged {$nold} old family nodes into {$nfam} families, and re-pointed {$refs} nodes that referenced them.`)
     } elif $nold {

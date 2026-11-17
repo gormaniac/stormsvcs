@@ -3,6 +3,7 @@
 import json
 import pathlib
 
+import pytest
 import synapse.tests.utils as s_tests
 from stormlibpp.testing import assertMainHelp, assertVersionsMatch
 
@@ -1452,6 +1453,58 @@ class TestStormFamilies(s_tests.SynTest):
             for prefix in ("rep.abusech", None):
                 builder = bulk.NodeBuilder(bulk.buildModel(), prefix)
                 assert builder.family("threatfox", "Emotet", "emotet")[1] == guid
+
+    # Synapse 2.x's only read-only props that can reference a family are on deprecated forms
+    # (meta:seen, edge:refs, ...), which older Cortexes still have.
+    @pytest.mark.allow_synapse_deprecations
+    async def test_merge_readonly_refs(self):
+        # An old node referenced by a read-only prop (part of another node's primary value)
+        # can't be re-pointed, so it's skipped before anything changes, and the rest merge.
+        async with abusechSvc(self) as (core, svc, fake):
+            src = SOURCES["bazaar"][0]
+            for query in (
+                """[ risk:tool:software=({"tag": "rep.abusech.bazaar.emotet"})
+                    :soft:name=Emotet :reporter:name=abuse.ch +#other.tag ]""",
+                """[ risk:tool:software=({"tag": "rep.abusech.threatfox.emotet"})
+                    :soft:name=Emotet :reporter:name=abuse.ch :desc=threatfox ]""",
+                """[ risk:tool:software=({"tag": "rep.abusech.bazaar.qakbot"})
+                    :soft:name=Qakbot :reporter:name=abuse.ch ]""",
+            ):
+                await core.nodes(query)
+            emo = await core.nodes("risk:tool:software:tag=rep.abusech.bazaar.emotet")
+            emoguid = emo[0].ndef[1]
+            qak = await core.nodes("risk:tool:software:tag=rep.abusech.bazaar.qakbot")
+            qakguid = qak[0].ndef[1]
+            await core.nodes(
+                "[ meta:seen=($src, (risk:tool:software, $g)) ]",
+                opts={"vars": {"src": src, "g": emoguid}},
+            )
+            await core.nodes(
+                "[ edge:refs=((inet:fqdn, x.com), (risk:tool:software, $g)) ]",
+                opts={"vars": {"g": qakguid}},
+            )
+            model = "$m = $lib.import(slib.abusech.model)"
+            emotet = await core.callStorm(f"{model} return($m.familyGuid(Emotet))")
+
+            msgs = await core.stormlist("slib.abusech.admin.families.merge")
+            self.stormHasNoErr(msgs)
+            self.stormIsInWarn("referenced by read-only props", msgs)
+            self.stormIsInWarn("meta:seen:node", msgs)
+            self.stormIsInWarn("edge:refs:n2", msgs)
+            self.stormIsInPrint("Found 1 old family nodes for 1 families", msgs)
+            self.stormIsInPrint("Skipped 2 old family nodes", msgs)
+
+            msgs = await core.stormlist("slib.abusech.admin.families.merge --apply")
+            self.stormHasNoErr(msgs)
+            self.stormIsInPrint("Merged 1 old family nodes into 1 families", msgs)
+            # The skipped nodes are untouched, the other one merged.
+            for guid in (emoguid, qakguid):
+                assert await count(core, f"risk:tool:software={guid}") == 1
+            emo = (await core.nodes(f"risk:tool:software={emoguid}"))[0]
+            assert emo.getTag("other.tag") == (None, None)
+            new = (await core.nodes(f"risk:tool:software={emotet}"))[0]
+            assert new.get("desc") == "threatfox" and new.getTag("other.tag") is None
+            assert await count(core, f"meta:seen:node=(risk:tool:software, {emoguid})") == 1
 
     async def test_merge(self):
         async with abusechSvc(self) as (core, svc, fake):
