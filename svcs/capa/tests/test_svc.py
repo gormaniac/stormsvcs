@@ -6,6 +6,7 @@ import os
 import shutil
 from unittest import mock
 import sys
+import threading
 
 import synapse.common as s_common
 import synapse.exc as s_exc
@@ -225,6 +226,57 @@ class TestCapaSvc(s_tests.SynTest):
                 # The Axon works again.
                 doc = await svc.scan(SAMPLE_SHA256, fmt="sc64")
                 assert [m["rule"]["name"] for m in doc["matches"]] == MATCHED
+
+    async def test_axon_cancel_open(self):
+        # A scan cancelled while the download's file is being opened leaves no open handle
+        # and no file in the work dir.
+        async with self.getTestAxon() as axon:
+            await axon.put(SAMPLE)
+            async with self.getTestCell(CapaSvc, svcConf(axon)) as svc:
+                proxy = await svc.axon.proxy()
+                loopthread = threading.get_ident()
+                called = threading.Event()
+                release = threading.Event()
+                opened = []
+
+                def slowopen(*args, **kwargs):
+                    called.set()
+                    # Opening in an executor thread is slow, so the scan is cancelled first.
+                    if threading.get_ident() != loopthread:
+                        release.wait(10)
+                    fd = open(*args, **kwargs)
+                    opened.append(fd)
+                    return fd
+
+                async def hanggenr(*args, **kwargs):
+                    await asyncio.Event().wait()
+                    yield b"a"  # pragma: no cover
+
+                with (
+                    mock.patch.object(s_svc, "open", slowopen, create=True),
+                    mock.patch.object(proxy, "get", hanggenr),
+                ):
+                    task = asyncio.create_task(svc.scan(SAMPLE_SHA256))
+                    for _ in range(500):
+                        if called.is_set():
+                            break
+                        await asyncio.sleep(0.01)
+                    assert called.is_set()
+                    await asyncio.sleep(0.05)
+                    task.cancel()
+                    with self.raises(asyncio.CancelledError):
+                        await task
+                    release.set()
+                    # Let an executor thread that was still opening the file finish.
+                    for _ in range(100):
+                        if opened:
+                            break
+                        await asyncio.sleep(0.01)
+
+                assert len(opened) == 1
+                assert opened[0].closed
+                assert not os.listdir(svc.workdir)
+                assert not svc.sema.locked()
 
     async def test_axon_nosuchfile(self):
         # The file is gone between the size check and the download.

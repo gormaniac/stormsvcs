@@ -633,13 +633,12 @@ class CapaSvc(s_cell.Cell):
                 f"The file {sha256} is {size} bytes, more than the {maxsize} byte "
                 "max (capa:maxsize)."
             )
+        # Opened here, not in a thread: a scan cancelled while an executor opened the file
+        # would never get the handle, leaking it and creating the file after _scan's cleanup.
         # Disk writes run in a thread, so a large file doesn't block the service.
-        fd = await s_coro.executor(open, path, "wb")
-        try:
+        with open(path, "wb") as fd:  # noqa: ASYNC230
             async for chunk in axon.get(byts):
                 await s_coro.executor(fd.write, chunk)
-        finally:
-            await s_coro.executor(fd.close)
 
     def _capaCmd(
         self,
