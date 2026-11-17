@@ -394,6 +394,75 @@ class TestNorm(s_tests.SynTest):
         # URL samples have no files.
         assert norm.normSample(dict(info, kind="url"), overview)["members"] == []
 
+    def test_norm_merge_valu(self):
+        assert norm.mergeValu("a", None) == "a" and norm.mergeValu("a", "") == "a"
+        assert norm.mergeValu(None, "b") == "b" and norm.mergeValu("", "b") == "b"
+        # Differing scalars: the new one wins.
+        assert norm.mergeValu("a", "b") == "b" and norm.mergeValu(0, 1) == 1
+        # Lists are unioned in order, and an empty one never blanks the other.
+        assert norm.mergeValu(["a", "b"], ["c", "a"]) == ["a", "b", "c"]
+        assert norm.mergeValu(["a"], []) == ["a"] and norm.mergeValu([], ["a"]) == ["a"]
+        assert norm.mergeValu([{"x": 1}], [{"x": 1}, {"x": 2}]) == [{"x": 1}, {"x": 2}]
+        # Dicts are merged key by key.
+        assert norm.mergeValu(
+            {"a": "1", "b": ["x"], "c": None, "d": {"e": ""}},
+            {"a": "", "b": ["y"], "c": "3", "d": {"e": "4"}, "f": "5"},
+        ) == {"a": "1", "b": ["x", "y"], "c": "3", "d": {"e": "4"}, "f": "5"}
+
+    def test_norm_merged_configs(self):
+        # The overview and the task report carry the same config (family and C2s), each with
+        # fields the other left empty, or set differently.
+        overview = copy.deepcopy(ft.OVERVIEW)
+        overview["extracted"][0]["config"] = dict(
+            ft.CONFIG,
+            mutex=[],
+            decoy=["decoy.example.com/a"],
+            dns=[],
+            campaign="overview-camp",
+            botnet="",
+            version=None,
+            wallet=["w1"],
+        )
+        report = copy.deepcopy(ft.TASK_REPORT)
+        report["extracted"][0]["config"] = dict(
+            ft.CONFIG,
+            mutex=["Global\\cs-mutex", "second"],
+            decoy=[],
+            dns=["8.8.8.8"],
+            campaign="task-camp",
+            wallet=["w2", "w1"],
+            credentials=[],
+        )
+        data = norm.normSample(ft.SAMPLE, overview, None, {"behavioral1": report})
+
+        (config,) = data["configs"]
+        assert config["detailed"] is True
+        assert config["mutexes"] == ["Global\\cs-mutex", "second"]
+        assert config["decoys"] == ["http://decoy.example.com/a"]
+        assert config["resolvers"] == ["udp://8.8.8.8:53"]
+        assert config["wallets"] == ["w1", "w2"]
+        # The overview's credentials stay, though the task report's copy has none.
+        assert [c["username"] for c in config["creds"]] == ["bot@example.com"]
+        # Both copies have a campaign: the task report's wins.
+        assert config["campaign"] == "task-camp"
+        assert config["botnet"] == "1359593325" and config["version"] == "4.9"
+        raw = config["raw"]
+        assert raw["campaign"] == "task-camp" and raw["botnet"] == "1359593325"
+        assert raw["version"] == "4.9" and raw["decoy"] == ["decoy.example.com/a"]
+        assert raw["mutex"] == ["Global\\cs-mutex", "second"] and raw["dns"] == ["8.8.8.8"]
+        assert raw["credentials"] == ft.CONFIG["credentials"]
+
+        # The task report's value wins even if it's merged first.
+        task = norm.normConfig(report["extracted"][0]["config"], detailed=True)
+        summary = norm.normConfig(overview["extracted"][0]["config"])
+        assert norm.mergeConfig(task, summary)["campaign"] == "task-camp"
+        assert norm.mergeConfig(summary, task)["campaign"] == "task-camp"
+
+        # A config with another identity isn't merged.
+        report["extracted"].append({"config": dict(ft.CONFIG, c2=["other.example.com:1"])})
+        data = norm.normSample(ft.SAMPLE, overview, None, {"behavioral1": report})
+        assert [c["servers"] for c in data["configs"]][1] == ["tcp://other.example.com:1"]
+
     def test_norm_url_sample(self):
         sample = dict(ft.SAMPLE, kind="url", url="https://example.com/login", filename=None)
         overview = {

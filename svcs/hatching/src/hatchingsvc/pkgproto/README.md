@@ -139,7 +139,13 @@ Each sample is modeled as a `file:bytes` (or `inet:url`, for URL analyses) with:
 - An `it:sec:c2:config` per extracted malware config: its C2 servers (and their hosts) tagged
   `#rep.hatching.c2` and the family, `:mutex` (the rest are `-(refs)>` from the sample),
   `:decoys`, `:listens`, `:dns:resolvers`, `:campaigncode`, the whole config as `:raw`, and
-  `-(refs)> auth:creds` for its credentials.
+  `-(refs)> auth:creds` for its credentials. Triage reports a config in the overview and again
+  in each task report that extracted it; copies with the same family and C2 servers are merged
+  field by field into one node. Lists are unioned, and an empty or missing value never blanks
+  another copy's. When the copies set a field differently, the task report's wins, since it's
+  extracted from that task's own memory dumps. Modeling the sample again merges the same way:
+  array props are unioned with what the node has, and `:mutex`, `:campaigncode`, and `:raw` are
+  replaced by a config from a task report but only filled in (when unset) by an overview-only one.
 
 With `--tasks`, each behavioral task adds, linked to the sample with `:sandbox:file`:
 
