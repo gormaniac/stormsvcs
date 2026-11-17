@@ -72,6 +72,40 @@ YARAIFY_SEARCHES = {
 }
 """YARAify searches: name -> query. Each takes a ``search_term`` and ``result_max``."""
 
+READ_QUERIES = {
+    "bazaar": frozenset(
+        ("get_info", "get_recent", "recent_detections", "get_cscb")
+        + tuple(q for q, _, _ in BAZAAR_SEARCHES.values())
+    ),
+    "threatfox": frozenset(
+        (
+            "get_iocs",
+            "ioc",
+            "search_ioc",
+            "search_hash",
+            "taginfo",
+            "malwareinfo",
+            "types",
+            "tag_list",
+            "malware_list",
+            "get_label",
+        )
+    ),
+    "yaraify": frozenset(
+        (
+            "lookup_hash",
+            "recent_yararules",
+            "show_deployed_yara_rules",
+            "get_results",
+            "list_tasks",
+        )
+        + tuple(YARAIFY_SEARCHES.values())
+    ),
+}
+"""The read-only queries of each API, safe to retry. Any other ``query`` (ex. ``add_comment``,
+``generate_identifier``) may change something, so it's only retried when abuse.ch didn't
+process it."""
+
 BAZAAR_EXPORTS = {
     "recent": "recent.csv",
     "full": "full.csv.zip",
@@ -606,9 +640,17 @@ class AbuseChSvc(s_cell.Cell):
     async def bazaarQuery(
         self, query: str, fields: dict | None = None, apikey: str | None = None
     ) -> dict | None:
-        """POST a ``query`` (with any other form fields) to the MalwareBazaar API."""
+        """POST a ``query`` (with any other form fields) to the MalwareBazaar API.
 
-        return await self._query("bazaar", apikey=apikey, form=dict(fields or {}, query=query))
+        Only the read-only queries (see ``READ_QUERIES``) are retried after a 5xx or timeout.
+        """
+
+        return await self._query(
+            "bazaar",
+            apikey=apikey,
+            form=dict(fields or {}, query=query),
+            idempotent=query in READ_QUERIES["bazaar"],
+        )
 
     async def bazaarInfo(self, sha: str, apikey: str | None = None) -> dict | None:
         """``get_info`` - Everything MalwareBazaar knows about a sample (by MD5, SHA1, SHA256)."""
@@ -1006,10 +1048,16 @@ class AbuseChSvc(s_cell.Cell):
     async def threatfoxQuery(
         self, query: str, body: dict | None = None, apikey: str | None = None
     ) -> dict | None:
-        """POST a ``query`` (with any other JSON fields) to the ThreatFox API."""
+        """POST a ``query`` (with any other JSON fields) to the ThreatFox API.
+
+        Only the read-only queries (see ``READ_QUERIES``) are retried after a 5xx or timeout.
+        """
 
         return await self._query(
-            "threatfox", apikey=apikey, json_data=dict(body or {}, query=query)
+            "threatfox",
+            apikey=apikey,
+            json_data=dict(body or {}, query=query),
+            idempotent=query in READ_QUERIES["threatfox"],
         )
 
     async def threatfoxRecent(self, days: int = 1, apikey: str | None = None) -> list:
@@ -1219,9 +1267,17 @@ class AbuseChSvc(s_cell.Cell):
     async def yaraifyQuery(
         self, query: str, body: dict | None = None, apikey: str | None = None
     ) -> dict | None:
-        """POST a ``query`` (with any other JSON fields) to the YARAify API."""
+        """POST a ``query`` (with any other JSON fields) to the YARAify API.
 
-        return await self._query("yaraify", apikey=apikey, json_data=dict(body or {}, query=query))
+        Only the read-only queries (see ``READ_QUERIES``) are retried after a 5xx or timeout.
+        """
+
+        return await self._query(
+            "yaraify",
+            apikey=apikey,
+            json_data=dict(body or {}, query=query),
+            idempotent=query in READ_QUERIES["yaraify"],
+        )
 
     async def yaraifyHash(
         self, sha: str, malpedia: str | None = None, apikey: str | None = None

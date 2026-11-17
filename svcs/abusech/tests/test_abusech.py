@@ -1896,6 +1896,69 @@ class TestAuditFixes(s_tests.SynTest):
                 await client.download("feodo", "ipblocklist.json", buf, maxsize=10)
             assert await client.download("feodo", "ipblocklist.json", io.BytesIO()) > 10
 
+    async def test_stream_json(self):
+        # A successful JSON dataset (ex. ThreatFox's recent.json) is streamed to EOF, even when
+        # it's larger than the error/status cap and arrives in several reads.
+        import abusechsvc.client as s_client
+
+        body = json.dumps([{"ioc": "x" * 100}] * 20000).encode()
+        assert len(body) > s_client.STATUS_MAX
+
+        async def bigjson(request, info, path, query):
+            resp = aiohttp.web.StreamResponse(headers={"Content-Type": "application/json"})
+            await resp.prepare(request)
+            for off in range(0, len(body), 100_000):
+                await resp.write(body[off : off + 100_000])
+                await asyncio.sleep(0.01)
+            await resp.write_eof()
+            return resp
+
+        async with FakeAbuseCh() as fake, aiohttp.ClientSession() as sess:
+            client = AbuseChClient(sess, urls=fake.urls, rate=0)
+            fake._threatfox_export = bigjson
+            byts = b"".join(
+                [b async for b in client.stream("threatfox:export", "recent.json", apikey="k")]
+            )
+            assert byts == body
+
+            # Small JSON statuses are still checked.
+            async def badkey(request, info, path, query):
+                return aiohttp.web.json_response({"query_status": "unknown_auth_key"})
+
+            fake._threatfox_export = badkey
+            with self.raises(AbuseChApiError) as cm:
+                async for _ in client.stream("threatfox:export", "recent.json", apikey="k"):
+                    pass
+            assert "Auth-Key" in cm.exception.mesg
+
+    async def test_query_retries(self):
+        # The generic *Query methods only retry read-only queries after a 500, since any
+        # other query (ex. add_comment) may have been processed.
+        import abusechsvc.client as s_client
+
+        async with abusechSvc(self) as (core, svc, fake):
+            calls = []
+
+            async def err500(request, info, path, query):
+                calls.append(query)
+                return aiohttp.web.Response(status=500, text="boom")
+
+            fake._bazaar = fake._threatfox = fake._yaraify = err500
+            for meth, read, write in (
+                (svc.bazaarQuery, "get_info", "add_comment"),
+                (svc.bazaarQuery, "get_siginfo", "update"),
+                (svc.threatfoxQuery, "search_ioc", "submit_ioc"),
+                (svc.yaraifyQuery, "lookup_hash", "generate_identifier"),
+            ):
+                calls.clear()
+                with self.raises(AbuseChApiError):
+                    await meth(write)
+                assert len(calls) == 1, write
+                calls.clear()
+                with self.raises(AbuseChApiError):
+                    await meth(read)
+                assert len(calls) == 1 + s_client.MAX_RETRIES, read
+
     async def test_svc_caps(self):
         async with abusechSvc(self) as (core, svc, fake):
             # ABUSE-PY-05: datasets read into memory, and their unzipped files, are capped.

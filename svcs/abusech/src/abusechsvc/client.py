@@ -83,6 +83,9 @@ AUTH_STATUSES = frozenset(
 )
 """``query_status`` values that mean the Auth-Key was missing or rejected."""
 
+STATUS_MAX = 1024 * 1024
+"""How much of a streamed download's error (or JSON status) response is read to report it."""
+
 MAX_RETRIES = 3
 """How many times to retry a request that failed in a way that may be temporary."""
 
@@ -419,6 +422,21 @@ class AbuseChClient:
                 )
         return bytes(buf)
 
+    @staticmethod
+    async def _readHead(resp: aiohttp.ClientResponse, size: int) -> tuple[bytes, bool]:
+        """Read up to ``size`` bytes of a body, returning ``(bytes, whether it hit EOF)``.
+
+        One ``read()`` returns whatever has arrived, so this reads until EOF or ``size``.
+        """
+
+        buf = bytearray()
+        while len(buf) < size:
+            byts = await resp.content.read(size - len(buf))
+            if not byts:
+                return bytes(buf), True
+            buf.extend(byts)
+        return bytes(buf), resp.content.at_eof()
+
     def url(self, base: str, path: str = "") -> str:
         """Build the full URL for a path on one of the abuse.ch APIs."""
 
@@ -592,25 +610,31 @@ class AbuseChClient:
                         await asyncio.sleep(self._retryWait(attempt, resp))
                         continue
                     if resp.status >= 400 or "json" in ctype:
-                        # Errors are small, read them and raise like any other response.
-                        body = await resp.content.read(1024 * 1024)
-                        data = None
-                        try:
-                            data = json.loads(body) if body.strip() else None
-                        except ValueError:
-                            pass
-                        try:
-                            checkStatus(
-                                base,
-                                resp.status,
-                                data,
-                                body.decode("utf-8", "replace"),
-                                notfound=False,
-                            )
-                        except AbuseChApiError as err:
-                            raise scrubError(err, apikey) from None
-                        yield body
-                        return
+                        # Errors (HTTP errors, or a JSON query_status) are small: read up to
+                        # STATUS_MAX and raise like any other response. A JSON body that's
+                        # larger is a dataset (ex. ThreatFox's recent.json), streamed below.
+                        body, eof = await self._readHead(resp, STATUS_MAX)
+                        if eof or resp.status >= 400:
+                            data = None
+                            try:
+                                data = json.loads(body) if body.strip() else None
+                            except ValueError:
+                                pass
+                            try:
+                                checkStatus(
+                                    base,
+                                    resp.status,
+                                    data,
+                                    body.decode("utf-8", "replace"),
+                                    notfound=False,
+                                )
+                            except AbuseChApiError as err:
+                                raise scrubError(err, apikey) from None
+                        if body:
+                            started = True
+                            yield body
+                        if eof:
+                            return
                     async for byts in resp.content.iter_chunked(chunk):
                         started = True
                         yield byts
