@@ -6,8 +6,10 @@ import os
 import shutil
 from unittest import mock
 import sys
+import threading
 
 import synapse.common as s_common
+import synapse.exc as s_exc
 import synapse.tests.utils as s_tests
 
 from capasvc import CapaSvc, svc as s_svc
@@ -181,6 +183,123 @@ class TestCapaSvc(s_tests.SynTest):
                     await svc.scan(SAMPLE_SHA256)
             assert cm.exception.mesg == "Unable to connect to the Axon within 0.5 seconds."
 
+    async def test_bad_custom_key(self):
+        # A custom key that isn't a string (ex. unhashable) is an error, before any work.
+        async with self.getTestCell(CapaSvc, svcConf()) as svc:
+            for custom in ({"a": 1}, ["a"], 5):
+                with self.raises(CapaSvcError) as cm:
+                    await svc.scan(SAMPLE_SHA256, custom=custom)
+                assert cm.exception.mesg == (
+                    "The custom rules key must be a string (see custom())."
+                )
+            assert not svc.customUse
+
+    async def test_axon_timeout(self):
+        # A hung Axon (size check or download) fails the scan after capa:timeout and frees
+        # the worker.
+        async with self.getTestAxon() as axon:
+            await axon.put(SAMPLE)
+            conf = svcConf(axon, **{"capa:timeout": 1, "capa:workers": 1})
+            async with self.getTestCell(CapaSvc, conf) as svc:
+                proxy = await svc.axon.proxy()
+
+                async def hang(*args, **kwargs):
+                    await asyncio.Event().wait()
+
+                async def hanggenr(*args, **kwargs):
+                    yield b"a"
+                    await asyncio.Event().wait()
+
+                mesg = (
+                    f"Downloading {SAMPLE_SHA256} from the Axon took longer than 1 seconds "
+                    "(capa:timeout)."
+                )
+                for name, func in (("size", hang), ("get", hanggenr)):
+                    with mock.patch.object(proxy, name, func):
+                        with self.raises(CapaSvcError) as cm:
+                            await asyncio.wait_for(svc.scan(SAMPLE_SHA256), timeout=30)
+                    assert cm.exception.mesg == mesg, name
+                    assert not svc.sema.locked()
+                    # The partial download is deleted.
+                    assert not os.listdir(svc.workdir)
+
+                # The Axon works again.
+                doc = await svc.scan(SAMPLE_SHA256, fmt="sc64")
+                assert [m["rule"]["name"] for m in doc["matches"]] == MATCHED
+
+    async def test_axon_cancel_open(self):
+        # A scan cancelled while the download's file is being opened leaves no open handle
+        # and no file in the work dir.
+        async with self.getTestAxon() as axon:
+            await axon.put(SAMPLE)
+            async with self.getTestCell(CapaSvc, svcConf(axon)) as svc:
+                proxy = await svc.axon.proxy()
+                loopthread = threading.get_ident()
+                called = threading.Event()
+                release = threading.Event()
+                opened = []
+
+                def slowopen(*args, **kwargs):
+                    called.set()
+                    # Opening in an executor thread is slow, so the scan is cancelled first.
+                    if threading.get_ident() != loopthread:
+                        release.wait(10)
+                    fd = open(*args, **kwargs)
+                    opened.append(fd)
+                    return fd
+
+                async def hanggenr(*args, **kwargs):
+                    await asyncio.Event().wait()
+                    yield b"a"  # pragma: no cover
+
+                with (
+                    mock.patch.object(s_svc, "open", slowopen, create=True),
+                    mock.patch.object(proxy, "get", hanggenr),
+                ):
+                    task = asyncio.create_task(svc.scan(SAMPLE_SHA256))
+                    for _ in range(500):
+                        if called.is_set():
+                            break
+                        await asyncio.sleep(0.01)
+                    assert called.is_set()
+                    await asyncio.sleep(0.05)
+                    task.cancel()
+                    with self.raises(asyncio.CancelledError):
+                        await task
+                    release.set()
+                    # Let an executor thread that was still opening the file finish.
+                    for _ in range(100):
+                        if opened:
+                            break
+                        await asyncio.sleep(0.01)
+
+                assert len(opened) == 1
+                assert opened[0].closed
+                assert not os.listdir(svc.workdir)
+                assert not svc.sema.locked()
+
+    async def test_axon_nosuchfile(self):
+        # The file is gone between the size check and the download.
+        async with self.getTestAxon() as axon:
+            await axon.put(SAMPLE)
+            async with self.getTestCell(CapaSvc, svcConf(axon)) as svc:
+                proxy = await svc.axon.proxy()
+
+                async def gone(*args, **kwargs):
+                    raise s_exc.NoSuchFile(mesg="newp")
+                    yield  # pragma: no cover
+
+                with mock.patch.object(proxy, "get", gone):
+                    with self.raises(CapaSvcError) as cm:
+                        await svc._fetch(SAMPLE_SHA256, os.path.join(svc.workdir, "a"))
+                assert cm.exception.mesg == f"The file {SAMPLE_SHA256} is not in the Axon."
+
+                # Other errors connecting to the Axon are reported.
+                with mock.patch.object(svc.axon, "proxy", side_effect=OSError("down")):
+                    with self.raises(CapaSvcError) as cm:
+                        await svc._fetch(SAMPLE_SHA256, os.path.join(svc.workdir, "b"))
+                assert cm.exception.mesg == f"Unable to read {SAMPLE_SHA256} from the Axon: down"
+
     async def test_axon_client(self):
         # Every scan uses the service's one Axon client, which reconnects if the link drops.
         async with self.getTestAxon() as axon:
@@ -219,6 +338,15 @@ class TestCapaSvc(s_tests.SynTest):
             with self.raises(CapaSvcError) as cm:
                 [r async for r in svc.rules(names=["contain xor", "newp"])]
             assert cm.exception.mesg == "Unknown capa rules: newp"
+
+            # names is a list (or tuple) of strings, not a string's characters.
+            for names in ("abc", ["contain xor", 1], {"contain xor": 1}, 5):
+                with self.raises(CapaSvcError) as cm:
+                    [r async for r in svc.rules(names=names)]
+                assert cm.exception.mesg == "Rule names must be a list of strings."
+            recs = [r async for r in svc.rules(names=("contain xor",))]
+            assert [r["name"] for r in recs] == ["contain xor"]
+            assert len([r async for r in svc.rules(names=[])]) == 6
 
             tags = await svc.tags()
             assert "testing.ops.xor" in [t["tag"] for t in tags]
@@ -418,3 +546,19 @@ class TestCapaApi(s_tests.SynTest):
 
                     assert (await prox.tags())["status"]
                     assert (await prox.reload())["status"]
+
+                    # Bad argument types are errors with a message, not raw exceptions.
+                    retns = [r async for r in prox.rules(names="contain xor")]
+                    assert retns == [
+                        {
+                            "status": False,
+                            "mesg": "Rule names must be a list of strings.",
+                            "data": None,
+                        },
+                    ]
+                    retn = await prox.scan(SAMPLE_SHA256, custom={"a": 1})
+                    assert retn == {
+                        "status": False,
+                        "mesg": "The custom rules key must be a string (see custom()).",
+                        "data": None,
+                    }

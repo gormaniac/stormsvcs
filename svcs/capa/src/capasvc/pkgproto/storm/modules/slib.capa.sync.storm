@@ -11,7 +11,8 @@ init {
 // Run by the package's onload, as root.
 function onload() {
     if (not $lib.service.wait("slib.capa", timeout=(300))) {
-        $lib.warn("slib.capa: The service wasn't ready, the capa rules weren't imported. Run slib.capa.admin.sync.")
+        $mesg = "the capa rules weren't imported. Run slib.capa.admin.sync"
+        $lib.warn(`slib.capa: The service wasn't ready, {$mesg}.`)
         return()
     }
     $sync()
@@ -25,11 +26,11 @@ function sync(force=(false), reload=(false)) {
     $privadmin = $lib.import(slib.capa.priv.admin)
 
     if $reload {
-        if $util.failed($privadmin.reload(), "Reloading the capa rules") { return($lib.null) }
+        if $util.failed($privadmin.reload(), "Reloading the capa rules") { return() }
     }
 
     $retn = $priv.rulesInfo()
-    if $util.failed($retn, "Getting the capa rules info") { return($lib.null) }
+    if $util.failed($retn, "Getting the capa rules info") { return() }
 
     $set = $syncRules($retn.data, $force)
     $syncTags($retn.data, $force)
@@ -45,15 +46,19 @@ function syncRules(info, force=(false)) {
     if ((not $force) and $priv.syncState().rules = $info.key) {
         // Nothing to edit, this runs every time the package loads.
         $set = $model.rulesetOf($info)
-        if ($set != $lib.null) {
-            if $lib.debug { $lib.print("slib.capa: The capa rules ({v}) are already imported.", v=$info.version) }
+        if ($set != null) {
+            if $lib.debug {
+                $lib.print(`slib.capa: The capa rules ({$info.version}) are already imported.`)
+            }
             return($set)
         }
     }
 
     $set = $model.ruleset($info)
+    // Cleared until the import finishes, so one that fails partway is done again next time.
+    $privadmin.setSynced(rules, (null))
 
-    $lib.print("slib.capa: Importing {n} capa rules ({v}).", n=$info.rules, v=$info.version)
+    $lib.print(`slib.capa: Importing {$info.rules} capa rules ({$info.version}).`)
     $count = (0)
     for $retn in $priv.rules() {
         if $util.failed($retn, "Importing the capa rules") { return($set) }
@@ -61,7 +66,7 @@ function syncRules(info, force=(false)) {
         $count = ($count + 1)
     }
     $privadmin.setSynced(rules, $info.key)
-    $lib.print("slib.capa: Imported {n} capa rules ({v}).", n=$count, v=$info.version)
+    $lib.print(`slib.capa: Imported {$count} capa rules ({$info.version}).`)
     return($set)
 }
 
@@ -75,7 +80,7 @@ function syncTags(info, force=(false)) {
     $prefix = $priv.tagSettings().prefix
     $key = `{$prefix}:{$info.key}`
     if ((not $force) and $priv.syncState().tags = $key) {
-        if $lib.debug { $lib.print("slib.capa: The {p} tags are already imported.", p=$prefix) }
+        if $lib.debug { $lib.print(`slib.capa: The {$prefix} tags are already imported.`) }
         return((0))
     }
 
@@ -84,6 +89,6 @@ function syncTags(info, force=(false)) {
 
     for $t in $retn.data { $model.tag($prefix, $t) }
     $privadmin.setSynced(tags, $key)
-    $lib.print("slib.capa: Imported the docs of {n} {p} tags.", n=$retn.data.size(), p=$prefix)
+    $lib.print(`slib.capa: Imported the docs of {$retn.data.size()} {$prefix} tags.`)
     return($retn.data.size())
 }

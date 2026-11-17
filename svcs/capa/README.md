@@ -3,8 +3,8 @@
 A Storm Service that runs Mandiant's [capa](https://github.com/mandiant/capa) against files in the Axon
 and models the capa rules they match.
 
-- Every capa rule is a `meta:rule` (with its documentation, YAML, and ATT&CK techniques), imported in bulk
-  when the package loads.
+- Every capa rule is a `meta:rule` (with its documentation, YAML, ATT&CK techniques, and MBC behaviors),
+  imported in bulk when the package loads.
 - Every rule namespace is a documented `syn:tag`, ex. `host-interaction/process/create` is
   `#rep.capa.host_interaction.process.create`.
 - Scanning a `file:bytes` links every matched rule to it with a `-(matches)>` edge and tags the file with
@@ -36,10 +36,17 @@ file:bytes=<sha256> | slib.capa.scan --yield
 // Every file that does process injection.
 file:bytes#rep.capa.host_interaction.process.inject
 
-// Files that match a rule, and the rule's ATT&CK techniques.
+// Files that match a rule, and the rule's ATT&CK techniques and MBC behaviors.
 meta:rule:name="create process on windows" -(matches)> file:bytes
 meta:rule:name="create process on windows" -(refs)> it:mitre:attack:technique
+meta:rule:name="create process on windows" -(refs)> ou:technique
+
+// Files that match a rule mapped to an MBC behavior.
+ou:technique:ext:id=B0001 +:reporter:name=mbc <(refs)- meta:rule -(matches)> file:bytes
 ```
+
+A file is skipped if it was already scanned with the same capa rules, custom rules, `--format`, `--os`,
+and tag settings. Use `--force` to scan it again anyway.
 
 Supported formats are `auto` (the default, capa detects PE, .NET, and ELF files), `pe`, `dotnet`, `elf`,
 `sc32`, and `sc64`. Formats that describe another file aren't supported: sandbox reports (CAPE, DRAKVUF,
@@ -57,7 +64,7 @@ for $rule in $capa.scan($node, fmt=auto, osname=auto, force=(false)) { $lib.prin
 ## Custom rules
 
 A custom capa rule is a `meta:rule` with a `:type` of `capa.custom` (or a type below it, ex.
-`capa.custom.myteam`) and the [capa rule](https://github.com/mandiant/capa-rules/blob/master/doc/format.md)'s
+`capa.custom.myteam`, but not a type that only starts with the same letters, ex. `capa.customer`) and the [capa rule](https://github.com/mandiant/capa-rules/blob/master/doc/format.md)'s
 YAML in its `:text`:
 
 ```
@@ -96,11 +103,23 @@ they only model a rule that isn't in the Cortex yet. Each rule is a `meta:rule`:
 | `:desc` | The rule's documentation: its description, namespace, scopes, authors, ATT&CK, MBC, MAEC, references, and examples. |
 | `:text` | The rule's YAML. |
 | `:url` | The rule's file on GitHub, at the version of the rules. |
-| `:author` | A `ps:contact` for the rule's first author (all authors are in `:desc`). |
+| `:author` | A `ps:contact` for the rule's first author (all authors are in `:desc`): an email author's `:email`, an `@handle`'s `:user` (without the `@`), or else its `:name`. |
 
 The rule's full meta is its `slib:capa` node data. Rules `-(refs)>` the `it:mitre:attack:technique`
-nodes of their ATT&CK mappings, and each version of the rules is a `meta:ruleset` that `-(has)>` its
-rules. Every node is linked to the `slib.capa` `meta:source` with a `-(seen)>` edge.
+nodes of their ATT&CK mappings and the `ou:technique` nodes of their
+[MBC](https://github.com/MBCProject/mbc-markdown) behaviors (a rules update that drops a mapping
+removes its edge), and each version of the rules is a
+`meta:ruleset` that `-(has)>` its rules. Every node is linked to the `slib.capa` `meta:source` with a
+`-(seen)>` edge. MAEC categories and families are only in `:desc` and the node data.
+
+An MBC behavior or method (ex. `Anti-Behavioral Analysis::Debugger Detection::Software Breakpoints
+[B0001.025]`) is an `ou:technique` with its ID as `:ext:id` and a `:reporter:name` of `mbc` (a guid made
+from those two props, so another source's node for the same ID is reused), the last part of the entry as
+its `:name` (unless it already has one), and a method's behavior (`B0001`) as its `:parent`.
+
+Upgrading from 0.4.x imports the rules again on the next package load, to add the MBC behaviors and the
+handle `:user` contacts. Contacts made for handles by older versions (with the `@handle` as their `:name`)
+are left as they are, the rules' `:author` points at the new contacts.
 
 ### Tags
 
@@ -108,6 +127,20 @@ Every rule namespace (and every namespace above it) is a `syn:tag` under the tag
 and a `:doc` listing the rules in it. Namespaces are converted to tags the way Synapse normalizes tags,
 `/` separates tag parts and `-` becomes `_`. Rules without a namespace, and library rules, don't add a
 tag. The tag docs are imported with the rules, and again whenever the tag prefix changes.
+
+`slib.capa.admin.tags --prefix` refuses a prefix that isn't a valid tag name (ex. `""` or one with
+spaces). After a prefix change (or turning tagging on or off), files keep their old tags until they're
+scanned again. The next scan of a file isn't skipped, it removes the tags under the old prefix and
+applies the new ones. To move every file that has capa tags now:
+
+```
+slib.capa.admin.tags --prefix my.capa
+file:bytes#rep.capa | slib.capa.scan
+```
+
+The `syn:tag` nodes under the old prefix (with their capa docs) are left in place, delete them once no
+node has them anymore if they aren't wanted. Files scanned by slib.capa older than 0.1.4 didn't record
+their tag prefix, so their next scan isn't skipped either.
 
 ### Results
 
@@ -136,7 +169,7 @@ file is packed or an installer, so its results may be incomplete.
 | `capa:rules:version` | `v10.0.0` | The version of the rules, used for rule URLs and the ruleset name. |
 | `capa:rules:url` | `https://github.com/mandiant/capa-rules/blob/{version}/{path}` | A template for each rule's `:url`, it may only use `{version}` and `{path}`. Set to `""` for none. |
 | `capa:sigs` | The bundled signatures | FLIRT signatures capa uses to recognize library code in PE files. |
-| `capa:timeout` | `900` | Seconds before a capa run is killed. |
+| `capa:timeout` | `900` | Seconds before a capa run is killed, and before a file's download from the Axon is stopped (connecting to the Axon times out after 30 seconds). |
 | `capa:workers` | `2` | The max number of files capa analyzes at once. |
 | `capa:maxsize` | `104857600` | The max size (in bytes) of a file the service will scan. |
 

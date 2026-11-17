@@ -8,11 +8,18 @@ init {
         $lib.raise(BadArg, "slib.capa.admin.tags: Use --enable or --disable, not both.")
     }
 
+    if ($cmdopts.prefix != null) {
+        // An invalid prefix (ex. "" or one with spaces) would make every tag edit fail.
+        ($ok, $prefix) = $lib.trycast(syn:tag, $cmdopts.prefix)
+        if ((not $ok) or ($prefix != $lib.cast(str, $cmdopts.prefix).strip().lower())) {
+            $lib.raise(BadArg, `slib.capa.admin.tags: {$cmdopts.prefix} isn't a valid tag name.`)
+        }
+    }
+
     if $cmdopts.enable { $privadmin.setTagsEnabled((true)) }
     if $cmdopts.disable { $privadmin.setTagsEnabled((false)) }
 
-    if ($cmdopts.prefix != $lib.null) {
-        $prefix = $lib.cast(syn:tag, $cmdopts.prefix)
+    if ($cmdopts.prefix != null) {
         $privadmin.setTagPrefix($prefix)
         // Document the tags under the new prefix.
         $retn = $priv.rulesInfo()
@@ -20,6 +27,5 @@ init {
     }
 
     $settings = $priv.tagSettings()
-    $lib.print("slib.capa tags: enabled={enabled} prefix={prefix}",
-        enabled=$settings.enabled, prefix=$settings.prefix)
+    $lib.print(`slib.capa tags: enabled={$settings.enabled} prefix={$settings.prefix}`)
 }

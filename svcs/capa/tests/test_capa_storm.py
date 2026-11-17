@@ -1,11 +1,16 @@
 """Pytests for the slib.capa Storm package (commands, modules, modeling, the rule import, perms)."""
 
 import pathlib
+import subprocess
+import sys
+from unittest import mock
 
+import synapse.lib.stormtypes as s_stormtypes
 import synapse.tests.utils as s_tests
 from stormlibpp.testing import assertMainHelp, assertVersionsMatch
 
 from capasvc import __version__
+from capasvc.api import CapaSvcError
 from capasvc.defs import PKGDEFS, SVC_GUID, SVC_NAME
 from capasvc.rules import ruleGuid, rulesetGuid
 
@@ -20,6 +25,7 @@ TAGS = {
     "rep.capa.testing.ops.xor",
     "rep.capa.testing.ops.ret",
 }
+SVCDIR = pathlib.Path(__file__).parents[1]
 USER_PERM = ("slib", "capa", "user")
 ADMIN_PERM = ("slib", "capa", "admin")
 
@@ -33,10 +39,33 @@ class TestCapaStormPkg(s_tests.SynTest):
     def test_versions_match(self):
         # The version lives in pyproject.toml (the image tag), __init__.py, the package yaml,
         # and the service's uv.lock entry.
-        assert assertVersionsMatch(pathlib.Path(__file__).parents[1]) == __version__
+        assert assertVersionsMatch(SVCDIR) == __version__
 
     def test_main_help(self):
         assertMainHelp("capasvc")
+
+    def test_readmes_match(self):
+        # The package's README (shown in the Cortex) is a copy of the service's README.
+        pkgreadme = SVCDIR / "src" / "capasvc" / "pkgproto" / "README.md"
+        assert pkgreadme.read_text() == (SVCDIR / "README.md").read_text(), (
+            "Copy README.md to src/capasvc/pkgproto/README.md"
+        )
+
+    def test_readme_commands(self):
+        # The README documents every command.
+        readme = (SVCDIR / "README.md").read_text()
+        for cmd in PKGDEFS[0]["commands"]:
+            assert f"`{cmd['name']}" in readme, cmd["name"]
+
+    def test_storm_lint(self):
+        # The package's Storm passes Synapse's Storm linter (CI runs it too, see storm_lint).
+        proc = subprocess.run(
+            [sys.executable, "-m", "synapse.tools.storm.lint", str(SVCDIR / "src")],
+            capture_output=True,
+            text=True,
+            cwd=SVCDIR,
+        )
+        assert proc.returncode == 0, proc.stdout + proc.stderr
 
     async def test_api_unexpected_error(self):
         # An error that isn't a CapaSvcError or CapaRulesError reaches Storm as status=False,
@@ -651,3 +680,275 @@ class TestCapaStormCustom(s_tests.SynTest):
             self.stormHasNoWarnErr(msgs)
             names = {n.ndef[1] for n in await core.nodes(f"{FILE} <(matches)- meta:rule")}
             assert guid in names
+
+
+class TestCapaStormModel(s_tests.SynTest):
+    async def test_mbc(self):
+        # MBC behaviors and methods are ou:technique nodes the rules -(refs)>.
+        async with capaSvc(self) as (core, svc, axon):
+            guid = ruleGuid("contain slib-capa test marker")
+            techs = await core.nodes(f"meta:rule={guid} -(refs)> ou:technique")
+            byid = {n.get("ext:id"): n for n in techs}
+            assert set(byid) == {"B0032", "B0001.025"}
+            assert all(n.get("reporter:name") == "mbc" for n in techs)
+            assert byid["B0032"].get("name") == "executable code obfuscation"
+            assert byid["B0032"].get("parent") is None
+            assert byid["B0001.025"].get("name") == "software breakpoints"
+
+            parent = await core.nodes(f"ou:technique={byid['B0001.025'].ndef[1]} :parent -> *")
+            assert len(parent) == 1
+            assert parent[0].get("ext:id") == "B0001"
+            assert parent[0].get("name") == "debugger detection"
+            assert len(await core.nodes("ou:technique")) == 3
+            assert len(await core.nodes(f"meta:source={SVC_GUID} -(seen)> ou:technique")) == 3
+
+            # A re-import reuses the nodes, and keeps a :name another source set.
+            await core.nodes("ou:technique:ext:id=B0032 [ :name='my name' ]")
+            await core.nodes("slib.capa.admin.sync --force")
+            assert len(await core.nodes("ou:technique")) == 3
+            node = (await core.nodes("ou:technique:ext:id=B0032"))[0]
+            assert node.get("name") == "my name"
+
+    async def test_mbc_existing(self):
+        async with capaSvc(self, onload=False) as (core, svc, axon):
+            await core.nodes("[ ou:technique=* :ext:id=B0032 :reporter:name=mbc :name=theirs ]")
+            await core.nodes("slib.capa.admin.sync --force")
+            nodes = await core.nodes("ou:technique:ext:id=B0032")
+            assert len(nodes) == 1 and nodes[0].get("name") == "theirs"
+            guid = ruleGuid("contain slib-capa test marker")
+            refs = await core.nodes(f"meta:rule={guid} -(refs)> ou:technique:ext:id=B0032")
+            assert [n.ndef for n in refs] == [nodes[0].ndef]
+
+    async def test_refs_follow_mappings(self):
+        # A rule's ATT&CK and MBC edges follow its current mappings when it's modeled again
+        # (ex. a rules update), and its other -(refs)> edges are left alone.
+        async with capaSvc(self) as (core, svc, axon):
+            q = """
+                $model = $lib.import(slib.capa.model)
+                $r = ({
+                    "guid": $guid, "name": "remapped", "type": "capa", "techniques": $tids,
+                    "mbc": $mbc, "meta": ({}), "authors": ([]),
+                })
+                yield $model.rule($r)
+            """
+            guid = "c" * 32
+            first = {
+                "guid": guid,
+                "tids": ["T1027", "T1497"],
+                "mbc": [
+                    {"id": "B0032", "name": "obfuscation", "parent": None},
+                    {"id": "B0009", "name": "virtual machine detection", "parent": None},
+                ],
+            }
+            await core.nodes(q, opts={"vars": first})
+            await core.nodes(f"meta:rule={guid} [ +(refs)> {{ [ inet:fqdn=example.com ] }} ]")
+            # Another source's ou:technique the rule refs isn't one of its MBC mappings.
+            await core.nodes(
+                f"meta:rule={guid} [ +(refs)> {{ [ ou:technique=* :ext:id=B0009 :reporter:name=x ] }} ]"
+            )
+
+            second = {
+                "guid": guid,
+                "tids": ["T1027"],
+                "mbc": [{"id": "B0032", "name": "obfuscation", "parent": None}],
+            }
+            await core.nodes(q, opts={"vars": second})
+
+            tids = {n.ndef[1] for n in await core.nodes(f"meta:rule={guid} -(refs)> it:mitre:attack:technique")}
+            assert tids == {"T1027"}
+            techs = await core.nodes(f"meta:rule={guid} -(refs)> ou:technique")
+            assert {(n.get("reporter:name"), n.get("ext:id")) for n in techs} == {
+                ("mbc", "B0032"),
+                ("x", "B0009"),
+            }
+            assert len(await core.nodes(f"meta:rule={guid} -(refs)> inet:fqdn")) == 1
+            # The nodes themselves are kept.
+            assert len(await core.nodes("ou:technique:ext:id=B0009")) == 2
+            assert len(await core.nodes("it:mitre:attack:technique=T1497")) == 1
+
+    async def test_contacts(self):
+        async with capaSvc(self) as (core, svc, axon):
+            # An email author is the contact's :email, as before.
+            guid = ruleGuid("contain slib-capa test marker")
+            authors = await core.nodes(f"meta:rule={guid} :author -> ps:contact")
+            assert len(authors) == 1 and authors[0].get("email") == "test@example.com"
+            assert authors[0].get("user") is None and authors[0].get("name") is None
+
+            # A handle is the contact's :user, a name its :name.
+            q = """
+                $model = $lib.import(slib.capa.model)
+                $r = ({
+                    "guid": $guid, "name": "handles", "type": "capa", "techniques": ([]),
+                    "mbc": ([]), "meta": ({}), "authors": ([$author]),
+                })
+                yield $model.rule($r)
+                :author -> ps:contact
+            """
+            nodes = await core.nodes(
+                q, opts={"vars": {"guid": "a" * 32, "author": {"user": "visi"}}}
+            )
+            assert len(nodes) == 1
+            assert nodes[0].get("user") == "visi" and nodes[0].get("name") is None
+            nodes = await core.nodes(
+                q, opts={"vars": {"guid": "b" * 32, "author": {"name": "jane doe"}}}
+            )
+            assert nodes[0].get("name") == "jane doe" and nodes[0].get("user") is None
+
+
+class TestCapaStormFixes(s_tests.SynTest):
+    async def test_unmatch_other_taxonomies(self):
+        # A rescan only removes the edges of capa rules (capa, capa.*), not of other rule types
+        # that start with "capa" (ex. capability).
+        async with capaSvc(self) as (core, svc, axon):
+            await putSample(core, axon)
+            await core.nodes(
+                f"{FILE} [ <(matches)+ {{ [ meta:rule=* :type=capability.x :name=other ] }} "
+                "<(matches)+ { [ meta:rule=* :type=capa.custom.old :name=stale ] } ]"
+            )
+            await core.nodes(SCAN)
+            names = {n.get("name") for n in await core.nodes(f"{FILE} <(matches)- meta:rule")}
+            assert names == set(MATCHED) | {"other"}
+
+    async def test_custom_type_prefix(self):
+        # Only capa.custom (and the types below it) are custom rules, not capa.customer.
+        async with capaSvc(self) as (core, svc, axon):
+            opts = {"vars": {"text": MARKER}}
+            await core.nodes(
+                "[ meta:rule=* :name=mine :type=capa.customer :text=$text ]", opts=opts
+            )
+            msgs = await core.stormlist("slib.capa.info")
+            self.stormIsInPrint("custom rules: 0", msgs)
+
+    async def test_rescan_on_tag_change(self):
+        # A file scanned with other tag settings is scanned again without --force.
+        async with capaSvc(self) as (core, svc, axon):
+            await putSample(core, axon)
+            await core.nodes(SCAN)
+            msgs = await core.stormlist(SCAN)
+            self.stormIsInPrint("already scanned", msgs)
+
+            await core.nodes("slib.capa.admin.tags --prefix my.capa")
+            msgs = await core.stormlist(SCAN)
+            self.stormNotInPrint("already scanned", msgs)
+            file = (await core.nodes(FILE))[0]
+            assert leafTags(file) == {t.replace("rep.capa", "my.capa") for t in TAGS}
+            msgs = await core.stormlist(SCAN)
+            self.stormIsInPrint("already scanned", msgs)
+
+            # Turning tagging off (and on) is a change too.
+            await core.nodes("slib.capa.admin.tags --disable")
+            msgs = await core.stormlist(SCAN)
+            self.stormNotInPrint("already scanned", msgs)
+            assert not (await core.nodes(FILE))[0].tags
+            msgs = await core.stormlist(SCAN)
+            self.stormIsInPrint("already scanned", msgs)
+
+            await core.nodes("slib.capa.admin.tags --enable")
+            msgs = await core.stormlist(SCAN)
+            self.stormNotInPrint("already scanned", msgs)
+            assert leafTags((await core.nodes(FILE))[0]) == {
+                t.replace("rep.capa", "my.capa") for t in TAGS
+            }
+
+    async def test_tags_prefix_invalid(self):
+        async with capaSvc(self) as (core, svc, axon):
+            for prefix in ("", "a b", "my..capa", "#nope"):
+                msgs = await core.stormlist(
+                    "slib.capa.admin.tags --prefix $p --disable", opts={"vars": {"p": prefix}}
+                )
+                self.stormIsInErr("isn't a valid tag name", msgs)
+
+            # Nothing changed, not even --disable.
+            msgs = await core.stormlist("slib.capa.admin.tags")
+            self.stormIsInPrint("slib.capa tags: enabled=true prefix=rep.capa", msgs)
+
+            # Case and surrounding space are normalized.
+            msgs = await core.stormlist("slib.capa.admin.tags --prefix ' My.Capa '")
+            self.stormIsInPrint("prefix=my.capa", msgs)
+
+    async def test_scan_lazy_init(self):
+        # An empty pipeline doesn't send the custom rules or get the rules info.
+        async with capaSvc(self) as (core, svc, axon):
+            await core.nodes("[ meta:rule=* :name=mine :type=capa.custom :text=$t ]",
+                             opts={"vars": {"t": MARKER}})
+            calls = {"custom": 0, "rulesInfo": 0}
+            custom, rulesInfo = svc.custom, svc.rulesInfo
+
+            async def countCustom(rules):
+                calls["custom"] += 1
+                return await custom(rules)
+
+            async def countInfo():
+                calls["rulesInfo"] += 1
+                return await rulesInfo()
+
+            svc.custom = countCustom
+            svc.rulesInfo = countInfo
+
+            msgs = await core.stormlist(f"file:bytes:sha256={'0' * 64} | slib.capa.scan")
+            self.stormHasNoWarnErr(msgs)
+            msgs = await core.stormlist("[ test:str=a ] | slib.capa.scan")
+            assert calls == {"custom": 0, "rulesInfo": 0}
+
+            # With files, once for all of them.
+            await putSample(core, axon)
+            await putSample(core, axon, b"another file")
+            msgs = await core.stormlist("file:bytes | slib.capa.scan --format sc64")
+            assert calls == {"custom": 1, "rulesInfo": 1}
+
+            # --force doesn't need the rules info.
+            await core.stormlist("file:bytes | slib.capa.scan --format sc64 --force")
+            assert calls == {"custom": 2, "rulesInfo": 1}
+
+    async def test_onload_not_ready(self):
+        # The onload gives up (with a warning) if the service isn't ready within 300 seconds.
+        async with capaSvc(self) as (core, svc, axon):
+            waits = []
+
+            async def notReady(self, name, timeout=None):
+                waits.append((name, timeout))
+                return False
+
+            with mock.patch.object(s_stormtypes.LibService, "_libSvcWait", notReady):
+                msgs = await core.stormlist("$lib.import(slib.capa.sync).onload()")
+            assert waits == [("slib.capa", 300)]
+            self.stormIsInWarn(
+                "slib.capa: The service wasn't ready, the capa rules weren't imported. "
+                "Run slib.capa.admin.sync.",
+                msgs,
+            )
+            self.stormNotInPrint("Importing", msgs)
+
+    async def test_sync_rules_fails_midway(self):
+        # A rules generator that fails partway through warns, and the import isn't recorded,
+        # so the next sync imports the rules again.
+        async with capaSvc(self) as (core, svc, axon):
+            await core.nodes("meta:rule | delnode --force")
+            rules = svc.rules
+
+            async def failing(names=None):
+                count = 0
+                async for rule in rules(names=names):
+                    if count == 2:
+                        raise CapaSvcError("the rules went away")
+                    count += 1
+                    yield rule
+
+            svc.rules = failing
+            msgs = await core.stormlist("slib.capa.admin.sync --force")
+            self.stormIsInWarn(
+                "slib.capa: Importing the capa rules failed: the rules went away", msgs
+            )
+            self.stormNotInPrint("Imported 6 capa rules", msgs)
+            assert len(await core.nodes("meta:rule")) == 2
+            # Still yields the ruleset.
+            assert [n.ndef[0] for n in await core.nodes("slib.capa.admin.sync --force")] == [
+                "meta:ruleset"
+            ]
+            msgs = await core.stormlist("slib.capa.info")
+            self.stormIsInPrint("rules imported: false", msgs)
+
+            svc.rules = rules
+            msgs = await core.stormlist("slib.capa.admin.sync")
+            self.stormIsInPrint("Imported 6 capa rules", msgs)
+            assert len(await core.nodes("meta:rule")) == 6

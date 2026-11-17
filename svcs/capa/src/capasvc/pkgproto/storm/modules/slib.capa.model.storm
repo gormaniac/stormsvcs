@@ -35,19 +35,25 @@ function setData(n, name, valu) {
 
 function refs(n, other) {
     yield $n
-    [ +(refs)> { yield $other } ]
+    [ +(refs)> $other ]
+    return($n)
+}
+
+function unref(n, other) {
+    yield $n
+    [ -(refs)> $other ]
     return($n)
 }
 
 function has(n, other) {
     yield $n
-    [ +(has)> { yield $other } ]
+    [ +(has)> $other ]
     return($n)
 }
 
 function matches(n, other) {
     yield $n
-    [ +(matches)> { yield $other } ]
+    [ +(matches)> $other ]
     return($n)
 }
 
@@ -57,12 +63,15 @@ function delTag(n, tag) {
     return($n)
 }
 
-// Remove the -(matches)> edges to a file from capa rules (meta:rule:type capa or capa.lib).
+// Remove the -(matches)> edges to a file from capa rules (a meta:rule:type of capa, or one
+// below it, ex. capa.lib or capa.custom). The trailing dot keeps other taxonomies that start
+// with "capa" (ex. "capability.") out, see Synapse's taxonomy ^= comparison.
 function unmatch(file) {
     yield $file
-    <(matches)- meta:rule +:type^=capa
-    [ -(matches)> { yield $file } ]
-    spin
+    <(matches)- meta:rule +:type^=capa.
+    [ -(matches)> $file ]
+    // Only the edits matter, the rule nodes aren't returned.
+    spin  // noqa: P001
 }
 
 // ---- Rules ----
@@ -75,10 +84,11 @@ function rulesetOf(info) {
 
 // The meta:ruleset for a version of the capa rules (see CapaSvc.rulesInfo).
 function ruleset(info) {
+    $desc = `The capa rules (capa-rules {$info.version}) of the slib.capa service`
     [ meta:ruleset=$info.ruleset
         :name=`capa-rules {$info.version}`
         :type=capa
-        :desc=`The capa rules (capa-rules {$info.version}) of the slib.capa service, for capa {$info.capa}.`
+        :desc=`{$desc}, for capa {$info.capa}.`
     ]
     $node.data.set("slib:capa", ({
         "version": $info.version,
@@ -96,6 +106,35 @@ function technique(tid) {
     return($node)
 }
 
+// The ou:technique of an MBC behavior or method (see capasvc.rules.mbc), by its MBC ID (its
+// :ext:id, with a :reporter:name of mbc). A method's :parent is its behavior. A :name another
+// source already set is kept.
+function mbcTechnique(m) {
+    [ ou:technique=({"ext:id": $m.id, "reporter:name": "mbc"}) ]
+    if ($m.name and not :name) { [ :name=$m.name ] }
+    if $m.parent {
+        $parent = $mbcTechnique($m.parent)
+        [ :parent=$parent ]
+    }
+    return($seen($node))
+}
+
+// The ATT&CK techniques a rule node -(refs)> that aren't in tids (ATT&CK IDs), and the MBC
+// behaviors (ou:technique, see mbcTechnique) it -(refs)> that aren't in mids (MBC IDs), so a
+// rule's edges follow its current mappings when the rules are reloaded. Its other -(refs)>
+// edges (ex. to another source's ou:technique) are left alone.
+function staleTechniques(n, tids) {
+    yield $n
+    -(refs)> it:mitre:attack:technique
+    if (not $tids.has($node.repr())) { emit $node }
+}
+
+function staleMbc(n, mids) {
+    yield $n
+    -(refs)> ou:technique +:reporter:name=mbc
+    if (not $mids.has(:ext:id)) { emit $node }
+}
+
 // Create a capa rule's meta:rule and set its props. Returns the node.
 function ruleNode(r) {
     [ meta:rule=$r.guid
@@ -105,7 +144,7 @@ function ruleNode(r) {
         :text?=$r.text
         :url?=$r.url
     ]
-    if $r.authors { [ :author={[ ps:contact=$r.authors.index(0) ]} ] }
+    if $r.authors { [ :author={[ ps:contact=$r.authors.index(0) ]} ] }  // noqa: M001
     $node.data.set("slib:capa", $r.meta)
     return($seen($node))
 }
@@ -114,11 +153,21 @@ function ruleNode(r) {
 //
 // The rule's documentation (description, namespace, scopes, ATT&CK, MBC, references, and
 // examples) is its :desc, its YAML is its :text, and its full meta is its "slib:capa"
-// node data. It -(refs)> the ATT&CK techniques it maps to, and is in the ruleset, if given.
-function rule(r, ruleset=$lib.null) {
+// node data. It -(refs)> the ATT&CK techniques and the MBC behaviors (ou:technique, see
+// mbcTechnique) it maps to, and is in the ruleset, if given. Its edges to the ones it no
+// longer maps to (ex. after a rules update) are removed, see staleTechniques.
+function rule(r, ruleset=(null)) {
     $n = $ruleNode($r)
+    $mids = ([])
+    for $m in $r.mbc { $mids.append($m.id) }
+    // Collected first, so the edges aren't removed while they're being walked.
+    $stale = ([])
+    for $o in $staleTechniques($n, $r.techniques) { $stale.append($o) }
+    for $o in $staleMbc($n, $mids) { $stale.append($o) }
+    for $o in $stale { $unref($n, $o) }
     for $tid in $r.techniques { $refs($n, $technique($tid)) }
-    if ($ruleset != $lib.null) { $has($ruleset, $n) }
+    for $m in $r.mbc { $refs($n, $mbcTechnique($m)) }
+    if ($ruleset != null) { $has($ruleset, $n) }
     return($n)
 }
 
@@ -158,7 +207,7 @@ function hasBelow(n, tag) {
 // even under a shared prefix (ex. "rep").
 function clearTags(file) {
     $data = $file.data.get("slib:capa")
-    if ($data = $lib.null) { return() }
+    if ($data = null) { return() }
     if (not $data.tags) { return() }
 
     $parents = ({})
@@ -186,7 +235,7 @@ function clearTags(file) {
 // under the prefix (unless it's null), and the results are the file's "slib:capa" node data.
 // The capa edges and the tags of an earlier scan are removed first (see clearTags), so they
 // only show the latest results.
-function results(file, result, prefix=$lib.null) {
+function results(file, result, prefix=(null)) {
     $unmatch($file)
     $clearTags($file)
 
@@ -195,9 +244,9 @@ function results(file, result, prefix=$lib.null) {
     $tags = ([])
     for $m in $result.matches {
         $r = $ruleOf($m.rule)
-        if ($r = $lib.null) { $r = $rule($m.rule) }
+        if ($r = null) { $r = $rule($m.rule) }
         $matches($r, $file)
-        if ($prefix != $lib.null and $m.rule.tag) {
+        if ($prefix != null and $m.rule.tag) {
             $tag = $lib.cast(syn:tag, `{$prefix}.{$m.rule.tag}`)
             $addTag($file, $tag)
             if (not $tags.has($tag)) { $tags.append($tag) }

@@ -4,11 +4,14 @@ init {
     $svc = $lib.service.get("slib.capa")
 }
 
-function setTagPrefix(prefix) { $lib.globals.set("slib:capa:tag:prefix", $prefix) }
-function setTagsEnabled(enabled) { $lib.globals.set("slib:capa:tag:enabled", $enabled) }
+// $lib.globals.get/set (R005) are kept, $lib.globals.<name> doesn't work on Synapse 2.x.
+function setTagPrefix(prefix) { $lib.globals.set("slib:capa:tag:prefix", $prefix) }  // noqa: R005
+function setTagsEnabled(enabled) {
+    $lib.globals.set("slib:capa:tag:enabled", $enabled)  // noqa: R005
+}
 
 // Record what slib.capa.sync imported, kind is "rules" or "tags".
-function setSynced(kind, valu) { $lib.globals.set(`slib:capa:sync:{$kind}`, $valu) }
+function setSynced(kind, valu) { $lib.globals.set(`slib:capa:sync:{$kind}`, $valu) }  // noqa: R005
 
 // Have the service reload its rules from disk.
 function reload() { return($svc.reload()) }

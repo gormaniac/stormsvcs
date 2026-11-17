@@ -146,7 +146,10 @@ class CapaSvc(s_cell.Cell):
             "type": "integer",
             "default": 900,
             "minimum": 1,
-            "description": "Seconds before a capa run is killed.",
+            "description": (
+                "Seconds before a capa run is killed, and before a file's download from the "
+                "Axon is stopped."
+            ),
         },
         "capa:workers": {
             "type": "integer",
@@ -360,6 +363,10 @@ class CapaSvc(s_cell.Cell):
         """Yield the record of every capa rule (or the named ones), sorted by name."""
 
         rules = self._getRules().rules
+        if names is not None and (
+            not isinstance(names, (list, tuple)) or not all(isinstance(n, str) for n in names)
+        ):
+            raise CapaSvcError("Rule names must be a list of strings.")
         if names:
             missing = [n for n in names if n not in rules]
             if missing:
@@ -507,6 +514,9 @@ class CapaSvc(s_cell.Cell):
         if osname not in OSES:
             raise CapaSvcError(f"Invalid OS {osname}, expected one of: {', '.join(OSES)}")
 
+        if custom is not None and not isinstance(custom, str):
+            raise CapaSvcError("The custom rules key must be a string (see custom()).")
+
         rules = self._getRules()
         await self.cacheReady.wait()
 
@@ -576,41 +586,59 @@ class CapaSvc(s_cell.Cell):
         )
 
     async def _fetch(self, sha256: str, path: str) -> None:
-        """Save a file from the Axon to ``path``."""
+        """Save a file from the Axon to ``path``.
+
+        Connecting to the Axon is bounded by ``AXON_TIMEOUT``, and the download (with its size
+        check) by ``capa:timeout``, so a hung Axon link doesn't hold a worker forever.
+        """
 
         if self.axon is None:
             raise CapaSvcError("The slib.capa service has no axon:url configured.")
 
-        maxsize = self.conf.get("capa:maxsize")
         byts = s_common.uhex(sha256)
 
         try:
             axon = await self.axon.proxy(timeout=AXON_TIMEOUT)
-            size = await axon.size(byts)
-            if size is None:
-                raise CapaSvcError(f"The file {sha256} is not in the Axon.")
-            if size > maxsize:
-                raise CapaSvcError(
-                    f"The file {sha256} is {size} bytes, more than the {maxsize} byte "
-                    "max (capa:maxsize)."
-                )
-            # Disk writes run in a thread, so a large file doesn't block the service.
-            fd = await s_coro.executor(open, path, "wb")
-            try:
-                async for chunk in axon.get(byts):
-                    await s_coro.executor(fd.write, chunk)
-            finally:
-                await s_coro.executor(fd.close)
+        except TimeoutError:
+            raise CapaSvcError(
+                f"Unable to connect to the Axon within {AXON_TIMEOUT} seconds."
+            ) from None
+        except Exception as err:
+            raise CapaSvcError(f"Unable to read {sha256} from the Axon: {err}") from None
+
+        timeout = self.conf.get("capa:timeout")
+        try:
+            await asyncio.wait_for(self._download(axon, sha256, byts, path), timeout=timeout)
         except CapaSvcError:
             raise
         except TimeoutError:
             raise CapaSvcError(
-                f"Unable to connect to the Axon within {AXON_TIMEOUT} seconds."
+                f"Downloading {sha256} from the Axon took longer than {timeout} seconds "
+                "(capa:timeout)."
             ) from None
         except s_exc.NoSuchFile:
             raise CapaSvcError(f"The file {sha256} is not in the Axon.") from None
         except Exception as err:
             raise CapaSvcError(f"Unable to read {sha256} from the Axon: {err}") from None
+
+    async def _download(self, axon: Any, sha256: str, byts: bytes, path: str) -> None:
+        """Check a file's size in the Axon and save it to ``path``, see ``_fetch``."""
+
+        maxsize = self.conf.get("capa:maxsize")
+        size = await axon.size(byts)
+        if size is None:
+            raise CapaSvcError(f"The file {sha256} is not in the Axon.")
+        if size > maxsize:
+            raise CapaSvcError(
+                f"The file {sha256} is {size} bytes, more than the {maxsize} byte "
+                "max (capa:maxsize)."
+            )
+        # Opened here, not in a thread: a scan cancelled while an executor opened the file
+        # would never get the handle, leaking it and creating the file after _scan's cleanup.
+        # Disk writes run in a thread, so a large file doesn't block the service.
+        with open(path, "wb") as fd:  # noqa: ASYNC230
+            async for chunk in axon.get(byts):
+                await s_coro.executor(fd.write, chunk)
 
     def _capaCmd(
         self,
