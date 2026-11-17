@@ -1,5 +1,5 @@
 name: slib.capa
-version: 0.5.1
+version: 0.6.0
 guid: debecd104d154eed9c8bec53a6b2531f
 
 synapse_version: ">=2.145.0,<3.0.0"
@@ -46,6 +46,9 @@ modules:
     perms:
       - [ slib, capa, user ]
   - name: slib.capa.sync
+    perms:
+      - [ slib, capa, admin ]
+  - name: slib.capa.contacts
     perms:
       - [ slib, capa, admin ]
   - name: slib.capa.util
@@ -167,3 +170,42 @@ commands:
         - default: false
           action: store_true
           help: Disable tagging.
+
+  - name: slib.capa.admin.contacts.migrate
+    perms:
+      - [ slib, capa, admin ]
+    descr: |
+      Migrate the rule author contacts made for @handles before slib.capa 0.5.0 to :user.
+
+      A rule's :author is a ps:contact for its first author. Before 0.5.0, an @handle author
+      (ex. "@someone") was a contact with the handle as its :name ({"name": "@someone"}). It's
+      now a contact with the handle, without the @, as its :user ({"user": "someone"}).
+      Re-importing the rules points their :author at the new contacts but leaves the old ones.
+
+      This finds the old contacts slib.capa made (the node the old ctor made, for a handle that's
+      the :author of a capa rule -(seen)> by the slib.capa meta:source) and merges each into the
+      contact the current code makes for its handle, which is made if it doesn't exist: props it
+      doesn't have are copied (not the @handle :name), array props are combined, and the tags
+      (with their times), node data it doesn't have, light edges (both directions), and the props
+      of other nodes that reference it (ex. a rule's :author) are moved, then the old node is
+      deleted. An old contact that already has the handle as its :user just has its :name
+      removed. Other ps:contact nodes, even with an @ :name, are never touched. An old contact
+      referenced by a read-only prop (ex. ou:contest:result:participant or meta:seen:node, which
+      are part of the referencing node's primary value) can't be re-pointed, so it's skipped with
+      a warning naming those nodes: recreate or delete them, then rerun.
+
+      Without --apply it's a dry run, which only prints what would be migrated. Running it again
+      after --apply finds nothing to migrate.
+
+      Examples:
+
+        // See what would be migrated.
+        slib.capa.admin.contacts.migrate
+
+        // Migrate them.
+        slib.capa.admin.contacts.migrate --apply
+    cmdargs:
+      - - --apply
+        - default: false
+          action: store_true
+          help: Migrate the contacts (the default is a dry run that changes nothing).

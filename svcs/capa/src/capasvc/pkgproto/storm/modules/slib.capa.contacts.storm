@@ -1,0 +1,252 @@
+// Migrate the ps:contact nodes older slib.capa versions made for @handle rule authors to the
+// current model, which slib.capa.admin.contacts.migrate runs.
+//
+// A rule's :author is a ps:contact made with a guid ctor (see capasvc.rules.contact). Before
+// 0.5.0, an @handle author was ({"name": "@handle"}), a contact with the handle as its :name. It's
+// now ({"user": "handle"}), a contact with the handle (without the @) as its :user. Re-importing
+// the rules points their :author at the new contacts, but leaves the old ones behind.
+//
+// Only contacts slib.capa made are migrated: the node the old ctor made (its guid is the old
+// ctor's, guid([("name", "@handle")])), for a handle that's the :author of a capa rule (a meta:rule
+// of a capa type, -(seen)> by the slib.capa meta:source), either still the old contact or already
+// the new one.
+//
+// Unprivileged: node edits run as the calling admin, so their node permissions apply.
+
+init {
+    $sourceGuid = "ee5999b4059645168272e22d7cd087e3"
+    // capasvc.rules.HANDLE_RE
+    $handleRe = "^@([^@\\s]+)$"
+}
+
+// The handle of a capa rule's :author contact: its :user, or its old @handle :name (without the
+// @). Null for any other contact (ex. an email or a person's name).
+function handleOf(n) {
+    $user = $n.props.user
+    if ($user != null) { return($user) }
+    $name = $n.props.name
+    if ($name = null) { return() }
+    $groups = $lib.regex.search($handleRe, $name)
+    if ($groups = null) { return() }
+    return($groups.0)
+}
+
+// The handles of the :author contacts of every capa rule, deduplicated.
+function ruleHandles() {
+    $handles = $lib.set()
+    $query = ${
+        meta:source=$sourceGuid -(seen)> meta:rule +:type^=capa. :author -> ps:contact  // noqa: M001
+    }
+    for $n in $query {
+        $handle = $handleOf($n)
+        if ($handle != null) { $handles.add($handle) }
+    }
+    $list = $handles.list()
+    $list.sort()
+    return($list)
+}
+
+// The old contact slib.capa made for a handle, or null.
+function oldContact(handle) {
+    $name = `@{$handle}`
+    // The guid the old ({"name": "@handle"}) ctor gave a contact it made.
+    $guid = $lib.guid((name, $name))
+    for $n in ${ ps:contact=$guid +:name=$name } { return($n) }  // noqa: M001
+    return()
+}
+
+// The contact the current code makes for a handle, or null if it doesn't exist yet. Only lifted.
+function currentContact(handle) {
+    for $n in ${ ps:contact=({"user": $handle}) } { return($n) }  // noqa: M001
+    return()
+}
+
+// Emit ({"node": <old contact>, "handle": <handle>, "target": <current contact or null>,
+// "guid": <the current contact's guid>}) for every old contact slib.capa made for a handle. The
+// target is the old node itself if it already has the handle as its :user.
+function oldContacts() {
+    for $handle in $ruleHandles() {
+        $old = $oldContact($handle)
+        if ($old = null) { continue }
+        $target = $currentContact($handle)
+        if ($target = null) { $guid = $lib.guid((user, $handle)) }
+        else { $guid = $target.value() }
+        emit ({"node": $old, "handle": $handle, "target": $target, "guid": $guid})
+    }
+}
+
+// The props of other nodes that reference the old node but are read-only, as a list of
+// "<form>:<prop> (<iden>)". These (ex. ou:contest:result:participant, meta:seen:node) are
+// derived from the referencing node's primary value, so they can't be re-pointed: a node
+// referenced this way must be skipped before anything is merged.
+function readOnlyRefs(old) {
+    $refs = ([])
+    $form = $old.form()  // noqa: R002 - $node.form is a gtor in 3.x, 2.x needs the call.
+    $oval = $old.value()
+    for $ref in ${ yield $old <- * } {
+        $refform = $ref.form()  // noqa: R002
+        for ($name, $valu) in $ref.props {
+            $prop = $lib.model.prop(`{$refform}:{$name}`)
+            if (not $prop) { continue }
+            if (not $_isReadOnly($prop.full)) { continue }
+            $refd = ($_swap($prop.type.name, $valu, $form, $oval, $oval) != null)
+            if ((not $refd) and $prop.type.name = "array") {
+                for $item in $valu {
+                    if ($_swap($prop.type.opts.type, $item, $form, $oval, $oval) != null) {
+                        $refd = (true)
+                    }
+                }
+            }
+            if $refd { $refs.append(`{$prop.full} ({$ref.iden()})`) }
+        }
+    }
+    return($refs)
+}
+
+function _isReadOnly(full) {
+    for $p in ${ syn:prop=$full +:ro=1 } { return((true)) }  // noqa: M001
+    return((false))
+}
+
+// Migrate an old contact for a handle. Returns how many nodes referenced the old node by a prop
+// (and now reference the current one).
+//
+// If the old node already has the handle as its :user, it's the current contact, so its @handle
+// :name is removed. Otherwise it's merged into the current contact (made if it doesn't exist),
+// and deleted.
+function migrate(old, handle) {
+    $new = $_target($handle)
+    if ($new.iden() = $old.iden()) {
+        $_clearName($old)
+        return((0))
+    }
+    $_props($old, $new)
+    $_tags($old, $new)
+    $_data($old, $new)
+    $_edges($old, $new)
+    $refs = $_repoint($old, $new)
+    $_delete($old)
+    return($refs)
+}
+
+// The contact the current code makes for a handle (see slib.capa.model.ruleNode).
+function _target(handle) {
+    [ ps:contact=({"user": $handle}) ]  // noqa: M001
+    return($node)
+}
+
+function _clearName(n) {
+    yield $n
+    [ -:name ]
+    return($n)
+}
+
+// Copy the props the new node doesn't have, union the array props, and merge .seen. The old
+// @handle :name isn't copied, the handle is the new node's :user.
+function _props(old, new) {
+    for ($name, $valu) in $old.props {
+        if ($name = ".created" or $name = "name") { continue }
+        $cur = $new.props.$name
+        if ($name = ".seen") {
+            // Setting an interval merges it with the current one.
+            $new.props.set($name, $valu)
+            continue
+        }
+        $prop = $lib.model.prop(`ps:contact:{$name}`)
+        if ($prop and $prop.type.name = "array") {
+            $vals = $lib.set()
+            for $v in $cur { $vals.add($v) }
+            for $v in $valu { $vals.add($v) }
+            $new.props.set($name, $vals.list())
+        } elif ($cur = null) {
+            $new.props.set($name, $valu)
+        }
+    }
+}
+
+// Move the tags, with their times.
+function _tags(old, new) {
+    ($ndef, $info) = $old.pack()
+    for ($tag, $ival) in $info.tags { $_tag($new, $tag, $ival) }
+}
+
+function _tag(n, tag, ival) {
+    yield $n
+    if ($ival.0 = null) { [ +#$tag ] }
+    else { [ +#$tag=$ival ] }
+    return($n)
+}
+
+// Copy the node data the new node doesn't have.
+function _data(old, new) {
+    for ($name, $valu) in $old.data.list() {
+        if ($new.data.get($name) = null) { $new.data.set($name, $valu) }
+    }
+}
+
+// Move the light edges, both directions. An edge between the old node and itself moves to
+// the new node and itself.
+function _edges(old, new) {
+    $oiden = $old.iden()
+    $niden = $new.iden()
+    for ($verb, $iden) in $old.edges() {
+        if ($iden = $oiden) { $iden = $niden }
+        $new.addEdge($verb, $iden)
+        $old.delEdge($verb, $iden)
+    }
+    for ($verb, $iden) in $old.edges(reverse=(true)) {
+        for $n1 in ${ yield $iden } {
+            $n1.addEdge($verb, $niden)
+            $n1.delEdge($verb, $oiden)
+        }
+    }
+}
+
+// Point the props that reference the old node (by guid or ndef, or in an array) at the new one.
+function _repoint(old, new) {
+    $count = (0)
+    $form = $old.form()  // noqa: R002 - $node.form is a gtor in 3.x, 2.x needs the call.
+    $oval = $old.value()
+    $nval = $new.value()
+    for $ref in ${ yield $old <- * } {
+        $changed = (false)
+        $refform = $ref.form()  // noqa: R002
+        for ($name, $valu) in $ref.props {
+            $prop = $lib.model.prop(`{$refform}:{$name}`)
+            if (not $prop) { continue }
+            $newvalu = $_swap($prop.type.name, $valu, $form, $oval, $nval)
+            if ($newvalu = null) {
+                if ($prop.type.name = "array") {
+                    $items = ([])
+                    $swapped = (false)
+                    for $item in $valu {
+                        $sitem = $_swap($prop.type.opts.type, $item, $form, $oval, $nval)
+                        if ($sitem = null) { $items.append($item) }
+                        else { $items.append($sitem) $swapped = (true) }
+                    }
+                    if $swapped {
+                        $ref.props.set($name, $items)
+                        $changed = (true)
+                    }
+                }
+            } else {
+                $ref.props.set($name, $newvalu)
+                $changed = (true)
+            }
+        }
+        if $changed { $count = ($count + 1) }
+    }
+    return($count)
+}
+
+// The new value for a value of the given type that references the old node, or null.
+function _swap(type, valu, form, oval, nval) {
+    if ($type = $form and $valu = $oval) { return($nval) }
+    if ($type = "ndef" and $valu.0 = $form and $valu.1 = $oval) { return(($form, $nval)) }
+    return()
+}
+
+function _delete(old) {
+    yield $old | delnode
+    return()
+}

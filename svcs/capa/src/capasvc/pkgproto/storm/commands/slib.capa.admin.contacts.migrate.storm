@@ -1,0 +1,54 @@
+init {
+    $contacts = $lib.import(slib.capa.contacts)
+    $cmd = "slib.capa.admin.contacts.migrate"
+
+    // Nodes referenced by read-only props are found first, and skipped: they can't be
+    // re-pointed, so merging would fail partway.
+    $olds = ([])
+    $skipped = (0)
+    for $item in $contacts.oldContacts() {
+        $old = $item.node
+        $same = ($item.target != null and $item.target.iden() = $old.iden())
+        if (not $same) {
+            $rorefs = $contacts.readOnlyRefs($old)
+            if $rorefs {
+                $skipped = ($skipped + 1)
+                $lib.warn(`{$cmd}: Skipping {$old.repr()} (:name={$old.props.name}), it's referenced by read-only props that can't be re-pointed: {(", ").join($rorefs)}. Recreate (or delete) those nodes to reference ps:contact={$item.guid} instead, then rerun.`)
+                continue
+            }
+        }
+        $item.same = $same
+        $olds.append($item)
+    }
+
+    $refs = (0)
+    for $item in $olds {
+        $old = $item.node
+        $what = `ps:contact={$old.repr()} (:name={$old.props.name})`
+        if $item.same {
+            $how = `by removing its :name, it already has :user={$item.handle}`
+        } elif ($item.target = null) {
+            $how = `into a new ps:contact={$item.guid} (:user={$item.handle})`
+        } else {
+            $how = `into ps:contact={$item.guid} (:user={$item.handle})`
+        }
+        if $cmdopts.apply {
+            $refs = ($refs + $contacts.migrate($old, $item.handle))
+            $lib.print(`Migrated {$what} {$how}`)
+        } else {
+            $lib.print(`Would migrate {$what} {$how}`)
+        }
+    }
+
+    $nold = $lib.len($olds)
+    if $skipped {
+        $lib.print(`{$cmd}: Skipped {$skipped} old contacts referenced by read-only props.`)
+    }
+    if $cmdopts.apply {
+        $lib.print(`{$cmd}: Migrated {$nold} old contacts, and re-pointed {$refs} nodes that referenced them.`)
+    } elif $nold {
+        $lib.print(`{$cmd}: Found {$nold} old contacts. This was a dry run, rerun with --apply to migrate them.`)
+    } else {
+        $lib.print(`{$cmd}: There are no old contacts to migrate.`)
+    }
+}
