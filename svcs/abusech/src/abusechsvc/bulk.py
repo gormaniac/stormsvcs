@@ -95,6 +95,8 @@ class NodeBuilder:
         self.nodes: dict[Ndef, dict] = {}
         self.held: dict[Ndef, dict] = {}
         self.arrays: dict[tuple[Ndef, str], set] = {}
+        # A family's :tag, by its guid. Not packed with its node, see familyTags().
+        self.familytags: dict[str, str] = {}
 
     # ---- Packed node helpers ----
 
@@ -310,8 +312,15 @@ class NodeBuilder:
         )
         if ndef is None:
             return None
-        if tagname and self.prefix:
-            self.prop(ndef, "tag", f"{self.prefix}.{plat}.{tagname}", ifunset=True)
+        if tagname and self.prefix and ndef[1] not in self.familytags:
+            try:
+                tag, _ = self.model.prop("risk:tool:software:tag").type.norm(
+                    f"{self.prefix}.{plat}.{tagname}"
+                )
+            except NORM_ERRORS:
+                pass
+            else:
+                self.familytags[ndef[1]] = tag
         self.prop(ndef, "soft:name", name)
         self.prop(ndef, "reporter:name", "abuse.ch")
         self.prop(ndef, "type", "malware")
@@ -527,6 +536,17 @@ class NodeBuilder:
                 ]
                 info["edges"] = set()
         return list(self._pack(nodes))
+
+    def familyTags(self) -> list[list[str]]:
+        """The ``[guid, tag]`` of every family given a tag, to set on the ones without one.
+
+        Like the Storm model, a family's :tag is from the first platform it's tagged on. Packed
+        nodes always set their props, so a :tag in the nodes file would replace the one a
+        family already has in the Cortex: the importer sets these after ingesting the nodes,
+        with ``-:tag``.
+        """
+
+        return [[guid, tag] for guid, tag in self.familytags.items()]
 
     def finish(self) -> list[tuple]:
         """Return the remaining nodes, including the held ones with their complete arrays."""

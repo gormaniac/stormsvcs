@@ -1816,7 +1816,7 @@ class AbuseChSvc(s_cell.Cell):
 
         ``prefix`` is the tag prefix (null when tagging is disabled). Yields
         ``{"rows", "nodes"}`` after each batch, then ``{"done": True, "rows", "skipped", "nodes",
-        "size", "builder", "seconds"}``.
+        "size", "builder", "seconds", "familytags"}`` (see ``NodeBuilder.familyTags``).
         """
 
         job = self._bulkJob(jobid, owner)
@@ -1891,6 +1891,7 @@ class AbuseChSvc(s_cell.Cell):
             "size": os.path.getsize(job["nodes"]),
             "builder": bulk.BUILDER_VERSION,
             "seconds": round(time.monotonic() - start, 1),
+            "familytags": builder.familyTags(),
         }
 
     async def bulkNodes(

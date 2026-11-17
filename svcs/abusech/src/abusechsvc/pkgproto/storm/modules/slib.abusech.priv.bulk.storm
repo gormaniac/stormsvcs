@@ -130,6 +130,11 @@ function run(plat, kind, reuse=(false), repull=(false)) {
             $lib.print(`{$cmd}: Ingesting {$sha256}.`)
             $start = $lib.time.now()
             $count = $lib.feed.fromAxon($sha256)
+            // A family's :tag is from the first platform it's tagged on, like the model's
+            // familyNode(). The nodes would replace it, so it's only set where it's unset.
+            for ($guid, $tag) in $result.familytags {
+                risk:tool:software=$guid -:tag [ :tag = $tag ]  // noqa: M001
+            }
             $secs = (($lib.time.now() - $start) / 1000)
 
             $info.nodes = ({"sha256": $sha256, "size": $size, "count": $count, "built": $result.nodes, "rows": $result.rows,

@@ -227,6 +227,36 @@ class TestBulkStorm(s_tests.SynTest):
                 {k for k in set(storm) | set(bulked) if storm.get(k) != bulked.get(k)},
             )
 
+    async def test_family_tag(self):
+        # A family keeps the :tag it already has (from the first platform it was tagged on),
+        # like the Storm model's familyNode(). Packed nodes always set their props, so the tag
+        # is set after ingesting, only where it's unset.
+        async with abusechSvc(self) as (core, svc, fake):
+            guid = await core.callStorm(
+                "return($lib.import(slib.abusech.model).familyGuid(QakBot))"
+            )
+            await core.nodes(
+                "[ risk:tool:software=$g :soft:name=qakbot :tag=rep.abusech.bazaar.qakbot ]",
+                opts={"vars": {"g": guid}},
+            )
+            msgs = await core.stormlist("slib.abusech.threatfox.export full --bulk")
+            self.stormIsInPrint("Ingested", msgs)
+            nodes = await core.nodes("risk:tool:software=$g", opts={"vars": {"g": guid}})
+            assert nodes[0].get("tag") == "rep.abusech.bazaar.qakbot"
+            assert nodes[0].get("reporter:name") == "abuse.ch"
+
+            # A family without one gets the platform's tag.
+            await core.nodes(
+                "risk:tool:software=$g [ -:tag ]", opts={"vars": {"g": guid}}
+            )
+            await core.stormlist("slib.abusech.threatfox.export full --bulk --reuse")
+            nodes = await core.nodes("risk:tool:software=$g", opts={"vars": {"g": guid}})
+            assert (nodes[0].get("tag") or "").startswith("rep.abusech.threatfox.")
+
+        builder = bulk.NodeBuilder(bulk.buildModel(), None)
+        builder.family("threatfox", "QakBot", "qakbot")
+        assert builder.familyTags() == []
+
     async def test_datasets(self):
         async with abusechSvc(self) as (core, svc, fake):
             msgs = await core.stormlist("slib.abusech.urlhaus.export recent --bulk")
