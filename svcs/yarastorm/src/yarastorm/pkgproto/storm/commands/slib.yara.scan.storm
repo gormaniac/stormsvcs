@@ -8,7 +8,7 @@ init {
     }
 }
 
-switch $node.form() {
+switch $node.form() {  // noqa: R002 - 2.x needs the call
     "file:bytes": {
         if (not :sha256) {
             $lib.warn(`file:bytes={$node.repr()} has no :sha256 and can't be scanned.`)
@@ -37,6 +37,6 @@ switch $node.form() {
         }
     }
     *: {
-        $lib.warn(`slib.yara.scan only supports file:bytes nodes, skipping {$node.form()}.`)
+        $lib.warn(`slib.yara.scan only supports file:bytes nodes, skipping {$node.form()}.`)  // noqa: R002 - 2.x needs the call
     }
 }

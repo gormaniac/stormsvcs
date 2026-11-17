@@ -3,18 +3,17 @@ init {
     $name = "slib.vt.admin.tags"
 
     if ($cmdopts.enable and $cmdopts.disable) {
-        $lib.warn("{name}: Use --enable or --disable, not both.", name=$name)
+        $lib.warn(`{$name}: Use --enable or --disable, not both.`)
     } else {
         try {
-            if ($cmdopts.prefix != $lib.null) { $admin.setTagPrefix($cmdopts.prefix) }
+            if ($cmdopts.prefix != null) { $admin.setTagPrefix($cmdopts.prefix) }
         } catch * as err {
-            $lib.warn("{name}: Invalid tag prefix: {err}", name=$name, err=$err.mesg)
+            $lib.warn(`{$name}: Invalid tag prefix: {$err.mesg}`)
         }
         if $cmdopts.enable { $admin.setTagsEnabled((true)) }
         if $cmdopts.disable { $admin.setTagsEnabled((false)) }
     }
 
     $settings = $admin.tagSettings()
-    $lib.print("{name}: enabled={enabled} prefix={prefix}", name=$name,
-        enabled=$settings.enabled, prefix=$settings.prefix)
+    $lib.print(`{$name}: enabled={$settings.enabled} prefix={$settings.prefix}`)
 }

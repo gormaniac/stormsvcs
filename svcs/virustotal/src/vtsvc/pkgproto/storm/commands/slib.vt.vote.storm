@@ -4,12 +4,12 @@ init {
 }
 
 $tgt = $util.target($node)
-if ($tgt = $lib.null) {
-    $lib.warn("slib.vt.vote: Can't vote on {repr}, it has no hash.", repr=$node.repr())
+if ($tgt = null) {
+    $lib.warn(`slib.vt.vote: Can't vote on {$node.repr()}, it has no hash.`)
 } else {
     ($kind, $ident) = $tgt
     $retn = $submit.addVote($kind, $ident, $cmdopts.verdict)
     if (not $util.failed($retn, `Voting on {$ident}`)) {
-        $lib.print("slib.vt.vote: Voted {ident} {verdict}.", ident=$ident, verdict=$cmdopts.verdict)
+        $lib.print(`slib.vt.vote: Voted {$ident} {$cmdopts.verdict}.`)
     }
 }

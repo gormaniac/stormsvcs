@@ -3,23 +3,23 @@
 ARG BASE_IMAGE=ghcr.io/gormaniac/stormsvcs/base:latest
 FROM ${BASE_IMAGE}
 
+# Copy all the service files into a build dir.
 COPY pyproject.toml /opt/stormsvcs/yarastorm/pyproject.toml
 COPY uv.lock /opt/stormsvcs/yarastorm/uv.lock
 COPY src/yarastorm /opt/stormsvcs/yarastorm/src/yarastorm
 COPY README.md /opt/stormsvcs/yarastorm/README.md
 
+# Use the upstream stormsvcs license since it's a symlink in the repo
 RUN cp /opt/stormsvcs/LICENSE /opt/stormsvcs/yarastorm/LICENSE
 
+# Install deps with uv
 RUN uv sync --no-dev --locked --directory /opt/stormsvcs/yarastorm
 
+# Move the entrypoint script and make it executable.
 COPY docker/prod/entrypoint.sh /opt/stormsvcs/yarastorm/entrypoint.sh
 RUN chmod +x /opt/stormsvcs/yarastorm/entrypoint.sh
 
-EXPOSE 4443
-EXPOSE 27492
-
-VOLUME /vertex/storage
-
+# The things that actually run the service
 ENTRYPOINT ["tini", "--", "/opt/stormsvcs/yarastorm/entrypoint.sh"]
 
 HEALTHCHECK --start-period=10s --retries=1 --timeout=10s --interval=30s CMD \

@@ -1,5 +1,5 @@
 name: slib.yara
-version: 0.7.0
+version: 0.8.0
 guid: f418c8589b13201801b9a4bf2b4f7842
 
 # Only tested against the Synapse version in uv.lock.
@@ -13,6 +13,10 @@ author:
   name: John Gorman
 
 desc: Dispatch Yara scans on files in an Axon.
+
+docs:
+  - title: README
+    path: README.md
 
 perms:
   - perm: [ slib, yara, admin ]

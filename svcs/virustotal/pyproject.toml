@@ -1,6 +1,6 @@
 [project]
 name = "vtsvc"
-version = "0.2.0"
+version = "0.3.0"
 description = "A VirusTotal Storm Service"
 readme = "README.md"
 license-files = ["LICENSE"]
@@ -21,6 +21,7 @@ build-backend = "uv_build"
 [tool.uv.build-backend]
 source-include = [
     "pkgproto/*.yaml",
+    "pkgproto/*.md",
     "pkgproto/storm/*/*.storm",
 ]
 

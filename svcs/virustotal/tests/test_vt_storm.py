@@ -2,6 +2,7 @@
 
 import pathlib
 
+import synapse.common as s_common
 import synapse.tests.utils as s_tests
 from stormlibpp.testing import assertMainHelp, assertVersionsMatch
 
@@ -19,6 +20,14 @@ async def count(core, query, opts=None):
 
 
 class TestVtStormPkg(s_tests.SynTest):
+    def test_readmes_match(self):
+        # The package's README (shown in the Cortex) is a copy of the service's README.
+        svcdir = pathlib.Path(__file__).parents[1]
+        pkgreadme = svcdir / "src" / "vtsvc" / "pkgproto" / "README.md"
+        assert pkgreadme.read_text() == (svcdir / "README.md").read_text(), (
+            "Copy README.md to src/vtsvc/pkgproto/README.md"
+        )
+
     def test_versions_match(self):
         # The version lives in pyproject.toml (the image tag), __init__.py, the package yaml,
         # and the service's uv.lock entry.
@@ -108,6 +117,26 @@ class TestVtStormPkg(s_tests.SynTest):
             msgs = await core.stormlist(f"slib.vt.enrich --hash {fv.WANNACRY} --no-cache --engines all --yield")
             assert len(fake.requests) == 2
             assert len(await core.nodes(f"it:av:scan:result:multi:scan={top[0].ndef[1]}")) > len(engines)
+
+    async def test_guids_unchanged(self):
+        # The guid nodes the package makes are deconflicted by the same guids as in 0.2.0, which
+        # used $lib.guid(...) seeds rather than list seeds, so existing nodes are reused.
+        def guid(*seed):
+            return s_common.guid(("slib.vt", *seed))
+
+        async with fv.vtSvc(self) as (core, svc, fake):
+            await core.nodes(f"[hash:sha256={fv.WANNACRY}] | slib.vt.enrich")
+            await core.nodes(f"[hash:sha256={fv.WANNACRY}] | slib.vt.comments --limit 1")
+
+            rule = guid("yara", "000fd39f0d", "WannaCry_Ransomware")
+            nodes = await core.nodes(f"it:app:yara:rule={rule}")
+            assert len(nodes) == 1 and nodes[0].get("name") == "WannaCry_Ransomware"
+            author = guid("contact", "Florian Roth (Nextron Systems) (with the help of binar.ly)")
+            assert nodes[0].get("author") == author
+            assert await count(core, f"ps:contact={author}") == 1
+
+            cid = f"f-{fv.WANNACRY}-c19a567f"
+            assert await count(core, f"meta:note={guid('comment', cid)} -(about)> file:bytes") == 1
 
     async def test_enrich_behaviour(self):
         async with fv.vtSvc(self) as (core, svc, fake):

@@ -3,7 +3,7 @@
 // Warn about a failed service call. Returns true if the call failed.
 function failed(retn, what) {
     if $retn.status { return((false)) }
-    $lib.warn("slib.vt: {what} failed: {err}", what=$what, err=$retn.mesg)
+    $lib.warn(`slib.vt: {$what} failed: {$retn.mesg}`)
     return((true))
 }
 
@@ -15,7 +15,7 @@ function target(n) {
                 $valu = $n.props.$prop
                 if $valu { return((file, $valu)) }
             }
-            return($lib.null)
+            return()
         }
         "hash:md5": { return((file, $n.repr())) }
         "hash:sha1": { return((file, $n.repr())) }
@@ -25,18 +25,18 @@ function target(n) {
         "inet:ipv6": { return((ip_address, $n.repr())) }
         "inet:url": { return((url, $n.repr())) }
     }
-    return($lib.null)
+    return()
 }
 
 // Format an epoch millis time (or null) for printing.
 function when(time) {
-    if ($time = $lib.null) { return(never) }
+    if ($time = null) { return(never) }
     return($lib.time.format($time, "%Y-%m-%d %H:%M:%S UTC"))
 }
 
 // "68/75 engines" from a normalized scan, or "not scanned".
 function detections(scan) {
-    if ($scan = $lib.null or $scan.counts = $lib.null) { return("not scanned") }
+    if ($scan = null or $scan.counts = null) { return("not scanned") }
     $c = $scan.counts
     return(`{$c.malicious} malicious, {$c.suspicious} suspicious of {$c.total} engines`)
 }

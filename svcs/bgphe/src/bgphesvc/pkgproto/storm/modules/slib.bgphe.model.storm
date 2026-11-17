@@ -24,7 +24,7 @@ function seen(n) {
 // Extend the node's .seen to cover the time.
 function seenAt(n, time) {
     yield $n
-    [ .seen ?= $time ]
+    [ .seen ?= $time ]  // noqa: M004 - 3.x model, the package needs 2.x
     return($n)
 }
 
@@ -149,7 +149,7 @@ function whoisRec(w) {
     if ($asof = null) { $asof = $r.updated }
     if ($asof = null) { $asof = $lib.time.now() }
 
-    [ inet:whois:rec=($w.fqdn, $asof) ]
+    [ inet:whois:rec=($w.fqdn, $asof) ]  // noqa: M001 - 3.x model, the package needs 2.x
     [
         :text = $w.text
         :created ?= $r.created
@@ -169,13 +169,13 @@ function whoisNs(rec, ns) {
 }
 
 function whoisEmail(fqdn, email) {
-    [ inet:whois:email=($fqdn, $email) ]
+    [ inet:whois:email=($fqdn, $email) ]  // noqa: M002 - 3.x model, the package needs 2.x
     return($seen($node))
 }
 
 // A registrant/admin/tech/billing contact.
 function whoisContact(rec, c) {
-    [ inet:whois:contact=($rec.value(), $c.type) ]
+    [ inet:whois:contact=($rec.value(), $c.type) ]  // noqa: M002 - 3.x model, the package needs 2.x
     [
         :id ?= $c.id
         :name ?= $c.name
@@ -193,7 +193,7 @@ function whoisContact(rec, c) {
 
 // The registrar's contact (its abuse email and phone, URL, and whois server).
 function whoisRegistrar(rec, rar) {
-    [ inet:whois:contact=($rec.value(), registrar) ]
+    [ inet:whois:contact=($rec.value(), registrar) ]  // noqa: M002 - 3.x model, the package needs 2.x
     [
         :id ?= $rar.ianaid
         :orgname ?= $rar.name
@@ -257,11 +257,11 @@ function asn(w) {
 // visibility is stored in its "slib:bgphe" node data.
 function asnet(asn, p) {
     if ($p.version = 4) {
-        [ inet:asnet4=($asn, $p.prefix) ]
+        [ inet:asnet4=($asn, $p.prefix) ]  // noqa: M001 - 3.x model, the package needs 2.x
     } else {
-        [ inet:asnet6=($asn, $p.prefix) ]
+        [ inet:asnet6=($asn, $p.prefix) ]  // noqa: M001 - 3.x model, the package needs 2.x
     }
-    [ .seen = now ]
+    [ .seen = now ]  // noqa: M004 - 3.x model, the package needs 2.x
     $node.data.set("slib:bgphe", ({"count": $p.count, "total": $p.total}))
     return($seen($node))
 }

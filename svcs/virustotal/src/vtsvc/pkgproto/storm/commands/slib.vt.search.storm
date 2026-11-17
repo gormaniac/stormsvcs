@@ -11,7 +11,7 @@ init {
             $n = $model.obj($obj)
             if $n { $found.append($n) }
         }
-        $lib.print("slib.vt.search: {count} results for {query}.", count=$lib.len($found), query=$cmdopts.query)
+        $lib.print(`slib.vt.search: {$lib.len($found)} results for {$cmdopts.query}.`)
     }
 
     for $n in $found { yield $n }

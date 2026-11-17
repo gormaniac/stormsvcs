@@ -6,7 +6,7 @@ init {
 
 if $cmdopts.valus {
     // Values ignore inbound nodes.
-    spin |
+    spin |  // noqa: P001 - the inbound node is dropped on purpose
     for $valu in $cmdopts.valus {
         for $n in $bgphe.hosts($valu, print=$cmdopts.print) { yield $n }
     }
@@ -14,9 +14,9 @@ if $cmdopts.valus {
 else {
     // Statements after an if block still run for a node that leaves it, so the work is in the else.
     // Unsupported nodes are passed through (or dropped, with --yield).
-    if (not $forms.has($node.form())) {
-        $lib.warn(`slib.bgphe.certs.ip: Unable to look up {$node.form()} {$node.repr()}, it needs an IP or CIDR.`)
-        if $cmdopts.yield { spin }
+    if (not $forms.has($node.form())) {  // noqa: R002 - 2.x needs the call
+        $lib.warn(`slib.bgphe.certs.ip: Unable to look up {$node.form()} {$node.repr()}, it needs an IP or CIDR.`)  // noqa: R002 - 2.x needs the call
+        if $cmdopts.yield { spin }  // noqa: P001 - the inbound node is dropped on purpose
     } else {
         divert $cmdopts.yield $util.nodes($bgphe.hosts($node.repr(), print=$cmdopts.print))
     }

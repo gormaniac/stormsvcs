@@ -11,17 +11,17 @@ init {
 
 function userKey() {
     $vault = $lib.vault.bytype(virustotal, scope=user)
-    if ($vault = $lib.null) { return($lib.null) }
+    if ($vault = null) { return() }
     $secrets = $vault.secrets
-    if ($secrets = $lib.null) { return($lib.null) }
+    if ($secrets = null) { return() }
     return($secrets.apikey)
 }
 
 function tagPrefix() {
-    if $lib.globals.get("slib:vt:tag:enabled") {
-        return($lib.globals.get("slib:vt:tag:prefix"))
+    if $lib.globals.get("slib:vt:tag:enabled") {  // noqa: R005 - the 2.x API, the package needs 2.x
+        return($lib.globals.get("slib:vt:tag:prefix"))  // noqa: R005 - the 2.x API, the package needs 2.x
     }
-    return($lib.null)
+    return()
 }
 
 function lookup(kind, ident, cache=(true)) {

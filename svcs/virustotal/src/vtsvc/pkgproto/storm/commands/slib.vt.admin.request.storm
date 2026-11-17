@@ -8,18 +8,18 @@ init {
     for $p in $cmdopts.param {
         $parts = $p.split("=", maxsplit=(1))
         if ($lib.len($parts) != 2) {
-            $lib.warn("{name}: Invalid --param {p}, use name=value.", name=$name, p=$p)
+            $lib.warn(`{$name}: Invalid --param {$p}, use name=value.`)
             $ok = (false)
         } else {
             $params.($parts.0) = $parts.1
         }
     }
 
-    $body = $lib.null
+    $body = (null)
     if ($ok and $cmdopts.json) {
         try { $body = $lib.json.load($cmdopts.json) }
         catch * as err {
-            $lib.warn("{name}: Invalid --json: {err}", name=$name, err=$err.mesg)
+            $lib.warn(`{$name}: Invalid --json: {$err.mesg}`)
             $ok = (false)
         }
     }

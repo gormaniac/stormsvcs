@@ -4,12 +4,12 @@ init {
 }
 
 $tgt = $util.target($node)
-if ($tgt = $lib.null) {
-    $lib.warn("slib.vt.rescan: Can't rescan {repr}, it has no hash.", repr=$node.repr())
+if ($tgt = null) {
+    $lib.warn(`slib.vt.rescan: Can't rescan {$node.repr()}, it has no hash.`)
 } else {
     ($kind, $ident) = $tgt
     $retn = $submit.rescan($kind, $ident)
     if (not $util.failed($retn, `Rescanning {$ident}`)) {
-        $lib.print("slib.vt.rescan: Rescanning {ident}, analysis {aid}.", ident=$ident, aid=$retn.data.id)
+        $lib.print(`slib.vt.rescan: Rescanning {$ident}, analysis {$retn.data.id}.`)
     }
 }

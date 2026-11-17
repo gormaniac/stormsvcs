@@ -9,7 +9,7 @@ init {
         $retn = $user.analysis($cmdopts.id)
     }
 
-    $n = $lib.null
+    $n = (null)
     if (not $util.failed($retn, `Getting analysis {$cmdopts.id}`)) {
         $n = $vtlib.analysis($retn.data, engines=$cmdopts.engines)
     }

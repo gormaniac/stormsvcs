@@ -12,25 +12,25 @@ init {
 // couldn't be looked up.
 function enrich(kind, ident, engines=detected, behaviour=(false), cache=(true), name="slib.vt.enrich") {
     $retn = $user.lookup($kind, $ident, cache=$cache)
-    if $util.failed($retn, `Looking up {$ident}`) { return($lib.null) }
+    if $util.failed($retn, `Looking up {$ident}`) { return() }
     $obj = $retn.data
-    if ($obj = $lib.null) {
-        $lib.print("{name}: VirusTotal doesn't have {kind} {ident}.", name=$name, kind=$kind, ident=$ident)
-        return($lib.null)
+    if ($obj = null) {
+        $lib.print(`{$name}: VirusTotal doesn't have {$kind} {$ident}.`)
+        return()
     }
 
     $n = $model.obj($obj, $engines)
-    if ($n = $lib.null) {
-        $lib.warn("{name}: Unable to model {kind} {ident}.", name=$name, kind=$kind, ident=$ident)
-        return($lib.null)
+    if ($n = null) {
+        $lib.warn(`{$name}: Unable to model {$kind} {$ident}.`)
+        return()
     }
-    $lib.print("{name}: {repr} - {dets}.", name=$name, repr=$n.repr(), dets=$util.detections($obj.scan))
+    $lib.print(`{$name}: {$n.repr()} - {$util.detections($obj.scan)}.`)
 
     if ($behaviour and $kind = "file") {
         $bretn = $user.behaviour($obj.sha256)
         if (not $util.failed($bretn, `Getting the behaviour of {$ident}`)) {
             if $bretn.data { $model.behaviour($n, $bretn.data) }
-            else { $lib.print("{name}: VirusTotal has no behaviour reports for {ident}.", name=$name, ident=$ident) }
+            else { $lib.print(`{$name}: VirusTotal has no behaviour reports for {$ident}.`) }
         }
     }
     return($n)
@@ -64,7 +64,7 @@ function related(n, kind, ident, rel, limit=(10), name="slib.vt.related") {
     $stubs = ([])
     for $item in $retn.data.items {
         $m = $model.obj($item, detected, $n)
-        if ($m = $lib.null) {
+        if ($m = null) {
             $stubs.append(`{$item.type} {$item.id}`)
             continue
         }
@@ -75,10 +75,9 @@ function related(n, kind, ident, rel, limit=(10), name="slib.vt.related") {
         }
     }
     $count = $retn.data.count
-    if ($count = $lib.null) { $count = $lib.len($retn.data.items) }
-    $lib.print("{name}: {ident} {rel}: {got} of {count}.", name=$name, ident=$ident, rel=$rel,
-        got=$lib.len($retn.data.items), count=$count)
-    for $stub in $stubs { $lib.print("    {stub}", stub=$stub) }
+    if ($count = null) { $count = $lib.len($retn.data.items) }
+    $lib.print(`{$name}: {$ident} {$rel}: {$lib.len($retn.data.items)} of {$count}.`)
+    for $stub in $stubs { $lib.print(`    {$stub}`) }
     return($nodes)
 }
 
@@ -88,20 +87,19 @@ function comments(n, kind, ident, limit=(10)) {
     $retn = $user.comments($kind, $ident, limit=$limit)
     if $util.failed($retn, `Getting the comments on {$ident}`) { return($nodes) }
     for $c in $retn.data.items { $nodes.append($model.comment($n, $c)) }
-    $lib.print("slib.vt.comments: {ident}: {got} comments.", ident=$ident, got=$lib.len($nodes))
+    $lib.print(`slib.vt.comments: {$ident}: {$lib.len($nodes)} comments.`)
     return($nodes)
 }
 
 // Model a completed analysis (or print its status). Returns the analyzed node, or null.
 function analysis(a, engines=detected, name="slib.vt.analysis") {
     if (not $a.done) {
-        $lib.print("{name}: Analysis {id} is {status}.", name=$name, id=$a.id, status=$a.status)
-        return($lib.null)
+        $lib.print(`{$name}: Analysis {$a.id} is {$a.status}.`)
+        return()
     }
     $n = $model.analysis($a, $engines)
     $what = $a.sha256
-    if ($what = $lib.null) { $what = $a.url }
-    $lib.print("{name}: Analysis {id} of {what} completed: {dets}.", name=$name, id=$a.id, what=$what,
-        dets=$util.detections($a.scan))
+    if ($what = null) { $what = $a.url }
+    $lib.print(`{$name}: Analysis {$a.id} of {$what} completed: {$util.detections($a.scan)}.`)
     return($n)
 }
