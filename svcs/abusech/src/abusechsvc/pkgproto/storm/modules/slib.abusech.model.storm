@@ -43,6 +43,11 @@ function setPrefix(prefix) {
     return($prefix)
 }
 
+// The meta:source guid of each platform, ({"<platform>": "<guid>"}).
+function sourceGuids() {
+    return($sources)
+}
+
 // ---- Generic helpers, each returns a single node ----
 
 // Link the node to the platform's meta:source and update its .seen.

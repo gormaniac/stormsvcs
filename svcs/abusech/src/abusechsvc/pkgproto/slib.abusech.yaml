@@ -1299,6 +1299,51 @@ commands:
           action: store_true
           help: Merge the nodes (the default is a dry run that changes nothing).
 
+  - name: slib.abusech.admin.edges.migrate
+    perms:
+      - [ slib, abusech, admin ]
+    descr: |
+      Rewrite the generic -(refs)> light edges slib.abusech made before 0.5.0 into the edges it
+      makes now.
+
+        inet:url -(refs)> node               -> inet:url -(about)> node (reference/report links)
+        it:sec:stix:indicator -(refs)> node  -> -(detects)> (ThreatFox IOC records)
+        file:bytes -(refs)> file:bytes       -> -(linked)>, same direction (related samples)
+        file:bytes -(refs)> inet:passwd      -> -(uses)> (archive passwords)
+        file:bytes -(refs)> ThreatFox IOC    -> -(uses)> (payloads listed with an IOC)
+        file:bytes -(refs)> C2               -> removed, the file's it:sec:c2:config has it
+
+      Reporters (inet:service:account -(refs)> node) and the URLs a vendor found in a file
+      (file:bytes -(refs)> inet:url) keep -(refs)>.
+
+      Only edges between nodes linked to an abuse.ch meta:source (-(seen)>) are changed, so
+      -(refs)> edges made by anything else are left alone (an inet:passwd isn't linked to a
+      meta:source, so only its file has to be). A file's edge to an observable is a ThreatFox
+      IOC's when the file is from ThreatFox and a ThreatFox it:sec:stix:indicator detects the
+      observable. Otherwise, an edge to a C2 host, server, or URL is removed when one of the
+      file's abuse.ch it:sec:c2:config nodes has the C2 in :servers. Before 0.5.0, a C2 given as
+      a bare host (no port) wasn't put in :servers, so it's added (as tcp://host) before the
+      edge is removed, when the file has one config (with more, the edge is kept with a
+      warning). A C2 given as a URL can't be told from a URL the vendor found in the file, so
+      its edge is kept, and the next lookup of the file adds it to :servers.
+
+      Without --apply it's a dry run, which only prints the counts of each change. Running it
+      again after --apply changes nothing. Changing edges needs the node.edge.add and
+      node.edge.del permissions.
+
+      Examples:
+
+        // See what would change.
+        slib.abusech.admin.edges.migrate
+
+        // Make the changes.
+        slib.abusech.admin.edges.migrate --apply
+    cmdargs:
+      - - --apply
+        - default: false
+          action: store_true
+          help: Rewrite the edges (the default is a dry run that changes nothing).
+
   - name: slib.abusech.admin.request
     perms:
       - [ slib, abusech, admin ]
