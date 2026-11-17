@@ -7,7 +7,6 @@ import synapse.tests.utils as s_tests
 
 from abusechsvc import bulk, norm
 from abusechsvc.client import AbuseChApiError
-
 from abusechsvc.svc import BULK_IDLE
 
 from . import fakeabusech as fd

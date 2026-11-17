@@ -11,7 +11,6 @@ import os
 
 from capasvc import CapaSvc
 
-
 RULES = os.path.join(os.path.dirname(__file__), "data", "rules")
 """The test capa rules directory."""
 

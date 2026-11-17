@@ -13,6 +13,7 @@ deterministic, so the tests can check their hashes; keys and certificates are ge
 """
 
 
+import contextlib
 import email.message
 import ftplib
 import gzip
@@ -500,12 +501,13 @@ def scenario_krb5(tmp: pathlib.Path) -> None:
     """A Kerberos AS-REQ (impacket) to a KDC that answers KRB-ERROR PREAUTH_REQUIRED, over
     UDP and TCP."""
 
+    import datetime
+
     from impacket.krb5 import constants
     from impacket.krb5.asn1 import KRB_ERROR, seq_set
     from impacket.krb5.kerberosv5 import getKerberosTGT
-    from impacket.krb5.types import Principal, KerberosTime
+    from impacket.krb5.types import KerberosTime, Principal
     from pyasn1.codec.der import decoder, encoder
-    import datetime
 
     requests = []
 
@@ -517,7 +519,7 @@ def scenario_krb5(tmp: pathlib.Path) -> None:
         err = KRB_ERROR()
         err["pvno"] = 5
         err["msg-type"] = constants.ApplicationTagNumbers.KRB_ERROR.value
-        now = datetime.datetime.now(datetime.timezone.utc)
+        now = datetime.datetime.now(datetime.UTC)
         err["stime"] = KerberosTime.to_asn1(now)
         err["susec"] = now.microsecond
         err["error-code"] = constants.ErrorCodes.KDC_ERR_PREAUTH_REQUIRED.value
@@ -563,10 +565,9 @@ def scenario_krb5(tmp: pathlib.Path) -> None:
     with Capture("krb5", "port 88"):
         # impacket sends over TCP.
         user = Principal("alice", type=constants.PrincipalNameType.NT_PRINCIPAL.value)
-        try:
+        # The error has no e-data, and impacket fails reading it.
+        with contextlib.suppress(Exception):
             getKerberosTGT(user, "password", "VERTEX.LINK", "", "", kdcHost="127.0.0.1")
-        except Exception:  # noqa: BLE001 - the error has no e-data, impacket fails reading it
-            pass
         # The same AS-REQ again over UDP.
         client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         client.settimeout(5)

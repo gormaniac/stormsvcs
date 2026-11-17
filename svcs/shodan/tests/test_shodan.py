@@ -1,6 +1,8 @@
 """Pytests for the slib.shodan service's HTTP client, normalization, and Cell/Telepath methods."""
 
 import asyncio
+import base64
+import hashlib
 import json
 
 import aiohttp
@@ -18,33 +20,29 @@ from shodansvc.client import (
     normParams,
 )
 
-import base64
-import hashlib
-
 from .fakeshodan import (
-    FORM_ROUTES,
     CVE_LOG4SHELL,
     DNS_DOMAIN,
     EUVD_NO_CVE,
+    FAVICON_B64,
+    FAVICON_HASH,
+    FORM_ROUTES,
     GHSA_LOG4SHELL,
     HISTORY_BANNERS,
     HOST_8888,
-    FAVICON_B64,
-    FAVICON_HASH,
     HOST_HTTP,
     HOST_SSH,
     HTTP_REDIRECT_BODY,
     HTTP_ROBOTS,
     HTTP_SECURITYTXT,
     HTTP_SITEMAP,
+    INTERNETDB_1111,
     SCANME_HTML,
     SCANME_HTML_HASH,
-    INTERNETDB_1111,
     SSH_KEY_B64,
     FakeShodan,
     shodanSvc,
 )
-
 
 # (ShodanSvc method, args, kwargs, HTTP method, path, expected query params)
 ENDPOINTS = (

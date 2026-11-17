@@ -17,7 +17,6 @@ import synapse.tests.utils as s_tests
 
 from hatchingsvc import HatchingSvc
 
-
 APIKEY = os.environ.get("HATCHING_LIVE_APIKEY")
 URL = os.environ.get("HATCHING_LIVE_URL", "https://tria.ge")
 

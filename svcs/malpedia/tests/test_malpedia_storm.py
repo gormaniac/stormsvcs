@@ -7,8 +7,7 @@ from unittest import mock
 import synapse.tests.utils as s_tests
 from stormlibpp.testing import assertMainHelp, assertVersionsMatch
 
-from malpediasvc import __version__
-from malpediasvc import defs
+from malpediasvc import __version__, defs
 from malpediasvc import svc as m_svc
 from malpediasvc.defs import PKGDEFS, SVC_GUID, SVC_NAME
 

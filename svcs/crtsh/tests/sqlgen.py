@@ -20,7 +20,6 @@ import sys
 from crtshsvc.db import NAME_TYPES, CrtshDb
 from crtshsvc.svc import identityQuery
 
-
 CRTSH = {
     "certid": 29578180990,  # A www.comodo.com certificate.
     "issuer": 204411,  # Its issuing CA, Sectigo Public Server Authentication CA OV R36.

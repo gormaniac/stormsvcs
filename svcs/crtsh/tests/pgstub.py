@@ -23,7 +23,6 @@ import asyncpg
 
 from .fakecrtsh import CA_NAMES, PKI, Pki, _derSerial, _identities, _ski, _spki, identityText
 
-
 SCHEMA = """
 DROP SCHEMA IF EXISTS public CASCADE;
 CREATE SCHEMA public;
@@ -98,11 +97,11 @@ CREATE TABLE crl_revoked (
 
 
 def _naive(when: datetime.datetime) -> datetime.datetime:
-    return when.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+    return when.astimezone(datetime.UTC).replace(tzinfo=None)
 
 
 def _fromMillis(ms: int) -> datetime.datetime:
-    return datetime.datetime.fromtimestamp(ms / 1000, datetime.timezone.utc).replace(tzinfo=None)
+    return datetime.datetime.fromtimestamp(ms / 1000, datetime.UTC).replace(tzinfo=None)
 
 
 async def load(dsn: str, pki: Pki = PKI) -> None:

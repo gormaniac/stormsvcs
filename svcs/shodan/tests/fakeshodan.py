@@ -11,7 +11,6 @@ from typing import Any
 
 from aiohttp import web
 
-
 HOST_8888 = {
     "ip_str": "8.8.8.8",
     "asn": "AS15169",

@@ -1,6 +1,7 @@
 """Pytests for pcapsvc.rules (no Snort needed)."""
 
 import pytest
+
 from pcapsvc import rules as s_rules
 
 ET_RULE = (

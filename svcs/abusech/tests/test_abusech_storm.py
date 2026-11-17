@@ -14,7 +14,6 @@ from abusechsvc.defs import EXT_PROPS, PKGDEFS, SOURCES, SVC_NAME
 from . import fakeabusech as fd
 from .fakeabusech import abusechSvc
 
-
 CMDS = tuple(cmd["name"] for cmd in PKGDEFS[0]["commands"])
 MODS = tuple(mod["name"] for mod in PKGDEFS[0]["modules"])
 

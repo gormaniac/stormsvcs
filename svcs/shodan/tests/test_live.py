@@ -21,7 +21,6 @@ import synapse.tests.utils as s_tests
 from shodansvc import ShodanSvc, norm
 from shodansvc.client import ShodanApiError
 
-
 LIVE = os.environ.get("SLIB_SHODAN_LIVE") == "1"
 APIKEY = os.environ.get("SHODAN_API_KEY")
 

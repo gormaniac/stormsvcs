@@ -4,15 +4,16 @@ import asyncio
 import hashlib
 import os
 import shutil
-from unittest import mock
 import sys
 import threading
+from unittest import mock
 
 import synapse.common as s_common
 import synapse.exc as s_exc
 import synapse.tests.utils as s_tests
 
-from capasvc import CapaSvc, svc as s_svc
+from capasvc import CapaSvc
+from capasvc import svc as s_svc
 from capasvc.api import CapaSvcError
 from capasvc.rules import ruleGuid
 

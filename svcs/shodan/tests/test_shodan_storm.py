@@ -2,13 +2,12 @@
 
 import base64
 import copy
-
-import aiohttp.web
 import hashlib
 import pathlib
 import time
 from unittest import mock
 
+import aiohttp.web
 import synapse.exc as s_exc
 import synapse.tests.utils as s_tests
 from stormlibpp.testing import assertMainHelp, assertVersionsMatch
@@ -18,10 +17,9 @@ from shodansvc.defs import PKGDEFS, SVC_GUID, SVC_NAME
 
 from .fakeshodan import (
     FAVICON_B64,
-    HISTORY_IP,
     FAVICON_HASH,
+    HISTORY_IP,
     HOST_8888,
-    HOST_HTTP,
     HOST_SSH,
     HTTP_IP,
     HTTP_REDIRECT_BODY,
@@ -33,7 +31,6 @@ from .fakeshodan import (
     SSH_KEY_B64,
     shodanSvc,
 )
-
 
 CMDS = tuple(cmd["name"] for cmd in PKGDEFS[0]["commands"])
 MODS = tuple(mod["name"] for mod in PKGDEFS[0]["modules"])
@@ -1293,7 +1290,7 @@ class TestShodanStormHistory(s_tests.SynTest):
             assert len(await core.nodes("meta:timeline")) == 1
 
             # From the library, timeline defaults to history.
-            q = f"$shodan = $lib.import(slib.shodan.lib) $shodan.host(8.8.8.8, history=(true))"
+            q = "$shodan = $lib.import(slib.shodan.lib) $shodan.host(8.8.8.8, history=(true))"
             await core.nodes(q)
             assert len(await core.nodes("meta:timeline")) == 2
 

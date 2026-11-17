@@ -12,7 +12,7 @@ from cryptography.x509.oid import NameOID
 
 from crtshsvc import norm
 
-from .fakecrtsh import CRL_URL, NOW, PKI, DAY
+from .fakecrtsh import CRL_URL, DAY, NOW, PKI
 
 
 def details(certid: int) -> dict:

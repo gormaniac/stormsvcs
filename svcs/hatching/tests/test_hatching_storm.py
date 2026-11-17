@@ -11,7 +11,6 @@ from hatchingsvc.defs import PKGDEFS, SOURCE_GUID, SVC_NAME
 
 from .helpers import hatchingSvc
 
-
 CMDS = tuple(cmd["name"] for cmd in PKGDEFS[0]["commands"])
 MODS = tuple(mod["name"] for mod in PKGDEFS[0]["modules"])
 

@@ -24,7 +24,6 @@ from abusechsvc.client import (
 from . import fakeabusech as fake_data
 from .fakeabusech import FakeAbuseCh, abusechSvc, mkzip
 
-
 SHA256 = fake_data.SHA256
 MD5 = fake_data.MD5
 

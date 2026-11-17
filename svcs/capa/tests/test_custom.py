@@ -10,7 +10,8 @@ import pytest
 import synapse.common as s_common
 import synapse.tests.utils as s_tests
 
-from capasvc import CapaSvc, svc as s_svc
+from capasvc import CapaSvc
+from capasvc import svc as s_svc
 from capasvc.api import CapaSvcError
 from capasvc.custom import CUSTOM_RULE_TYPE, CustomRules
 from capasvc.rules import CapaRules

@@ -7,6 +7,7 @@ import zipfile
 import aiohttp
 import pytest
 import synapse.tests.utils as s_tests
+
 from pcapsvc import feeds as s_feeds
 
 from .fakefeeds import SNORT2_RULES, SNORT3_RULES, FakeFeeds, tarGz

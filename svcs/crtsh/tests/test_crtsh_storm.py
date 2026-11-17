@@ -12,7 +12,6 @@ from crtshsvc.defs import SVC_GUID
 
 from .fakecrtsh import CRL_URL, PKI, crtshSvc
 
-
 SHA = {cid: PKI.sha256(cid) for cid in (1, 2, 3, 4, 9, 10, 11, 12, 13, 14, 15)}
 CERT = {cid: f"crypto:x509:cert:sha256={sha}" for cid, sha in SHA.items()}
 USER_PERM = ("slib", "crtsh", "user")

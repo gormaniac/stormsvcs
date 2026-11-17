@@ -584,7 +584,8 @@ def test_landlock_log_flag(monkeypatch):
     calls = []
 
     class FakeLibc:
-        class syscall:  # noqa: N801 - mimics ctypes' function object
+        # Lowercase, as it mimics ctypes' function object.
+        class syscall:
             restype = None
 
             def __new__(cls, nr, *args):

@@ -125,7 +125,7 @@ class TestMalpediaPull(s_tests.SynTest):
             summary = await svc.pull()
             assert summary["pulled"] is True
             assert summary["version"] == 26602
-            yesterday = (datetime.datetime.now(datetime.timezone.utc).date() - datetime.timedelta(days=1)).isoformat()
+            yesterday = (datetime.datetime.now(datetime.UTC).date() - datetime.timedelta(days=1)).isoformat()
             assert fake.requests[start:] == [
                 "/api/get/version",
                 "/api/list/actors",

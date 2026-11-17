@@ -413,7 +413,7 @@ class TestVtStormPkg(s_tests.SynTest):
             await core.stormlist("slib.vt.enrich --fqdn example.com --no-cache")
             assert (await core.nodes("inet:fqdn=example.com"))[0].getTag("rep.virustotal.verdict.benign") is not None
 
-            msgs = await core.stormlist(f"slib.vt.admin.apikey --clear")
+            msgs = await core.stormlist("slib.vt.admin.apikey --clear")
             self.stormIsInPrint("Cleared the slib.vt API key.", msgs)
 
     async def test_apikey(self):

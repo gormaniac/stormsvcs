@@ -494,10 +494,10 @@ def test_whois_asn_missing():
 
 def test_cert_extensions():
     # A certificate with every extension, SAN type, and attribute the parser handles.
+    import ipaddress
+
     from cryptography.hazmat.primitives.asymmetric import ed25519, rsa
     from cryptography.x509.oid import AuthorityInformationAccessOID, ExtendedKeyUsageOID
-
-    import ipaddress
 
     issuerkey = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     key = ed25519.Ed25519PrivateKey.generate()

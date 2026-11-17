@@ -12,6 +12,7 @@ import pathlib
 
 import synapse.common as s_common
 import synapse.tests.utils as s_tests
+
 from pcapsvc import PcapSvc, __version__
 from pcapsvc import feeds as s_feeds
 from pcapsvc.defs import CRON_GLOBAL, PKGDEFS, RULES_VIEW_GLOBAL, SVC_GUID, SVC_NAME

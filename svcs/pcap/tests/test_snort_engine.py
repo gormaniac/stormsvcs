@@ -4,8 +4,9 @@ import os
 
 import pytest
 import synapse.tests.utils as s_tests
-from pcapsvc import snort as p_snort
+
 from pcapsvc import rules as s_rules
+from pcapsvc import snort as p_snort
 
 from . import pcaps
 from .fakefeeds import SNORT2_RULES, SNORT3_RULES, needsnort

@@ -17,7 +17,6 @@ from capasvc.rules import ruleGuid, rulesetGuid
 from .capatest import MATCHED, RULES_VERSION, SAMPLE_SHA256, capaSvc, putSample
 from .test_custom import MARKER, customRule
 
-
 FILE = f"file:bytes:sha256={SAMPLE_SHA256}"
 SCAN = f"{FILE} | slib.capa.scan --format sc64"
 TAGS = {

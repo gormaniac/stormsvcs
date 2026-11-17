@@ -24,7 +24,7 @@ def makeCert() -> bytes:
             x509.NameAttribute(NameOID.ORGANIZATION_NAME, "The Vertex Project"),
         ]
     )
-    now = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
+    now = datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC)
     cert = (
         x509.CertificateBuilder()
         .subject_name(name)

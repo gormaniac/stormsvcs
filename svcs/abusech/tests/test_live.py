@@ -18,7 +18,6 @@ import synapse.tests.utils as s_tests
 
 from abusechsvc import AbuseChSvc
 
-
 LIVE = os.environ.get("SLIB_ABUSECH_LIVE") == "1"
 APIKEY = os.environ.get("ABUSECH_AUTH_KEY")
 
