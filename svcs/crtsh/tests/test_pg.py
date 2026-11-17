@@ -9,7 +9,9 @@ FakeCrtshDb-backed tests expect, through asyncpg.
 
 import base64
 import copy
+import datetime
 import os
+import re
 
 import asyncpg
 import pytest
@@ -17,7 +19,7 @@ import synapse.tests.utils as s_tests
 from cryptography import x509
 
 from crtshsvc import CrtshSvc
-from crtshsvc.db import CrtshDbError, tsquery
+from crtshsvc.db import CrtshDbError, Params, _filters, tsquery
 
 from . import pgstub
 from .fakecrtsh import PKI, identityText, tsTokens
@@ -65,6 +67,36 @@ class TestPostgres(s_tests.SynTest):
             assert await svc.get(999) is None
 
             # Searches.
+            # Expiry bounds on notAfter, through the partition key.
+            def notafter(certid):
+                return int(PKI.certs[certid].not_valid_after_utc.timestamp() * 1000)
+
+            assert await ids(svc.searchGenr(dns="vertex.link", expires_after=notafter(11))) == [11]
+            assert await ids(svc.searchGenr(dns="vertex.link", expires_before=notafter(11))) == [
+                10,
+                9,
+                15,
+                12,
+            ]
+            assert await ids(svc.issuedGenr(caids=[2], expires_after=notafter(11))) == [11]
+            assert await ids(
+                svc.searchGenr(
+                    cn="vert*", issuer="Issuing", expires_after=notafter(10), expires_before=2**52
+                )
+            ) == [10, 9, 11]
+            # A trailing * is a prefix (to_tsquery 'vert':*), no user text is tsquery syntax.
+            assert await ids(svc.searchGenr(cn="vert*")) == [10, 9, 15, 11, 12]
+            assert await ids(svc.searchGenr(cn="vert*", valid=True, since=0)) == [10, 9, 11]
+            assert await ids(svc.searchGenr(org="The Vert*", issuer="Issuing")) == [
+                10,
+                9,
+                15,
+                11,
+                12,
+            ]
+            assert await ids(svc.searchGenr(cn="ertex*")) == []
+            assert await ids(svc.searchGenr(cn="x') | !('y\\* & z:*")) == []
+            assert await ids(svc.searchGenr(identity="test trust", caids=[1])) == [2, 1]
             assert await ids(svc.searchGenr(dns="vertex.link")) == [10, 9, 15, 11, 12]
             assert await ids(svc.searchGenr(dns="www.vertex.link", exact=True)) == [10, 9, 15]
             assert await ids(svc.searchGenr(dns="vertex.link", valid=True, precerts=False)) == [
@@ -236,9 +268,27 @@ class TestPostgres(s_tests.SynTest):
                 assert tsTokens(text) == set(words), text
             for text in ("*.vertex.link", "visi@vertex.link", "https://vertex.link/", "Test Trust"):
                 query = await conn.fetchval(
-                    "SELECT querytree(plainto_tsquery('simple', $1))", tsquery(text)
+                    "SELECT querytree(plainto_tsquery('simple', $1))", tsquery(text)[0]
                 )
                 words = {w.strip("'") for w in query.split(" & ")}
-                assert tsTokens(tsquery(text)) == words, text
+                assert tsTokens(tsquery(text)[0]) == words, text
         finally:
             await conn.close()
+
+    async def test_partition_pruning(self):
+        # The expiry bounds are on the partition key, so PostgreSQL only scans the partitions in
+        # range (the stub's are yearly; crt.sh's recent ones are quarterly, ex. c2027q1).
+        await pgstub.load(DSN)
+        params = Params()
+        after = int(datetime.datetime(2030, 1, 1, tzinfo=datetime.UTC).timestamp() * 1000)
+        before = int(datetime.datetime(2030, 4, 1, tzinfo=datetime.UTC).timestamp() * 1000)
+        conds = _filters(params, expires_after=after, expires_before=before)
+        conn = await asyncpg.connect(DSN)
+        try:
+            rows = await conn.fetch(
+                f"EXPLAIN SELECT c.ID FROM certificate c WHERE {' AND '.join(conds)}", *params.args
+            )
+        finally:
+            await conn.close()
+        scanned = set(re.findall(r"on (certificate_\w+)", "\n".join(r[0] for r in rows)))
+        assert scanned == {"certificate_2030"}, scanned

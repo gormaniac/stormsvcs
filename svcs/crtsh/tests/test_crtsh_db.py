@@ -20,6 +20,7 @@ from crtshsvc.db import (
     CrtshDb,
     CrtshDbError,
     likeEscape,
+    prefixQuery,
     tsquery,
 )
 
@@ -233,11 +234,45 @@ async def test_retries():
         server.errors = [asyncpg.exceptions.UndefinedTableError('relation "nope" does not exist')]
         with pytest.raises(CrtshDbError, match="nope"):
             await db.fetch("SELECT * FROM nope")
+    finally:
+        await db.close()
+
+
+async def test_retry_statement_timeout(caplog):
+    # A heavy query can time out on crt.sh's cold cache and finish when rerun, so a statement
+    # timeout is retried once (crtsh:timeout:retries), after timeout_delay, on the same connection.
+    server = FakeServer()
+    db = makeDb(server, timeout_delay=0.01)
+    timeout = asyncpg.exceptions.QueryCanceledError("canceling statement due to statement timeout")
+    try:
+        server.errors = [timeout]
+        assert (await db.fetch("SELECT 1"))[0]["conn"] == 0
+        assert len(server.conns) == 1 and "ROLLBACK" in server.executed
+        assert "retrying in 0s (1 of 1)" in caplog.text
+
+        # Twice in a row is the normal error.
+        server.errors = [timeout, timeout]
+        with pytest.raises(CrtshDbError, match="canceled the query \\(statement timeout\\)"):
+            await db.fetch("SELECT 2")
+        assert not server.errors
+
+        # Other cancels aren't retried, the connection stays usable.
         server.errors = [
-            asyncpg.exceptions.QueryCanceledError("canceling statement due to statement timeout")
+            asyncpg.exceptions.QueryCanceledError("canceling statement due to user request"),
+            None,
         ]
-        with pytest.raises(CrtshDbError, match="statement timeout"):
+        with pytest.raises(CrtshDbError, match="user request"):
             await db.fetch("SELECT 3")
+        assert server.errors == [None]
+
+        # Nor are timeouts without retries, and they don't use up connection retries.
+        db.timeout_retries = 0
+        server.errors = [timeout]
+        with pytest.raises(CrtshDbError, match="statement timeout"):
+            await db.fetch("SELECT 4")
+        db.timeout_retries, db.retries = 1, 0
+        server.errors = [timeout]
+        assert (await db.fetch("SELECT 5"))[0]["conn"] == 0
     finally:
         await db.close()
 
@@ -502,24 +537,81 @@ async def test_sql_identity():
     assertMeta(sql)
     assert "FROM certificate_and_identities c WHERE" in sql
     assert "c.NAME_VALUE ILIKE $2 AND c.NAME_TYPE = ANY($3::text[])" in sql
-    assert "c.ISSUER_CA_ID = ANY($4::int[])" in sql
-    # The issuer's name is a subquery, not another round trip.
-    assert "c.ISSUER_CA_ID IN (SELECT ca.ID FROM ca WHERE ca.NAME ILIKE $5 LIMIT 1000)" in sql
     assert f"{NOTAFTER_KEY} >= date_trunc('year', now() AT TIME ZONE 'UTC')" in sql
-    assert "x509_notBefore(c.CERTIFICATE) >= to_timestamp($6) AT TIME ZONE 'UTC'" in sql
-    assert f"{NOTAFTER_KEY} >= to_timestamp($6) AT TIME ZONE 'UTC'" in sql
-    assert "x509_notBefore(c.CERTIFICATE) < to_timestamp($7) AT TIME ZONE 'UTC'" in sql
-    assert "LIMIT $8) sub GROUP BY sub.CERTIFICATE_ID, sub.ISSUER_CA_ID, sub.CERTIFICATE" in sql
+    assert "x509_notBefore(c.CERTIFICATE) >= to_timestamp($4) AT TIME ZONE 'UTC'" in sql
+    assert f"{NOTAFTER_KEY} >= to_timestamp($4) AT TIME ZONE 'UTC'" in sql
+    assert "x509_notBefore(c.CERTIFICATE) < to_timestamp($5) AT TIME ZONE 'UTC'" in sql
+    # The issuer filters the materialized candidates, it isn't part of their scan: nothing
+    # indexes a word and an issuer together, so a common word and a rare issuer would recheck
+    # every certificate with the word.
+    cand = sql.split("cand AS MATERIALIZED (", 1)[1].split("LIMIT $6)", 1)[0]
+    assert "ISSUER_CA_ID =" not in cand and "ISSUER_CA_ID IN" not in cand
+    assert (
+        "SELECT cand.ID, cand.ISSUER_CA_ID, cand.CERTIFICATE FROM cand WHERE "
+        "cand.ISSUER_CA_ID = ANY($7::int[]) AND "
+        # The issuer's name is a subquery, not another round trip.
+        "cand.ISSUER_CA_ID IN (SELECT ca.ID FROM ca WHERE ca.NAME ILIKE $8 LIMIT 1000) "
+        "GROUP BY cand.ID, cand.ISSUER_CA_ID, cand.CERTIFICATE"
+    ) in sql
     assert db.args == (
         "vertex.link",
         "%vertex.link",
         ["san:dNSName", "2.5.4.3"],
-        [2, 3],
-        "%Let's\\_Encrypt%",
         1.0,
         2.0,
         50,
+        [2, 3],
+        "%Let's\\_Encrypt%",
     )
+
+    # Identities without an issuer are still grouped from the candidates.
+    await db.certsByIdentity("vertex.link", like="%vertex.link", limit=5)
+    assert "FROM cand GROUP BY cand.ID" in db.sql
+    assert "FROM cand WHERE" not in db.sql
+
+    # Full text search alone with an issuer.
+    await db.certsByIdentity("vertex.link", issuer="Sectigo", limit=5)
+    assert (
+        "cand AS MATERIALIZED (SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate c WHERE "
+        "plainto_tsquery('certwatch', $1) @@ identities(c.CERTIFICATE) LIMIT $2)"
+    ) in db.sql
+    assert "FROM cand WHERE cand.ISSUER_CA_ID IN (SELECT ca.ID" in db.sql
+    assert "GROUP BY" not in db.sql.split("FROM cand", 1)[1].split("SELECT m.ID", 1)[0]
+
+    # Expiry bounds are on notAfter, and on the partition key so partitions are pruned, inside
+    # the candidates' LIMIT. The issuer still filters after it.
+    await db.certsByIdentity(
+        "vertex.link", issuer="Sectigo", expires_after=1000, expires_before=2000, limit=5
+    )
+    cand = db.sql.split("cand AS MATERIALIZED (", 1)[1].split(" LIMIT $4)", 1)[0]
+    assert (
+        "x509_notAfter(c.CERTIFICATE) >= to_timestamp($2) AT TIME ZONE 'UTC' AND "
+        f"{NOTAFTER_KEY} >= to_timestamp($2) AT TIME ZONE 'UTC' AND "
+        "x509_notAfter(c.CERTIFICATE) < to_timestamp($3) AT TIME ZONE 'UTC' AND "
+        f"{NOTAFTER_KEY} < to_timestamp($3) AT TIME ZONE 'UTC'"
+    ) in cand
+    assert "FROM cand WHERE cand.ISSUER_CA_ID IN (SELECT ca.ID" in db.sql
+    assert db.args == ("vertex.link", 1.0, 2.0, 5, "%Sectigo%")
+    await db.certsByIdentity("vertex.link", expires_before=2000, limit=5)
+    assert f"{NOTAFTER_KEY} < to_timestamp($2) AT TIME ZONE 'UTC'" in db.sql
+    assert f"{NOTAFTER_KEY} >=" not in db.sql
+
+    # A prefix is a to_tsquery operand, quoted so no user text is tsquery syntax.
+    await db.certsByIdentity("microsoft*", valid=True, limit=5)
+    assert (
+        "WHERE to_tsquery('certwatch', $1) @@ identities(c.CERTIFICATE) AND "
+        f"{NOTAFTER_KEY} >= date_trunc('year', now() AT TIME ZONE 'UTC')"
+    ) in db.sql
+    assert db.args == ("'microsoft':*", 5)
+    # With plain words, both are required.
+    await db.certsByIdentity("login micro*", like="%micro%", since=1000, limit=5)
+    assert (
+        "(plainto_tsquery('certwatch', $1) && to_tsquery('certwatch', $2)) @@ identities(c.CERTIFICATE)"
+        " AND c.NAME_VALUE ILIKE $3 AND x509_notBefore(c.CERTIFICATE) >= to_timestamp($4)"
+    ) in db.sql
+    assert db.args == ("login", "'micro':*", "%micro%", 1.0, 5)
+    await db.certsByIdentity("x') | !('y\\*", limit=5)
+    assert db.args == ("x') |", "'!(''y\\\\':*", 5)
 
     # Name types alone still check each identity.
     await db.certsByIdentity("Sectigo", nametypes=["2.5.4.10"])
@@ -528,6 +620,14 @@ async def test_sql_identity():
 
 async def test_sql_issuer():
     db = Recorder()
+    edb = Recorder()
+    await edb.certsByIssuer(caids=[2], expires_after=1000, expires_before=2000, limit=10)
+    assert (
+        f"{NOTAFTER_KEY} >= to_timestamp($2) AT TIME ZONE 'UTC' AND "
+        "x509_notAfter(c.CERTIFICATE) < to_timestamp($3) AT TIME ZONE 'UTC' AND "
+        f"{NOTAFTER_KEY} < to_timestamp($3) AT TIME ZONE 'UTC' ORDER BY"
+    ) in edb.sql
+
     await db.certsByIssuer(
         caids=[2, 3], issuer="Sectigo", cert={"sha256": [b"\x01"]}, valid=True, until=2000, limit=10
     )
@@ -726,9 +826,18 @@ async def test_raw_rolls_back():
 
 
 def test_tsquery():
-    assert tsquery(" *.vertex.link ") == "vertex.link"
-    assert tsquery("%.vertex.link") == "vertex.link"
-    assert tsquery("a%b*c") == "a b c"
+    assert tsquery(" *.vertex.link ") == ("vertex.link", [])
+    assert tsquery("%.vertex.link") == ("vertex.link", [])
+    assert tsquery("a%b*c") == ("a b c", [])
+    # Only a trailing * makes a prefix, and only of a word with something to index.
+    assert tsquery("microsoft*") == ("", ["microsoft"])
+    assert tsquery("*.microsoft*") == ("", ["microsoft"])
+    assert tsquery("login.Microsoft** corp") == ("corp", ["login.Microsoft"])
+    assert tsquery("a*b* c") == ("a c", ["b"])
+    assert tsquery("-* *") == ("-", [])
+    assert prefixQuery(["microsoft", "it's", "a\\b", "x') | !(y"]) == (
+        "'microsoft':* & 'it''s':* & 'a\\\\b':* & 'x'') | !(y':*"
+    )
     assert likeEscape("a_b%c\\") == "a\\_b\\%c\\\\"
 
 

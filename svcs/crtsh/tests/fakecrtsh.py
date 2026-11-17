@@ -774,14 +774,21 @@ class FakeCrtshDb:
         assert callable(getattr(self, meth, None)), f"FakeCrtshDb has no method {meth}"
         return sum(1 for m, _ in self.calls if m == meth)
 
-    def _valid(self, cert, valid=False, since=None, until=None) -> bool:
+    def _valid(
+        self, cert, valid=False, since=None, until=None, expires_after=None, expires_before=None
+    ) -> bool:
         if cert is None:
             # The x509_* functions return null for unparsable certificates, so any filter drops them.
-            return not valid and since is None and until is None
+            return not valid and (since, until, expires_after, expires_before) == (None,) * 4
         if valid and cert.not_valid_after_utc < datetime.datetime.now(datetime.UTC):
             return False
         nb = int(cert.not_valid_before_utc.timestamp() * 1000)
+        na = int(cert.not_valid_after_utc.timestamp() * 1000)
         if since is not None and nb < since:
+            return False
+        if expires_after is not None and na < expires_after:
+            return False
+        if expires_before is not None and na >= expires_before:
             return False
         return until is None or nb < until
 
@@ -861,6 +868,8 @@ class FakeCrtshDb:
         since=None,
         until=None,
         limit=1000,
+        expires_after=None,
+        expires_before=None,
     ):
         self._call(
             "certsByIdentity",
@@ -873,10 +882,16 @@ class FakeCrtshDb:
             since=since,
             until=until,
             limit=limit,
+            expires_after=expires_after,
+            expires_before=expires_before,
         )
-        # plainto_tsquery(text) @@ identities(...): every token of the text is a token of the cert.
-        words = tsTokens(tsquery(text))
-        if not words:
+        # plainto_tsquery(plain) && to_tsquery('prefix':*) @@ identities(...): every word of the
+        # plain text is a word of the cert, and every word of each prefix starts one of its words
+        # (a prefix's words are a phrase, their order isn't checked).
+        plain, prefixes = tsquery(text)
+        words = tsTokens(plain)
+        starts = {w for prefix in prefixes for w in tsTokens(prefix)}
+        if not words and not starts:
             return []  # An empty tsquery matches nothing.
         regex = _likeRegex(like) if like is not None else None
         issuers = (
@@ -888,23 +903,35 @@ class FakeCrtshDb:
             if cert is None:
                 continue
             idents = _identities(cert)
-            if not words <= tsTokens(identityText(cert)):
+            tokens = tsTokens(identityText(cert))
+            if not words <= tokens or not all(any(t.startswith(w) for t in tokens) for w in starts):
                 continue
             if (regex is not None or nametypes) and not any(
                 (regex is None or regex.match(v)) and (not nametypes or t in nametypes)
                 for t, v in idents
             ):
                 continue
-            if caids and row["issuer_ca_id"] not in caids:
-                continue
-            if issuers is not None and row["issuer_ca_id"] not in issuers:
-                continue
-            if self._valid(cert, valid, since, until):
-                found.append(self._row(row))
-        return found[:limit]
+            if self._valid(cert, valid, since, until, expires_after, expires_before):
+                found.append(row)
+        # Like crt.sh, the issuer narrows the candidates after the limit.
+        return [
+            self._row(row)
+            for row in found[:limit]
+            if (not caids or row["issuer_ca_id"] in caids)
+            and (issuers is None or row["issuer_ca_id"] in issuers)
+        ]
 
     async def certsByIssuer(
-        self, caids=None, issuer=None, cert=None, valid=False, since=None, until=None, limit=1000
+        self,
+        caids=None,
+        issuer=None,
+        cert=None,
+        valid=False,
+        since=None,
+        until=None,
+        limit=1000,
+        expires_after=None,
+        expires_before=None,
     ):
         self._call(
             "certsByIssuer",
@@ -915,6 +942,8 @@ class FakeCrtshDb:
             since=since,
             until=until,
             limit=limit,
+            expires_after=expires_after,
+            expires_before=expires_before,
         )
         sources = set(caids or [])
         if issuer:
@@ -929,7 +958,9 @@ class FakeCrtshDb:
                 r
                 for r in self.pki.rows
                 if r["issuer_ca_id"] == caid
-                and self._valid(self.pki.certs.get(r["id"]), valid, since, until)
+                and self._valid(
+                    self.pki.certs.get(r["id"]), valid, since, until, expires_after, expires_before
+                )
             ]
             found.extend(self._row(r) for r in self._newest(rows)[:limit])
         return found

@@ -60,6 +60,7 @@ every other call.
 | `crtsh:timeout` | `660` | Seconds before the service gives up waiting on a query, `0` for none. Keep it longer than `crtsh:statement:timeout`. |
 | `crtsh:statement:timeout` | `600` | The `statement_timeout` set for each query, in seconds, `0` for none. crt.sh's default cancels big queries. |
 | `crtsh:retries` | `3` | Retries when the connection drops mid-query. |
+| `crtsh:timeout:retries` | `1` | Retries of a query crt.sh cancels for its statement timeout (a heavy search often finishes when rerun on crt.sh's warm cache), `0` for none. |
 | `crtsh:keepalive` | `10` | Seconds between keepalive pings while the connection is in use. |
 | `crtsh:idle` | `300` | Seconds without a query before the connection is closed. |
 | `crtsh:connect:timeout` | `300` | Seconds to keep retrying (with backoff) when crt.sh refuses a connection. |
@@ -79,10 +80,10 @@ every other call.
 | Command | Description |
 |---|---|
 | `slib.crtsh.cert` | Look up certs by crt.sh ID, SHA-256, SHA-1, serial, SKI, SPKI hash, or subject hash. |
-| `slib.crtsh.search` | Search by `--dns`, `--cn`, `--org`, `--ou`, `--email`, `--ip`, `--uri`, `--subject`, `--identity`, `--issuer`, `--caid`, with `--valid`, `--since`, `--until`, `--no-precerts`. See [Search matching](#search-matching). |
+| `slib.crtsh.search` | Search by `--dns`, `--cn`, `--org`, `--ou`, `--email`, `--ip`, `--uri`, `--subject`, `--identity` (whole words, or a prefix with a trailing `*`), `--issuer`, `--caid`, with `--valid`, `--since`, `--until`, `--expires-after`, `--expires-before`, `--no-precerts`. See [Search matching](#search-matching). |
 | `slib.crtsh.pivot` | From certs to related certs: `--by issued`, `siblings`, `key`, `subject`, `serial`, `ski`. |
 | `slib.crtsh.chain` | Model every chain from a cert up to its root(s), setting `:issuer:cert`. |
-| `slib.crtsh.ca` | Find CAs by name/ID, model their certs (`--certs`) or what they issued (`--issued`). |
+| `slib.crtsh.ca` | Find CAs by name/ID, model their certs (`--certs`) or what they issued (`--issued`, with `--valid`, `--since`, `--until`, `--expires-after`, `--expires-before`). |
 | `slib.crtsh.admin.tags` | Configure the `precert`, `revoked`, `ca`, and `root` tags (prefix `rep.crtsh`). A `--prefix` that isn't a valid tag name is refused. |
 | `slib.crtsh.admin.sql` | Run a raw SQL query against crt.sh, at most `--limit` rows. |
 
@@ -97,6 +98,39 @@ matches `www.vertex.link`, but `--cn old` doesn't match `old.vertex.link` and `-
 doesn't match `visi@vertex.link`. `--dns` matches the domain and its subdomains (a leading `*.` or
 `.` is ignored), `--ip` matches the address exactly (in any notation), and `--exact` requires
 whole field values.
+
+A trailing `*` makes the last word a prefix (`to_tsquery('certwatch', 'microsoft':*)`):
+`--cn "microsoft*"` matches any indexed word that starts with `microsoft`, and crt.sh indexes
+every parent domain as a word, so it matches `microsoftonline.com` and
+`login.microsoftonline.com`. Other words in the value are still whole words (`--org "Vertex
+Proj*"`). There's no suffix or substring search: `fakemicrosoft.com` doesn't match
+`microsoft*`. A prefix can't be `--exact`. The prefix is passed as a quoted `to_tsquery`
+operand, so no user text is read as tsquery syntax.
+
+Prefixes of common words are much heavier than exact words, and with `--valid` or `--since` on
+recent certificates (the newest partitions) they may time out. Heavy searches can time out on
+crt.sh's cold cache and then finish when rerun, so a query crt.sh cancels for its statement
+timeout is retried once (`crtsh:timeout:retries`, logged as a warning). A search that still
+times out fails with the usual "crt.sh canceled the query (statement timeout)" error.
+
+`--since`/`--until` bound when a certificate was issued (notBefore), `--expires-after`
+(inclusive) and `--expires-before` (exclusive) when it expires (notAfter). crt.sh partitions
+`certificate` on notAfter (`coalesce(x509_notAfter(CERTIFICATE), 'infinity')`; the recent
+partitions are quarterly, ex. `c2027q1` holds notAfter in 2027 Q1), and the expiry bounds are
+written on that expression, so PostgreSQL only scans the partitions in range. They're the way to
+keep a heavy search to one partition, ex. `--cn "microsoft*" --issuer "Let's Encrypt"
+--expires-after 2027-01-01 --expires-before 2027-04-01`. A certificate without a notAfter never
+matches `--expires-before`. They take the same times as `--since` and combine with `--valid`,
+`--since`, and `--until`; `--expires-after` must be before `--expires-before`.
+
+Searches work like crt.sh's own: the text is found with crt.sh's full text index first (up to
+`crtsh:candidates` certificates), so it must be a whole word (or a prefix of one) somewhere in
+the certificate (ex. `microsoft` finds `microsoft--web-hosting.tk` and
+`O=Microsoft Corporation`, but not `login.microsoftonline.com` alone), and the candidates are
+then matched field by field. `--issuer`/`--caid` filter those candidates too: nothing indexes a
+word and an issuer together, so a common word with a rare issuer (`--cn microsoft --issuer
+"Let's Encrypt"`) only finds the matches among the first `crtsh:candidates` candidates.
+`--since` and `--valid` move the candidates to newer certificates.
 
 ### Raw SQL
 

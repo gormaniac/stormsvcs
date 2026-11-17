@@ -59,10 +59,12 @@ function pivot(valu, by, kind=(null), valid=(false), precerts=(true), limit=(100
 
 // Emit the certificates issued by crt.sh CAs, or the CA of a certificate.
 function issued(caids=(null), valu=(null), kind=(null), valid=(false), since=(null),
-                until=(null), precerts=(true), limit=(100), chain=(false)) {
+                until=(null), precerts=(true), limit=(100), chain=(false), expires_after=(null),
+                expires_before=(null)) {
     $tagPrefix = $priv.tagPrefix()
     for $retn in $priv.issued(caids=$caids, valu=$valu, kind=$kind, valid=$valid, since=$since,
-                              until=$until, precerts=$precerts, limit=$limit) {
+                              until=$until, precerts=$precerts, limit=$limit,
+                              expires_after=$expires_after, expires_before=$expires_before) {
         if $util.failed($retn, "Listing issued certificates") { break }
         emit $ingest($retn.data, $chain, $tagPrefix)
     }

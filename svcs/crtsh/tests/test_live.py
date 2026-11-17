@@ -30,6 +30,12 @@ ISSUER = 204411
 ISSUER_CERT = 4267304698
 """The certificate of CA 204411."""
 
+RECENT = 1790812800000
+"""2026-10-01, epoch millis."""
+
+Q1_2027 = (1798761600000, 1806537600000)
+"""2027-01-01 and 2027-04-01, epoch millis: crt.sh's c2027q1 partition."""
+
 
 class TestLive(s_tests.SynTest):
     async def test_live(self):
@@ -67,6 +73,45 @@ class TestLive(s_tests.SynTest):
                 assert not details["precert"]
                 assert norm.matches(details, "dns", "comodo.com", "suffix"), norm.fieldValues(
                     details, "dns"
+                )
+
+            # A common word and a rare issuer: "microsoft" matches hundreds of millions of
+            # certificates, few from Let's Encrypt. This used to hit the statement timeout, the
+            # issuer has to filter the candidates rather than be part of their scan.
+            async for details in svc.searchGenr(cn="microsoft", issuer="Let's Encrypt", limit=20):
+                assert "Let's Encrypt" in details["crtsh"]["issuer"]["name"]
+                assert norm.matches(details, "cn", "microsoft"), norm.fieldValues(details, "cn")
+
+            # A prefix matches indexed words that start with it (every parent domain is a word).
+            found = [d async for d in svc.searchGenr(cn="microsoftonl*", limit=20)]
+            assert found, "microsoftonline.com and its subdomains have many certificates."
+            for details in found:
+                assert norm.matches(details, "cn", "microsoftonl", "prefix"), norm.fieldValues(
+                    details, "cn"
+                )
+            # A prefix of a common word in a recent window, with an issuer: the heaviest search,
+            # it may time out on crt.sh's cold cache, which crtsh:timeout:retries retries once.
+            async for details in svc.searchGenr(
+                cn="microsoft*", issuer="Let's Encrypt", valid=True, since=RECENT, limit=20
+            ):
+                assert "Let's Encrypt" in details["crtsh"]["issuer"]["name"]
+                assert details["notbefore"] >= RECENT
+                assert norm.matches(details, "cn", "microsoft", "prefix"), norm.fieldValues(
+                    details, "cn"
+                )
+
+            # The same, pinned to one partition (c2027q1) with expiry bounds on its key.
+            async for details in svc.searchGenr(
+                cn="microsoft*",
+                issuer="Let's Encrypt",
+                expires_after=Q1_2027[0],
+                expires_before=Q1_2027[1],
+                limit=20,
+            ):
+                assert "Let's Encrypt" in details["crtsh"]["issuer"]["name"]
+                assert Q1_2027[0] <= details["notafter"] < Q1_2027[1]
+                assert norm.matches(details, "cn", "microsoft", "prefix"), norm.fieldValues(
+                    details, "cn"
                 )
 
             # ---- CAs, issued, and chains ----

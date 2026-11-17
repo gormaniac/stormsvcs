@@ -8,7 +8,7 @@ Every SQL statement the service runs lives in this module. The queries only
 depend on these parts of the certwatch schema (https://github.com/crtsh/certwatch_db):
 
 - ``certificate (id, issuer_ca_id, certificate)`` - every cert and precert, as DER.
-  Range partitioned by year on notAfter, see ``NOTAFTER_KEY``.
+  Range partitioned on notAfter (recent partitions are quarterly), see ``NOTAFTER_KEY``.
 - ``ca (id, name)`` - every issuing CA (a name + key pair).
 - ``ca_certificate (certificate_id, ca_id)`` - which certificates belong to a CA (one CA each).
 - ``ct_log (id, name, url, operator)`` and ``ct_log_entry (certificate_id, ct_log_id,
@@ -60,7 +60,12 @@ NAME_TYPES = {
 """The certificate_and_identities NAME_TYPEs (as crt.sh's web_apis uses them) of each search field."""
 
 NOTAFTER_KEY = "coalesce(x509_notAfter(c.CERTIFICATE), 'infinity'::timestamp)"
-"""The expression ``certificate`` is range partitioned (by year) on."""
+"""The expression ``certificate`` is range partitioned on (by notAfter, ``infinity`` when unset).
+
+crt.sh's recent partitions are quarterly (ex. ``c2027q1`` holds notAfter in 2027 Q1), older ones
+are wider. A condition on exactly this expression lets PostgreSQL skip whole partitions, so
+``_filters`` writes every notAfter bound on it too.
+"""
 
 LOOKUPS = {
     "id": "{c}.ID = ANY({p}::bigint[])",
@@ -177,15 +182,23 @@ def _alias(cond: str, alias: str = "c") -> str:
 
 
 def _filters(
-    params: Params, valid: bool = False, since: int | None = None, until: int | None = None
+    params: Params,
+    valid: bool = False,
+    since: int | None = None,
+    until: int | None = None,
+    expires_after: int | None = None,
+    expires_before: int | None = None,
 ) -> list[str]:
     """The validity conditions shared by searches, on ``certificate c``.
 
-    ``since``/``until`` are epoch millis bounds on notBefore.
+    ``since``/``until`` are epoch millis bounds on notBefore, ``expires_after`` (inclusive)
+    and ``expires_before`` (exclusive) on notAfter. A certificate without a notAfter never
+    expires, so it never matches ``expires_before``.
 
-    ``certificate`` is partitioned by year on ``NOTAFTER_KEY``, so every bound that
-    implies a minimum notAfter is also applied to that expression, which lets
-    PostgreSQL skip whole partitions (crt.sh's own expiry filter does the same).
+    ``certificate`` is partitioned on ``NOTAFTER_KEY``, so every bound that implies a
+    notAfter bound is also applied to that expression, which lets PostgreSQL skip whole
+    partitions (crt.sh's own expiry filter does the same). Both expiry bounds can pin a
+    search to one partition (ex. 2027-01-01 to 2027-04-01 for ``c2027q1``).
     """
 
     clauses = []
@@ -200,6 +213,14 @@ def _filters(
     if until is not None:
         param = params.add(until / 1000)
         clauses.append(f"x509_notBefore(c.CERTIFICATE) < to_timestamp({param}) AT TIME ZONE 'UTC'")
+    if expires_after is not None:
+        param = params.add(expires_after / 1000)
+        clauses.append(f"x509_notAfter(c.CERTIFICATE) >= to_timestamp({param}) AT TIME ZONE 'UTC'")
+        clauses.append(f"{NOTAFTER_KEY} >= to_timestamp({param}) AT TIME ZONE 'UTC'")
+    if expires_before is not None:
+        param = params.add(expires_before / 1000)
+        clauses.append(f"x509_notAfter(c.CERTIFICATE) < to_timestamp({param}) AT TIME ZONE 'UTC'")
+        clauses.append(f"{NOTAFTER_KEY} < to_timestamp({param}) AT TIME ZONE 'UTC'")
     return clauses
 
 
@@ -221,15 +242,39 @@ def _issuerName(params: Params, name: str) -> str:
     return f"SELECT ca.ID FROM ca WHERE ca.NAME ILIKE {params.add('%' + likeEscape(name) + '%')} LIMIT 1000"
 
 
-def tsquery(text: str) -> str:
-    """Clean up text for ``plainto_tsquery('certwatch', ...)``.
+def tsquery(text: str) -> tuple[str, list[str]]:
+    """Split search text into plain words for ``plainto_tsquery('certwatch', ...)`` and prefixes.
 
-    Wildcards and LIKE patterns aren't meaningful to full text search, so a
-    leading ``*.``/``%.`` and any other ``%``/``*`` are removed.
+    Returns ``(plain, prefixes)``. A word with a trailing ``*`` (ex. ``microsoft*``) is a
+    prefix, see ``prefixQuery``. Other wildcards and LIKE patterns aren't meaningful to full
+    text search, so a leading ``*.``/``%.`` and any other ``%``/``*`` are removed (a ``*``
+    inside a word splits it). A prefix with nothing to index (ex. ``-*``) is dropped.
     """
 
-    text = re.sub(r"^[*%]+\.?", "", text.strip())
-    return text.replace("%", " ").replace("*", " ").strip()
+    text = re.sub(r"^[*%]+\.?", "", text.strip()).replace("%", " ")
+    plain, prefixes = [], []
+    for word in text.split():
+        if word.endswith("*") and any(c.isalnum() for c in word.rstrip("*").split("*")[-1]):
+            *rest, word = word.rstrip("*").split("*")
+            plain.extend(rest)
+            prefixes.append(word)
+        else:
+            plain.append(word.replace("*", " "))
+    return " ".join(" ".join(plain).split()), prefixes
+
+
+def prefixQuery(words: list[str]) -> str:
+    """A ``to_tsquery`` query matching indexed words that start with each of ``words``.
+
+    Each word is quoted as one ``to_tsquery`` operand (``'word':*``, its quotes and
+    backslashes escaped), so no user text is ever read as tsquery syntax (``&|!():<>``).
+    PostgreSQL parses a quoted operand with the config's parser like any text, and every
+    word it makes of it is a prefix: ``'login.microsoft':*`` is one host word, ``'foo-bar':*``
+    is ``'foo-bar':* <-> 'foo':* <-> 'bar':*``.
+    """
+
+    quoted = ("'" + w.replace("\\", "\\\\").replace("'", "''") + "':*" for w in words)
+    return " & ".join(quoted)
 
 
 def likeEscape(text: str) -> str:
@@ -257,6 +302,9 @@ class CrtshDb:
       only reaches whichever backend served it. ``timeout`` (client side, None for none)
       is a backstop for a query the server never cancels, keep it longer than
       ``statement_timeout``.
+    - A query the server cancels for its statement timeout is retried ``timeout_retries``
+      times, ``timeout_delay`` seconds later: a heavy search can time out on crt.sh's cold
+      cache and finish when rerun. Nothing else that cancels a query is retried.
 
     Every query method returns rows as plain dicts.
     """
@@ -271,12 +319,16 @@ class CrtshDb:
         connect_timeout: float = 300,
         backoff: float = 1.0,
         statement_timeout: float = 0,
+        timeout_retries: int = 1,
+        timeout_delay: float = 5,
         connect=None,
     ):
         self.dsn = dsn
         self.timeout = timeout or None
         self.statement_timeout = statement_timeout
         self.retries = retries
+        self.timeout_retries = timeout_retries
+        self.timeout_delay = timeout_delay
         self.keepalive = keepalive
         self.idle = idle
         self.connect_timeout = connect_timeout
@@ -470,8 +522,10 @@ class CrtshDb:
         ``_run``)."""
 
         loop = asyncio.get_running_loop()
+        canceled = 0
         async with self._lock:
-            for attempt in range(self.retries + 1):
+            attempt = 0
+            while attempt <= self.retries:
                 conn = await self._ensure()
                 self._lastUsed = loop.time()
                 try:
@@ -482,9 +536,25 @@ class CrtshDb:
                     self._kill(conn)
                     raise
                 except asyncpg.exceptions.QueryCanceledError as err:
-                    raise CrtshDbError(
-                        f"crt.sh canceled the query (statement timeout), try a narrower search: {err}"
-                    ) from err
+                    # A heavy query can time out on crt.sh's cold cache and finish when rerun.
+                    # Only the server's statement timeout is retried, not other cancels (57014
+                    # is also "canceling statement due to user request").
+                    if "statement timeout" not in str(err) or canceled >= self.timeout_retries:
+                        raise CrtshDbError(
+                            f"crt.sh canceled the query (statement timeout), try a narrower search: {err}"
+                        ) from err
+                    canceled += 1
+                    delay = self.timeout_delay
+                    logger.warning(
+                        "crt.sh canceled the query (statement timeout), retrying in %.0fs (%d of %d), "
+                        "its cache may be warm now: %s",
+                        delay,
+                        canceled,
+                        self.timeout_retries,
+                        err,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
                 except TimeoutError as err:
                     # The connection is mid-query, it can't be reused.
                     await self._drop()
@@ -510,6 +580,7 @@ class CrtshDb:
                 if attempt >= self.retries:
                     raise CrtshDbError(f"crt.sh query failed: {retry}") from retry
                 logger.warning("crt.sh query failed (attempt %d), retrying: %s", attempt + 1, retry)
+                attempt += 1
         raise CrtshDbError("crt.sh query failed.")  # pragma: no cover
 
     # ---- Certificates, each returned with its metadata (see _withMeta) ----
@@ -536,6 +607,8 @@ class CrtshDb:
         since: int | None = None,
         until: int | None = None,
         limit: int = 1000,
+        expires_after: int | None = None,
+        expires_before: int | None = None,
     ) -> list[dict]:
         """Search certificate identities (subject attributes and SANs) like crt.sh does.
 
@@ -543,39 +616,65 @@ class CrtshDb:
         (an ILIKE pattern) and/or ``nametypes`` (see ``NAME_TYPES``), each candidate's
         individual identities are also matched in the ``certificate_and_identities``
         view before the limit is applied, exactly like crt.sh's own search, so the
-        limit counts real matches. ``caids`` and ``issuer`` (a CA name) narrow the
-        issuer. Like crt.sh, the results are an arbitrary subset (not the newest)
-        when there are more than ``limit``.
+        limit counts real matches. Like crt.sh, the results are an arbitrary subset
+        (not the newest) when there are more than ``limit``.
+
+        A word of ``text`` with a trailing ``*`` is a prefix (see ``tsquery``): it
+        matches any indexed word that starts with it.
+
+        ``caids`` and ``issuer`` (a CA name) narrow the issuer, but only after the
+        limit: the candidates are found first, then filtered by issuer, like crt.sh's
+        own search. Nothing indexes a word and an issuer together, so filtering by
+        issuer inside the limit makes PostgreSQL recheck every certificate with the
+        word until enough are from the issuer, which never finishes for common words
+        (ex. "microsoft" matches hundreds of millions of certificates, few from Let's
+        Encrypt).
         """
 
         params = Params()
-        clauses = [
-            f"plainto_tsquery('certwatch', {params.add(tsquery(text))}) @@ identities(c.CERTIFICATE)"
-        ]
+        plain, prefixes = tsquery(text)
+        queries = []
+        if plain or not prefixes:
+            queries.append(f"plainto_tsquery('certwatch', {params.add(plain)})")
+        if prefixes:
+            queries.append(f"to_tsquery('certwatch', {params.add(prefixQuery(prefixes))})")
+        query = queries[0] if len(queries) == 1 else f"({' && '.join(queries)})"
+        clauses = [f"{query} @@ identities(c.CERTIFICATE)"]
         if like is not None:
             clauses.append(f"c.NAME_VALUE ILIKE {params.add(like)}")
         if nametypes:
             clauses.append(f"c.NAME_TYPE = ANY({params.add(list(nametypes))}::text[])")
-        if caids:
-            clauses.append(f"c.ISSUER_CA_ID = ANY({params.add(list(caids))}::int[])")
-        if issuer:
-            clauses.append(f"c.ISSUER_CA_ID IN ({_issuerName(params, issuer)})")
-        clauses.extend(_filters(params, valid, since, until))
+        clauses.extend(_filters(params, valid, since, until, expires_after, expires_before))
         where = " AND ".join(clauses)
         limit = params.add(limit)
 
         if like is None and not nametypes:
             # Only the full text search, no need to parse every candidate's identities.
-            inner = f"SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate c WHERE {where} LIMIT {limit}"
+            cand = f"SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate c WHERE {where} LIMIT {limit}"
+            group = ""
         else:
-            # A certificate has a row per matching identity, group them back into one.
-            inner = (
-                "SELECT sub.CERTIFICATE_ID AS ID, sub.ISSUER_CA_ID, sub.CERTIFICATE FROM ("
-                "SELECT c.CERTIFICATE_ID, c.ISSUER_CA_ID, c.CERTIFICATE "
+            # A certificate has a row per matching identity, they're grouped back into one.
+            cand = (
+                "SELECT c.CERTIFICATE_ID AS ID, c.ISSUER_CA_ID, c.CERTIFICATE "
                 f"FROM certificate_and_identities c WHERE {where} LIMIT {limit}"
-                ") sub GROUP BY sub.CERTIFICATE_ID, sub.ISSUER_CA_ID, sub.CERTIFICATE"
             )
-        return await self.fetch(_withMeta(inner), *params.args)
+            group = " GROUP BY cand.ID, cand.ISSUER_CA_ID, cand.CERTIFICATE"
+
+        issuers = []
+        if caids:
+            issuers.append(f"cand.ISSUER_CA_ID = ANY({params.add(list(caids))}::int[])")
+        if issuer:
+            issuers.append(f"cand.ISSUER_CA_ID IN ({_issuerName(params, issuer)})")
+
+        if not issuers and not group:
+            return await self.fetch(_withMeta(cand), *params.args)
+
+        # The candidates are materialized so the issuer filter isn't planned into their scan.
+        filt = f" WHERE {' AND '.join(issuers)}" if issuers else ""
+        inner = f"SELECT cand.ID, cand.ISSUER_CA_ID, cand.CERTIFICATE FROM cand{filt}{group}"
+        return await self.fetch(
+            _withMeta(inner, ctes=f"cand AS MATERIALIZED ({cand})"), *params.args
+        )
 
     async def certsByIssuer(
         self,
@@ -586,6 +685,8 @@ class CrtshDb:
         since: int | None = None,
         until: int | None = None,
         limit: int = 1000,
+        expires_after: int | None = None,
+        expires_before: int | None = None,
     ) -> list[dict]:
         """The newest ``limit`` certificates issued by each CA.
 
@@ -613,7 +714,10 @@ class CrtshDb:
         if not sources:
             raise CrtshDbError("A CA ID, CA name, or CA certificate is required.")
 
-        clauses = ["c.ISSUER_CA_ID = cas.CA_ID", *_filters(params, valid, since, until)]
+        clauses = [
+            "c.ISSUER_CA_ID = cas.CA_ID",
+            *_filters(params, valid, since, until, expires_after, expires_before),
+        ]
         inner = (
             f"SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM ({' UNION '.join(sources)}) cas "
             "CROSS JOIN LATERAL (SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate c "

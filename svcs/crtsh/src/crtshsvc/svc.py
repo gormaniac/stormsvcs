@@ -43,6 +43,14 @@ def identityQuery(field: str, valu: str, exact: bool = False) -> tuple[str, str 
     """
 
     valu = valu.strip()
+    if isPrefix(valu):
+        if exact:
+            raise CrtshDbError(f"A prefix search ({valu}) can't be exact.")
+        if field != "subject" and field != "ip":
+            # Any indexed word that starts with the prefix, see db.tsquery.
+            word = valu.rstrip("*").rstrip()
+            word = normDomain(word) if field == "dns" else word
+            return word + "*", "%" + likeEscape(word) + "%"
     if field == "subject":
         # identities() only indexes attribute values, not their names, so "O=Vertex, CN=x"
         # is searched as "Vertex x". The service matches the whole DN afterwards.
@@ -70,6 +78,13 @@ def identityQuery(field: str, valu: str, exact: bool = False) -> tuple[str, str 
         # The domain itself, its subdomains, and wildcards for it.
         return valu, "%" + pattern
     return valu, "%" + pattern + "%"
+
+
+def isPrefix(valu: str) -> bool:
+    """Whether a search value is a prefix search: its last word ends with ``*`` (ex. ``microsoft*``)."""
+
+    words = valu.strip().rstrip("*").split()
+    return valu.strip().endswith("*") and bool(words) and any(c.isalnum() for c in words[-1])
 
 
 def normDomain(valu: str) -> str:
@@ -112,6 +127,15 @@ def toMillis(name: str, valu: Any) -> int | None:
     """Convert an optional epoch millis argument."""
 
     return None if valu is None else toInt(name, valu)
+
+
+def toExpires(after: Any, before: Any) -> dict[str, int | None]:
+    """The ``expires_after``/``expires_before`` epoch millis bounds on notAfter, checked."""
+
+    after, before = toMillis("expires_after", after), toMillis("expires_before", before)
+    if after is not None and before is not None and after >= before:
+        raise CrtshDbError("The expires after time must be before the expires before time.")
+    return {"expires_after": after, "expires_before": before}
 
 
 def lookupValu(kind: str, valu: Any) -> list:
@@ -194,6 +218,15 @@ class CrtshSvc(s_cell.Cell):
             "default": 3,
             "description": "How many times to retry a query when the connection drops.",
         },
+        "crtsh:timeout:retries": {
+            "type": "integer",
+            "default": 1,
+            "minimum": 0,
+            "description": (
+                "How many times to retry a query crt.sh canceled for its statement timeout, 0 for "
+                "none. A heavy search can time out on crt.sh's cold cache and finish when rerun."
+            ),
+        },
         "crtsh:keepalive": {
             "type": "number",
             "default": 10,
@@ -249,6 +282,7 @@ class CrtshSvc(s_cell.Cell):
             idle=self.conf.get("crtsh:idle"),
             connect_timeout=self.conf.get("crtsh:connect:timeout"),
             statement_timeout=self.conf.get("crtsh:statement:timeout"),
+            timeout_retries=self.conf.get("crtsh:timeout:retries"),
         )
         self.onfini(self.db.close)
 
@@ -349,6 +383,8 @@ class CrtshSvc(s_cell.Cell):
         until: int | None = None,
         precerts: bool = True,
         limit: int = 100,
+        expires_after: int | None = None,
+        expires_before: int | None = None,
     ) -> AsyncIterator[dict]:
         """Search certificates by their properties, yielding the complete details of each, newest first.
 
@@ -358,8 +394,10 @@ class CrtshSvc(s_cell.Cell):
         domain and its subdomains (or only the domain itself with ``exact``), ``ip``
         matches the address exactly, and ``exact`` requires whole values. ``issuer`` matches the
         issuing CA's name and ``caids`` the issuing crt.sh CA IDs. ``valid`` only
-        returns unexpired certificates, ``since``/``until`` bound notBefore (epoch
-        millis), and ``precerts=False`` drops precertificates.
+        returns unexpired certificates, ``since``/``until`` bound notBefore and
+        ``expires_after``/``expires_before`` bound notAfter (epoch millis, the expiry bounds
+        map onto crt.sh's partitions), and ``precerts=False`` drops precertificates. A
+        trailing ``*`` on a value makes its last word a prefix (see ``db.tsquery``).
         """
 
         limit = self._limit(limit)
@@ -383,9 +421,12 @@ class CrtshSvc(s_cell.Cell):
         caids = toCaids(caids)
         issuer = str(issuer) if issuer not in (None, "") else None
         since, until = toMillis("since", since), toMillis("until", until)
+        expires = toExpires(expires_after, expires_before)
 
         if not fields and not caids and not issuer:
             raise CrtshDbError("A search needs at least one certificate field or an issuer.")
+        if exact and (prefix := next((v for v in fields.values() if isPrefix(v)), None)):
+            raise CrtshDbError(f"A prefix search ({prefix}) can't be exact.")
 
         if fields:
             # Search crt.sh on the most specific field, then filter on every field.
@@ -395,7 +436,10 @@ class CrtshSvc(s_cell.Cell):
                 if k in fields
             )
             text, like = identityQuery(field, fields[field], exact)
-            candidates = min(max(limit * 5, 500), self.conf.get("crtsh:candidates"))
+            candidates = self.conf.get("crtsh:candidates")
+            if not caids and not issuer:
+                candidates = min(max(limit * 5, 500), candidates)
+            # With an issuer, every candidate is fetched: they're filtered by issuer afterwards.
             rows = await self.db.certsByIdentity(
                 text,
                 like=like,
@@ -406,6 +450,7 @@ class CrtshSvc(s_cell.Cell):
                 since=since,
                 until=until,
                 limit=candidates,
+                **expires,
             )
         else:
             rows = await self.db.certsByIssuer(
@@ -415,19 +460,26 @@ class CrtshSvc(s_cell.Cell):
                 since=since,
                 until=until,
                 limit=limit if precerts else limit * 2,
+                **expires,
             )
+
+        modes = {}
+        for field, valu in fields.items():
+            if isPrefix(valu) and field != "ip":
+                # A word of the field starts with the prefix (a whole DN just contains it).
+                fields[field] = valu.strip().rstrip("*").rstrip()
+                modes[field] = "contains" if field == "subject" else "prefix"
+            elif exact or field == "ip":
+                modes[field] = "exact"  # A substring of an IP is a different IP.
+            else:
+                modes[field] = "suffix" if field == "dns" else "contains"
 
         def keep(details: dict) -> bool:
             if not precerts and details.get("precert"):
                 return False
-            for field, valu in fields.items():
-                if exact or field == "ip":
-                    mode = "exact"  # A substring of an IP is a different IP.
-                else:
-                    mode = "suffix" if field == "dns" else "contains"
-                if not norm.matches(details, field, valu, mode):
-                    return False
-            return True
+            return all(
+                norm.matches(details, field, valu, modes[field]) for field, valu in fields.items()
+            )
 
         for _, details in self._sort([item for item in self._parse(rows) if keep(item[1])])[:limit]:
             yield details
@@ -444,6 +496,8 @@ class CrtshSvc(s_cell.Cell):
         until: int | None = None,
         precerts: bool = True,
         limit: int = 100,
+        expires_after: int | None = None,
+        expires_before: int | None = None,
     ) -> AsyncIterator[dict]:
         """Yield the certificates issued by a CA, newest first.
 
@@ -454,6 +508,7 @@ class CrtshSvc(s_cell.Cell):
 
         caids = toCaids(caids)
         since, until = toMillis("since", since), toMillis("until", until)
+        expires = toExpires(expires_after, expires_before)
         cert = self._lookups(kind, valu) if valu is not None else None
         if not caids and not cert:
             raise CrtshDbError("A CA ID or certificate is required.")
@@ -467,6 +522,7 @@ class CrtshSvc(s_cell.Cell):
             since=since,
             until=until,
             limit=limit if precerts else limit * 2,
+            **expires,
         )
         if not rows and cert and not caids and not (await self._one(kind, valu))["caids"]:
             # Explain why: there's no such certificate, or it isn't a CA certificate.
