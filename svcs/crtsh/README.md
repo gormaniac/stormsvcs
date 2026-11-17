@@ -105,7 +105,9 @@ whole field values.
 transaction that's rolled back once the rows are fetched. So it can't change data or session
 settings, even with a writable `crtsh:dsn`: a function that changes a setting (ex.
 `set_config('search_path', ..., false)`) only lasts for the query. Session advisory locks outlive
-a rollback, so queries that mention `pg_advisory_lock` and friends anywhere (even in a comment or
+a rollback, so every session advisory lock is released (`pg_advisory_unlock_all()`) before the
+rollback, even ones taken through dynamic SQL (ex. `query_to_xml`) or by a query that then failed.
+As a first line, queries that mention `pg_advisory_lock` and friends anywhere (even in a comment or
 string) are refused, as are Unicode escaped identifiers (`U&"..."`) that could spell them; the
 `pg_advisory_xact_lock` ones work.
 Statements like `SHOW` or `EXPLAIN` aren't accepted.

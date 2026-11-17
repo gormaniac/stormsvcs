@@ -349,6 +349,10 @@ class CrtshDb:
 
         Without ``commit`` the transaction is rolled back once the rows are fetched, which
         also undoes any session setting the query changed (ex. ``set_config(..., false)``).
+        Session advisory locks outlive a rollback, so the query also runs in a savepoint and
+        every session advisory lock is released before the rollback, whether the query
+        succeeded or failed (see ``_unlockAll``). The service never takes advisory locks of
+        its own, so none of them are lost.
         """
 
         if self._setLocal:
@@ -371,15 +375,43 @@ class CrtshDb:
                     ) from err
         if not self._setLocal:
             await conn.execute("BEGIN READ ONLY")
+        if not commit:
+            await conn.execute("SAVEPOINT raw")
 
         try:
             rows = await conn.fetch(sql, *args, timeout=self.timeout)
         except asyncpg.PostgresError:
             # The transaction is aborted, end it so the connection can be reused.
-            await self._rollback(conn)
+            if commit or await self._unlockAll(conn, aborted=True):
+                await self._rollback(conn)
             raise
-        await conn.execute("COMMIT" if commit else "ROLLBACK")
+        if commit:
+            await conn.execute("COMMIT")
+        elif await self._unlockAll(conn):
+            await conn.execute("ROLLBACK")
         return rows
+
+    async def _unlockAll(self, conn: asyncpg.Connection, aborted: bool = False) -> bool:
+        """Release the session advisory locks a query took (ex. through dynamic SQL, like
+        ``query_to_xml('SELECT pg_advisory_lock(1)', ...)``), which a ROLLBACK doesn't.
+
+        It runs in the query's transaction, so behind PgBouncer's transaction pooling it
+        reaches the same server connection the query ran on. An ``aborted`` transaction is
+        rolled back to the savepoint first. If the locks can't be released the connection
+        is dropped (ending its session releases them) and this returns false.
+        """
+
+        try:
+            if aborted:
+                await asyncio.wait_for(conn.execute("ROLLBACK TO SAVEPOINT raw"), timeout=30)
+            await asyncio.wait_for(conn.execute("SELECT pg_advisory_unlock_all()"), timeout=30)
+            return True
+        except Exception as err:
+            logger.debug(
+                "Unable to release crt.sh advisory locks, dropping the connection: %s", err
+            )
+            await self._drop()
+            return False
 
     async def _rollback(self, conn: asyncpg.Connection) -> None:
         """Roll back the current transaction, dropping the connection if that fails."""
@@ -709,8 +741,9 @@ class CrtshDb:
         Functions can still change the session from inside a query, so the transaction is
         rolled back instead of committed, which undoes every setting a query changed (ex.
         ``set_config(name, value, false)``) before the connection is used again. Session
-        advisory locks outlive a rollback, so queries that name the functions that take
-        them are refused.
+        advisory locks outlive a rollback, so they're released before it with
+        ``pg_advisory_unlock_all()``, which catches locks taken through dynamic SQL too. As a
+        first line, queries that name the functions that take them are refused.
         """
 
         args = list(args or ())

@@ -99,6 +99,8 @@ class FakeConn:
             )
         if self.server.rollbackfail and sql == "ROLLBACK":
             raise OSError("connection lost")
+        if sql in self.server.failon:
+            raise OSError("connection lost")
 
     async def fetchval(self, sql, timeout=None):
         if self.server.pingfail:
@@ -130,6 +132,7 @@ class FakeServer:
         self.executed: list[str] = []
         self.setfail = False
         self.rollbackfail = False
+        self.failon: set[str] = set()
 
     async def connect(self, dsn, **kwargs):
         self.attempts += 1
@@ -259,6 +262,7 @@ async def test_keepalive_and_idle_close():
 
 
 BEGIN = "BEGIN READ ONLY; SET LOCAL statement_timeout = {}"
+RAW_END = ["SAVEPOINT raw", "SELECT pg_advisory_unlock_all()", "ROLLBACK"]
 
 
 async def test_statement_timeout():
@@ -677,9 +681,42 @@ async def test_raw_rolls_back():
     try:
         rows = await db.raw("SELECT set_config('search_path', 'pg_catalog', false)")
         assert rows == [{"sql": rows[0]["sql"], "conn": 0}]
-        assert server.executed == [BEGIN.format(60000), "ROLLBACK"]
+        # Session advisory locks outlive the rollback, so they're released in the transaction
+        # first (behind PgBouncer's transaction pooling, a later one may be on another backend).
+        assert server.executed == [BEGIN.format(60000), *RAW_END]
         await db.fetch("SELECT 1")
         assert server.executed[-1] == "COMMIT"
+        assert "SAVEPOINT raw" not in server.executed[-2:]
+
+        # A failed raw query is rolled back to the savepoint (its transaction is aborted) to
+        # release the locks it took before failing.
+        server.executed.clear()
+        server.errors = [asyncpg.exceptions.DivisionByZeroError("division by zero")]
+        with pytest.raises(CrtshDbError, match="division by zero"):
+            await db.raw("SELECT 1/0")
+        assert server.executed == [
+            BEGIN.format(60000),
+            "SAVEPOINT raw",
+            "ROLLBACK TO SAVEPOINT raw",
+            "SELECT pg_advisory_unlock_all()",
+            "ROLLBACK",
+        ]
+        assert db._conn is not None
+
+        # If the locks can't be released, the connection is dropped, which releases them.
+        for errors in ([], [asyncpg.exceptions.DivisionByZeroError("division by zero")]):
+            server.failon = {"SELECT pg_advisory_unlock_all()"}
+            server.errors = list(errors)
+            server.executed.clear()
+            if errors:
+                with pytest.raises(CrtshDbError, match="division by zero"):
+                    await db.raw("SELECT 1/0")
+            else:
+                assert len(await db.raw("SELECT 1")) == 1
+            assert db._conn is None and server.open == 0
+            assert "ROLLBACK" not in server.executed
+            server.failon = set()
+            assert (await db.fetch("SELECT 1"))[0]["conn"] == len(server.conns) - 1
     finally:
         await db.close()
 
