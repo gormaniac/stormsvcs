@@ -17,7 +17,6 @@ from capasvc.rules import ruleGuid, rulesetGuid
 from .capatest import MATCHED, RULES_VERSION, SAMPLE_SHA256, capaSvc, putSample
 from .test_custom import MARKER, customRule
 
-
 FILE = f"file:bytes:sha256={SAMPLE_SHA256}"
 SCAN = f"{FILE} | slib.capa.scan --format sc64"
 TAGS = {
@@ -62,6 +61,7 @@ class TestCapaStormPkg(s_tests.SynTest):
         proc = subprocess.run(
             [sys.executable, "-m", "synapse.tools.storm.lint", str(SVCDIR / "src")],
             capture_output=True,
+            check=False,
             text=True,
             cwd=SVCDIR,
         )
@@ -299,7 +299,7 @@ class TestCapaStormScan(s_tests.SynTest):
             }
             assert (data["format"], data["arch"], data["flavor"]) == ("sc64", "amd64", "static")
             assert [m["rule"] for m in data["matches"]] == MATCHED
-            xor = [m for m in data["matches"] if m["rule"] == "contain xor"][0]
+            xor = next(m for m in data["matches"] if m["rule"] == "contain xor")
             assert xor == {
                 "rule": "contain xor",
                 "guid": ruleGuid("contain xor"),
@@ -754,7 +754,10 @@ class TestCapaStormModel(s_tests.SynTest):
             }
             await core.nodes(q, opts={"vars": second})
 
-            tids = {n.ndef[1] for n in await core.nodes(f"meta:rule={guid} -(refs)> it:mitre:attack:technique")}
+            tids = {
+                n.ndef[1]
+                for n in await core.nodes(f"meta:rule={guid} -(refs)> it:mitre:attack:technique")
+            }
             assert tids == {"T1027"}
             techs = await core.nodes(f"meta:rule={guid} -(refs)> ou:technique")
             assert {(n.get("reporter:name"), n.get("ext:id")) for n in techs} == {
@@ -869,8 +872,10 @@ class TestCapaStormFixes(s_tests.SynTest):
     async def test_scan_lazy_init(self):
         # An empty pipeline doesn't send the custom rules or get the rules info.
         async with capaSvc(self) as (core, svc, axon):
-            await core.nodes("[ meta:rule=* :name=mine :type=capa.custom :text=$t ]",
-                             opts={"vars": {"t": MARKER}})
+            await core.nodes(
+                "[ meta:rule=* :name=mine :type=capa.custom :text=$t ]",
+                opts={"vars": {"t": MARKER}},
+            )
             calls = {"custom": 0, "rulesInfo": 0}
             custom, rulesInfo = svc.custom, svc.rulesInfo
 

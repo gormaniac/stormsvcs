@@ -100,7 +100,7 @@ def test_helpers():
             "b": b"\x01",
             "m": memoryview(b"\x02"),
             "a": bytearray(b"\x03"),
-            "t": datetime.datetime(1970, 1, 1),
+            "t": datetime.datetime(1970, 1, 1),  # noqa: DTZ001 - as the database returns them
             "l": [1, (b"\x04",)],
             "n": None,
             "s": "x",
@@ -503,9 +503,15 @@ class TestCrtshSvc(s_tests.SynTest):
 
             async with svc.getLocalProxy() as prox:
                 retn = await prox.lookup(None, 10, limit="zz")
-                assert retn == {"status": False, "mesg": "Invalid limit, expected an integer: zz", "data": None}
+                assert retn == {
+                    "status": False,
+                    "mesg": "Invalid limit, expected an integer: zz",
+                    "data": None,
+                }
                 items = [i async for i in prox.searchGenr(caids=["x"])]
-                assert items == [{"status": False, "mesg": "Invalid CA ID, expected an integer: x", "data": None}]
+                assert items == [
+                    {"status": False, "mesg": "Invalid CA ID, expected an integer: x", "data": None}
+                ]
 
                 # Unexpected errors (ex. from the database driver) are status=False too.
                 async def boom(*args, **kwargs):
@@ -525,7 +531,11 @@ class TestCrtshSvc(s_tests.SynTest):
                 }
                 items = [i async for i in prox.searchGenr(dns="vertex.link")]
                 assert items == [
-                    {"status": False, "mesg": "Unexpected error: RuntimeError: driver exploded", "data": None}
+                    {
+                        "status": False,
+                        "mesg": "Unexpected error: RuntimeError: driver exploded",
+                        "data": None,
+                    }
                 ]
 
     async def test_db_conf(self):

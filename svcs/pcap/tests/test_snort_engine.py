@@ -4,8 +4,9 @@ import os
 
 import pytest
 import synapse.tests.utils as s_tests
-from pcapsvc import snort as p_snort
+
 from pcapsvc import rules as s_rules
+from pcapsvc import snort as p_snort
 
 from . import pcaps
 from .fakefeeds import SNORT2_RULES, SNORT3_RULES, needsnort
@@ -110,7 +111,9 @@ class TestSnort(s_tests.SynTest):
         # Network variables for one scan, ex. an admin's HOME_NET (see slib.pcap.admin.vars).
         with self.getTestDir() as dirn:
             snort = p_snort.Snort(dirn)
-            rules = {"home": 'alert tcp $HOME_NET any -> any 80 ( msg:"x"; content:"evil"; sid:1; )'}
+            rules = {
+                "home": 'alert tcp $HOME_NET any -> any 80 ( msg:"x"; content:"evil"; sid:1; )'
+            }
             path = os.path.join(dirn, "home.rules")
             assert (await snort.validate(rules, path))[0] == ["home"]
             pcap = os.path.join(dirn, "sample.pcap")
@@ -120,11 +123,13 @@ class TestSnort(s_tests.SynTest):
             alerts = []
             assert (await snort.scan(path, pcap, alerts.append))[0] == 2
             alerts.clear()
-            count, _ = await snort.scan(path, pcap, alerts.append,
-                                        netvars={"HOME_NET": "[192.0.2.0/24]"})
+            count, _ = await snort.scan(
+                path, pcap, alerts.append, netvars={"HOME_NET": "[192.0.2.0/24]"}
+            )
             assert count == 0 and alerts == []
-            count, _ = await snort.scan(path, pcap, alerts.append,
-                                        netvars={"HOME_NET": "[10.1.1.10]"})
+            count, _ = await snort.scan(
+                path, pcap, alerts.append, netvars={"HOME_NET": "[10.1.1.10]"}
+            )
             assert count == 1
 
             # Variables derived from HOME_NET follow it (HTTP_SERVERS = HOME_NET in the stock
@@ -137,9 +142,15 @@ class TestSnort(s_tests.SynTest):
             assert sorted((await snort.validate(rules, path))[0]) == ["dns", "http"]
             alerts.clear()
             assert (await snort.scan(path, pcap, alerts.append))[0] == 0
-            count, _ = await snort.scan(path, pcap, alerts.append, netvars={
-                "HOME_NET": "[203.0.113.0/24]", "DNS_SERVERS": "[198.51.100.7]",
-            })
+            count, _ = await snort.scan(
+                path,
+                pcap,
+                alerts.append,
+                netvars={
+                    "HOME_NET": "[203.0.113.0/24]",
+                    "DNS_SERVERS": "[198.51.100.7]",
+                },
+            )
             assert count == 3 and sorted({a["sid"] for a in alerts}) == [2, 3]
 
     async def test_validate_conf_error(self):
@@ -198,7 +209,7 @@ class TestSnort(s_tests.SynTest):
             alerts = []
             assert await snort.scan(path, pcap, alerts.append) == (5, [])
             assert sorted(a["sid"] for a in alerts) == [1000001, 1000001, 1000002, 1000002, 1000003]
-            udp = [a for a in alerts if a["sid"] == 1000003][0]
+            udp = next(a for a in alerts if a["sid"] == 1000003)
             assert (
                 udp["proto"] == "UDP" and udp["src_addr"] == "10.1.1.10" and udp["dst_port"] == 9999
             )

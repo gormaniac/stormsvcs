@@ -16,7 +16,6 @@ from typing import Any
 import pyzipper
 from aiohttp import web
 
-
 SHA256 = "094fd325049b8a9cf6d3e5ef2a6d4cc6a567d7d49c35f8bb8dd9e3c6acf3d78d"
 MD5 = "f1f1e1d1c1b1a1918171615141312111"
 SHA1 = "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d"

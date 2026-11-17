@@ -43,10 +43,14 @@ class TestLive(s_tests.SynTest):
 
             await run(f"slib.vt.enrich --hash {WANNACRY} --behaviour")
             assert len(await core.nodes(f"file:bytes=sha256:{WANNACRY} -> it:av:scan:result")) > 10
-            assert await core.count(f"file:bytes=sha256:{WANNACRY} -(uses)> it:mitre:attack:technique")
+            assert await core.count(
+                f"file:bytes=sha256:{WANNACRY} -(uses)> it:mitre:attack:technique"
+            )
             assert await core.count(f"file:bytes=sha256:{WANNACRY} -> it:app:yara:match")
 
-            await run("slib.vt.enrich --fqdn example.com --ip 8.8.8.8 --url http://www.eicar.org/download/eicar.com.txt")
+            await run(
+                "slib.vt.enrich --fqdn example.com --ip 8.8.8.8 --url http://www.eicar.org/download/eicar.com.txt"
+            )
             assert await core.count("inet:dns:a:fqdn=example.com")
             assert await core.count("inet:whois:rec:fqdn=example.com")
             assert (await core.nodes("inet:ipv4=8.8.8.8"))[0].get("asn") == 15169
@@ -54,9 +58,13 @@ class TestLive(s_tests.SynTest):
             await run("inet:fqdn=example.com | slib.vt.related --rel resolutions --limit 5")
             await run("inet:fqdn=example.com | slib.vt.related --rel historical_whois --limit 2")
             assert await core.count("inet:whois:rec:fqdn=example.com") >= 2
-            msgs = await run("inet:ipv4=8.8.8.8 | slib.vt.related --rel historical_ssl_certificates --limit 2")
+            msgs = await run(
+                "inet:ipv4=8.8.8.8 | slib.vt.related --rel historical_ssl_certificates --limit 2"
+            )
             assert await core.count("inet:tls:servercert:server=tcp://8.8.8.8:443") >= 2, msgs
-            await run(f"file:bytes=sha256:{WANNACRY} | slib.vt.related --rel contacted_domains --limit 3")
+            await run(
+                f"file:bytes=sha256:{WANNACRY} | slib.vt.related --rel contacted_domains --limit 3"
+            )
             await run(f"file:bytes=sha256:{WANNACRY} | slib.vt.comments --limit 3")
             nodes = await core.nodes("slib.vt.search 8.8.8.8")
             assert [n.ndef[0] for n in nodes] == ["inet:ipv4"]

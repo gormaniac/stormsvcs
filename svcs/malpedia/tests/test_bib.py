@@ -151,13 +151,15 @@ def test_backslashes():
 
 def test_latex_accents():
     # MALP-11: the common LaTeX accents and letters are decoded.
-    assert bib.unescape(r'M\"{u}ller') == "Müller"
+    assert bib.unescape(r"M\"{u}ller") == "Müller"
     assert bib.unescape(r"{\'e}t{\'{e}} \`a \^o \~n \c{c} \v{s} \c c") == "été à ô ñ ç š ç"
     # A space after a letter command ends it (LaTeX drops it), braces keep the spacing.
     assert bib.unescape(r"Stra\ss{}e {\o} {\AA} \'{\i} \o x") == "Straße ø Å í øx"
     # Not accents: a Windows path, and an unknown command.
     assert bib.unescape(r"C:\vault \foo") == r"C:\vault \foo"
-    entries, _ = bib.parse(r'@online{k, author = {J\"{o}rg M\"uller and Ren\'e}, url = {https://a}}')
+    entries, _ = bib.parse(
+        r"@online{k, author = {J\"{o}rg M\"uller and Ren\'e}, url = {https://a}}"
+    )
     assert entries[0]["names"]["author"] == ["Jörg Müller", "René"]
 
 

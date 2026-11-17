@@ -37,8 +37,7 @@ from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from crtshsvc import CrtshSvc
 from crtshsvc.db import CrtshDbError, tsquery
 
-
-NOW = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
+NOW = datetime.datetime.now(datetime.UTC).replace(microsecond=0)
 DAY = datetime.timedelta(days=1)
 
 CA_NAMES = {
@@ -588,14 +587,12 @@ class FakeCrtshDb:
         if cert is None:
             # The x509_* functions return null for unparsable certificates, so any filter drops them.
             return not valid and since is None and until is None
-        if valid and cert.not_valid_after_utc < datetime.datetime.now(datetime.timezone.utc):
+        if valid and cert.not_valid_after_utc < datetime.datetime.now(datetime.UTC):
             return False
         nb = int(cert.not_valid_before_utc.timestamp() * 1000)
         if since is not None and nb < since:
             return False
-        if until is not None and nb >= until:
-            return False
-        return True
+        return until is None or nb < until
 
     def _row(self, row: dict, **extra) -> dict:
         """A certificate row with its metadata."""
@@ -702,12 +699,11 @@ class FakeCrtshDb:
             idents = _identities(cert)
             if not words <= tsTokens(identityText(cert)):
                 continue
-            if regex is not None or nametypes:
-                if not any(
-                    (regex is None or regex.match(v)) and (not nametypes or t in nametypes)
-                    for t, v in idents
-                ):
-                    continue
+            if (regex is not None or nametypes) and not any(
+                (regex is None or regex.match(v)) and (not nametypes or t in nametypes)
+                for t, v in idents
+            ):
+                continue
             if caids and row["issuer_ca_id"] not in caids:
                 continue
             if issuers is not None and row["issuer_ca_id"] not in issuers:
@@ -815,7 +811,8 @@ class FakeCrtshDb:
                 "id": 1,
                 "name": CA_NAMES[1],
                 "key": memoryview(b"\x01\x02"),
-                "seen": datetime.datetime(2026, 1, 1),
+                # crt.sh's timestamps are naive (UTC).
+                "seen": datetime.datetime(2026, 1, 1),  # noqa: DTZ001
                 "ids": [1, b"\xff"],
                 "ok": True,
                 "none": None,

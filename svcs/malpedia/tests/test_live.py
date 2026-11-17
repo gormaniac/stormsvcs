@@ -16,7 +16,9 @@ from malpediasvc.client import MalpediaClient
 
 LIVE = os.environ.get("SLIB_MALPEDIA_LIVE") == "1"
 
-pytestmark = pytest.mark.skipif(not LIVE, reason="Set SLIB_MALPEDIA_LIVE=1 to run live Malpedia tests.")
+pytestmark = pytest.mark.skipif(
+    not LIVE, reason="Set SLIB_MALPEDIA_LIVE=1 to run live Malpedia tests."
+)
 
 
 async def test_live_small_endpoints():

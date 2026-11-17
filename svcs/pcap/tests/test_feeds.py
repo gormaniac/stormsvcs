@@ -7,6 +7,7 @@ import zipfile
 import aiohttp
 import pytest
 import synapse.tests.utils as s_tests
+
 from pcapsvc import feeds as s_feeds
 
 from .fakefeeds import SNORT2_RULES, SNORT3_RULES, FakeFeeds, tarGz
@@ -24,9 +25,13 @@ def test_norm_feed():
         "exclude": ["*.bad"],
         "desc": "",
     }
-    assert s_feeds.normFeed({"name": "x", "url": "http://e.com", "engine": "2"})["engine"] == "snort2"
-    assert s_feeds.normFeed({"name": "x", "url": "http://e.com", "engine": "Suricata"})["engine"] == \
-        "suricata"
+    assert (
+        s_feeds.normFeed({"name": "x", "url": "http://e.com", "engine": "2"})["engine"] == "snort2"
+    )
+    assert (
+        s_feeds.normFeed({"name": "x", "url": "http://e.com", "engine": "Suricata"})["engine"]
+        == "suricata"
+    )
 
     with pytest.raises(s_feeds.FeedError, match="name"):
         s_feeds.normFeed({"name": "bad name", "url": "https://e.com"})
@@ -86,7 +91,7 @@ def test_unpack_zip_lies():
     # The uncompressed size, in the local header (offset 22) and the central directory (24).
     cdir = byts.rindex(b"PK\x01\x02")
     for offs in (info.header_offset + 22, cdir + 24):
-        byts[offs:offs + 4] = (10).to_bytes(4, "little")
+        byts[offs : offs + 4] = (10).to_bytes(4, "little")
     with pytest.raises(s_feeds.FeedError):
         list(s_feeds.unpack(bytes(byts), maxsize=1000))
 
@@ -193,7 +198,12 @@ class TestRetiredFeeds(s_tests.SynTest):
                 assert sorted(f["name"] for f in await svc.feeds()) == ["keep"]
             # One an admin pointed elsewhere stays.
             async with self.getTestCell(PcapSvc, dirn=dirn) as svc:
-                await svc.feedAdd({"name": "abusech-sslbl-c2", "url": "https://mirror.example/x.rules",
-                                   "engine": "suricata"})
+                await svc.feedAdd(
+                    {
+                        "name": "abusech-sslbl-c2",
+                        "url": "https://mirror.example/x.rules",
+                        "engine": "suricata",
+                    }
+                )
             async with self.getTestCell(PcapSvc, dirn=dirn) as svc:
                 assert sorted(f["name"] for f in await svc.feeds()) == ["abusech-sslbl-c2", "keep"]

@@ -21,7 +21,6 @@ import synapse.tests.utils as s_tests
 from shodansvc import ShodanSvc, norm
 from shodansvc.client import ShodanApiError
 
-
 LIVE = os.environ.get("SLIB_SHODAN_LIVE") == "1"
 APIKEY = os.environ.get("SHODAN_API_KEY")
 
@@ -151,7 +150,9 @@ class TestLiveKeyed(s_tests.SynTest):
                 assert data["scanned"] == 50
                 assert all("webcam" in str(m).lower() for m in data["matches"])
 
-            msgs = await core.stormlist("slib.shodan.queries --source shodan --search webcam --pages 5 --yield")
+            msgs = await core.stormlist(
+                "slib.shodan.queries --source shodan --search webcam --pages 5 --yield"
+            )
             self.stormHasNoErr(msgs)
             rules = await core.nodes("meta:rule:type=svc.shodan.query.community.")
             assert rules and all(r.get("text") for r in rules)
@@ -204,7 +205,9 @@ class TestLiveKeyed(s_tests.SynTest):
             key = norm.normSshKey(ssh[0]["ssh"])
             blob = base64.b64decode(key["text"].split()[1])
             fprint = hashlib.md5(blob).hexdigest()
-            assert ":".join(fprint[i : i + 2] for i in range(0, 32, 2)) == ssh[0]["ssh"]["fingerprint"]
+            assert (
+                ":".join(fprint[i : i + 2] for i in range(0, 32, 2)) == ssh[0]["ssh"]["fingerprint"]
+            )
 
             # The free count API supports searching by the hash.
             count = await svc.count(f"hash:{ssh[0]['hash']}")
@@ -221,5 +224,7 @@ class TestLiveKeyed(s_tests.SynTest):
 
             msgs = await core.stormlist("slib.shodan.host --ip 45.33.32.156")
             self.stormHasNoErr(msgs)
-            nodes = await core.nodes("inet:server=tcp://45.33.32.156:22 -> inet:servfile -> file:bytes")
+            nodes = await core.nodes(
+                "inet:server=tcp://45.33.32.156:22 -> inet:servfile -> file:bytes"
+            )
             assert [n.ndef[1] for n in nodes] == [f"sha256:{key['sha256']}"]

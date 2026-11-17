@@ -17,11 +17,12 @@ import synapse.tests.utils as s_tests
 
 from hatchingsvc import HatchingSvc
 
-
 APIKEY = os.environ.get("HATCHING_LIVE_APIKEY")
 URL = os.environ.get("HATCHING_LIVE_URL", "https://tria.ge")
 
-pytestmark = pytest.mark.skipif(not APIKEY, reason="Set HATCHING_LIVE_APIKEY to run live Triage tests.")
+pytestmark = pytest.mark.skipif(
+    not APIKEY, reason="Set HATCHING_LIVE_APIKEY to run live Triage tests."
+)
 
 
 @contextlib.asynccontextmanager
@@ -32,7 +33,6 @@ async def liveSvc(test):
 
 
 class TestLive(s_tests.SynTest):
-
     async def test_search_and_model(self):
         async with liveSvc(self) as (core, svc):
             samples = await svc.search("family:emotet", limit=5)

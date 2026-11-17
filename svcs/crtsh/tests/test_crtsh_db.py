@@ -391,7 +391,7 @@ async def test_drop_edges():
     # Client side timeouts drop the connection, it's mid-query.
     server = FakeServer()
     db = makeDb(server, timeout=1)
-    server.errors = [asyncio.TimeoutError()]
+    server.errors = [TimeoutError()]
     with pytest.raises(CrtshDbError, match="timed out after 1s"):
         await db.fetch("SELECT 1")
     assert db._conn is None and server.conns[0].closed

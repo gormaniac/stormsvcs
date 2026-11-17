@@ -65,7 +65,9 @@ def test_actor():
     assert rec["url"] == "https://malpedia.caad.fkie.fraunhofer.de/actor/apt28"
 
     # Sparse and odd data.
-    rec = norm.normActor("x", {"meta": {"country": "Russia", "synonyms": "X", "targeted-sector": None}})
+    rec = norm.normActor(
+        "x", {"meta": {"country": "Russia", "synonyms": "X", "targeted-sector": None}}
+    )
     assert rec["name"] == "x"
     assert rec["aliases"] == []
     assert rec["country"] is None
@@ -78,7 +80,10 @@ def test_actor():
 
 def test_family_and_attribution():
     state = fm.initialState()
-    actors = {aid: norm.normActor(aid, data) for aid, data in norm.resolveActorIds(state["actors"], state["actorids"])[0].items()}
+    actors = {
+        aid: norm.normActor(aid, data)
+        for aid, data in norm.resolveActorIds(state["actors"], state["actorids"])[0].items()
+    }
     index = norm.ActorIndex(actors.values())
 
     assert index.resolve("APT28") == "apt28"
@@ -105,9 +110,7 @@ def test_family_and_attribution():
     assert xagent["desc"] is None
     assert xagent["updated"] == "2026-03-11"
 
-    fams = {
-        fid: norm.normFamily(fid, data, index) for fid, data in state["families"].items()
-    }
+    fams = {fid: norm.normFamily(fid, data, index) for fid, data in state["families"].items()}
     raw = norm.resolveActorIds(state["actors"], state["actorids"])[0]
     norm.addActorLinks(fams, raw)
     assert fams["win.sedreco"]["actors"] == ["apt28"]
@@ -143,8 +146,11 @@ def test_canon_url():
 
 def test_news():
     fake = fm.FakeMalpedia()
-    bibs, errors = norm.parseBib(fake.bibText() + "\n@online{nourl, title = {x}}\n" + fm.bibEntry(
-        "online", "dupe:2026:key:1", "Someone", "Dupe", "2026", "Org", fm.URL_PLAIN))
+    bibs, errors = norm.parseBib(
+        fake.bibText()
+        + "\n@online{nourl, title = {x}}\n"
+        + fm.bibEntry("online", "dupe:2026:key:1", "Someone", "Dupe", "2026", "Org", fm.URL_PLAIN)
+    )
     assert errors == ["Skipped the BibTeX entry nourl: it has no url."]
     assert set(bibs) == {fm.URL_SEDNIT, fm.URL_XAGENT_PDF, fm.URL_WANNACRY, fm.URL_PLAIN}
     assert bibs[fm.URL_PLAIN]["keys"] == ["dupe:2026:key:1", "plain:2020:report:bbbb222"]
@@ -161,7 +167,14 @@ def test_news():
     refs[fm.URL_PLAIN] = [{"type": "other", "id": "x"}, {"type": "actor"}, "junk"]
     news = norm.buildNews(bibs, refs, fams)
     byurl = {rec["url"]: rec for rec in news.values()}
-    assert set(byurl) == {fm.URL_SEDNIT, fm.URL_XAGENT_PDF, fm.URL_WANNACRY, fm.URL_PLAIN, fm.URL_NOBIB, "https://bad.example/"}
+    assert set(byurl) == {
+        fm.URL_SEDNIT,
+        fm.URL_XAGENT_PDF,
+        fm.URL_WANNACRY,
+        fm.URL_PLAIN,
+        fm.URL_NOBIB,
+        "https://bad.example/",
+    }
     assert byurl[fm.URL_SEDNIT]["actors"] == [["apt28", "threat.apt28"]]
     assert byurl[fm.URL_SEDNIT]["families"] == [["win.xagent", "mal.win.xagent"]]
     # Tagged through the family's library entries.
@@ -174,8 +187,12 @@ def test_news():
 
 
 def test_yara():
-    rec = norm.normYara("win.xagent_w0.yar", fm.YARA_XAGENT_W0, tlp="tlp_white",
-                        families={"win.xagent": {"name": "X-Agent"}})
+    rec = norm.normYara(
+        "win.xagent_w0.yar",
+        fm.YARA_XAGENT_W0,
+        tlp="tlp_white",
+        families={"win.xagent": {"name": "X-Agent"}},
+    )
     assert rec["key"] == rec["file"] == "win.xagent_w0.yar"
     assert rec["name"] == "win_xagent_w0"
     assert rec["family"] == "win.xagent"
@@ -215,18 +232,29 @@ def test_yara():
 
     assert norm.yaraMeta("rule x { condition: true }") == {}
     assert norm.yaraMeta('rule x { meta: a = "1" condition: true }') == {"a": "1"}
-    meta = norm.yaraMeta('rule x {\n meta:\n  a = "1"\n  a = "2"\n  b = "say \\"hi\\""\n condition:\n  true\n}')
+    meta = norm.yaraMeta(
+        'rule x {\n meta:\n  a = "1"\n  a = "2"\n  b = "say \\"hi\\""\n condition:\n  true\n}'
+    )
     assert meta == {"a": "1", "b": 'say "hi"'}
 
     assert norm.yaraTlpRules({"tlp_white": {"a/b.yar": "x", 1: "y", "c.yar": 2}, "bad": []}) == [
         ("tlp_white", "b.yar", "x")
     ]
-    listing = norm.yaraListing({
-        "win.a": [{"path": "/win.a/yara/tlp_white/win.a_w0.yar", "tlp": "tlp_white"},
-                  {"path": "/win.a/yara/tlp_green/win.a_g0.yar"}, {"nopath": 1}, "junk"],
-        "win.b": "junk",
-    })
-    assert listing == {"win.a_w0.yar": ("win.a", "tlp_white"), "win.a_g0.yar": ("win.a", "tlp_green")}
+    listing = norm.yaraListing(
+        {
+            "win.a": [
+                {"path": "/win.a/yara/tlp_white/win.a_w0.yar", "tlp": "tlp_white"},
+                {"path": "/win.a/yara/tlp_green/win.a_g0.yar"},
+                {"nopath": 1},
+                "junk",
+            ],
+            "win.b": "junk",
+        }
+    )
+    assert listing == {
+        "win.a_w0.yar": ("win.a", "tlp_white"),
+        "win.a_g0.yar": ("win.a", "tlp_green"),
+    }
 
 
 def test_rechash():

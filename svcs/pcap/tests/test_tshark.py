@@ -3,7 +3,6 @@
 These need tshark, they're skipped when it isn't installed (CI installs it).
 """
 
-
 import hashlib
 import io
 import os
@@ -52,7 +51,6 @@ def fakeTshark(tmp_path, script: str) -> str:
 
 @needsTshark
 class TestCaptures:
-
     async def test_http(self, tmp_path):
         flows, summary = await enriched("http", tmp_path)
         assert summary["tshark"] == {"frames": 4, "matched": 4}
@@ -131,7 +129,13 @@ class TestCaptures:
     async def test_frame_numbers(self, tmp_path):
         # Frame numbers line up with tshark's, even in pcapng files with SPBs and bad interfaces.
         frame = g.eth(g.udp("10.0.0.1", 5000, "10.0.0.2", 6000))
-        data = g.shb() + g.idb(1) + g.epb(9, g.usec(0), frame) + g.spb(frame) + g.epb(0, g.usec(1), frame)
+        data = (
+            g.shb()
+            + g.idb(1)
+            + g.epb(9, g.usec(0), frame)
+            + g.spb(frame)
+            + g.epb(0, g.usec(1), frame)
+        )
         pkts = list(p_flows.readPackets(io.BytesIO(data)))
         assert [p.num for p in pkts] == [2, 3]
         pkts = list(p_flows.readPackets(io.BytesIO(g.pcap(g.session()))))
@@ -151,7 +155,6 @@ class TestCaptures:
 
 @needsTshark
 class TestTshark:
-
     async def test_load(self):
         ts = p_tshark.Tshark()
         assert ts.available
@@ -187,7 +190,7 @@ class TestTshark:
         # A truncated capture still returns what tshark read, with the error.
         data = (DATA / "http.pcapng").read_bytes()
         path = tmp_path / "cut.pcapng"
-        path.write_bytes(data[:len(data) - 600])
+        path.write_bytes(data[: len(data) - 600])
         frames, info = await ts.frames(str(path))
         assert frames and info["error"]
 
@@ -206,8 +209,10 @@ class TestTsharkFake:
         with pytest.raises(p_tshark.TsharkError, match="tshark -v failed: broken"):
             await ts.load()
 
-        script = 'if [ "$1" = "-v" ]; then echo "TShark (Wireshark) 9.9"; exit 0; fi\n' \
-                 "echo nofields >&2; exit 2"
+        script = (
+            'if [ "$1" = "-v" ]; then echo "TShark (Wireshark) 9.9"; exit 0; fi\n'
+            "echo nofields >&2; exit 2"
+        )
         ts = p_tshark.Tshark(path=fakeTshark(tmp_path, script))
         with pytest.raises(p_tshark.TsharkError, match="tshark -G fields failed: nofields"):
             await ts.load()
@@ -224,11 +229,11 @@ class TestTsharkFake:
             '  -G) printf "F\\tUser Agent\\thttp.user_agent\\tFT_STRING\\nP\\tIMF\\timf\\n" ;;\n'
             '  *) case "$*" in\n'
             '       *json*) echo "not json" ;;\n'
-            '       *) echo \'{"index":{}}\'\n'
+            "       *) echo '{\"index\":{}}'\n"
             '          echo \'{"timestamp":"1","layers":{}}\'\n'
             '          echo \'{"timestamp":"1","layers":{"frame_number":["3"],"imf":["imf"]}}\' ;;\n'
-            '     esac ;;\n'
-            'esac\n'
+            "     esac ;;\n"
+            "esac\n"
         )
         ts = p_tshark.Tshark(path=fakeTshark(tmp_path, script))
         frames, info = await ts.frames("x")
@@ -238,14 +243,20 @@ class TestTsharkFake:
 
 
 class TestDecodeAs:
-
     def test_checkDecodeAs(self):
         assert p_tshark.checkDecodeAs(None) == []
-        assert p_tshark.checkDecodeAs(["TCP.port==8443,TLS ", "tcp.port==8443,tls",
-                                       "udp.port==5000-5010,rtp"]) == \
-            ["tcp.port==8443,tls", "udp.port==5000-5010,rtp"]
-        for bad in ("tcp.port==8443", "-X lua_script:x.lua", "tcp.port==8443,tls;rm",
-                    "tcp.port==abc,tls", "tcp.port==1,", "", "tcp.port == 1,tls"):
+        assert p_tshark.checkDecodeAs(
+            ["TCP.port==8443,TLS ", "tcp.port==8443,tls", "udp.port==5000-5010,rtp"]
+        ) == ["tcp.port==8443,tls", "udp.port==5000-5010,rtp"]
+        for bad in (
+            "tcp.port==8443",
+            "-X lua_script:x.lua",
+            "tcp.port==8443,tls;rm",
+            "tcp.port==abc,tls",
+            "tcp.port==1,",
+            "",
+            "tcp.port == 1,tls",
+        ):
             with pytest.raises(p_tshark.TsharkError, match="Invalid Decode As rule"):
                 p_tshark.checkDecodeAs([bad])
         with pytest.raises(p_tshark.TsharkError, match="must be a list"):
@@ -254,7 +265,6 @@ class TestDecodeAs:
 
 @needsTshark
 class TestDecrypt:
-
     async def test_decode(self):
         # Decode As rules change what tshark dissects, ex. SSH's port as HTTP.
         ts = p_tshark.Tshark()
@@ -273,8 +283,7 @@ class TestDecrypt:
         # Without the keys only the ClientHello and ServerHello are readable.
         frames, _ = await p_tshark.Tshark().frames(path)
         with open(path, "rb") as fd:
-            flows, _ = p_flows.analyze(fd, frames=frames,
-                                       files=p_enrich.FileStore(str(tmp_path)))
+            flows, _ = p_flows.analyze(fd, frames=frames, files=p_enrich.FileStore(str(tmp_path)))
         h1, h2 = flows
         assert h1["tls"]["sni"] == ["secure.vertex.link"]
         assert h1["tls"]["ja4"][0].startswith("t13")
@@ -283,8 +292,9 @@ class TestDecrypt:
 
         frames, _ = await p_tshark.Tshark().frames(path, keylog=keylog)
         with open(path, "rb") as fd:
-            flows, summary = p_flows.analyze(fd, frames=frames,
-                                             files=p_enrich.FileStore(str(tmp_path)))
+            flows, summary = p_flows.analyze(
+                fd, frames=frames, files=p_enrich.FileStore(str(tmp_path))
+            )
         h1, h2 = flows
         assert h1["dst"]["ssl:cert"]["subject"] == "CN=secure.vertex.link,O=Test"
         assert h2["dst"]["ssl:cert"]["subject"] == "CN=secure.vertex.link,O=Test"
@@ -296,8 +306,10 @@ class TestDecrypt:
         assert dl["sha256"] == DOWNLOAD and dl["name"] == "sample.bin" and dl["proto"] == "http"
 
         # HTTP/2 inside TLS 1.3.
-        assert h2["http"] == {"hosts": ["secure.vertex.link"],
-                              "requests": [{"method": "POST", "uri": "/upload/report.txt"}]}
+        assert h2["http"] == {
+            "hosts": ["secure.vertex.link"],
+            "requests": [{"method": "POST", "uri": "/upload/report.txt"}],
+        }
         assert h2["src"]["softnames"] == ["curl/8.5.0"]
         assert h2["dst"]["softnames"] == ["hypercorn-h11"]
         (up,) = h2["src"]["txfiles"]

@@ -12,7 +12,6 @@ from crtshsvc.defs import SVC_GUID
 
 from .fakecrtsh import CRL_URL, PKI, crtshSvc
 
-
 SHA = {cid: PKI.sha256(cid) for cid in (1, 2, 3, 4, 9, 10, 11, 12, 13, 14, 15)}
 CERT = {cid: f"crypto:x509:cert:sha256={sha}" for cid, sha in SHA.items()}
 USER_PERM = ("slib", "crtsh", "user")
@@ -222,7 +221,9 @@ class TestCrtshStormSearch(s_tests.SynTest):
                 10,
                 9,
             ]
-            assert await certIds(core, "slib.crtsh.search --cn old.vertex.link --org vertex --ou '' ") == [11]
+            assert await certIds(
+                core, "slib.crtsh.search --cn old.vertex.link --org vertex --ou '' "
+            ) == [11]
             assert await certIds(core, "slib.crtsh.search --ou Engineering") == [10, 9, 15]
             assert await certIds(core, "slib.crtsh.search --email visi@vertex.link") == [10, 9]
             assert await certIds(core, "slib.crtsh.search --ip 1.2.3.4") == [10, 9]
@@ -281,7 +282,9 @@ class TestCrtshStormSearch(s_tests.SynTest):
             assert len([m for m in msgs if m[0] == "node"]) == 1
 
             # Options ignore inbound nodes.
-            assert await certIds(core, "inet:fqdn | slib.crtsh.search --identity shop.example.com") == [14]
+            assert await certIds(
+                core, "inet:fqdn | slib.crtsh.search --identity shop.example.com"
+            ) == [14]
 
     async def test_search_failure(self):
         async with crtshSvc(self) as (core, svc, fake):
@@ -440,7 +443,9 @@ class TestCrtshStormAdmin(s_tests.SynTest):
         async with crtshSvc(self) as (core, svc, fake):
             for prefix in ("bad..prefix", "my tags", "#my.tags", ""):
                 opts = {"vars": {"prefix": prefix}}
-                await core.callStorm('$lib.globals.set("slib:crtsh:tag:prefix", $prefix)', opts=opts)
+                await core.callStorm(
+                    '$lib.globals.set("slib:crtsh:tag:prefix", $prefix)', opts=opts
+                )
                 msgs = await core.stormlist("slib.crtsh.cert 1 --yield")
                 self.stormHasNoErr(msgs)
                 self.stormIsInWarn(f"The tag prefix {prefix} isn't a valid tag name", msgs)
@@ -515,7 +520,9 @@ class TestCrtshStormInputs(s_tests.SynTest):
         """Explicit values are looked up once, however many nodes come in (CRTSH-01)."""
 
         async with crtshSvc(self) as (core, svc, fake):
-            await core.nodes("[ inet:fqdn=a.vertex.link inet:fqdn=b.vertex.link inet:fqdn=c.vertex.link ]")
+            await core.nodes(
+                "[ inet:fqdn=a.vertex.link inet:fqdn=b.vertex.link inet:fqdn=c.vertex.link ]"
+            )
             await core.nodes("slib.crtsh.cert 1 2 4 9 10 11 12")
             assert len(await core.nodes("crypto:x509:cert")) == 7
 
@@ -569,7 +576,10 @@ class TestCrtshStormInputs(s_tests.SynTest):
                 ("slib.crtsh.cert", "slib.crtsh.cert: Nothing to look up"),
                 ("slib.crtsh.cert --yield", "slib.crtsh.cert: Nothing to look up"),
                 ("slib.crtsh.search", "slib.crtsh.search: Nothing to search for"),
-                ("slib.crtsh.search --valid --since 2020-01-01", "slib.crtsh.search: Nothing to search for"),
+                (
+                    "slib.crtsh.search --valid --since 2020-01-01",
+                    "slib.crtsh.search: Nothing to search for",
+                ),
                 ("slib.crtsh.pivot --by key", "slib.crtsh.pivot: Nothing to pivot from"),
                 ("slib.crtsh.chain", "slib.crtsh.chain: Nothing to build the chain of"),
             ):
@@ -597,5 +607,7 @@ class TestCrtshStormInputs(s_tests.SynTest):
         async with crtshSvc(self) as (core, svc, fake):
             msgs = await core.stormlist("for $n in $lib.import(slib.crtsh.lib).lookup('999') { }")
             self.stormIsInWarn("crt.sh has no certificates for: 999", msgs)
-            msgs = await core.stormlist("for $n in $lib.import(slib.crtsh.lib).lookup((998, 999)) { }")
+            msgs = await core.stormlist(
+                "for $n in $lib.import(slib.crtsh.lib).lookup((998, 999)) { }"
+            )
             self.stormIsInWarn("crt.sh has no certificates for: 998, 999", msgs)

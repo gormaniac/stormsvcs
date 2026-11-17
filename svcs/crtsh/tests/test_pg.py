@@ -19,7 +19,6 @@ from crtshsvc.db import CrtshDbError
 from . import pgstub
 from .fakecrtsh import PKI
 
-
 DSN = os.environ.get("SLIB_CRTSH_PGDSN")
 
 pytestmark = pytest.mark.skipif(not DSN, reason="Set SLIB_CRTSH_PGDSN to run the PostgreSQL tests.")

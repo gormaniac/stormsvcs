@@ -115,7 +115,7 @@ class Pcap:
         out = [struct.pack("<IHHiIII", 0xA1B2C3D4, 2, 4, 0, 0, 65535, LINKTYPE_ETHERNET)]
         for ts, pkt in self.packets:
             secs = int(ts)
-            usecs = int(round((ts - secs) * 1_000_000))
+            usecs = round((ts - secs) * 1_000_000)
             out.append(struct.pack("<IIII", secs, usecs, len(pkt), len(pkt)) + pkt)
         return b"".join(out)
 

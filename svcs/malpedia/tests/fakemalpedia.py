@@ -22,7 +22,7 @@ URL_XAGENT_PDF = "http://www2.fireeye.com/rs/fireye/images/rpt-apt28.pdf"
 URL_NOBIB = "https://blog.prevasio.com/2020/12/sunburst-backdoor-deeper-look-into.html"
 URL_PLAIN = "https://example.com/reports/plain-report"
 
-YARA_XAGENT_W0 = '''rule win_xagent_w0 {
+YARA_XAGENT_W0 = """rule win_xagent_w0 {
     meta:
         description = "Sofacy Group Malware Sample 3"
         author = "Florian Roth"
@@ -36,9 +36,9 @@ YARA_XAGENT_W0 = '''rule win_xagent_w0 {
     condition:
         all of them
 }
-'''
+"""
 
-YARA_XAGENT_AUTO = '''rule win_xagent_auto {
+YARA_XAGENT_AUTO = """rule win_xagent_auto {
 
     meta:
         author = "Felix Bilstein - yara-signator at cocacoding dot com"
@@ -61,9 +61,9 @@ YARA_XAGENT_AUTO = '''rule win_xagent_auto {
     condition:
         7 of them and filesize < 1015808
 }
-'''
+"""
 
-YARA_WANNA_W0 = '''rule win_wannacryptor_w0 {
+YARA_WANNA_W0 = """rule win_wannacryptor_w0 {
     meta:
         author = "Florian Roth"
         malpedia_version = "20170515"
@@ -73,7 +73,7 @@ YARA_WANNA_W0 = '''rule win_wannacryptor_w0 {
     condition:
         $x1
 }
-'''
+"""
 
 
 def bibEntry(kind, key, author, title, date, org, url, orgfield="organization", lang="English"):
@@ -147,7 +147,10 @@ def initialState() -> dict:
                 "attribution": ["APT28"],
                 "common_name": "X-Agent",
                 "description": "",
-                "library_entries": ["research:20260310:sednit:86e9801", "fireeye:2014:apt28:27799d1"],
+                "library_entries": [
+                    "research:20260310:sednit:86e9801",
+                    "fireeye:2014:apt28:27799d1",
+                ],
             },
             "win.sedreco": {
                 "urls": [URL_NOBIB],
@@ -175,28 +178,85 @@ def initialState() -> dict:
         },
         "references": {
             URL_SEDNIT: [
-                {"type": "family", "id": "win.xagent", "common_name": "X-Agent", "alt_names": [], "url": "/details/win.xagent"},
-                {"type": "actor", "id": "apt28", "common_name": "APT28", "alt_names": [], "url": "/actor/apt28"},
+                {
+                    "type": "family",
+                    "id": "win.xagent",
+                    "common_name": "X-Agent",
+                    "alt_names": [],
+                    "url": "/details/win.xagent",
+                },
+                {
+                    "type": "actor",
+                    "id": "apt28",
+                    "common_name": "APT28",
+                    "alt_names": [],
+                    "url": "/actor/apt28",
+                },
             ],
             URL_WANNACRY: [
-                {"type": "family", "id": "win.wannacryptor", "common_name": "WannaCryptor", "alt_names": [], "url": "/details/win.wannacryptor"},
-                {"type": "actor", "id": "lazarus_group", "common_name": "Lazarus Group", "alt_names": [], "url": "/actor/lazarus_group"},
+                {
+                    "type": "family",
+                    "id": "win.wannacryptor",
+                    "common_name": "WannaCryptor",
+                    "alt_names": [],
+                    "url": "/details/win.wannacryptor",
+                },
+                {
+                    "type": "actor",
+                    "id": "lazarus_group",
+                    "common_name": "Lazarus Group",
+                    "alt_names": [],
+                    "url": "/actor/lazarus_group",
+                },
             ],
             URL_NOBIB: [
-                {"type": "family", "id": "win.sedreco", "common_name": "Sedreco", "alt_names": [], "url": "/details/win.sedreco"},
+                {
+                    "type": "family",
+                    "id": "win.sedreco",
+                    "common_name": "Sedreco",
+                    "alt_names": [],
+                    "url": "/details/win.sedreco",
+                },
             ],
         },
         "bib": [
-            ("online", "research:20260310:sednit:86e9801", "ESET Research",
-             "Sednit reloaded: Back in the trenches", "2026-03-10", "ESET Research", URL_SEDNIT),
-            ("techreport", "fireeye:2014:apt28:27799d1", "FireEye and Jane Doe",
-             "APT28: A Window into Russia's Cyber Espionage Operations?", "2014", "FireEye",
-             URL_XAGENT_PDF, "institution"),
-            ("online", "talos:20170512:wannacry:aaaa111", "Talos",
-             "Player 3 Has Entered the Game: Say Hello to 'WannaCry'", "2017-05", "Cisco Talos",
-             URL_WANNACRY),
-            ("online", "plain:2020:report:bbbb222", "John Smith",
-             "A plain report", "2020-02-02", "Example Org", URL_PLAIN),
+            (
+                "online",
+                "research:20260310:sednit:86e9801",
+                "ESET Research",
+                "Sednit reloaded: Back in the trenches",
+                "2026-03-10",
+                "ESET Research",
+                URL_SEDNIT,
+            ),
+            (
+                "techreport",
+                "fireeye:2014:apt28:27799d1",
+                "FireEye and Jane Doe",
+                "APT28: A Window into Russia's Cyber Espionage Operations?",
+                "2014",
+                "FireEye",
+                URL_XAGENT_PDF,
+                "institution",
+            ),
+            (
+                "online",
+                "talos:20170512:wannacry:aaaa111",
+                "Talos",
+                "Player 3 Has Entered the Game: Say Hello to 'WannaCry'",
+                "2017-05",
+                "Cisco Talos",
+                URL_WANNACRY,
+            ),
+            (
+                "online",
+                "plain:2020:report:bbbb222",
+                "John Smith",
+                "A plain report",
+                "2020-02-02",
+                "Example Org",
+                URL_PLAIN,
+            ),
         ],
         "yara": {
             "tlp_white": {
@@ -241,7 +301,9 @@ class FakeMalpedia:
         out = {}
         for tlp, files in self.state["yara"].items():
             for filename, (family, _) in files.items():
-                out.setdefault(family, []).append({"path": f"/{family}/yara/{tlp}/{filename}", "tlp": tlp})
+                out.setdefault(family, []).append(
+                    {"path": f"/{family}/yara/{tlp}/{filename}", "tlp": tlp}
+                )
         return out
 
     def yaraFor(self, family: str) -> dict:
@@ -298,7 +360,8 @@ class FakeMalpedia:
                     if name.lower().replace(" ", "_").replace("/", "_") == aid:
                         data = copy.deepcopy(data)
                         data["families"] = {
-                            fid: fam for fid, fam in state["families"].items()
+                            fid: fam
+                            for fid, fam in state["families"].items()
                             if data["value"] in fam["attribution"]
                         }
                         return js(data)
@@ -315,7 +378,9 @@ class FakeMalpedia:
                 keys = state["families"].get(fid, {}).get("library_entries", [])
                 return web.Response(text=self.bibText(keys), content_type="text/plain")
             case ["get", "bib", "actor", aid]:
-                urls = {u for u, tags in state["references"].items() for t in tags if t["id"] == aid}
+                urls = {
+                    u for u, tags in state["references"].items() for t in tags if t["id"] == aid
+                }
                 keys = [e[1] for e in state["bib"] if e[6] in urls]
                 return web.Response(text=self.bibText(keys), content_type="text/plain")
             case ["find", "actor", needle]:
@@ -323,7 +388,13 @@ class FakeMalpedia:
                 for name, data in state["actors"].items():
                     syns = data["meta"].get("synonyms", [])
                     if any(needle.lower() in s.lower() for s in [name, *syns]):
-                        out.append({"name": name.lower().replace(" ", "_").replace("/", "_"), "common_name": name, "synonyms": syns})
+                        out.append(
+                            {
+                                "name": name.lower().replace(" ", "_").replace("/", "_"),
+                                "common_name": name,
+                                "synonyms": syns,
+                            }
+                        )
                 return js(out)
             case ["find", "family", needle]:
                 out = []

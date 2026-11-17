@@ -17,7 +17,6 @@ import synapse.tests.utils as s_tests
 
 from crtshsvc import CrtshSvc, norm
 
-
 LIVE = os.environ.get("SLIB_CRTSH_LIVE") == "1"
 
 pytestmark = pytest.mark.skipif(not LIVE, reason="Set SLIB_CRTSH_LIVE=1 to run live crt.sh tests.")

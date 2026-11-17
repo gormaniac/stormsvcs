@@ -24,7 +24,6 @@ from abusechsvc.client import (
 from . import fakeabusech as fake_data
 from .fakeabusech import FakeAbuseCh, abusechSvc, mkzip
 
-
 SHA256 = fake_data.SHA256
 MD5 = fake_data.MD5
 
@@ -948,7 +947,7 @@ class TestNorm(s_tests.SynTest):
         assert certs[1]["family"] == "AsyncRAT"
         assert norm.normSslblCert({"sha1": "bad"}) is None
 
-        ja3 = [norm.normJa3(r) for r in norm.parseCsv(fake_data.SSLBL_JA3, norm.SSLBL_JA3_CSV)][0]
+        [ja3] = [norm.normJa3(r) for r in norm.parseCsv(fake_data.SSLBL_JA3, norm.SSLBL_JA3_CSV)]
         assert ja3 == {
             "ja3": "51c64c77e60f3980eea90869b68c58a8",
             "first_seen": "2017-07-14 18:08:15",
@@ -1780,8 +1779,19 @@ class TestAuditFixes(s_tests.SynTest):
 
         for path in ("", "x/y/", "urls/recent/limit/3/"):
             assert checkRawPath(path) == path
-        for path in ("../../x", "a/../b", "%2e%2e/x", "./x", "http://evil/x", "a\\b", "a?b=1",
-                     "a#b", "a b", "a\n", 5):
+        for path in (
+            "../../x",
+            "a/../b",
+            "%2e%2e/x",
+            "./x",
+            "http://evil/x",
+            "a\\b",
+            "a?b=1",
+            "a#b",
+            "a b",
+            "a\n",
+            5,
+        ):
             with self.raises(AbuseChApiError):
                 checkRawPath(path)
 
@@ -1842,9 +1852,7 @@ class TestAuditFixes(s_tests.SynTest):
 
                 fake._bazaar = err500
                 with self.raises(AbuseChApiError):
-                    await client.query(
-                        "bazaar", apikey="k", form={"query": "x"}, idempotent=False
-                    )
+                    await client.query("bazaar", apikey="k", form={"query": "x"}, idempotent=False)
                 assert len(calls) == 1
                 # A read is retried, then gives up with the last error.
                 with self.raises(AbuseChApiError) as cm:

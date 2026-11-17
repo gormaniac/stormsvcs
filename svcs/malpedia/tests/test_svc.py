@@ -76,7 +76,7 @@ class TestMalpediaPull(s_tests.SynTest):
             # Malpedia didn't change, only its version is requested.
             summary = await svc.pull()
             assert summary == {**summary, "pulled": False, "reason": "unchanged", "requests": 1}
-            assert fake.requests[len(INITIAL):] == ["/api/get/version"]
+            assert fake.requests[len(INITIAL) :] == ["/api/get/version"]
 
             # Within malpedia:pull:minage hours of a check, nothing is requested at all.
             svc.conf["malpedia:pull:minage"] = 12
@@ -117,15 +117,23 @@ class TestMalpediaPull(s_tests.SynTest):
             text = fm.YARA_WANNA_W0.replace("20170515", "20261031")
             state["yara"]["tlp_white"]["win.wannacryptor_w0.yar"] = ("win.wannacryptor", text)
             state["yara"]["tlp_white"]["win.wannacryptor_w1.yar"] = (
-                "win.wannacryptor", fm.YARA_WANNA_W0.replace("win_wannacryptor_w0", "win_wannacryptor_w1"))
+                "win.wannacryptor",
+                fm.YARA_WANNA_W0.replace("win_wannacryptor_w0", "win_wannacryptor_w1"),
+            )
             state["yara"]["tlp_white"]["win.sedreco_w0.yar"] = (
-                "win.sedreco", fm.YARA_WANNA_W0.replace("win_wannacryptor_w0", "win_sedreco_w0"))
-            state["yara_after"] = {"tlp_white": ["win.wannacryptor_w0.yar", "win.wannacryptor_w1.yar"]}
+                "win.sedreco",
+                fm.YARA_WANNA_W0.replace("win_wannacryptor_w0", "win_sedreco_w0"),
+            )
+            state["yara_after"] = {
+                "tlp_white": ["win.wannacryptor_w0.yar", "win.wannacryptor_w1.yar"]
+            }
 
             summary = await svc.pull()
             assert summary["pulled"] is True
             assert summary["version"] == 26602
-            yesterday = (datetime.datetime.now(datetime.timezone.utc).date() - datetime.timedelta(days=1)).isoformat()
+            yesterday = (
+                datetime.datetime.now(datetime.UTC).date() - datetime.timedelta(days=1)
+            ).isoformat()
             assert fake.requests[start:] == [
                 "/api/get/version",
                 "/api/list/actors",
@@ -153,15 +161,25 @@ class TestMalpediaPull(s_tests.SynTest):
             fams = {item["key"]: item for item in changes["family"]["upsert"]}
             assert set(fams) == {"win.xagent", "win.wannacryptor"}
             assert fams["win.xagent"]["drop"] == {}
-            assert list(fams["win.xagent"]["rec"]["aliases"]) == ["Sofacy Agent", "chopstick", "splm"]
+            assert list(fams["win.xagent"]["rec"]["aliases"]) == [
+                "Sofacy Agent",
+                "chopstick",
+                "splm",
+            ]
             # Only the fields Storm undoes are in the drop diff.
-            assert fams["win.wannacryptor"]["drop"] == {"actortags": [["lazarus_group", "threat.lazarus_group"]]}
+            assert fams["win.wannacryptor"]["drop"] == {
+                "actortags": [["lazarus_group", "threat.lazarus_group"]]
+            }
 
             assert [item["key"] for item in changes["actor"]["removed"]] == ["[vault_7_8]"]
             assert changes["actor"]["removed"][0]["rec"]["name"] == "[Vault 7/8]"
 
             yara = {item["key"]: item for item in changes["yara"]["upsert"]}
-            assert set(yara) == {"win.wannacryptor_w0.yar", "win.wannacryptor_w1.yar", "win.sedreco_w0.yar"}
+            assert set(yara) == {
+                "win.wannacryptor_w0.yar",
+                "win.wannacryptor_w1.yar",
+                "win.sedreco_w0.yar",
+            }
             # A new rule text doesn't need anything undone (and the old text isn't sent).
             assert yara["win.wannacryptor_w0.yar"]["drop"] == {}
             assert yara["win.wannacryptor_w0.yar"]["rec"]["updated"] == "2026-10-31"
@@ -187,7 +205,9 @@ class TestMalpediaPull(s_tests.SynTest):
             fake.state["version"]["version"] += 1
             for i in range(m_svc.MAX_GAP_REQUESTS + 1):
                 fake.state["yara"]["tlp_white"][f"win.new{i}_w0.yar"] = (
-                    f"win.new{i}", f"rule win_new{i}_w0 {{ condition: true }}")
+                    f"win.new{i}",
+                    f"rule win_new{i}_w0 {{ condition: true }}",
+                )
             summary = await svc.pull()
             assert summary["added"]["yara"] == m_svc.MAX_GAP_REQUESTS + 1
             assert fake.countPaths("/api/get/yara/tlp_white/zip") == 2
@@ -239,7 +259,9 @@ class TestMalpediaPull(s_tests.SynTest):
             fake.state["actorids"].append("turla")
             with mock.patch.object(m_svc, "MAX_GAP_REQUESTS", 1):
                 summary = await svc.pull()
-            assert any("weren't requested" in w or "were not requested" in w for w in summary["warnings"])
+            assert any(
+                "weren't requested" in w or "were not requested" in w for w in summary["warnings"]
+            )
 
     async def test_failures_keep_the_snapshot(self):
         async with fm.malpediaSvc(self) as (core, svc, fake):
@@ -310,7 +332,15 @@ class TestMalpediaViews(s_tests.SynTest):
 
             # Only records marked with the snapshot's hash count as synced.
             items = batches[0]["upsert"]
-            count = await svc.synced(VIEW, "news", done=[[items[0]["key"], items[0]["hash"]], [items[1]["key"], "stale"], ["nokey", "x"]])
+            count = await svc.synced(
+                VIEW,
+                "news",
+                done=[
+                    [items[0]["key"], items[0]["hash"]],
+                    [items[1]["key"], "stale"],
+                    ["nokey", "x"],
+                ],
+            )
             assert count == 1
             assert (await drain(svc, VIEW, "news"))["total"] == 4
             # Other views are independent.
@@ -361,15 +391,31 @@ class TestMalpediaViews(s_tests.SynTest):
             assert await svc.record("actor", "apt28") is None
             await svc.pull()
             assert (await svc.record("actor", "apt28"))["name"] == "APT28"
-            assert (await svc.record("news", fm.URL_SEDNIT))["title"] == "Sednit reloaded: Back in the trenches"
+            assert (await svc.record("news", fm.URL_SEDNIT))[
+                "title"
+            ] == "Sednit reloaded: Back in the trenches"
             assert (await svc.record("news", norm.urlKey(fm.URL_SEDNIT)))["url"] == fm.URL_SEDNIT
             assert (await svc.record("news", fm.URL_SEDNIT + "?"))["url"] == fm.URL_SEDNIT
             assert await svc.record("news", "?") is None
 
             found = await svc.find("actor", " fancy ")
-            assert found == [{"name": "apt28", "common_name": "APT28", "synonyms": fake.state["actors"]["APT28"]["meta"]["synonyms"], "known": True}]
+            assert found == [
+                {
+                    "name": "apt28",
+                    "common_name": "APT28",
+                    "synonyms": fake.state["actors"]["APT28"]["meta"]["synonyms"],
+                    "known": True,
+                }
+            ]
             found = await svc.find("family", "wcry")
-            assert found == [{"name": "win.wannacryptor", "alt_names": ["WannaCry", "Wcry"], "known": True, "common_name": "WannaCryptor"}]
+            assert found == [
+                {
+                    "name": "win.wannacryptor",
+                    "alt_names": ["WannaCry", "Wcry"],
+                    "known": True,
+                    "common_name": "WannaCryptor",
+                }
+            ]
             with self.raises(MalpediaSvcError):
                 await svc.find("yara", "x")
             with self.raises(MalpediaSvcError):
@@ -398,9 +444,16 @@ class TestMalpediaViews(s_tests.SynTest):
 
             start = len(fake.requests)
             data = await svc.refresh("family", "win.xagent")
-            assert fake.requests[start:] == ["/api/get/family/win.xagent", "/api/get/yara/win.xagent", "/api/get/bib/family/win.xagent"]
+            assert fake.requests[start:] == [
+                "/api/get/family/win.xagent",
+                "/api/get/yara/win.xagent",
+                "/api/get/bib/family/win.xagent",
+            ]
             assert data["family"][0]["rec"]["actors"] == ["apt28"]
-            assert {i["rec"]["file"] for i in data["yara"]} == {"win.xagent_w0.yar", "win.xagent_auto.yar"}
+            assert {i["rec"]["file"] for i in data["yara"]} == {
+                "win.xagent_w0.yar",
+                "win.xagent_auto.yar",
+            }
             assert {i["rec"]["url"] for i in data["news"]} == {fm.URL_SEDNIT, fm.URL_XAGENT_PDF}
 
             # Refreshing doesn't change the snapshot.
@@ -431,14 +484,20 @@ class TestMalpediaViews(s_tests.SynTest):
 
                         fake.state["errors"]["/api/get/family/win.nope"] = [404]
                         retn = await prox.refresh("family", "win.nope")
-                        assert retn == {"status": False, "mesg": "Malpedia returned HTTP 404 for /get/family/win.nope: fake error 404", "data": None}
+                        assert retn == {
+                            "status": False,
+                            "mesg": "Malpedia returned HTTP 404 for /get/family/win.nope: fake error 404",
+                            "data": None,
+                        }
 
                         batches = [b async for b in prox.changes(VIEW, "actor")]
                         assert batches[0]["status"] is True
                         assert batches[0]["data"]["total"] == 4
 
                         batches = [b async for b in prox.changes("bad", "actor")]
-                        assert batches == [{"status": False, "mesg": "Invalid view iden: 'bad'", "data": None}]
+                        assert batches == [
+                            {"status": False, "mesg": "Invalid view iden: 'bad'", "data": None}
+                        ]
 
                         retn = await prox.status(VIEW)
                         assert retn["status"] is True
@@ -525,11 +584,15 @@ class TestMalpediaAuditFixes(s_tests.SynTest):
             # A failed request for a family's new YARA rules is a gap too.
             fake.state["version"]["version"] += 1
             fake.state["yara"]["tlp_white"]["win.sedreco_w0.yar"] = (
-                "win.sedreco", fm.YARA_WANNA_W0.replace("win_wannacryptor_w0", "win_sedreco_w0"))
+                "win.sedreco",
+                fm.YARA_WANNA_W0.replace("win_wannacryptor_w0", "win_sedreco_w0"),
+            )
             fake.state["errors"]["/api/get/yara/win.sedreco"] = [500] * 10
             summary = await svc.pull()
             assert summary["gaps"] == 1
-            assert any("Unable to get the YARA rules for win.sedreco" in w for w in summary["warnings"])
+            assert any(
+                "Unable to get the YARA rules for win.sedreco" in w for w in summary["warnings"]
+            )
             assert await svc.record("yara", "win.sedreco_w0.yar") is None
             fake.state["errors"].clear()
             summary = await svc.pull()
@@ -563,7 +626,10 @@ class TestMalpediaAuditFixes(s_tests.SynTest):
 
     async def test_skipped_yara_file(self):
         async with fm.malpediaSvc(self) as (core, svc, fake):
-            fake.state["yara"]["tlp_white"]["win.xagent_w9.yar"] = ("win.xagent", "/* no rule here */")
+            fake.state["yara"]["tlp_white"]["win.xagent_w9.yar"] = (
+                "win.xagent",
+                "/* no rule here */",
+            )
             summary = await svc.pull()
             assert "Skipped the YARA file win.xagent_w9.yar: it has no rule." in summary["warnings"]
             assert await svc.record("yara", "win.xagent_w9.yar") is None
@@ -573,14 +639,19 @@ class TestMalpediaAuditFixes(s_tests.SynTest):
         async with fm.malpediaSvc(self) as (core, svc, fake):
             await svc.pull()
             assert await svc.record("actor", "x" * 600) is None
-            assert await svc.synced(VIEW, "actor", done=[["x" * 600, "h"]], removed=["y" * 600]) == 0
+            assert (
+                await svc.synced(VIEW, "actor", done=[["x" * 600, "h"]], removed=["y" * 600]) == 0
+            )
 
             async def findActor(needle):
                 return [{"name": "x" * 600}, "not a dict", {"name": "apt28"}]
 
             with mock.patch.object(svc.client, "findActor", findActor):
                 found = await svc.find("actor", "x")
-            assert [(f["name"][:5], f["known"]) for f in found] == [("xxxxx", False), ("apt28", True)]
+            assert [(f["name"][:5], f["known"]) for f in found] == [
+                ("xxxxx", False),
+                ("apt28", True),
+            ]
 
             async with svc.getLocalProxy() as prox:
                 retn = await prox.record("actor", "x" * 600)
@@ -598,8 +669,17 @@ class TestMalpediaAuditFixes(s_tests.SynTest):
             assert (await task)["total"] == 4
 
             # The records are hashed in _build (in a thread), not while storing.
-            raw = {"actorids": [], "actors": {}, "families": {}, "references": {}, "bib": "",
-                   "yaralist": {}, "extra_actors": {}, "yara": {"full": True, "rules": []}, "haveyara": {}}
+            raw = {
+                "actorids": [],
+                "actors": {},
+                "families": {},
+                "references": {},
+                "bib": "",
+                "yaralist": {},
+                "extra_actors": {},
+                "yara": {"full": True, "rules": []},
+                "haveyara": {},
+            }
             built = svc._build(raw, [])
             assert built == {"news": {}, "actor": {}, "family": {}, "yara": {}}
 
@@ -610,7 +690,9 @@ class TestMalpediaAuditFixes(s_tests.SynTest):
             first = await genr.__anext__()
             assert len(first["upsert"]) == 2
             # A pull removes a record before its batch is built.
-            rest = [k for k in svc._snapRecs("actor") if k not in {i["key"] for i in first["upsert"]}]
+            rest = [
+                k for k in svc._snapRecs("actor") if k not in {i["key"] for i in first["upsert"]}
+            ]
             svc._snapkv("actor").delete(rest[0])
             second = await genr.__anext__()
             assert [i["key"] for i in second["upsert"]] == rest[1:]

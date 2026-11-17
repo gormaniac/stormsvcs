@@ -1,6 +1,5 @@
 """Pytests for slib.pcap.model and slib.pcap.lib with crafted flows (no engine needed)."""
 
-
 import copy
 import hashlib
 
@@ -22,7 +21,6 @@ async def baseFlow(svc, sha: str) -> dict:
 
 
 class TestModelStorm(s_tests.SynTest):
-
     async def test_dns_answers(self):
         async with pcapCore(self, g.pcap(g.session())) as (core, svc, (sha,)):
             flow = await baseFlow(svc, sha)
@@ -33,22 +31,47 @@ class TestModelStorm(s_tests.SynTest):
 
             events = [
                 {"type": "query", "id": 1, "rrname": "4.3.2.1.in-addr.arpa", "rrtype": "PTR"},
-                {"type": "answer", "id": 1, "rrname": "4.3.2.1.in-addr.arpa", "rrtype": "PTR",
-                 "rcode": "NOERROR",
-                 "answers": [ans("4.3.2.1.in-addr.arpa", "PTR", "host.vertex.link")]},
-                {"type": "answer", "id": 2, "rrname": "vertex.link", "rrtype": "SOA",
-                 "rcode": "NOERROR",
-                 "answers": [ans("vertex.link", "SOA",
-                                 soa={"mname": "ns1.vertex.link.",
-                                      "rname": "hostmaster.vertex.link"})]},
-                {"type": "answer", "id": 3, "rrname": "_ldap._tcp.vertex.link", "rrtype": "SRV",
-                 "rcode": "NOERROR",
-                 "answers": [ans("_ldap._tcp.vertex.link", "SRV", "dc.vertex.link")]},
+                {
+                    "type": "answer",
+                    "id": 1,
+                    "rrname": "4.3.2.1.in-addr.arpa",
+                    "rrtype": "PTR",
+                    "rcode": "NOERROR",
+                    "answers": [ans("4.3.2.1.in-addr.arpa", "PTR", "host.vertex.link")],
+                },
+                {
+                    "type": "answer",
+                    "id": 2,
+                    "rrname": "vertex.link",
+                    "rrtype": "SOA",
+                    "rcode": "NOERROR",
+                    "answers": [
+                        ans(
+                            "vertex.link",
+                            "SOA",
+                            soa={"mname": "ns1.vertex.link.", "rname": "hostmaster.vertex.link"},
+                        )
+                    ],
+                },
+                {
+                    "type": "answer",
+                    "id": 3,
+                    "rrname": "_ldap._tcp.vertex.link",
+                    "rrtype": "SRV",
+                    "rcode": "NOERROR",
+                    "answers": [ans("_ldap._tcp.vertex.link", "SRV", "dc.vertex.link")],
+                },
             ]
             v6name = ".".join(reversed("20010db8000000000000000000000001")) + ".ip6.arpa"
             events.append(
-                {"type": "answer", "id": 4, "rrname": v6name, "rrtype": "PTR",
-                 "rcode": "NOERROR", "answers": [ans(v6name, "PTR", "v6.vertex.link")]}
+                {
+                    "type": "answer",
+                    "id": 4,
+                    "rrname": v6name,
+                    "rrtype": "PTR",
+                    "rcode": "NOERROR",
+                    "answers": [ans(v6name, "PTR", "v6.vertex.link")],
+                }
             )
             flow["dns"] = p_eve.dnsQueries(events)
 
@@ -90,8 +113,13 @@ class TestModelStorm(s_tests.SynTest):
             flow["dst"]["rdp:hostname"] = "WORKSTATION"
             flow["dst"]["rdp:keyboard:layout"] = "en-us"
             der = b"not a cert"
-            cert = {"sha256": hashlib.sha256(der).hexdigest(), "sha1": hashlib.sha1(der).hexdigest(),
-                    "md5": hashlib.md5(der).hexdigest(), "error": "unparsable", "stored": False}
+            cert = {
+                "sha256": hashlib.sha256(der).hexdigest(),
+                "sha1": hashlib.sha1(der).hexdigest(),
+                "md5": hashlib.md5(der).hexdigest(),
+                "error": "unparsable",
+                "stored": False,
+            }
             flow["dst"]["ssl:cert"] = cert
             flow["dst"]["ssl:certs"] = [cert]
 
@@ -114,8 +142,11 @@ class TestModelStorm(s_tests.SynTest):
 
     async def test_invalid_model_opts(self):
         async with pcapCore(self, g.pcap(g.session())) as (core, svc, (sha,)):
-            for opt, flag in (("--tag", "--tag"), ("--host", "--host"),
-                              ("--sandbox-file", "--sandbox-file")):
+            for opt, flag in (
+                ("--tag", "--tag"),
+                ("--host", "--host"),
+                ("--sandbox-file", "--sandbox-file"),
+            ):
                 msgs = await core.stormlist(f"slib.pcap.flows {sha} {opt} foo..bar")
                 self.stormIsInWarn(f"Invalid {flag}", msgs)
                 # Nothing was modeled (or analyzed).

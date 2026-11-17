@@ -16,7 +16,6 @@ from capasvc.rules import CapaRules
 
 from .capatest import SAMPLE_SHA256, capaSvc, putSample
 
-
 LIVE_RULES = os.getenv("SYN_CAPASVC_CAPA_RULES")
 LIVE_SIGS = os.getenv("SYN_CAPASVC_CAPA_SIGS")
 

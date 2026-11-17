@@ -1,5 +1,5 @@
 name: slib.malpedia
-version: 0.3.0
+version: 0.3.1
 guid: 7cd3f7d3485c4aed874fd561e954a28c
 
 synapse_version: ">=2.234.0,<3.0.0"

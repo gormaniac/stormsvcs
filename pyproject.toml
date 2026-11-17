@@ -27,10 +27,26 @@ dev = [
 target-version = "py311"
 # The line limit from .github/copilot-instructions.md.
 line-length = 100
+# Each service's package, so isort groups `from capasvc import ...` as first-party.
+src = ["svcs/*/src"]
 # exclude some common directories and file types from Ruff checks
-exclude = [".ruff_cache/", ".git/", ".claude/", "**/*.md", "**/*.yml", "**/*.yaml", "**/tests/*"]
+exclude = [".ruff_cache/", ".git/", ".claude/", "**/*.md", "**/*.yml", "**/*.yaml"]
 # Ignore some specific rules
 lint.ignore = [
     "RUF012",
     "BLE001",
+]
+# Rules that flag idioms the tests use on purpose. Rewriting them would be churn with no gain.
+[tool.ruff.lint.per-file-ignores]
+"**/tests/**" = [
+    # Unused unpacked variable: the test helpers yield tuples like (core, svc, fake), and each
+    # test unpacks all of them for a uniform signature, using only the ones it needs.
+    "RUF059",
+    # Blocking open() in an async function: tests read and write small local fixture files,
+    # where blocking the event loop for a moment doesn't matter.
+    "ASYNC230",
+    # Nested with statements: tests nest a service context and then a proxy or patch inside it
+    # (ex. `async with svc.getLocalProxy() as prox:`), which reads as setup-then-use and keeps
+    # each context on its own line instead of one long combined statement.
+    "SIM117",
 ]

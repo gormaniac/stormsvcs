@@ -72,6 +72,7 @@ jobs:
           cache-dependency-glob: svcs/${{ inputs.service }}/uv.lock
 
       # Ruff reads the [tool.ruff] config in the root pyproject.toml, which targets Python 3.11.
+      # It checks the whole service dir, tests included (tests ignore a few rules, see the config).
       # Lint and format failures block, and both gates run before the install so syntax, style,
       # and format issues fail early. Run `uvx ruff check --fix .` and `uvx ruff format .`
       # locally to fix.

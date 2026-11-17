@@ -93,7 +93,9 @@ class TestVtStormPkg(s_tests.SynTest):
             assert f.getTag("rep.vt.category.ransomware") is not None
             assert f.getTag("rep.vt.tag.cve_2017_0144") is not None
 
-            top = await core.nodes(f"file:bytes:sha256={fv.WANNACRY} -> it:av:scan:result +:scanner:name=virustotal")
+            top = await core.nodes(
+                f"file:bytes:sha256={fv.WANNACRY} -> it:av:scan:result +:scanner:name=virustotal"
+            )
             assert len(top) == 1
             assert top[0].get("verdict") == 40
             assert top[0].get("multi:count") == 75
@@ -106,17 +108,32 @@ class TestVtStormPkg(s_tests.SynTest):
 
             assert await count(core, "it:av:scan:result:scanner:name=c2ae +:verdict=40") == 1
             assert await count(core, f"file:bytes:sha256={fv.WANNACRY} -> it:app:yara:match") == 2
-            assert await count(core, "it:app:yara:rule:name=WannaCry_Ransomware :author -> ps:contact") == 1
-            assert await count(core, f"file:bytes:sha256={fv.WANNACRY} <(matches)- it:app:snort:rule") == 2
-            assert await count(core, f"file:bytes:sha256={fv.WANNACRY} <(seen)- meta:source={SVC_GUID}") == 1
+            assert (
+                await count(core, "it:app:yara:rule:name=WannaCry_Ransomware :author -> ps:contact")
+                == 1
+            )
+            assert (
+                await count(core, f"file:bytes:sha256={fv.WANNACRY} <(matches)- it:app:snort:rule")
+                == 2
+            )
+            assert (
+                await count(
+                    core, f"file:bytes:sha256={fv.WANNACRY} <(seen)- meta:source={SVC_GUID}"
+                )
+                == 1
+            )
 
             # Looking it up again is answered from the cache.
             msgs = await core.stormlist(f"slib.vt.enrich --hash {fv.WANNACRY}")
             self.stormHasNoWarnErr(msgs)
             assert len(fake.requests) == 1
-            msgs = await core.stormlist(f"slib.vt.enrich --hash {fv.WANNACRY} --no-cache --engines all --yield")
+            msgs = await core.stormlist(
+                f"slib.vt.enrich --hash {fv.WANNACRY} --no-cache --engines all --yield"
+            )
             assert len(fake.requests) == 2
-            assert len(await core.nodes(f"it:av:scan:result:multi:scan={top[0].ndef[1]}")) > len(engines)
+            assert len(await core.nodes(f"it:av:scan:result:multi:scan={top[0].ndef[1]}")) > len(
+                engines
+            )
 
     async def test_guids_unchanged(self):
         # The guid nodes the package makes are deconflicted by the same guids as in 0.2.0, which
@@ -140,12 +157,28 @@ class TestVtStormPkg(s_tests.SynTest):
 
     async def test_enrich_behaviour(self):
         async with fv.vtSvc(self) as (core, svc, fake):
-            msgs = await core.stormlist(f"slib.vt.enrich --hash {fv.WANNACRY_MD5} --behaviour --engines none")
+            msgs = await core.stormlist(
+                f"slib.vt.enrich --hash {fv.WANNACRY_MD5} --behaviour --engines none"
+            )
             self.stormHasNoWarnErr(msgs)
-            assert fake.paths() == [f"GET /files/{fv.WANNACRY_MD5}", f"GET /files/{fv.WANNACRY}/behaviour_summary"]
+            assert fake.paths() == [
+                f"GET /files/{fv.WANNACRY_MD5}",
+                f"GET /files/{fv.WANNACRY}/behaviour_summary",
+            ]
             q = f"file:bytes:sha256={fv.WANNACRY}"
-            assert await count(core, f"{q} -(refs)> inet:fqdn +inet:fqdn=www.iuqerfsodp9ifjaposdfjhgosurijfaewrwergwea.com") == 1
-            assert await count(core, "inet:dns:a:fqdn=www.iuqerfsodp9ifjaposdfjhgosurijfaewrwergwea.com") == 9
+            assert (
+                await count(
+                    core,
+                    f"{q} -(refs)> inet:fqdn +inet:fqdn=www.iuqerfsodp9ifjaposdfjhgosurijfaewrwergwea.com",
+                )
+                == 1
+            )
+            assert (
+                await count(
+                    core, "inet:dns:a:fqdn=www.iuqerfsodp9ifjaposdfjhgosurijfaewrwergwea.com"
+                )
+                == 9
+            )
             assert await count(core, f"{q} -(refs)> inet:server") == 4
             assert await count(core, f"{q} -(refs)> inet:url") >= 1
             assert await count(core, f"{q} -(uses)> it:mitre:attack:technique") == 4
@@ -179,12 +212,25 @@ class TestVtStormPkg(s_tests.SynTest):
             assert len(nodes) == 1
             assert nodes[0].get("registrar") == "reserved-internet assigned numbers authority"
             assert "domain name: example.com" in nodes[0].get("text")
-            nodes = await core.nodes("crypto:x509:cert:sha256=85ca6ab068e9bcce88b6c4aa3c47f7d17228134a457f870d3800e6223a0df07a")
+            nodes = await core.nodes(
+                "crypto:x509:cert:sha256=85ca6ab068e9bcce88b6c4aa3c47f7d17228134a457f870d3800e6223a0df07a"
+            )
             assert nodes[0].get("identities:fqdns") == ("example.com",)
-            assert nodes[0].get("serial") == "0000000000000000000000000000000000001eee6aabb521d5e14fc315fd998569"[-len(nodes[0].get("serial")):]
+            assert (
+                nodes[0].get("serial")
+                == "0000000000000000000000000000000000001eee6aabb521d5e14fc315fd998569"[
+                    -len(nodes[0].get("serial")) :
+                ]
+            )
             fqdn = (await core.nodes("inet:fqdn=example.com"))[0]
             assert fqdn.getTag("rep.vt.verdict.benign") is not None
-            assert await count(core, "it:av:scan:result:target:fqdn=example.com +:scanner:name=virustotal +:verdict=10") == 1
+            assert (
+                await count(
+                    core,
+                    "it:av:scan:result:target:fqdn=example.com +:scanner:name=virustotal +:verdict=10",
+                )
+                == 1
+            )
 
             # IP: ASN, country, whois, cert, JARM.
             ip = (await core.nodes("inet:ipv4=8.8.8.8"))[0]
@@ -207,14 +253,18 @@ class TestVtStormPkg(s_tests.SynTest):
             assert (await core.nodes(f"file:bytes=sha256:{fv.EICAR}"))[0].get("size") == 68
 
             # Re-enriching with a new verdict replaces the verdict tag.
-            fake.objects["ip_addresses"]["8.8.8.8"]["data"]["attributes"]["last_analysis_stats"]["malicious"] = 0
+            fake.objects["ip_addresses"]["8.8.8.8"]["data"]["attributes"]["last_analysis_stats"][
+                "malicious"
+            ] = 0
             msgs = await core.stormlist("inet:ipv4=8.8.8.8 | slib.vt.enrich --no-cache")
             ip = (await core.nodes("inet:ipv4=8.8.8.8"))[0]
             assert ip.getTag("rep.vt.verdict.benign") is not None
             assert ip.getTag("rep.vt.verdict.suspicious") is None
 
             # Values given as options, and --yield.
-            nodes = await core.nodes("slib.vt.enrich --fqdn example.com --ip 8.8.8.8 --url http://www.eicar.org/download/eicar.com.txt --yield")
+            nodes = await core.nodes(
+                "slib.vt.enrich --fqdn example.com --ip 8.8.8.8 --url http://www.eicar.org/download/eicar.com.txt --yield"
+            )
             assert {n.ndef[0] for n in nodes} == {"inet:fqdn", "inet:ipv4", "inet:url"}
 
     async def test_enrich_errors(self):
@@ -234,7 +284,10 @@ class TestVtStormPkg(s_tests.SynTest):
 
         async with fv.vtSvc(self, **{"vt:apikey": "wrong"}) as (core, svc, fake):
             msgs = await core.stormlist("slib.vt.enrich --fqdn example.com")
-            self.stormIsInWarn("VirusTotal rejected the API key: Wrong API key (WrongCredentialsError, HTTP 401)", msgs)
+            self.stormIsInWarn(
+                "VirusTotal rejected the API key: Wrong API key (WrongCredentialsError, HTTP 401)",
+                msgs,
+            )
 
         async with fv.vtSvc(self, **{"vt:apikey": None}) as (core, svc, fake):
             msgs = await core.stormlist("slib.vt.enrich --fqdn example.com")
@@ -256,7 +309,10 @@ class TestVtStormPkg(s_tests.SynTest):
             self.stormHasNoWarnErr(msgs)
             # The 3rd request would have to wait a minute, longer than vt:limit:maxwait.
             msgs = await core.stormlist("slib.vt.enrich --fqdn example.com")
-            self.stormIsInWarn("Timed out waiting for room under the VirusTotal rate limit of 2 requests per minute", msgs)
+            self.stormIsInWarn(
+                "Timed out waiting for room under the VirusTotal rate limit of 2 requests per minute",
+                msgs,
+            )
             assert len(fake.requests) == 2
 
             msgs = await core.stormlist("slib.vt.quota")
@@ -293,17 +349,27 @@ class TestVtStormPkg(s_tests.SynTest):
 
     async def test_related(self):
         async with fv.vtSvc(self) as (core, svc, fake):
-            msgs = await core.stormlist("[inet:fqdn=example.com] | slib.vt.related --rel resolutions --limit 3")
+            msgs = await core.stormlist(
+                "[inet:fqdn=example.com] | slib.vt.related --rel resolutions --limit 3"
+            )
             self.stormHasNoWarnErr(msgs)
             self.stormIsInPrint("example.com resolutions: 3 of 47.", msgs)
-            assert await count(core, "inet:dns:a:fqdn=example.com") + await count(core, "inet:dns:aaaa:fqdn=example.com") == 3
+            assert (
+                await count(core, "inet:dns:a:fqdn=example.com")
+                + await count(core, "inet:dns:aaaa:fqdn=example.com")
+                == 3
+            )
 
             # Paging: 5 results, 2 per page in the fake.
-            nodes = await core.nodes("[inet:ipv4=8.8.8.8] | slib.vt.related --rel resolutions --limit 40 --yield")
+            nodes = await core.nodes(
+                "[inet:ipv4=8.8.8.8] | slib.vt.related --rel resolutions --limit 40 --yield"
+            )
             assert len(nodes) == 5
             assert all(n.ndef[0] == "inet:dns:a" for n in nodes)
 
-            nodes = await core.nodes(f"[hash:sha256={fv.WANNACRY}] | slib.vt.related --rel contacted_domains --yield")
+            nodes = await core.nodes(
+                f"[hash:sha256={fv.WANNACRY}] | slib.vt.related --rel contacted_domains --yield"
+            )
             assert len(nodes) == 3 and all(n.ndef[0] == "inet:fqdn" for n in nodes)
             assert await count(core, f"file:bytes=sha256:{fv.WANNACRY} -(refs)> inet:fqdn") == 3
 
@@ -313,7 +379,9 @@ class TestVtStormPkg(s_tests.SynTest):
             self.stormHasNoWarnErr(msgs)
             assert await count(core, f"file:bytes=sha256:{fv.WANNACRY} <(about)- meta:note") == 3
 
-            nodes = await core.nodes("inet:fqdn=example.com | slib.vt.related --rel historical_whois --yield")
+            nodes = await core.nodes(
+                "inet:fqdn=example.com | slib.vt.related --rel historical_whois --yield"
+            )
             assert len(nodes) == 1
             assert nodes[0].get("created") == 808372800000
             assert nodes[0].get("registrar") == "reserved-internet assigned numbers authority"
@@ -329,7 +397,9 @@ class TestVtStormPkg(s_tests.SynTest):
 
     async def test_comments(self):
         async with fv.vtSvc(self) as (core, svc, fake):
-            nodes = await core.nodes(f"[hash:sha256={fv.WANNACRY}] | slib.vt.comments --limit 2 --yield")
+            nodes = await core.nodes(
+                f"[hash:sha256={fv.WANNACRY}] | slib.vt.comments --limit 2 --yield"
+            )
             assert len(nodes) == 2
             assert nodes[0].ndef[0] == "meta:note"
             assert nodes[0].get("type") == "virustotal.comment."
@@ -354,13 +424,23 @@ class TestVtStormPkg(s_tests.SynTest):
             self.stormIsInPrint("is queued", msgs)
             nodes = await core.nodes(f"slib.vt.analysis {fv.ANALYSIS_ID} --yield")
             assert nodes[0].ndef == ("inet:url", fv.EICAR_URL)
-            assert await count(core, f"it:av:scan:result:target:url={fv.EICAR_URL!r} +:scanner:name=virustotal") == 1
+            assert (
+                await count(
+                    core, f"it:av:scan:result:target:url={fv.EICAR_URL!r} +:scanner:name=virustotal"
+                )
+                == 1
+            )
 
             # A file from the Axon, waiting for the analysis.
             fake.analysisPolls = 0
-            size, sha256 = await core.axon.put(b"X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*")
+            size, sha256 = await core.axon.put(
+                b"X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"
+            )
             opts = {"vars": {"sha256": sha256.hex()}}
-            msgs = await core.stormlist("[file:bytes=$sha256 :sha256=$sha256 :size=68 :name=eicar.com] | slib.vt.submit --wait --interval 0", opts=opts)
+            msgs = await core.stormlist(
+                "[file:bytes=$sha256 :sha256=$sha256 :size=68 :name=eicar.com] | slib.vt.submit --wait --interval 0",
+                opts=opts,
+            )
             self.stormHasNoWarnErr(msgs)
             self.stormIsInPrint("completed", msgs)
             filename, byts = fake.bodies[-1]["file"]
@@ -368,19 +448,30 @@ class TestVtStormPkg(s_tests.SynTest):
 
             msgs = await core.stormlist("[file:bytes=*] | slib.vt.submit")
             self.stormIsInWarn("has no :sha256", msgs)
-            msgs = await core.stormlist(f"[file:bytes=sha256:{'1' * 64} :sha256={'1' * 64}] | slib.vt.submit")
+            msgs = await core.stormlist(
+                f"[file:bytes=sha256:{'1' * 64} :sha256={'1' * 64}] | slib.vt.submit"
+            )
             self.stormIsInWarn("The Axon doesn't have", msgs)
 
     async def test_rescan_comment_vote(self):
         async with fv.vtSvc(self) as (core, svc, fake):
-            msgs = await core.stormlist(f"[inet:fqdn=example.com hash:sha256={fv.WANNACRY}] | slib.vt.rescan")
+            msgs = await core.stormlist(
+                f"[inet:fqdn=example.com hash:sha256={fv.WANNACRY}] | slib.vt.rescan"
+            )
             self.stormHasNoWarnErr(msgs)
-            assert fake.paths() == ["POST /domains/example.com/analyse", f"POST /files/{fv.WANNACRY}/analyse"]
+            assert fake.paths() == [
+                "POST /domains/example.com/analyse",
+                f"POST /files/{fv.WANNACRY}/analyse",
+            ]
 
-            msgs = await core.stormlist('inet:fqdn=example.com | slib.vt.comment "Looks fine #benign"')
+            msgs = await core.stormlist(
+                'inet:fqdn=example.com | slib.vt.comment "Looks fine #benign"'
+            )
             self.stormHasNoWarnErr(msgs)
             self.stormIsInPrint("Added comment x-example.com-1", msgs)
-            assert fake.bodies[-1] == {"data": {"type": "comment", "attributes": {"text": "Looks fine #benign"}}}
+            assert fake.bodies[-1] == {
+                "data": {"type": "comment", "attributes": {"text": "Looks fine #benign"}}
+            }
 
             msgs = await core.stormlist("inet:fqdn=example.com | slib.vt.vote harmless")
             self.stormHasNoWarnErr(msgs)
@@ -398,7 +489,9 @@ class TestVtStormPkg(s_tests.SynTest):
 
             msgs = await core.stormlist("slib.vt.admin.request /popular_threat_categories")
             self.stormIsInPrint('"ransomware"', msgs)
-            msgs = await core.stormlist("slib.vt.admin.request /search --param query=8.8.8.8 --param limit=1")
+            msgs = await core.stormlist(
+                "slib.vt.admin.request /search --param query=8.8.8.8 --param limit=1"
+            )
             self.stormHasNoWarnErr(msgs)
             assert fake.requests[-1][2] == {"query": "8.8.8.8", "limit": "1"}
             msgs = await core.stormlist("slib.vt.admin.request /search --param bad")
@@ -411,9 +504,11 @@ class TestVtStormPkg(s_tests.SynTest):
             msgs = await core.stormlist("slib.vt.admin.tags --prefix '..' --enable")
             self.stormIsInWarn("Invalid tag prefix", msgs)
             await core.stormlist("slib.vt.enrich --fqdn example.com --no-cache")
-            assert (await core.nodes("inet:fqdn=example.com"))[0].getTag("rep.virustotal.verdict.benign") is not None
+            assert (await core.nodes("inet:fqdn=example.com"))[0].getTag(
+                "rep.virustotal.verdict.benign"
+            ) is not None
 
-            msgs = await core.stormlist(f"slib.vt.admin.apikey --clear")
+            msgs = await core.stormlist("slib.vt.admin.apikey --clear")
             self.stormIsInPrint("Cleared the slib.vt API key.", msgs)
 
     async def test_apikey(self):
@@ -444,12 +539,18 @@ class TestVtStormPkg(s_tests.SynTest):
             msgs = await core.stormlist("slib.vt.enrich --fqdn example.com", opts=opts)
             self.stormHasNoWarnErr(msgs)
 
-            for cmd in ("inet:fqdn=example.com | slib.vt.rescan", f"slib.vt.submit --url {fv.EICAR_URL}",
-                        "inet:fqdn=example.com | slib.vt.vote harmless", "slib.vt.admin.apikey",
-                        "slib.vt.admin.request /search"):
+            for cmd in (
+                "inet:fqdn=example.com | slib.vt.rescan",
+                f"slib.vt.submit --url {fv.EICAR_URL}",
+                "inet:fqdn=example.com | slib.vt.vote harmless",
+                "slib.vt.admin.apikey",
+                "slib.vt.admin.request /search",
+            ):
                 msgs = await core.stormlist(cmd, opts=opts)
                 self.stormIsInErr("requires permission", msgs)
 
             # The service's key can't be read through the privileged modules.
-            msgs = await core.stormlist("$lib.print($lib.import(slib.vt.priv.user).userKey())", opts=opts)
+            msgs = await core.stormlist(
+                "$lib.print($lib.import(slib.vt.priv.user).userKey())", opts=opts
+            )
             assert fv.APIKEY not in str(msgs)

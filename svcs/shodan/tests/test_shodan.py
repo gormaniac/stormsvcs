@@ -1,6 +1,8 @@
 """Pytests for the slib.shodan service's HTTP client, normalization, and Cell/Telepath methods."""
 
 import asyncio
+import base64
+import hashlib
 import json
 
 import aiohttp
@@ -18,33 +20,29 @@ from shodansvc.client import (
     normParams,
 )
 
-import base64
-import hashlib
-
 from .fakeshodan import (
-    FORM_ROUTES,
     CVE_LOG4SHELL,
     DNS_DOMAIN,
     EUVD_NO_CVE,
+    FAVICON_B64,
+    FAVICON_HASH,
+    FORM_ROUTES,
     GHSA_LOG4SHELL,
     HISTORY_BANNERS,
     HOST_8888,
-    FAVICON_B64,
-    FAVICON_HASH,
     HOST_HTTP,
     HOST_SSH,
     HTTP_REDIRECT_BODY,
     HTTP_ROBOTS,
     HTTP_SECURITYTXT,
     HTTP_SITEMAP,
+    INTERNETDB_1111,
     SCANME_HTML,
     SCANME_HTML_HASH,
-    INTERNETDB_1111,
     SSH_KEY_B64,
     FakeShodan,
     shodanSvc,
 )
-
 
 # (ShodanSvc method, args, kwargs, HTTP method, path, expected query params)
 ENDPOINTS = (
@@ -333,7 +331,9 @@ class TestNorm(s_tests.SynTest):
         assert norm.normSoftvers([], None, None) == []
 
     def test_tcp_ports(self):
-        assert norm.tcpPorts([22, 53, 80, 111, 123, 161, 443, 1900, 3671, 5353, "8080", 27015, None, "x", 70000, 22]) == [
+        assert norm.tcpPorts(
+            [22, 53, 80, 111, 123, 161, 443, 1900, 3671, 5353, "8080", 27015, None, "x", 70000, 22]
+        ) == [
             22,
             80,
             111,
@@ -419,11 +419,21 @@ class TestNorm(s_tests.SynTest):
 
     def test_norm_banner_history(self):
         cut = norm.normBanner(HISTORY_BANNERS[3])
-        assert (cut["data"], cut["scan"], cut["truncated"], cut["hash"]) == ("", "SCAN1", ["data", "http.html"], 333)
+        assert (cut["data"], cut["scan"], cut["truncated"], cut["hash"]) == (
+            "",
+            "SCAN1",
+            ["data", "http.html"],
+            333,
+        )
         assert cut["http_headers"] == []
 
         ssh = norm.normBanner(HISTORY_BANNERS[0])
-        assert (ssh["id"], ssh["crawler"], ssh["scan"], ssh["truncated"]) == ("hist-1", "crawler-a", None, [])
+        assert (ssh["id"], ssh["crawler"], ssh["scan"], ssh["truncated"]) == (
+            "hist-1",
+            "crawler-a",
+            None,
+            [],
+        )
         assert ssh["data"] == "SSH-2.0-OpenSSH_8.9p1"
 
         # Shodan documents the region in two places.
@@ -471,7 +481,13 @@ class TestNorm(s_tests.SynTest):
 
         for kind, text, url, name, mime in (
             ("robots", HTTP_ROBOTS, "/robots.txt", "robots.txt", "text/plain"),
-            ("securitytxt", HTTP_SECURITYTXT, "/.well-known/security.txt", "security.txt", "text/plain"),
+            (
+                "securitytxt",
+                HTTP_SECURITYTXT,
+                "/.well-known/security.txt",
+                "security.txt",
+                "text/plain",
+            ),
             ("sitemap", HTTP_SITEMAP, "/sitemap.xml", "sitemap.xml", "application/xml"),
         ):
             assert base64.b64decode(files[kind]["b64"]) == text.encode(), kind
@@ -565,7 +581,10 @@ class TestNorm(s_tests.SynTest):
         # favicon on this host but another port is on another server.
         assert http(favicon={"data": base64.b64encode(b"x").decode()})["files"][0]["local"] is True
         assert http(favicon={"data": "!!!notbase64"})["files"] == []
-        favicon = {"data": base64.b64encode(b"x").decode(), "location": "https://[2001:db8::1]:8443/f.ico"}
+        favicon = {
+            "data": base64.b64encode(b"x").decode(),
+            "location": "https://[2001:db8::1]:8443/f.ico",
+        }
         assert http(favicon=favicon)["files"][0]["local"] is False
         favicon["location"] = "https://[2001:db8::1]/f.ico"
         assert http(favicon=favicon)["files"][0]["local"] is True
@@ -576,7 +595,10 @@ class TestNorm(s_tests.SynTest):
         # that are only slashes or not strings are skipped.
         banner = {"ip_str": "1.2.3.4", "port": 80, "http": {"location": "/pub?sort=name"}}
         banner["open_dir"] = {"data": {"a.sh": {}, "/b/": {}, "/": {}, "": {}}}
-        assert norm.normHttp(banner, "")["listing"] == ["http://1.2.3.4/pub/a.sh", "http://1.2.3.4/pub/b/"]
+        assert norm.normHttp(banner, "")["listing"] == [
+            "http://1.2.3.4/pub/a.sh",
+            "http://1.2.3.4/pub/b/",
+        ]
         banner["http"]["location"] = "/pub/"
         assert norm.normHttp(banner, "")["listing"][0] == "http://1.2.3.4/pub/a.sh"
         for opendir in (None, [], {"data": None}, {"data": ["a.sh"]}):
@@ -584,7 +606,9 @@ class TestNorm(s_tests.SynTest):
             assert norm.normHttp(banner, "")["listing"] == [], opendir
 
         # Redirects without a body or a parseable response still record the URL.
-        retn = http(redirects=[{"host": "www.example.com", "location": "/a", "data": "garbage"}, "bad"])
+        retn = http(
+            redirects=[{"host": "www.example.com", "location": "/a", "data": "garbage"}, "bad"]
+        )
         assert retn["redirects"] == [
             {
                 "url": "https://www.example.com/a",
@@ -654,7 +678,10 @@ class TestNorm(s_tests.SynTest):
 
         # Shodan's fingerprint is the MD5 of the key blob, so the base64 round trips.
         fprint = hashlib.md5(base64.b64decode(b64)).hexdigest()
-        assert ":".join(fprint[i : i + 2] for i in range(0, 32, 2)) == HOST_SSH["data"][0]["ssh"]["fingerprint"]
+        assert (
+            ":".join(fprint[i : i + 2] for i in range(0, 32, 2))
+            == HOST_SSH["data"][0]["ssh"]["fingerprint"]
+        )
 
         # The algorithm comes from the key blob itself, over Shodan's "type".
         assert norm.normSshKey({"type": "ssh-dss", "key": SSH_KEY_B64})["algo"] == "ssh-rsa"
@@ -725,9 +752,9 @@ class TestNorm(s_tests.SynTest):
         assert scores({"cvss": 7.5, "cvss_version": 2, "cvss_v2": 7.5}) == {"v2_0": 7.5}
         assert scores({"cvss": 7.5, "cvss_version": 2.0}) == {"v2_0": 7.5}
         # A v4.0 primary score: v3's minor version is unknown, and 2.x has no v4.0 prop.
-        assert scores({"cvss": 9.3, "cvss_version": 4.0, "cvss_v3": 9.8, "cvss_v4": 9.3, "cvss_v2": 5.0}) == {
-            "v2_0": 5.0
-        }
+        assert scores(
+            {"cvss": 9.3, "cvss_version": 4.0, "cvss_v3": 9.8, "cvss_v4": 9.3, "cvss_v2": 5.0}
+        ) == {"v2_0": 5.0}
         assert scores({"cvss": 9.8, "cvss_v3": 9.8}) == {}
         assert scores({"cvss": 9.8, "cvss_version": "nope"}) == {}
         assert scores({"cvss": 9.8, "cvss_version": True}) == {}
@@ -757,7 +784,9 @@ class TestNorm(s_tests.SynTest):
             {
                 "id": "GHSA-xxxx-xxxx-xxxx",
                 "cvss": 8.1,
-                "severity": [{"type": "CVSS_V3", "score": "CVSS:3.0/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H"}],
+                "severity": [
+                    {"type": "CVSS_V3", "score": "CVSS:3.0/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H"}
+                ],
             }
         )
         assert ghsa["cvss_scores"] == {"v3_0": 8.1}
@@ -771,19 +800,35 @@ class TestNorm(s_tests.SynTest):
             {
                 "id": "GHSA-zzzz-zzzz-zzzz",
                 "severity": [
-                    {"type": "CVSS_V3", "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N/E:U"},
-                    {"type": "CVSS_V4", "score": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:N/VA:N/SC:N/SI:N/SA:N"},
+                    {
+                        "type": "CVSS_V3",
+                        "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N/E:U",
+                    },
+                    {
+                        "type": "CVSS_V4",
+                        "score": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:N/VA:N/SC:N/SI:N/SA:N",
+                    },
                 ],
             }
         )
         assert ghsa["cvss"] == 7.5
         assert ghsa["cvss_scores"] == {"v3_1": 7.5}
         ghsa = norm.normAdvisory(
-            {"id": "GHSA-zzzz-zzzz-zzzz", "severity": [{"type": "CVSS_V3", "score": "CVSS:3.0/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H"}]}
+            {
+                "id": "GHSA-zzzz-zzzz-zzzz",
+                "severity": [
+                    {"type": "CVSS_V3", "score": "CVSS:3.0/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H"}
+                ],
+            }
         )
         assert ghsa["cvss_scores"] == {"v3_0": 8.1}
         # An invalid vector has no score.
-        ghsa = norm.normAdvisory({"id": "GHSA-zzzz-zzzz-zzzz", "severity": [{"type": "CVSS_V3", "score": "CVSS:3.1/AV:X"}]})
+        ghsa = norm.normAdvisory(
+            {
+                "id": "GHSA-zzzz-zzzz-zzzz",
+                "severity": [{"type": "CVSS_V3", "score": "CVSS:3.1/AV:X"}],
+            }
+        )
         assert ghsa["cvss_scores"] == {}
 
 
@@ -902,19 +947,22 @@ class TestClient(s_tests.SynTest):
             ]
             assert len(banners) == 1
 
-
     async def test_client_bad_json(self):
         # SHODAN-12: a 2xx that isn't JSON is an error, a 4xx that isn't JSON uses the status.
         async with FakeShodan() as fake, aiohttp.ClientSession() as sess:
             client = ShodanClient(sess, urls=fake.urls, rate=0)
 
-            fake.routes[("GET", "/api/shodan/ports")] = aiohttp.web.Response(text="<html>oops</html>", status=200)
+            fake.routes[("GET", "/api/shodan/ports")] = aiohttp.web.Response(
+                text="<html>oops</html>", status=200
+            )
             with self.raises(ShodanApiError) as cm:
                 await client.request("get", "/shodan/ports", apikey="key")
             assert cm.exception.mesg.startswith("Unable to parse the JSON response")
             assert cm.exception.code == 200
 
-            fake.routes[("GET", "/api/shodan/ports")] = aiohttp.web.Response(text="<html>401</html>", status=401)
+            fake.routes[("GET", "/api/shodan/ports")] = aiohttp.web.Response(
+                text="<html>401</html>", status=401
+            )
             with self.raises(ShodanApiError) as cm:
                 await client.request("get", "/shodan/ports", apikey="key")
             assert cm.exception.mesg.startswith("Shodan rejected the API key")
@@ -929,7 +977,9 @@ class TestClient(s_tests.SynTest):
             client = ShodanClient(sess, urls=fake.urls, rate=0)
 
             async def html401(request):
-                return aiohttp.web.Response(text="<html><title>401 Unauthorized</title></html>", status=401)
+                return aiohttp.web.Response(
+                    text="<html><title>401 Unauthorized</title></html>", status=401
+                )
 
             fake.streamhandler = html401
             with self.raises(ShodanApiError) as cm:
@@ -958,7 +1008,9 @@ class TestClient(s_tests.SynTest):
             fake.streamhandler = quiet
             loop = asyncio.get_running_loop()
             start = loop.time()
-            banners = [b async for b in client.stream("/shodan/banners", apikey="key", limit=0, timeout=1)]
+            banners = [
+                b async for b in client.stream("/shodan/banners", apikey="key", limit=0, timeout=1)
+            ]
             assert [b["port"] for b in banners] == [443]
             assert loop.time() - start < 4
 
@@ -1049,7 +1101,9 @@ class TestShodanSvc(s_tests.SynTest):
             retn = await svc.countIps("product:nginx", size=2, facets="country, ip:9,nope")
             assert retn["ips"] == ["8.8.8.8", "2001:4860:4860::8888"]
             assert (retn["size"], retn["full"], retn["lowered"]) == (2, True, False)
-            assert retn["facets"] == {"country": [{"value": "US", "count": 900}, {"value": "DE", "count": 100}][:5]}
+            assert retn["facets"] == {
+                "country": [{"value": "US", "count": 900}, {"value": "DE", "count": 100}][:5]
+            }
             assert counts()[-1]["query"]["facets"] == "ip:2,country,nope"
 
             # Each key learns its own limit.
@@ -1070,12 +1124,17 @@ class TestShodanSvc(s_tests.SynTest):
         # SHODAN-07: the ignored service is a single "<ip>:<port>" path segment, so it can't
         # reach another endpoint (ex. /org/member/...) with the service's API key.
         async with shodanSvc(self) as (core, svc, fake):
-            fake.routes[("PUT", "/api/shodan/alert/ALERT1/trigger/new_service/ignore/2001:db8::1:443")] = (
+            fake.routes[
+                ("PUT", "/api/shodan/alert/ALERT1/trigger/new_service/ignore/2001:db8::1:443")
+            ] = (
                 200,
                 {"success": True},
             )
             await svc.alertTriggerIgnore("ALERT1", "new_service", "2001:db8::1:443")
-            assert fake.last()["path"] == "/api/shodan/alert/ALERT1/trigger/new_service/ignore/2001:db8::1:443"
+            assert (
+                fake.last()["path"]
+                == "/api/shodan/alert/ALERT1/trigger/new_service/ignore/2001:db8::1:443"
+            )
 
             bad = (
                 "1.2.3.4:80/../../../../org/member/visi",
@@ -1102,7 +1161,10 @@ class TestShodanSvc(s_tests.SynTest):
         async with shodanSvc(self) as (core, svc, fake):
             fake.routes[("GET", "/api/shodan/scans")] = (
                 200,
-                {"total": 1, "matches": [{"id": "SCAN1", "status": "DONE", "api_key": "secretkey"}]},
+                {
+                    "total": 1,
+                    "matches": [{"id": "SCAN1", "status": "DONE", "api_key": "secretkey"}],
+                },
             )
             fake.routes[("GET", "/api/shodan/scan/SCAN1")] = (
                 200,
@@ -1181,6 +1243,7 @@ class TestShodanSvc(s_tests.SynTest):
                 [b async for b in svc.searchGenr("nginx", limit=0, page=2)]
 
             for code in (401, 402, 429, 500, 503):
+
                 def failing(request, code=code):
                     if int(request.query["page"]) > 1:
                         return (code, {"error": f"HTTP {code} error"})
@@ -1196,7 +1259,11 @@ class TestShodanSvc(s_tests.SynTest):
             def paged(request):
                 page = int(request.query["page"])
                 matches = [
-                    {"title": f"t{page}{i}", "query": f"port:{page}{i}", "tags": ["iot"] if i == 0 else []}
+                    {
+                        "title": f"t{page}{i}",
+                        "query": f"port:{page}{i}",
+                        "tags": ["iot"] if i == 0 else [],
+                    }
                     for i in range(10 if page < 3 else 5)
                 ]
                 return (200, {"total": 25, "matches": matches})

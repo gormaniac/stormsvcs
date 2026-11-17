@@ -7,7 +7,6 @@ import synapse.tests.utils as s_tests
 
 from abusechsvc import bulk, norm
 from abusechsvc.client import AbuseChApiError
-
 from abusechsvc.svc import BULK_IDLE
 
 from . import fakeabusech as fd
@@ -246,9 +245,7 @@ class TestBulkStorm(s_tests.SynTest):
             assert nodes[0].get("reporter:name") == "abuse.ch"
 
             # A family without one gets the platform's tag.
-            await core.nodes(
-                "risk:tool:software=$g [ -:tag ]", opts={"vars": {"g": guid}}
-            )
+            await core.nodes("risk:tool:software=$g [ -:tag ]", opts={"vars": {"g": guid}})
             await core.stormlist("slib.abusech.threatfox.export full --bulk --reuse")
             nodes = await core.nodes("risk:tool:software=$g", opts={"vars": {"g": guid}})
             assert (nodes[0].get("tag") or "").startswith("rep.abusech.threatfox.")

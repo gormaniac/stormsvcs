@@ -93,7 +93,9 @@ class FakeVt:
             },
             ("domains", "example.com", "votes"): {
                 "meta": {"count": 1},
-                "data": [{"id": "d-example.com-1", "type": "vote", "attributes": {"verdict": "harmless"}}],
+                "data": [
+                    {"id": "d-example.com-1", "type": "vote", "attributes": {"verdict": "harmless"}}
+                ],
             },
         }
 
@@ -153,7 +155,12 @@ class FakeVt:
             return web.json_response({"data": f"{self.base}/upload/token123"})
         if parts == ["files"] and method == "POST":
             post = await request.post()
-            self.bodies.append({k: (getattr(v, "filename", None), getattr(v, "file", None) and v.file.read()) for k, v in post.items()})
+            self.bodies.append(
+                {
+                    k: (getattr(v, "filename", None), getattr(v, "file", None) and v.file.read())
+                    for k, v in post.items()
+                }
+            )
             return web.json_response({"data": {"type": "analysis", "id": FILE_ANALYSIS_ID}})
         if parts == ["urls"] and method == "POST":
             post = await request.post()
@@ -177,8 +184,13 @@ class FakeVt:
                 self.bodies.append(body)
                 text = body["data"]["attributes"]["text"]
                 return web.json_response(
-                    {"data": {"id": f"x-{ident}-1", "type": "comment",
-                              "attributes": {"text": text, "date": 1793700000, "tags": []}}}
+                    {
+                        "data": {
+                            "id": f"x-{ident}-1",
+                            "type": "comment",
+                            "attributes": {"text": text, "date": 1793700000, "tags": []},
+                        }
+                    }
                 )
             if rel == "votes" and method == "POST":
                 body = await request.json()
@@ -186,7 +198,15 @@ class FakeVt:
                 if (coll, ident) in self.votes:
                     return err(409, "AlreadyExistsError", "Already voted")
                 self.votes.add((coll, ident))
-                return web.json_response({"data": {"type": "vote", "id": "v-1", "attributes": body["data"]["attributes"]}})
+                return web.json_response(
+                    {
+                        "data": {
+                            "type": "vote",
+                            "id": "v-1",
+                            "attributes": body["data"]["attributes"],
+                        }
+                    }
+                )
             if rel == "behaviour_summary":
                 if ident in (WANNACRY, WANNACRY_MD5):
                     return web.json_response(load("file_behaviour_summary"))
@@ -226,8 +246,14 @@ class FakeVt:
         if aid == ANALYSIS_ID:
             meta = {"url_info": {"id": url["url"], "url": url["url"]}}
         else:
-            meta = {"file_info": {"sha256": EICAR, "md5": "44d88612fea8a8f36de82e1278abb02f",
-                                  "sha1": "3395856ce81f2b7382dee72602f798b642f14140", "size": 68}}
+            meta = {
+                "file_info": {
+                    "sha256": EICAR,
+                    "md5": "44d88612fea8a8f36de82e1278abb02f",
+                    "sha1": "3395856ce81f2b7382dee72602f798b642f14140",
+                    "size": 68,
+                }
+            }
         return web.json_response(
             {"data": {"id": aid, "type": "analysis", "attributes": attrs}, "meta": meta}
         )
@@ -236,8 +262,14 @@ class FakeVt:
 def svcConf(fake: FakeVt, **conf) -> dict:
     """The service config to use with a FakeVt. Limits are off unless a test turns them on."""
 
-    ret = {"vt:url": fake.url, "vt:apikey": APIKEY, "vt:community": True,
-           "vt:limit:minute": 0, "vt:limit:day": 0, "vt:limit:month": 0}
+    ret = {
+        "vt:url": fake.url,
+        "vt:apikey": APIKEY,
+        "vt:community": True,
+        "vt:limit:minute": 0,
+        "vt:limit:day": 0,
+        "vt:limit:month": 0,
+    }
     ret.update(conf)
     return ret
 
