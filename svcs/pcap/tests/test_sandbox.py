@@ -2,6 +2,7 @@
 
 
 import asyncio
+import contextlib
 import os
 import signal
 import sys
@@ -36,6 +37,43 @@ async def runPy(sbx, code, dirs, **kwargs):
     return await sbx.run([py, "-I", "-S", "-c", code], read=[str(dirs / "allowed")],
                          write=[str(dirs / "out")], execs=[sys.prefix, sys.base_prefix],
                          **kwargs)
+
+
+@contextlib.contextmanager
+def lateKill(delay=0.3):
+    """SIGKILLs sent to process groups land ``delay`` seconds late (SIGKILL isn't
+    synchronous). Yields the groups they were sent to."""
+
+    killpg = os.killpg
+    loop = asyncio.get_running_loop()
+    pgids = []
+
+    def late(pgid, sig):
+        if sig != signal.SIGKILL:
+            return killpg(pgid, sig)
+        pgids.append(pgid)
+        loop.call_later(delay, _killpgQuiet, killpg, pgid)
+
+    with unittest.mock.patch.object(p_sandbox.os, "killpg", late):
+        yield pgids
+
+
+def _killpgQuiet(killpg, pgid):
+    with contextlib.suppress(OSError):
+        killpg(pgid, signal.SIGKILL)
+
+
+def zombies(pgid):
+    """The service's zombie children in a process group."""
+
+    me = str(os.getpid())
+    found = []
+    for pid in (int(n) for n in os.listdir("/proc") if n.isdigit()):
+        status = p_sandbox._procStatus(pid)
+        if (status and status.get("PPid") == me and status["State"].startswith("Z")
+                and p_sandbox._procPgrp(pid) == pgid):
+            found.append(pid)
+    return found
 
 
 class TestSandbox:
@@ -291,26 +329,109 @@ class TestDetection:
 
     async def test_leftover_killed_not_escaped(self, dirs):
         # Killed leftovers aren't swept as escaped while SIGKILL is still landing: the run
-        # waits for its group to die before it stops being live (this raced under load).
+        # polls its group until its processes are dead, and only then stops treating it as
+        # live (this raced under load). The SIGKILL lands late here, so a run that swept right
+        # after sending it would see the child alive, outside every live group.
         sbx = p_sandbox.Sandbox()
+        if not sbx.subreaper and sbx.ids() is None:
+            pytest.skip("the sweep finds nothing without a subreaper or a sandbox user")
+        # The child doesn't hold the run's pipes, so the run ends as soon as the engine exits.
         code = ("import subprocess, sys; subprocess.Popen([sys.executable, '-c', "
-                "'import time; time.sleep(60)']); print('left one')")
-        killpg = os.killpg
+                "'import time; time.sleep(60)'], stdout=subprocess.DEVNULL, "
+                "stderr=subprocess.DEVNULL); print('left one')")
+        polled = []
+        groupAlive = p_sandbox._groupAlive
 
-        def slowKill(pgid, sig):
-            killpg(pgid, sig)
-            if sig == signal.SIGKILL:
-                # The sweep right after sees them before they're dead without the wait.
-                sbx.sweep("other")
+        def spyAlive(pgid):
+            alive = groupAlive(pgid)
+            polled.append((bool(alive), pgid in sbx._live))
+            return alive
 
-        with unittest.mock.patch.object(p_sandbox.os, "killpg", slowKill):
+        with lateKill(), unittest.mock.patch.object(p_sandbox, "_groupAlive", spyAlive):
             res = await runPy(sbx, code, dirs)
         assert [a["kind"] for a in res.alerts] == ["leftover"]
         assert [a["kind"] for a in sbx.alerts] == ["leftover"]
+        # Polled while the child was still alive, with the group live, until it was dead.
+        assert (True, True) in polled
+        assert polled[-1] == (False, True)
 
     async def test_sweep_spares_live_groups(self, dirs):
         # A process orphaned to the service in a running engine's own process group is that
         # run's (a leftover when it ends): another run's sweep doesn't kill it as escaped.
+        sbx = p_sandbox.Sandbox()
+        if not sbx.subreaper:
+            pytest.skip("can't be a child subreaper here")
+        go = dirs / "out" / "go"
+        code = ("import os, time\n"
+                "if os.fork() == 0:\n"
+                "    if os.fork() == 0:\n"
+                "        time.sleep(60)\n"
+                "    os._exit(0)\n"
+                "os.wait()\n"
+                "end = time.monotonic() + 30\n"
+                f"while not os.path.exists({str(go)!r}) and time.monotonic() < end:\n"
+                "    time.sleep(0.01)\n"
+                "print('done')")
+        run = asyncio.create_task(runPy(sbx, code, dirs))
+        me = str(os.getpid())
+
+        def orphans():
+            # Alive, orphaned to the service, in a live run's group (not the engine itself).
+            found = []
+            for pid in (int(n) for n in os.listdir("/proc") if n.isdigit()):
+                if pid in sbx._live:
+                    continue
+                status = p_sandbox._procStatus(pid)
+                if (status and status.get("PPid") == me and not status["State"].startswith("Z")
+                        and p_sandbox._procPgrp(pid) in sbx._live):
+                    found.append(pid)
+            return found
+
+        try:
+            for _ in range(1000):
+                if orphans():
+                    break
+                await asyncio.sleep(0.01)
+            assert orphans()
+            # As if it ran as the service's user (no sandbox user), so only the live group
+            # spares it.
+            with unittest.mock.patch.object(sbx, "ids", return_value=None):
+                assert sbx.sweep("other") == []
+        finally:
+            go.write_text("")
+        res = await run
+        assert res.stdout.strip() == b"done"
+        assert [a["kind"] for a in res.alerts] == ["leftover"]
+        assert [a["kind"] for a in sbx.alerts] == ["leftover"]
+
+    async def test_cancelled_teardown(self, dirs):
+        # A run cancelled while it waits for its leftovers to die still finishes: its group
+        # stops being live (later sweeps would skip it for good) and is swept.
+        sbx = p_sandbox.Sandbox()
+        code = ("import subprocess, sys; subprocess.Popen([sys.executable, '-c', "
+                "'import time; time.sleep(60)'], stdout=subprocess.DEVNULL, "
+                "stderr=subprocess.DEVNULL); print('left one')")
+        run = asyncio.create_task(runPy(sbx, code, dirs))
+        groupAlive = p_sandbox._groupAlive
+        calls = []
+
+        def cancelling(pgid):
+            calls.append(pgid)
+            if len(calls) == 1:
+                run.cancel()
+                return [-1]  # Still dying, so the wait sleeps (and is cancelled).
+            return groupAlive(pgid)
+
+        with unittest.mock.patch.object(p_sandbox, "_groupAlive", cancelling):
+            with pytest.raises(asyncio.CancelledError):
+                await run
+        assert len(calls) > 1 and not groupAlive(calls[0])
+        assert sbx._live == set()
+        assert zombies(calls[0]) == []
+
+    async def test_timeout_sweeps_group(self, dirs):
+        # A run that times out sweeps after its group stops being live, so a child orphaned
+        # to the service in the group (killed, but too late for _reap's sweep) is reaped.
         sbx = p_sandbox.Sandbox()
         if not sbx.subreaper:
             pytest.skip("can't be a child subreaper here")
@@ -320,15 +441,11 @@ class TestDetection:
                 "        time.sleep(60)\n"
                 "    os._exit(0)\n"
                 "os.wait()\n"
-                "time.sleep(1.5)\n"
-                "print('done')")
-        run = asyncio.create_task(runPy(sbx, code, dirs))
-        await asyncio.sleep(0.8)
-        assert sbx.sweep("other") == []
-        res = await run
-        assert res.stdout.strip() == b"done"
-        assert [a["kind"] for a in res.alerts] == ["leftover"]
-        assert [a["kind"] for a in sbx.alerts] == ["leftover"]
+                "time.sleep(60)")
+        with lateKill() as pgids, pytest.raises(p_sandbox.SandboxError, match="took longer"):
+            await runPy(sbx, code, dirs, timeout=1)
+        assert sbx._live == set()
+        assert pgids and zombies(pgids[0]) == []
 
     async def test_escaped(self, dirs):
         # A child that leaves the run's process group (setsid) and is orphaned to the service
