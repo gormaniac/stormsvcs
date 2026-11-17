@@ -614,7 +614,11 @@ class TestNorm(s_tests.SynTest):
             )[0]["signame"]
             == "HEUR:x"
         )
-        assert norm.normC2Config({"c2": "http://a.com/gate.php"})["url"] is None
+        # Every C2 gets a :servers URL: a URL C2 is its own, a bare host gets tcp://host.
+        assert norm.normC2Config({"c2": "http://a.com/gate.php"})["url"] == "http://a.com/gate.php"
+        assert norm.normC2Config({"c2": "A.com"})["url"] == "tcp://a.com"
+        assert norm.normC2Config({"c2": "1.2.3.4"})["url"] == "tcp://1.2.3.4"
+        assert norm.normC2Config({"c2": "2001:db8::1"})["url"] == "tcp://[2001:db8::1]"
         assert norm.normC2Config({"c2": ""}) is None and norm.normC2Config("x") is None
         assert norm.normC2Config({"c2": "a" * 64}) is None
         assert norm.normOle(None) == {"attrs": [], "notes": []}
