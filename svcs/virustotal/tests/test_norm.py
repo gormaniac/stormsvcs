@@ -52,7 +52,7 @@ def test_network():
     d = norm.normObject(fv.load("domain")["data"])
     assert d["fqdn"] == "example.com"
     assert {r["type"] for r in d["dns"]} == {"A", "AAAA", "NS", "TXT", "SOA"}
-    soa = [r for r in d["dns"] if r["type"] == "SOA"][0]
+    soa = next(r for r in d["dns"] if r["type"] == "SOA")
     assert soa["email"] == "dns.cloudflare.com"
     assert d["whois"]["registrar"].startswith("RESERVED")
     assert d["cert"]["sans"] == ["example.com"]

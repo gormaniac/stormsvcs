@@ -63,7 +63,8 @@ def test_parse_errors():
 
 
 def test_parse_rules_file():
-    text = "\n".join(
+    # One string per line, like the text it stands in for.
+    text = "\n".join(  # noqa: FLY002
         (
             "# A comment, not a rule",
             "",
@@ -100,7 +101,8 @@ def test_parse_rules_file():
 def test_parse_rules_blank_line_continuation():
     # A blank line inside a backslash-continued rule doesn't end it, a blank line after a
     # line without one still does.
-    text = "\n".join(
+    # One string per line, like the text it stands in for.
+    text = "\n".join(  # noqa: FLY002
         (
             'alert tcp any any -> any any (msg:"one"; \\',
             "",

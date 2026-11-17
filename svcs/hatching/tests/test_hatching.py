@@ -849,7 +849,7 @@ class TestErrorPaths(s_tests.SynTest):
 
     def test_norm_edges(self):
         assert norm.tagPart(None) is None and norm.tagName("") is None
-        assert norm.toMsecs(datetime.datetime(2026, 10, 31, 12)) == 1793448000000
+        assert norm.toMsecs(datetime.datetime(2026, 10, 31, 12)) == 1793448000000  # noqa: DTZ001
         assert norm.toMsecs(5) is None
         assert norm.ipVersion("") is None
         assert norm.c2Url(":443") is None

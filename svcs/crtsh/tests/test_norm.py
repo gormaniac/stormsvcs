@@ -19,7 +19,10 @@ def details(certid: int) -> dict:
     return norm.certDetails(PKI.row(certid))
 
 
-def selfSigned(key, signer=None, names=None, sans=None, exts=(), algo=hashes.SHA256()) -> bytes:
+SHA256 = hashes.SHA256()
+
+
+def selfSigned(key, signer=None, names=None, sans=None, exts=(), algo=SHA256) -> bytes:
     """A minimal self-issued certificate for ``key``, signed by ``signer`` (default ``key``)."""
 
     signer = signer or key
@@ -273,7 +276,7 @@ def test_bad_extensions():
 
 def test_helpers():
     assert norm.toMillis(None) is None
-    assert norm.toMillis(datetime.datetime(1970, 1, 1, 0, 0, 1)) == 1000
+    assert norm.toMillis(datetime.datetime(1970, 1, 1, 0, 0, 1)) == 1000  # noqa: DTZ001 - naive is UTC
     assert norm.hexBytes(None) is None
     assert norm.hexBytes(b"\x0a\xff") == "0aff"
 

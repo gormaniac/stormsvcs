@@ -386,7 +386,8 @@ def test_whois_domain_sectioned():
 
 
 def test_whois_domain_misc():
-    text = "\n".join(
+    # One string per line, like the text it stands in for.
+    text = "\n".join(  # noqa: FLY002
         (
             "Domain Name: x.com",
             "Registrar URL: www.registrar.example",

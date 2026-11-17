@@ -163,7 +163,7 @@ class TestCapaSvc(s_tests.SynTest):
                     if svc.procs:
                         break
                     await asyncio.sleep(0.05)
-                proc = list(svc.procs)[0]
+                proc = next(iter(svc.procs))
                 assert proc.returncode is None
                 await svc.fini()
                 await asyncio.wait_for(proc.wait(), timeout=5)
@@ -245,7 +245,8 @@ class TestCapaSvc(s_tests.SynTest):
                     # Opening in an executor thread is slow, so the scan is cancelled first.
                     if threading.get_ident() != loopthread:
                         release.wait(10)
-                    fd = open(*args, **kwargs)
+                    # The caller closes it, this only stands in for open().
+                    fd = open(*args, **kwargs)  # noqa: SIM115
                     opened.append(fd)
                     return fd
 

@@ -4,6 +4,7 @@
 import asyncio
 import contextlib
 import os
+import pathlib
 import signal
 import sys
 import time
@@ -197,13 +198,13 @@ class TestSandbox:
         # Bad invocations exit with the sandbox's exit code.
         import subprocess
         res = subprocess.run([sys.executable, "-I", _sbxexec.__file__, "{}"],
-                             capture_output=True)
+                             capture_output=True, check=False)
         assert res.returncode == _sbxexec.EXIT_SANDBOX and b"usage" in res.stderr
         res = subprocess.run([sys.executable, "-I", _sbxexec.__file__, "not json", "--", "true"],
-                             capture_output=True)
+                             capture_output=True, check=False)
         assert res.returncode == _sbxexec.EXIT_SANDBOX and b"invalid spec" in res.stderr
         res = subprocess.run([sys.executable, "-I", _sbxexec.__file__, "{}", "--",
-                              "/nonexistent/x"], capture_output=True)
+                              "/nonexistent/x"], capture_output=True, check=False)
         assert res.returncode == _sbxexec.EXIT_SANDBOX and b"unable to run" in res.stderr
 
 
@@ -263,8 +264,10 @@ class TestProbes:
         probe, _ = run
         for code in (
             "import socket; socket.create_connection(('127.0.0.1', 1), timeout=1)",
-            "import socket; s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); "
-            "s.sendto(b'x', ('127.0.0.1', 9))",
+            (
+                "import socket; s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); "
+                "s.sendto(b'x', ('127.0.0.1', 9))"
+            ),
             "import socket; socket.socket(socket.AF_INET6, socket.SOCK_STREAM)",
             "import socket; socket.socket(socket.AF_PACKET, socket.SOCK_RAW)",
         ):
@@ -466,7 +469,7 @@ class TestDetection:
             "left its run's process group" in res.alerts[0]["detail"]
         pid = int(res.alerts[0]["detail"].split()[1])
         assert not os.path.exists(f"/proc/{pid}") or \
-            "Z" in open(f"/proc/{pid}/stat").read().rsplit(")", 1)[1].split()[0]
+            "Z" in pathlib.Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
 
     async def test_escaped_timeout(self, dirs):
         # An engine that times out while a child that left its process group holds its pipes
@@ -539,7 +542,9 @@ class TestDetection:
         import subprocess
 
         sbx = p_sandbox.Sandbox()
-        other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        # Popen only starts the child, and the test needs a plain child of this process.
+        other = subprocess.Popen(  # noqa: ASYNC220
+[sys.executable, "-c", "import time; time.sleep(30)"])
         try:
             res = await runPy(sbx, "print('ok')", dirs)
             assert res.alerts == [] and other.poll() is None

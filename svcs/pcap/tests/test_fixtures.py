@@ -76,9 +76,9 @@ class TestFixtureFlows:
         assert first["src"]["handshake"].startswith("GET /first")
         assert second["src"]["handshake"].startswith("GET /second")
         # The UDP datagram and the ICMP port unreachable it got back.
-        udp = [f for f in flows if f["ipproto"] == 17][0]
+        udp = next(f for f in flows if f["ipproto"] == 17)
         assert udp["dst"]["port"] == 9 and udp["src"]["handshake"] == "anyone there?"
-        icmp = [f for f in flows if f["ipproto"] == 1][0]
+        icmp = next(f for f in flows if f["ipproto"] == 1)
         assert icmp["icmp:types"] == [3]
 
     def test_vlan(self):
@@ -171,7 +171,7 @@ class TestFixtureTshark(s_tests.SynTest):
         # tshark only follows it when the server connects from port 20 (this one didn't),
         # Suricata does (see TestFixtureServices).
         flows, summary = await run(self, "ftp_active.pcapng", suricata=False)
-        data = [f for f in flows if f["dst"]["port"] != 2121][0]
+        data = next(f for f in flows if f["dst"]["port"] != 2121)
         assert data["src"]["port"] != 2121 and data["dst"]["port"] > 1024
         assert data["src"]["txfiles"] == []
 
@@ -313,7 +313,7 @@ class TestFixtureServices(s_tests.SynTest):
 
     async def test_ftp_active(self):
         flows, _ = await run(self, "ftp_active.pcapng")
-        data = [f for f in flows if f["dst"]["port"] != 2121][0]
+        data = next(f for f in flows if f["dst"]["port"] != 2121)
         assert [(f["sha256"], f["name"]) for f in data["src"]["txfiles"]] == [
             (DOWNLOAD, "sample.bin")
         ]

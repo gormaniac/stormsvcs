@@ -548,7 +548,7 @@ class TestPcapStormSuricata(s_tests.SynTest):
             smb = (await core.nodes("inet:flow:dst:port=445"))[0]
             assert smb.get("raw")["app_proto"] == ("smb",)
             assert {"share": "\\\\127.0.0.1\\DATA", "share_type": "FILE"}.items() <= \
-                [e for e in smb.get("raw")["smb"] if e.get("share")][0].items()
+                next(e for e in smb.get("raw")["smb"] if e.get("share")).items()
             att = (await core.nodes("inet:flow:dst:port=445 :dst:txfiles -> file:attachment"))[0]
             assert att.get("file") == f"sha256:{download}" and att.get("name") == "sample.bin"
             att = (await core.nodes("inet:flow:dst:port=445 :src:txfiles -> file:attachment"))[0]

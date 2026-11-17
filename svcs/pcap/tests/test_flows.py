@@ -643,8 +643,8 @@ class TestSplitLinktypes:
             + g.epb(1, future, b"\x00" * 16 + self.frame(1001)[14:])
             + g.epb(0, g.usec(2), big)
         )
-        parts = dict((p.rsplit("/", 1)[-1], (p, nums)) for p, nums in
-                     p_flows.splitLinktypes(str(path), str(tmp_path)))
+        parts = {p.rsplit("/", 1)[-1]: (p, nums) for p, nums in
+                 p_flows.splitLinktypes(str(path), str(tmp_path))}
         assert {k: v[1] for k, v in parts.items()} == {"linktype-1.pcap": [1, 3],
                                                        "linktype-113.pcap": [2]}
 

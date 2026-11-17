@@ -100,7 +100,7 @@ def test_helpers():
             "b": b"\x01",
             "m": memoryview(b"\x02"),
             "a": bytearray(b"\x03"),
-            "t": datetime.datetime(1970, 1, 1),
+            "t": datetime.datetime(1970, 1, 1),  # noqa: DTZ001 - as the database returns them
             "l": [1, (b"\x04",)],
             "n": None,
             "s": "x",

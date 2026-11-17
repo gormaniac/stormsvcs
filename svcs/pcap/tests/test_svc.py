@@ -484,7 +484,7 @@ class TestPcapSvcOptions(s_tests.SynTest):
                 # With tshark, key logs have to be in the Axon and under the size limit.
                 svc.tshark.path = "/bin/true"
                 async def frames(path, keylog=None, decode=(), gaps=False):
-                    assert open(keylog, "rb").read() == b"CLIENT_RANDOM 00 00\n\n" * 2
+                    assert pathlib.Path(keylog).read_bytes() == b"CLIENT_RANDOM 00 00\n\n" * 2
                     assert decode == ["tcp.port==8443,tls"]
                     assert not gaps
                     return {}, {"version": "fake", "error": None}

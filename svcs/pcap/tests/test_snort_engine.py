@@ -199,7 +199,7 @@ class TestSnort(s_tests.SynTest):
             alerts = []
             assert await snort.scan(path, pcap, alerts.append) == (5, [])
             assert sorted(a["sid"] for a in alerts) == [1000001, 1000001, 1000002, 1000002, 1000003]
-            udp = [a for a in alerts if a["sid"] == 1000003][0]
+            udp = next(a for a in alerts if a["sid"] == 1000003)
             assert (
                 udp["proto"] == "UDP" and udp["src_addr"] == "10.1.1.10" and udp["dst_port"] == 9999
             )

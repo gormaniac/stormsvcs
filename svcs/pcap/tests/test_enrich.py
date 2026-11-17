@@ -5,6 +5,7 @@ import base64
 import datetime
 import hashlib
 import io
+import pathlib
 
 import pytest
 from cryptography import x509
@@ -112,7 +113,7 @@ class TestX509:
         assert p_x509.serialHex(1) == "01"
         assert p_x509.serialHex(0x100) == "0100"
         assert p_x509.serialHex(-1) == "ff"
-        naive = datetime.datetime(2026, 1, 1)
+        naive = datetime.datetime(2026, 1, 1)  # noqa: DTZ001 - naive times are UTC
         assert p_x509.toMillis(naive) == 1767225600000
 
 
@@ -360,7 +361,7 @@ class TestEnrich:
         assert store.add(b"c") is None
         assert store.skipped == 2
         assert store.files == {a: 1, hashlib.sha256(b"b").hexdigest(): 1}
-        assert open(store.path(a), "rb").read() == b"a"
+        assert pathlib.Path(store.path(a)).read_bytes() == b"a"
 
         # Files over the limits are left out of the flow.
         flow = apply([(False, {"http.response_for.uri": ["/x"],

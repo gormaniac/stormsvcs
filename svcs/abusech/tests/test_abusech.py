@@ -947,7 +947,7 @@ class TestNorm(s_tests.SynTest):
         assert certs[1]["family"] == "AsyncRAT"
         assert norm.normSslblCert({"sha1": "bad"}) is None
 
-        ja3 = [norm.normJa3(r) for r in norm.parseCsv(fake_data.SSLBL_JA3, norm.SSLBL_JA3_CSV)][0]
+        [ja3] = [norm.normJa3(r) for r in norm.parseCsv(fake_data.SSLBL_JA3, norm.SSLBL_JA3_CSV)]
         assert ja3 == {
             "ja3": "51c64c77e60f3980eea90869b68c58a8",
             "first_seen": "2017-07-14 18:08:15",

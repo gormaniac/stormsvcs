@@ -61,6 +61,7 @@ class TestCapaStormPkg(s_tests.SynTest):
         proc = subprocess.run(
             [sys.executable, "-m", "synapse.tools.storm.lint", str(SVCDIR / "src")],
             capture_output=True,
+            check=False,
             text=True,
             cwd=SVCDIR,
         )
@@ -298,7 +299,7 @@ class TestCapaStormScan(s_tests.SynTest):
             }
             assert (data["format"], data["arch"], data["flavor"]) == ("sc64", "amd64", "static")
             assert [m["rule"] for m in data["matches"]] == MATCHED
-            xor = [m for m in data["matches"] if m["rule"] == "contain xor"][0]
+            xor = next(m for m in data["matches"] if m["rule"] == "contain xor")
             assert xor == {
                 "rule": "contain xor",
                 "guid": ruleGuid("contain xor"),

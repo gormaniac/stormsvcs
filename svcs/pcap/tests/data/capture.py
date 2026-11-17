@@ -142,7 +142,7 @@ def scenario_tls(tmp: pathlib.Path) -> None:
         subprocess.run(["openssl", "s_client", "-quiet", "-no_ign_eof", "-connect", "127.0.0.1:443",
                         "-tls1_2", "-servername", "vertex.link",
                         "-cert", str(tmp / "client.pem"), "-key", str(tmp / "client.key")],
-                       input=b"hello\n", capture_output=True, timeout=10)
+                       input=b"hello\n", capture_output=True, check=False, timeout=10)
     server.kill()
 
 
@@ -227,7 +227,7 @@ def scenario_ssh(tmp: pathlib.Path) -> None:
         subprocess.run(["ssh", "-p", "22", "-o", "BatchMode=yes",
                         "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
                         "-o", "HostKeyAlgorithms=ssh-ed25519", "nobody@127.0.0.1", "true"],
-                       capture_output=True, timeout=20)
+                       capture_output=True, check=False, timeout=20)
     server.kill()
 
 
@@ -600,7 +600,7 @@ def scenario_ssh_pq(tmp: pathlib.Path) -> None:
                         "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
                         "-o", "KexAlgorithms=sntrup761x25519-sha512@openssh.com",
                         "-o", "HostKeyAlgorithms=rsa-sha2-512", "nobody@127.0.0.1", "true"],
-                       capture_output=True, timeout=20)
+                       capture_output=True, check=False, timeout=20)
     server.kill()
 
 
