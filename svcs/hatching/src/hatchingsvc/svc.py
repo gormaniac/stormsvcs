@@ -21,7 +21,6 @@ import pyhatching.errors as p_errors
 import pyhatching.utils as p_utils
 import synapse.common as s_common
 import synapse.lib.cell as s_cell
-import synapse.lib.coro as s_coro
 from pyhatching import base as p_base
 
 from . import norm
@@ -495,7 +494,9 @@ class HatchingSvc(s_cell.Cell):
         self._pruneUploads()
         upload = s_common.guid()
         path = os.path.join(self.uploaddir, upload)
-        await s_coro.executor(appendFile, path, b"", "wb")
+        # Written in place, not in an executor: with no await between creating the file and
+        # tracking it, a cancelled call can't leave an untracked file behind.
+        appendFile(path, b"", "wb")
         self.uploads[upload] = {"path": path, "size": 0, "time": time.monotonic()}
         while len(self.uploads) > MAX_UPLOADS:
             self._dropUpload(next(iter(self.uploads)))
@@ -514,14 +515,12 @@ class HatchingSvc(s_cell.Cell):
         if item["size"] + len(byts) > self.maxsize:
             self._dropUpload(upload)
             raise HatchingApiError(f"The file is larger than the max of {self.maxsize} bytes.")
+        # Written in place, not in an executor (a chunk is at most a few MB). With no await
+        # between the checks above and the write, a submitFile for this upload can't run before
+        # the chunk is on disk, and a cancelled or evicted upload can't have its file recreated.
+        appendFile(item["path"], byts)
         item["size"] += len(byts)
         item["time"] = time.monotonic()
-        await s_coro.executor(appendFile, item["path"], byts)
-        if upload not in self.uploads:
-            # Dropped (ex. evicted) while the chunk was written, don't leave the file behind.
-            with contextlib.suppress(FileNotFoundError):
-                os.unlink(item["path"])
-            raise HatchingApiError("The file upload doesn't exist, it may have expired.")
         return item["size"]
 
     async def submitFile(

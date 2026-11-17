@@ -1,6 +1,7 @@
 """Pytests for the slib.hatching service's Python code (HatchingSvc, its Telepath API, and norm)."""
 
 import asyncio
+import contextlib
 import copy
 import datetime
 import os
@@ -716,6 +717,27 @@ class TestHatchingSvc(s_tests.SynTest):
             with self.raises(HatchingApiError):
                 await svc.submitFileChunk(upload, b"12345")
             assert not os.path.exists(path)
+
+    async def test_upload_races(self):
+        async with hatchingSvc(self) as (core, svc, fake):
+            # A submit that runs alongside the last chunk's call still sends the whole file: the
+            # chunk is on disk before anything else for the upload can run.
+            upload = await svc.submitFileInit()
+            await svc.submitFileChunk(upload, b"MZ first ")
+            await asyncio.gather(
+                svc.submitFileChunk(upload, b"second"), svc.submitFile(upload, "race.exe")
+            )
+            assert fake.last("post", "/samples")["files"]["file"] == ("race.exe", b"MZ first second")
+
+            # A cancelled upload start leaves no spool file that isn't tracked.
+            task = asyncio.create_task(svc.submitFileInit())
+            await asyncio.sleep(0)
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            await asyncio.sleep(0.2)
+            tracked = {os.path.basename(i["path"]) for i in svc.uploads.values()}
+            assert set(os.listdir(svc.uploaddir)) == tracked
 
     async def test_upload_leftovers(self):
         # Uploads a previous run left behind are deleted when the service starts.
