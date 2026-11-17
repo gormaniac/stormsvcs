@@ -9,11 +9,23 @@ function shodanSeen(form, valu) {
     return($node)
 }
 
-// A node linked to a node, other than by the slib.shodan meta:source's -(seen)> edge, or null.
-// NOTE: These return $node, not (true): a constant return runs even when no node is lifted.
+// Whether a node has an edge to it other than the slib.shodan meta:source's -(seen)> edge, which
+// every candidate has (see liftCandidates()). Any other edge stops delnode, even one from the
+// meta:source.
 function otherN2(n) {
+    $count = (0)
+    for $edge in $n.edges(reverse=(true)) {
+        $count = ($count + 1)
+        if ($count > 1) { return((true)) }
+    }
+    return((false))
+}
+
+// A node that refers to a node by a prop (ex. inet:dns:answer:a), which would stop delnode, or null.
+// NOTE: These return $node, not (true): a constant return runs even when no node is lifted.
+function refNode(n) {
     yield $n
-    <(*)- * -meta:source=$sourceGuid
+    <- *
     return($node)
 }
 
@@ -59,9 +71,9 @@ function keepReason(n, ipform, ip, fqdn) {
 
 // Replace a node: add the inet:dns:rev/rev6 for it (with its .seen, linked to the meta:source),
 // then delete the node, or only remove the meta:source's -(seen)> edge when the node is linked to
-// anything else or tagged (it has another source).
+// or referred to by anything else, or tagged (it has another source, or can't be deleted).
 function replace(n, ipform, ip, fqdn) {
-    $shared = ($n.tags() or $otherN2($n) or $anyN1($n))
+    $shared = ($n.tags() or $otherN2($n) or $anyN1($n) or $refNode($n))
     if $shared { $action = "unlink" }
     else { $action = "delete" }
     $lib.print(`slib.shodan.admin.dns.cleanup: {$action} {$n.form()}={$n.repr()}, adding the reverse DNS record ({$ip}, {$fqdn}).`)  // noqa: R002
@@ -86,7 +98,8 @@ function unlink(n) {
     return()
 }
 
-// The meta:source's -(seen)> edge is its only edge (see replace()), remove it to delete the node.
+// The meta:source's -(seen)> edge is its only edge, and nothing refers to it (see replace()),
+// remove the edge to delete the node.
 function delNode(n) {
     yield $n
     [ <(seen)- { meta:source=$sourceGuid } ]

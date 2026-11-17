@@ -1460,8 +1460,9 @@ commands:
       slib.shodan.dns.lookup, or InternetDB hostnames (which have no .seen), and are kept.
 
       Each changed node gets its inet:dns:rev/rev6 (with the node's .seen, linked to the
-      meta:source). Then it's deleted, or, when it's tagged or linked to anything else (it has
-      another source), only the meta:source's -(seen)> edge is removed. Running it again changes
+      meta:source). Then it's deleted, or, when it's tagged, linked to anything else, or referred
+      to by another node's prop (ex. inet:dns:answer:a), only the meta:source's -(seen)> edge is
+      removed. Running it again changes
       nothing. Deleting nodes needs the node.del permissions.
 
       Examples:

@@ -2214,6 +2214,35 @@ class TestShodanStormDnsCleanup(s_tests.SynTest):
             self.stormIsInErr("requires permission: slib.shodan.admin", msgs)
 
 
+    async def test_dns_cleanup_refs(self):
+        # Nodes another node refers to (by a prop, or by an edge other than the meta:source's
+        # -(seen)>, even one from the meta:source) can't be deleted, so they're only unlinked.
+        async with shodanSvc(self) as (core, svc, fake):
+            await self._oldHost(core, "answer.example.com", "8.8.8.8")
+            await core.nodes("[ inet:dns:answer=* :a=(answer.example.com, 8.8.8.8) ]")
+            await self._oldHost(core, "refs.example.com", "8.8.8.8")
+            await core.nodes(f"meta:source={SVC_GUID} [ +(refs)> {{ inet:dns:a=(refs.example.com, 8.8.8.8) }} ]")
+            await self._oldHost(core, "dns.google", "8.8.8.8")
+
+            msgs = await core.stormlist("slib.shodan.admin.dns.cleanup")
+            self.stormHasNoWarnErr(msgs)
+            self.stormIsInPrint("unlink inet:dns:a=('answer.example.com', '8.8.8.8')", msgs)
+            self.stormIsInPrint("unlink inet:dns:a=('refs.example.com', '8.8.8.8')", msgs)
+            self.stormIsInPrint("Dry run: would delete 1, unlink 2, keep 0", msgs)
+
+            msgs = await core.stormlist("slib.shodan.admin.dns.cleanup --apply")
+            self.stormHasNoWarnErr(msgs)
+            self.stormIsInPrint("Deleted 1, unlinked 2, kept 0", msgs)
+
+            assert not await core.nodes("inet:dns:a=(dns.google, 8.8.8.8)")
+            assert len(await core.nodes("inet:dns:answer:a=(answer.example.com, 8.8.8.8)")) == 1
+            assert len(await core.nodes(f"meta:source={SVC_GUID} -(refs)> inet:dns:a=(refs.example.com, 8.8.8.8)")) == 1
+            for fqdn in ("answer.example.com", "refs.example.com"):
+                assert len(await core.nodes(f"inet:dns:a=({fqdn}, 8.8.8.8)")) == 1
+                assert not await core.nodes(f"inet:dns:a=({fqdn}, 8.8.8.8) <(seen)- meta:source={SVC_GUID}")
+                assert len(await core.nodes(f"meta:source={SVC_GUID} -(seen)> inet:dns:rev=(8.8.8.8, {fqdn})")) == 1
+
+
 class TestShodanStormPerms(s_tests.SynTest):
     """The package's perms are enforced, and API keys stay private."""
 
