@@ -477,9 +477,10 @@ wheels = [
 
 [[package]]
 name = "malpediasvc"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "." }
 dependencies = [
+    { name = "aiohttp" },
     { name = "stormlibpp" },
 ]
 
@@ -490,7 +491,10 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "stormlibpp", specifier = ">=1.0.0" }]
+requires-dist = [
+    { name = "aiohttp", specifier = ">=3.10" },
+    { name = "stormlibpp", specifier = ">=1.0.0" },
+]
 
 [package.metadata.requires-dev]
 dev = [

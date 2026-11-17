@@ -343,6 +343,15 @@ class FakeMalpedia:
                 return web.Response(body=self.yaraZip(tlp), content_type="application/zip")
             case ["get", "yara", fid]:
                 return js(self.yaraFor(fid))
+            case ["test", "chunked"]:
+                # A chunked response, without a Content-Length.
+                resp = web.StreamResponse()
+                resp.enable_chunked_encoding()
+                await resp.prepare(request)
+                for _ in range(3):
+                    await resp.write(b"x" * 100)
+                await resp.write_eof()
+                return resp
             case ["get", "misp"]:
                 raise AssertionError("The service must never request /api/get/misp.")
 

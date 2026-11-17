@@ -1,5 +1,9 @@
 // Privileged (asroot) wrappers around the slib.malpedia service, the sync cron job, and the
 // tag settings, for slib.malpedia.admin.
+//
+// NOTE: $lib.globals.get()/set()/pop() and $lib.cron.enable()/disable() are removed in Synapse
+// 3.x, but 2.x has no $lib.globals.<name> (and these names have colons) and its $lib.cron.mod()
+// can't enable a job. This package requires Synapse <3.0.0 so R005 is ignored here.
 
 init {
     $svc = $lib.service.get("slib.malpedia")
@@ -10,12 +14,12 @@ init {
 
 // The sync cron job, or null if there isn't one.
 function cron() {
-    $iden = $lib.globals.get($cronglobal)
-    if (not $iden) { return($lib.null) }
+    $iden = $lib.globals.get($cronglobal)  // noqa: R005
+    if (not $iden) { return() }
     try {
         return($lib.cron.get($iden))
     } catch (NoSuchIden, StormRuntimeError) as err {
-        return($lib.null)
+        return()
     }
 }
 
@@ -25,23 +29,23 @@ function schedule(period) {
     $new = $lib.cron.add(query="slib.malpedia.sync", period=$period)
     $new.set(name, "slib.malpedia.sync")
     $new.set(doc, "Pull Malpedia (if it changed) and sync its library, actors, families, and YARA rules into the view.")
-    $lib.globals.set($cronglobal, $new.iden)
+    $lib.globals.set($cronglobal, $new.iden)  // noqa: R005
     if $old { $lib.cron.del($old.iden) }
     return($new)
 }
 
 function enable(enabled=(true)) {
     $job = $cron()
-    if (not $job) { return($lib.null) }
-    if $enabled { $lib.cron.enable($job.iden) }
-    else { $lib.cron.disable($job.iden) }
+    if (not $job) { return() }
+    if $enabled { $lib.cron.enable($job.iden) }  // noqa: R005
+    else { $lib.cron.disable($job.iden) }  // noqa: R005
     return($lib.cron.get($job.iden))
 }
 
 // Delete the sync cron job. Returns whether there was one.
 function unschedule() {
     $job = $cron()
-    $lib.globals.pop($cronglobal)
+    $lib.globals.pop($cronglobal)  // noqa: R005
     if (not $job) { return((false)) }
     $lib.cron.del($job.iden)
     return((true))
@@ -53,7 +57,7 @@ function unschedule() {
 function autoSchedule() {
     $retn = $svc.schedInfo()
     if (not $retn.status) {
-        $lib.warn("slib.malpedia: Unable to read the sync schedule: {err}", err=$retn.mesg)
+        $lib.warn(`slib.malpedia: Unable to read the sync schedule: {$retn.mesg}`)
         return((false))
     }
     $info = $retn.data
@@ -66,15 +70,15 @@ function autoSchedule() {
 
 function tagSettings() {
     return(({
-        "prefix": $lib.globals.get("slib:malpedia:tag:prefix"),
-        "tlp": $lib.globals.get("slib:malpedia:tag:tlp"),
+        "prefix": $lib.globals.get("slib:malpedia:tag:prefix"),  // noqa: R005
+        "tlp": $lib.globals.get("slib:malpedia:tag:tlp"),  // noqa: R005
     }))
 }
 
-// Set a tag prefix (name is prefix or tlp). Raises BadArg if it isn't a valid tag.
+// Set a tag prefix (name is prefix or tlp) to a normalized syn:tag (see slib.malpedia.admin.tags).
 function setTagPrefix(name, prefix) {
     $norm = $lib.cast(syn:tag, $prefix)
-    $lib.globals.set(`slib:malpedia:tag:{$name}`, $norm)
+    $lib.globals.set(`slib:malpedia:tag:{$name}`, $norm)  // noqa: R005
     return($norm)
 }
 

@@ -1,14 +1,30 @@
+// Set a prefix, refusing anything that isn't already a valid tag name (ex. "" or one with
+// spaces), which would silently tag nodes with something else.
+function setPrefix(admin, which, valu) {
+    ($ok, $norm) = $lib.trycast(syn:tag, $valu)
+    if ((not $ok) or ($norm != $lib.cast(str, $valu).strip().lower())) {
+        $lib.warn(`slib.malpedia.admin.tags: Invalid tag prefix {$valu}, it isn't a valid tag name. The {$which} prefix wasn't changed.`)
+        return((false))
+    }
+    $admin.setTagPrefix($which, $norm)
+    return((true))
+}
+
 init {
     $admin = $lib.import(slib.malpedia.priv.admin)
     $name = "slib.malpedia.admin.tags"
 
-    try {
-        if ($cmdopts.prefix != $lib.null) { $admin.setTagPrefix(prefix, $cmdopts.prefix) }
-        if ($cmdopts.tlp_prefix != $lib.null) { $admin.setTagPrefix(tlp, $cmdopts.tlp_prefix) }
-    } catch * as err {
-        $lib.warn("{name}: Invalid tag prefix: {err}", name=$name, err=$err.mesg)
+    $changed = (false)
+    if ($cmdopts.prefix != null) {
+        if $setPrefix($admin, prefix, $cmdopts.prefix) { $changed = (true) }
+    }
+    if ($cmdopts.tlp_prefix != null) {
+        if $setPrefix($admin, tlp, $cmdopts.tlp_prefix) { $changed = (true) }
     }
 
     $settings = $admin.tagSettings()
-    $lib.print("{name}: prefix={prefix} tlp={tlp}", name=$name, prefix=$settings.prefix, tlp=$settings.tlp)
+    $lib.print(`{$name}: prefix={$settings.prefix} tlp={$settings.tlp}`)
+    if $changed {
+        $lib.print(`{$name}: The next slib.malpedia.sync in each view models every record again, replacing the tags it added under the old prefixes.`)
+    }
 }

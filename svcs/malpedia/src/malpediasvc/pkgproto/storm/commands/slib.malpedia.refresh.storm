@@ -1,49 +1,85 @@
 init {
-    $layer = $lib.layer.get().iden
-    for $form in (media:news, risk:threat, risk:tool:software, it:app:yara:rule) {
-        if (not $lib.user.allowed(`node.add.{$form}`, gateiden=$layer)) {
-            $lib.raise(AuthDeny, `slib.malpedia.refresh edits nodes in the current view, it needs permission to add {$form} nodes to its layer.`)
-        }
-    }
     $sync = $lib.import(slib.malpedia.priv.sync)
     $util = $lib.import(slib.malpedia.util)
     $name = "slib.malpedia.refresh"
+
+    // slib.malpedia.priv.sync.refresh() checks these too, this fails before any output.
+    $sync.reqEdit($name)
+    if ($cmdopts.no_limit and not $lib.auth.users.get().allowed(slib.malpedia.admin)) {
+        $lib.raise(AuthDeny, "slib.malpedia.refresh --no-limit needs the slib.malpedia.admin permission.")
+    }
+
+    // The most actors and families one run refreshes (2-3 requests to Malpedia each), unless
+    // --no-limit is used. Malpedia is a free community resource, the daily sync gets everything.
+    $limit = $sync.refreshLimit()
+    // Shared by every inbound node: how many came in, and which IDs were refreshed already.
+    $state = ({"nodes": 0, "done": $lib.set(), "capped": false})
+}
+
+fini {
+    if ((not $cmdopts.actor) and (not $cmdopts.family) and $state.nodes = 0) {
+        $lib.warn(`{$name}: Nothing to refresh. Use --actor or --family, or pipe in Malpedia's risk:threat or risk:tool:software nodes.`)
+    }
 }
 
 function report(s) {
-    $lib.print("{name}: Modeled {counts}.", name=$name, counts=$util.kindCounts($s.counts))
-    for $err in $s.errors { $lib.warn("{name}: Unable to refresh {err}", name=$name, err=$err) }
-    for $warn in $s.warnings { $lib.warn("{name}: {warn}", name=$name, warn=$warn) }
+    $lib.print(`{$name}: Modeled {$util.kindCounts($s.counts)}.`)
+    for $err in $s.errors { $lib.warn(`{$name}: Unable to refresh {$err}`) }
+    for $warn in $s.warnings { $lib.warn(`{$name}: {$warn}`) }
     return()
 }
 
 if ($cmdopts.actor or $cmdopts.family) {
     // --actor and --family ignore inbound nodes.
-    spin |
+    spin |  // noqa: P001
     $actors = $lib.set()
     $families = $lib.set()
-    for $id in $cmdopts.actor { $actors.add($lib.cast(str, $id).strip()) }
-    for $id in $cmdopts.family { $families.add($lib.cast(str, $id).strip()) }
-    $s = $sync.refresh($actors.list(), $families.list())
-    $report($s)
-    if $cmdopts.yield { yield $util.nodes($s.nodes) }
+    for $id in $cmdopts.actor { $actors.add($lib.cast(str, $id).strip().lower()) }
+    for $id in $cmdopts.family { $families.add($lib.cast(str, $id).strip().lower()) }
+    $count = ($lib.len($actors) + $lib.len($families))
+    if ($count > $limit and not $cmdopts.no_limit) {
+        $lib.warn(`{$name}: Not refreshing {$count} actors and families at once, the limit is {$limit}. Use slib.malpedia.sync, or --no-limit (needs slib.malpedia.admin).`)
+    } else {
+        $s = $sync.refresh($actors.list(), $families.list(), nolimit=$cmdopts.no_limit)
+        $report($s)
+        if $cmdopts.yield { yield $util.nodes($s.nodes) }
+    }
 }
 else {
-    $s = $lib.null
-    switch $node.form() {
+    $what = (null)
+    $id = (null)
+    switch $node.form() {  // noqa: R002
         "risk:threat": {
-            if (:reporter:name = "malpedia" and :ext:id) { $s = $sync.refresh((:ext:id,), ([])) }
+            $state.nodes = ($state.nodes + 1)
+            if (:reporter:name = "malpedia" and :ext:id) { $what = actor $id = :ext:id }
         }
         "risk:tool:software": {
-            if (:reporter:name = "malpedia" and :id) { $s = $sync.refresh(([]), (:id,)) }
+            $state.nodes = ($state.nodes + 1)
+            if (:reporter:name = "malpedia" and :id) { $what = family $id = :id }
         }
+        *: { $state.nodes = ($state.nodes + 1) }
     }
-    if $s {
-        $report($s)
-        divert $cmdopts.yield $util.nodes($s.nodes)
+
+    if (not $what) {
+        $lib.warn(`{$name}: {$node.form()} {$node.repr()} isn't a Malpedia actor or family (a risk:threat with :reporter:name=malpedia and an :ext:id, or a risk:tool:software with :reporter:name=malpedia and an :id).`)  // noqa: R002
+        if $cmdopts.yield { spin }  // noqa: P001
     } else {
-        $lib.warn("{name}: {form} {iden} isn't a Malpedia actor or family (a risk:threat with :reporter:name=malpedia and an :ext:id, or a risk:tool:software with :reporter:name=malpedia and an :id).",
-            name=$name, form=$node.form(), iden=$node.iden())
-        if $cmdopts.yield { spin }
+        $key = `{$what}:{$lib.cast(str, $id).lower()}`
+        if $state.done.has($key) {
+            // Already refreshed (and yielded) by an earlier node.
+            if $cmdopts.yield { spin }  // noqa: P001
+        } elif ($lib.len($state.done) >= $limit and not $cmdopts.no_limit) {
+            if (not $state.capped) {
+                $state.capped = (true)
+                $lib.warn(`{$name}: Refreshed {$limit} actors and families, skipping the rest. Use slib.malpedia.sync, or --no-limit (needs slib.malpedia.admin).`)
+            }
+            if $cmdopts.yield { spin }  // noqa: P001
+        } else {
+            $state.done.add($key)
+            if ($what = "actor") { $s = $sync.refresh(($id,), ([]), nolimit=$cmdopts.no_limit) }
+            else { $s = $sync.refresh(([]), ($id,), nolimit=$cmdopts.no_limit) }
+            $report($s)
+            divert $cmdopts.yield $util.nodes($s.nodes)
+        }
     }
 }

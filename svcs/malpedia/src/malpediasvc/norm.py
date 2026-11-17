@@ -163,6 +163,17 @@ def normDate(text: Any) -> str | None:
     return year
 
 
+def _strs_ordered(valu: Any) -> list[str]:
+    """Stripped, de-duplicated strings from a list, keeping their order."""
+
+    out = []
+    for item in valu or ():
+        item = _str(item)
+        if item and item not in out:
+            out.append(item)
+    return out
+
+
 def splitAuthors(text: Any) -> list[str]:
     """Split a BibTeX author field (``A and B and C``) into names, keeping their order."""
 
@@ -375,7 +386,9 @@ def normBib(entry: Mapping) -> dict | None:
         "key": entry.get("key"),
         "type": entry.get("type"),
         "title": _str(fields.get("title")),
-        "authors": splitAuthors(fields.get("author")),
+        "authors": _strs_ordered((entry.get("names") or {}).get("author"))
+        if entry.get("names") and "author" in entry["names"]
+        else splitAuthors(fields.get("author")),
         "published": normDate(fields.get("date")),
         "publisher": _str(fields.get("organization")) or _str(fields.get("institution")),
         "language": _str(fields.get("language")),

@@ -1,5 +1,7 @@
 """The Python definition of the slib.malpedia Storm package."""
 
+import json
+
 from stormlibpp import StormPkg
 
 from . import __version__
@@ -14,26 +16,58 @@ SVC_GUID = "15b7f8ff9cef4e8fa9fedd9f2b10c1a5"
 # daily sync and run the initial sync.
 AUTO_QUERY = "if $lib.import(slib.malpedia.priv.admin).autoSchedule() { slib.malpedia.sync }"
 
+# The name of that one time cron job.
+SETUP_JOB = "slib.malpedia (initial setup and sync)"
+
+
+def stormStr(text: str) -> str:
+    """A Storm double quoted string literal for text."""
+
+    # json.dumps escapes quotes, backslashes, and control characters the same way Storm's
+    # double quoted strings unescape them. Non-ASCII would become \uXXXX, keep it ASCII.
+    if not text.isascii():
+        raise ValueError(f"Storm string literals here must be ASCII: {text!r}")
+    return json.dumps(text)
+
+
 SVC_EVTS = {
     "add": {
-        # Runs once, as root, when the service is first added to a Cortex. It sets up the
-        # meta:source and default settings, then (unless malpedia:autosync is off) schedules
-        # the daily sync and starts the initial one in the background.
+        # Runs once, as root, when the service is added to a Cortex. It sets up the meta:source
+        # and default settings, then (unless malpedia:autosync is off) schedules the daily sync
+        # and starts the initial one in the background.
         "storm": (
-            f"$autoquery = {AUTO_QUERY!r} "
+            f"$autoquery = {stormStr(AUTO_QUERY)} "
             f"[(meta:source={SVC_GUID} :name=malpedia :type=slib.malpedia "
             ":url=https://malpedia.caad.fkie.fraunhofer.de)] | spin | "
-            'if ($lib.globals.get("slib:malpedia:tag:prefix") = $lib.null) { '
+            'if ($lib.globals.get("slib:malpedia:tag:prefix") = null) { '
             '    $lib.globals.set("slib:malpedia:tag:prefix", "rep.malpedia") '
             "} "
-            'if ($lib.globals.get("slib:malpedia:tag:tlp") = $lib.null) { '
+            'if ($lib.globals.get("slib:malpedia:tag:tlp") = null) { '
             '    $lib.globals.set("slib:malpedia:tag:tlp", "rep.malpedia.tlp") '
             "} "
             # The service isn't ready while this runs, so a one time cron job does the rest.
             "$job = $lib.cron.at(query=$autoquery, now=(true)) "
-            '$job.set(name, "slib.malpedia (initial setup and sync)")'
+            f"$job.set(name, {stormStr(SETUP_JOB)})"
         )
-    }
+    },
+    "del": {
+        # Runs as root when the service is deleted, after its package is gone (so it can't use
+        # the package's modules). Deletes the daily sync cron job (it would fail every day
+        # without the service) and any setup jobs left behind. The tag settings are kept, so
+        # adding the service again tags nodes the same way.
+        "storm": (
+            '$iden = $lib.globals.get("slib:malpedia:cron") '
+            "if $iden { "
+            "    try { $lib.cron.del($iden) } catch * as err { } "
+            '    $lib.globals.pop("slib:malpedia:cron") '
+            "} "
+            "for $job in $lib.cron.list() { "
+            f"    if ($job.pack().name = {stormStr(SETUP_JOB)}) {{ "
+            "        try { $lib.cron.del($job.iden) } catch * as err { } "
+            "    } "
+            "}"
+        )
+    },
 }
 
 

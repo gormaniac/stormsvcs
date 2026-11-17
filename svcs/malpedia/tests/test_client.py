@@ -173,6 +173,12 @@ async def test_bad_json_and_size(monkeypatch):
             monkeypatch.setattr(m_client, "MAX_BODY", 10)
             with pytest.raises(MalpediaApiError, match="too large"):
                 await cli.getBib()
+            # Without a Content-Length, the body is limited while it's read.
+            monkeypatch.setattr(m_client, "MAX_BODY", 250)
+            with pytest.raises(MalpediaApiError, match="too large \\(over 250 bytes\\)"):
+                await cli.getText("/test/chunked")
+            monkeypatch.setattr(m_client, "MAX_BODY", 300)
+            assert await cli.getText("/test/chunked") == "x" * 300
 
 
 async def test_large_bodies():
@@ -215,6 +221,14 @@ def test_unzip():
     assert m_client.unzipRules(b"") == {}
     with pytest.raises(MalpediaApiError, match="invalid YARA zip"):
         m_client.unzipRules(b"not a zip")
+
+    # A member that can't be read (here, a bad CRC) fails the whole zip.
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_STORED) as zfd:
+        zfd.writestr("win.a_w0.yar", "rule a { condition: true }")
+    data = buf.getvalue().replace(b"rule a", b"rule b", 1)
+    with pytest.raises(MalpediaApiError, match="Unable to read win.a_w0.yar from the YARA zip"):
+        m_client.unzipRules(data)
 
 
 def test_errmesg():

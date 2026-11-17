@@ -21,4 +21,6 @@ jobs:
       service: malpedia
       # Also run the tests in the test image built on the new production image.
       docker_tests: true
+      # Both `synapse.tools.storm.lint` and `--v3-ready` are clean, keep them that way.
+      storm_lint: block
     secrets: inherit

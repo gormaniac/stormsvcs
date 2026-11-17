@@ -5,6 +5,9 @@
 // slib.malpedia.model, as root, so slib.malpedia.sync holders don't need node permissions),
 // and tells the service which ones were modeled. A record that fails to model isn't marked
 // as synced, so the next sync tries it again.
+//
+// Anyone with slib.malpedia.sync can import this module, so its functions check the same
+// permissions and limits as the commands, instead of relying on the commands to.
 
 init {
     $svc = $lib.service.get("slib.malpedia")
@@ -12,10 +15,41 @@ init {
     $kinds = (news, actor, family, yara)
     // The most per-record errors a sync reports, the rest are only counted.
     $maxerrs = (10)
+    // The most actors and families one refresh() asks Malpedia for (2-3 requests each),
+    // unless an admin uses nolimit. Malpedia is a free community resource, the daily sync
+    // gets everything.
+    $maxrefresh = (25)
+}
+
+// The most actors and families one refresh() gets, without nolimit.
+function refreshLimit() { return($maxrefresh) }
+
+// Raise AuthDeny unless the user may model Malpedia's nodes in the current view. The edits
+// run as root, so only users that can add Malpedia's nodes to the view's layer may run them.
+function reqEdit(name) {
+    $user = $lib.auth.users.get()
+    $layer = $lib.layer.get().iden
+    for $form in (media:news, risk:threat, risk:tool:software, it:app:yara:rule) {
+        if (not $user.allowed(`node.add.{$form}`, gateiden=$layer)) {
+            $lib.raise(AuthDeny, `{$name} edits nodes in the current view, it needs permission to add {$form} nodes to its layer.`)
+        }
+    }
+    return()
+}
+
+function _reqAdmin(what) {
+    if (not $lib.auth.users.get().allowed(slib.malpedia.admin)) {
+        $lib.raise(AuthDeny, `{$what} needs the slib.malpedia.admin permission.`)
+    }
+    return()
 }
 
 // Pull Malpedia into the service's snapshot (if it's due). Returns the service's retn.
-function pull(force=(false)) { return($svc.pull(force=$force)) }
+// Forcing a pull is for admins.
+function pull(force=(false)) {
+    if $force { $_reqAdmin("slib.malpedia.sync --force") }
+    return($svc.pull(force=$force))
+}
 
 function _err(summary, mesg) {
     if ($lib.len($summary.errors) < $maxerrs) { $summary.errors.append($mesg) }
@@ -31,7 +65,7 @@ function _batch(view, kind, batch, conf, summary) {
             $n = $model.model($kind, $item, $conf)
             $done.append(($item.key, $item.hash))
             // Only articles can be skipped: their URL isn't a valid inet:url.
-            if ($n = $lib.null) { $counts.skipped = ($counts.skipped + 1) }
+            if ($n = null) { $counts.skipped = ($counts.skipped + 1) }
             elif $item.new { $counts.added = ($counts.added + 1) }
             else { $counts.updated = ($counts.updated + 1) }
         } catch * as err {
@@ -54,7 +88,7 @@ function _batch(view, kind, batch, conf, summary) {
 
     $retn = $svc.synced($view, $kind, done=$done, removed=$gone)
     if (not $retn.status) { return($retn.mesg) }
-    return($lib.null)
+    return()
 }
 
 // Sync Malpedia into the current view.
@@ -62,12 +96,18 @@ function _batch(view, kind, batch, conf, summary) {
 // Returns a summary: {"pull": the pull summary (or null), "pullerror": why the pull failed
 // (the view is still synced from the service's last good pull), "error": why the sync
 // stopped, "kinds": {kind: {"total", "added", "updated", "removed", "skipped", "failed"}},
-// "errors"}.
+// "errors", "retagged": whether the tag prefixes changed since the view's last sync}.
+//
+// When a tag prefix changed since the view's last sync, every record is modeled again (like
+// full=(true)) and loses the tags it got under the old prefix. If any record fails to model,
+// the next sync does that again.
 function sync(force=(false), full=(false), pull=(true), progress=(false)) {
+    $reqEdit("slib.malpedia.sync")
+    if ($force and $pull) { $_reqAdmin("slib.malpedia.sync --force") }
     $view = $lib.view.get().iden
-    $summary = ({"pull": $lib.null, "pullerror": $lib.null, "error": $lib.null, "kinds": ({}), "errors": ([])})
+    $summary = ({"pull": null, "pullerror": null, "error": null, "kinds": {}, "errors": [], "retagged": false})
     for $kind in $kinds {
-        $summary.kinds.$kind = ({"total": (0), "added": (0), "updated": (0), "removed": (0), "skipped": (0), "failed": (0)})
+        $summary.kinds.$kind = ({"total": 0, "added": 0, "updated": 0, "removed": 0, "skipped": 0, "failed": 0})
     }
 
     if $pull {
@@ -76,7 +116,22 @@ function sync(force=(false), full=(false), pull=(true), progress=(false)) {
         else { $summary.pullerror = $retn.mesg }
     }
 
-    $conf = $model.conf()
+    // The tag prefixes the view was last synced with.
+    $retn = $svc.viewInfo($view)
+    if (not $retn.status) {
+        $summary.error = $retn.mesg
+        return($summary)
+    }
+    $old = $retn.data.tags
+    $conf = $model.conf(old=$old)
+    if $conf.changed {
+        $full = (true)
+        $summary.retagged = (true)
+        if $progress {
+            $lib.print(`slib.malpedia.sync: The tag prefixes changed since this view's last sync, modeling every record to replace the old tags.`)
+        }
+    }
+
     for $kind in $kinds {
         $first = (true)
         for $retn in $svc.changes($view, $kind, full=$full) {
@@ -89,7 +144,7 @@ function sync(force=(false), full=(false), pull=(true), progress=(false)) {
                 $summary.kinds.$kind.total = $batch.total
                 $first = (false)
                 if ($progress and $batch.total) {
-                    $lib.print("slib.malpedia.sync: Modeling {count} {kind} records.", count=$batch.total, kind=$kind)
+                    $lib.print(`slib.malpedia.sync: Modeling {$batch.total} {$kind} records.`)
                 }
             }
             $mesg = $_batch($view, $kind, $batch, $conf, $summary)
@@ -100,18 +155,36 @@ function sync(force=(false), full=(false), pull=(true), progress=(false)) {
         }
     }
 
-    $retn = $svc.viewSynced($view)
+    // A record that failed to model still has its old tags, so the new prefixes are only
+    // recorded once every record has them (until then, each sync models every record again).
+    $tags = ({"prefix": $conf.prefix, "tlp": $conf.tlp})
+    if $summary.retagged {
+        for $kind in $kinds {
+            if $summary.kinds.$kind.failed { $tags = (null) }
+        }
+    }
+    $retn = $svc.viewSynced($view, tags=$tags)
     if (not $retn.status) { $summary.error = $retn.mesg }
     return($summary)
 }
 
 // Get actors and families straight from Malpedia and model them (see slib.malpedia.refresh).
+// At most refreshLimit() at once, unless an admin uses nolimit.
 //
 // Returns {"nodes": [the risk:threat and risk:tool:software nodes], "counts": {kind: n},
 // "errors": [...], "warnings": [...]}.
-function refresh(actors, families) {
+function refresh(actors, families, nolimit=(false)) {
+    $reqEdit("slib.malpedia.refresh")
+    if $nolimit {
+        $_reqAdmin("slib.malpedia.refresh --no-limit")
+    } else {
+        $count = ($lib.len($actors) + $lib.len($families))
+        if ($count > $maxrefresh) {
+            $lib.raise(BadArg, `Not refreshing {$count} actors and families at once, the limit is {$maxrefresh}.`)
+        }
+    }
     $conf = $model.conf()
-    $summary = ({"nodes": ([]), "counts": ({}), "errors": ([]), "warnings": ([])})
+    $summary = ({"nodes": [], "counts": {}, "errors": [], "warnings": []})
     for $kind in $kinds { $summary.counts.$kind = (0) }
 
     $todo = ([])
@@ -125,6 +198,8 @@ function refresh(actors, families) {
             continue
         }
         $data = $retn.data
+        // The service normalizes the ID (ex. APT28 is apt28).
+        $id = $data.id
         for $warn in $data.warnings { $summary.warnings.append($warn) }
 
         // Model in sync order, so the main node exists before the articles link to it.

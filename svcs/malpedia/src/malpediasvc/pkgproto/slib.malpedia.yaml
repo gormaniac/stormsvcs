@@ -1,5 +1,5 @@
 name: slib.malpedia
-version: 0.2.0
+version: 0.3.0
 guid: 7cd3f7d3485c4aed874fd561e954a28c
 
 synapse_version: ">=2.234.0,<3.0.0"
@@ -55,9 +55,11 @@ commands:
 
       First the service pulls Malpedia, if it's due: it asks for Malpedia's version, and only
       if that changed does it download the library, actors, families, and new YARA rules (a
-      handful of bulk requests, never one per actor or family). The very first pull downloads
-      everything, every pull after that only what changed. Pulls happen at most once every
-      malpedia:pull:minage hours (12 by default) unless --force is used.
+      handful of bulk requests, plus up to 25 for actors and rules the bulk data is missing).
+      Every YARA rule (one ~4MB zip) is only downloaded by the first pull, forced pulls, and
+      once every malpedia:yara:fullage days (7 by default). Pulls happen at most once every
+      malpedia:pull:minage hours (12 by default) unless --force is used. A pull that couldn't
+      get everything pulls again on the next check, even if Malpedia's version didn't change.
 
       Then every record that changed since this view's last sync is modeled, in this order:
 
@@ -68,8 +70,11 @@ commands:
                             the actors they're attributed to.
         it:app:yara:rule    The families' YARA rules, with -(detects)> edges to the families.
 
-      Articles are linked to the actors and families they're tagged with by -(about)> edges
+      Articles are linked to the actors and families they're tagged with by -(refs)> edges
       and the actors' and families' tags. Everything is -(seen)> by the malpedia meta:source.
+
+      If a tag prefix changed (see slib.malpedia.admin.tags) since this view's last sync, every
+      record is modeled again and loses the tags it got under the old prefix.
 
       The service schedules this to run daily when it's added to the Cortex, see
       slib.malpedia.admin.schedule.
@@ -85,7 +90,7 @@ commands:
       - - --force
         - default: false
           action: store_true
-          help: Pull Malpedia now even if it was checked recently or hasn't changed (needs slib.malpedia.admin).
+          help: Pull Malpedia now (and every YARA rule) even if it was checked recently or hasn't changed (needs slib.malpedia.admin).
       - - --full
         - default: false
           action: store_true
@@ -103,10 +108,12 @@ commands:
 
       An actor is modeled with its families (and their -(uses)> edges) and the articles
       about it. A family is modeled with its actors, YARA rules, and the articles about it.
-      This only adds data, the daily sync handles removals.
+      Malpedia's values replace the nodes' (ex. :name, aliases, a rule's :family and :author),
+      but nothing is undone: tags and edges Malpedia dropped are removed by the daily sync.
 
       Takes risk:threat and risk:tool:software nodes from Malpedia (with a :reporter:name of
-      malpedia), or IDs with --actor and --family. Each one costs 2-3 requests to Malpedia.
+      malpedia), or IDs with --actor and --family (in any case, ex. APT28 is apt28). Each one
+      costs 2-3 requests to Malpedia, so a run refreshes at most 25 of them, once each.
 
       Examples:
 
@@ -128,6 +135,10 @@ commands:
         - default: false
           action: store_true
           help: Yield the refreshed risk:threat and risk:tool:software nodes instead of the inbound nodes.
+      - - --no-limit
+        - default: false
+          action: store_true
+          help: Refresh more than 25 actors and families (needs slib.malpedia.admin).
     cmdinputs:
       - form: risk:threat
         help: Malpedia actors to refresh.
@@ -224,8 +235,9 @@ commands:
       rep.malpedia.mal.win.xagent), and YARA rules <tlp prefix>.<tlp> (ex.
       rep.malpedia.tlp.white). Records Malpedia removed are tagged <prefix>.removed.
 
-      Changing a prefix doesn't retag existing nodes, run slib.malpedia.sync --full --no-pull
-      to apply the new tags (the old tags stay).
+      Changing a prefix doesn't retag nodes right away. The next slib.malpedia.sync in each
+      view (ex. slib.malpedia.sync --no-pull) models every record again with the new tags, and
+      removes the tags it added under the old prefix. Prefixes must already be valid tag names.
 
       Examples:
 

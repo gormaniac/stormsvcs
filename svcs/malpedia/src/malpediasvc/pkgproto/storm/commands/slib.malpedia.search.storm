@@ -10,26 +10,27 @@ init {
 
     $found = ([])
     for $kind in $kinds {
-        $results = $util.data($user.find($kind, $cmdopts.needle), `Searching the {$kind}s`)
-        if ($results = $lib.null) { continue }
+        $plural = $util.plural($kind)
+        $results = $util.data($user.find($kind, $cmdopts.needle), `Searching the {$plural}`)
+        if ($results = null) { continue }
 
         $rows = ([])
         for $res in $results {
             $found.append(($kind, $res.name))
             $synonyms = $res.synonyms
-            if ($synonyms = $lib.null) { $synonyms = $res.alt_names }
-            if ($synonyms = $lib.null) { $synonyms = ([]) }
+            if ($synonyms = null) { $synonyms = $res.alt_names }
+            if ($synonyms = null) { $synonyms = ([]) }
             $display = $res.common_name
-            if ($display = $lib.null) { $display = "" }
+            if ($display = null) { $display = "" }
             $known = no
             if $res.known { $known = yes }
-            $rows.append(($res.name, $display, $known, $lib.str.join(", ", $synonyms)))
+            $rows.append(($res.name, $display, $known, (", ").join($synonyms)))
         }
         if $rows {
-            $lib.print("{name}: {count} {kind}s match {needle}:", name=$name, count=$lib.len($rows), kind=$kind, needle=$cmdopts.needle)
+            $lib.print(`{$name}: {$lib.len($rows)} {$plural} match {$cmdopts.needle}:`)
             $util.table(([["id", 32], ["name", 28], ["synced", 7], ["synonyms", 60]]), $rows)
         } else {
-            $lib.print("{name}: No {kind}s match {needle}.", name=$name, kind=$kind, needle=$cmdopts.needle)
+            $lib.print(`{$name}: No {$plural} match {$cmdopts.needle}.`)
         }
     }
 }
@@ -37,6 +38,6 @@ init {
 if $cmdopts.yield {
     for ($kind, $id) in $found {
         if ($kind = "actor") { risk:threat=(malpedia, $id) }
-        else { risk:tool:software=(malpedia, $id) }
+        else { risk:tool:software=(malpedia, $id) }  // noqa: M001
     }
 }

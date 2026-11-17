@@ -6,29 +6,31 @@ init {
     $info = $util.data($user.status(), "Getting the service's status")
     if $info {
         if $info.complete {
-            $lib.print("{name}: Malpedia version {version} ({date}), pulled {pulled}, last checked {checked}.",
-                name=$name, version=$info.version, date=$info.date,
-                pulled=$util.when($info.pulled), checked=$util.when($info.checked))
+            $lib.print(`{$name}: Malpedia version {$info.version} ({$info.date}), pulled {$util.when($info.pulled)}, last checked {$util.when($info.checked)}.`)
         } else {
-            $lib.print("{name}: Malpedia hasn't been pulled yet, run slib.malpedia.sync.", name=$name)
+            $lib.print(`{$name}: Malpedia hasn't been pulled yet, run slib.malpedia.sync.`)
         }
-        $lib.print("{name}: The service has {counts} ({requests} requests to Malpedia so far).",
-            name=$name, counts=$util.kindCounts($info.counts), requests=$info.requests)
-        $lib.print("{name}: Checks Malpedia at most every {minage} hours.", name=$name, minage=$info.minage)
+        $lib.print(`{$name}: The service has {$util.kindCounts($info.counts)} ({$info.requests} requests to Malpedia so far).`)
+        $lib.print(`{$name}: Checks Malpedia at most every {$info.minage} hours.`)
+        if $info.complete {
+            $lib.print(`{$name}: Last downloaded every YARA rule {$util.when($info.yarafull)}.`)
+        }
+        if $info.gaps {
+            $lib.print(`{$name}: The last pull couldn't get {$info.gaps} actors or YARA rule families, the next check pulls again.`)
+        }
         if $info.failed {
-            $lib.warn("{name}: The last pull failed (the next sync retries it): {err}", name=$name, err=$info.failed)
+            $lib.warn(`{$name}: The last pull failed (the next sync retries it): {$info.failed}`)
         }
 
         $view = $info.view
         if $view.synced {
-            $lib.print("{name}: This view was synced {synced} (Malpedia version {version}) and has {counts}.",
-                name=$name, synced=$util.when($view.synced), version=$view.version, counts=$util.kindCounts($view.counts))
+            $lib.print(`{$name}: This view was synced {$util.when($view.synced)} (Malpedia version {$view.version}) and has {$util.kindCounts($view.counts)}.`)
         } else {
-            $lib.print("{name}: This view hasn't been synced yet ({counts}).", name=$name, counts=$util.kindCounts($view.counts))
+            $lib.print(`{$name}: This view hasn't been synced yet ({$util.kindCounts($view.counts)}).`)
         }
 
         if $info.last {
-            for $warn in $info.last.warnings { $lib.print("{name}: Last pull warning: {warn}", name=$name, warn=$warn) }
+            for $warn in $info.last.warnings { $lib.print(`{$name}: Last pull warning: {$warn}`) }
         }
     }
 }

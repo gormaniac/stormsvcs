@@ -7,7 +7,7 @@
 //   risk:threat         (malpedia, <actor id>)        :ext:id=<actor id>
 //   risk:tool:software  (malpedia, <family id>)       :id=<family id>
 //   it:app:yara:rule    (malpedia, <rule file name>)  :ext:id=<rule file name>
-//   media:news          $lib.gen.newsByUrl(<url>), so articles merge with other sources'.
+//   media:news          by URL (see getNews), so articles merge with other sources'.
 //
 // Malpedia's own nodes (threats, tools, rules) always take Malpedia's values. Articles can
 // come from anywhere, so only their unset props are filled in.
@@ -15,6 +15,12 @@
 // NOTE: A for loop that runs while a node is in a function's pipeline sends the node
 // downstream after its first iteration. So functions here only yield a node when they
 // don't loop, and loops call helpers that edit the node in their own runtime instead.
+//
+// NOTE: $lib.globals.get() and the $lib.gen functions are removed in Synapse 3.x, but 2.x
+// has no $lib.globals.<name> (and these names have colons) and no other way to deconflict
+// these nodes the way other packages do. ps:contact, media:news, and risk:tool:software are
+// renamed in 3.x (and ou:industry removed). This package requires Synapse <3.0.0, so R005, M001,
+// and M002 are ignored here.
 
 init {
     $sourceGuid = "15b7f8ff9cef4e8fa9fedd9f2b10c1a5"
@@ -22,33 +28,62 @@ init {
 
 // ---- Settings ----
 
-// The settings every model function needs: the tag prefixes, and the guids of the reporter
-// ou:org and the YARA meta:ruleset.
-function conf() {
-    $prefix = $lib.globals.get("slib:malpedia:tag:prefix")
-    if ($prefix = $lib.null) { $prefix = "rep.malpedia" }
-    $tlp = $lib.globals.get("slib:malpedia:tag:tlp")
-    if ($tlp = $lib.null) { $tlp = `{$prefix}.tlp` }
+// The malpedia meta:source, created in the current view if it isn't there yet.
+function source() {
+    [ meta:source=$sourceGuid
+        :name=malpedia
+        :type=slib.malpedia
+        :url=https://malpedia.caad.fkie.fraunhofer.de
+    ]
+    return($node)
+}
 
-    $org = $lib.gen.orgByName(malpedia)
+// The settings every model function needs: the tag prefixes, and the guids of the reporter
+// ou:org and the YARA meta:ruleset. It also makes sure the malpedia meta:source is in the view.
+//
+// old is the {"prefix", "tlp"} the view was last synced with (see slib.malpedia.priv.sync). If
+// a prefix changed since, the old one is returned as oldprefix/oldtlp, so the model removes
+// the tags it added under it, and "changed" is true.
+function conf(old=(null)) {
+    $prefix = $lib.globals.get("slib:malpedia:tag:prefix")  // noqa: R005
+    if ($prefix = null) { $prefix = "rep.malpedia" }
+    $tlp = $lib.globals.get("slib:malpedia:tag:tlp")  // noqa: R005
+    if ($tlp = null) { $tlp = `{$prefix}.tlp` }
+
+    $oldprefix = (null)
+    $oldtlp = (null)
+    if $old {
+        if ($old.prefix and $old.prefix != $prefix) { $oldprefix = $old.prefix }
+        if ($old.tlp and $old.tlp != $tlp) { $oldtlp = $old.tlp }
+    }
+    $changed = (false)
+    if ($oldprefix or $oldtlp) { $changed = (true) }
+
+    $source()
+    $org = $lib.gen.orgByName(malpedia)  // noqa: R005
     [ meta:ruleset=(malpedia, yara)
         :name="malpedia yara rules"
         :desc="YARA rules from Malpedia (https://malpedia.caad.fkie.fraunhofer.de)."
     ]
-    $ruleset = $node.value()
+    $ruleset = $node.value()  // noqa: R002
 
     return(({
         "prefix": $prefix,
         "tlp": $tlp,
         "removed": `{$prefix}.removed`,
-        "reporter": $org.value(),
+        "oldprefix": $oldprefix,
+        "oldtlp": $oldtlp,
+        "oldremoved": $fullTag($oldprefix, removed),
+        "changed": $changed,
+        "reporter": $org.value(),  // noqa: R002
         "ruleset": $ruleset,
+        "source": $sourceGuid,
     }))
 }
 
-// A full tag from a prefix and a record's tag suffix.
+// A full tag from a prefix and a record's tag suffix, or null if either is empty.
 function fullTag(prefix, suffix) {
-    if (not $suffix) { return($lib.null) }
+    if (not $prefix or not $suffix) { return() }
     return(`{$prefix}.{$suffix}`)
 }
 
@@ -57,8 +92,10 @@ function fullTag(prefix, suffix) {
 // Link a node to the malpedia meta:source and remove the removed tag (it's back in Malpedia).
 function seen(n, conf) {
     $removed = $conf.removed
+    $oldremoved = $conf.oldremoved
     yield $n
-    [ <(seen)+ { meta:source=$sourceGuid } -#$removed ]
+    [ <(seen)+ { [ meta:source=$conf.source ] } -#$removed ]
+    if $oldremoved { [ -#$oldremoved ] }
     return($n)
 }
 
@@ -69,28 +106,74 @@ function addTag(n, tag) {
     return($n)
 }
 
+// Remove a tag, and its parent tags that the node has no other tags under. Removing a tag
+// keeps its parents, so an article that loses #rep.malpedia.threat.apt28 would keep
+// #rep.malpedia.threat (and a prefix change would leave #<old prefix> on every node).
 function delTag(n, tag) {
     if (not $tag) { return($n) }
-    yield $n
-    [ -#$tag ]
+    if $_untag($n, $tag) { $_prune($n, $tag) }
     return($n)
+}
+
+// Remove a tag from n. Returns true if n had it.
+function _untag(n, tag) {
+    yield $n
+    +#$tag
+    [ -#$tag ]
+    return((true))
+}
+
+function _prune(n, tag) {
+    $tags = $n.tags()
+    $gone = $lib.set($tag)
+    $parts = $tag.split(".")
+    $parts.pop()
+    while $parts {
+        $parent = (".").join($parts)
+        for $have in $tags {
+            if ($have.startswith(`{$parent}.`) and not $gone.has($have)) { return() }
+        }
+        $_untag($n, $parent)
+        $gone.add($parent)
+        $parts.pop()
+    }
+    return()
 }
 
 // Add (or remove) a -(verb)> edge from n to dest.
 function edge(n, verb, dest, add=(true)) {
-    if ($dest = $lib.null) { return($n) }
+    if ($dest = null) { return($n) }
     yield $n
     if $add { [ +($verb)> $dest ] }
     else { [ -($verb)> $dest ] }
     return($n)
 }
 
+// The values of a list that normalize as a type (ex. ou:name), normalized. Values that don't
+// are left out, so one bad alias doesn't keep a node's old aliases (see _actorProps).
+function tryNorms(type, items) {
+    $out = ([])
+    for $item in $items {
+        ($ok, $norm) = $lib.trycast($type, $item)
+        if ($ok and $norm != "") { $out.append($norm) }
+    }
+    return($out)
+}
+
+// A value normalized as a type, or null if it doesn't normalize.
+function tryNorm(type, valu) {
+    if ($valu = null) { return() }
+    ($ok, $norm) = $lib.trycast($type, $valu)
+    if ($ok and $norm != "") { return($norm) }
+    return()
+}
+
 // A ps:contact for a name (an author), deconflicted by name. Returns its guid, or null.
 function contact(name) {
-    ($ok, $norm) = $lib.trycast(ps:name, $name)
-    if (not $ok) { return($lib.null) }
-    [ ps:contact=({"name": $norm}) ]
-    return($node.value())
+    $norm = $tryNorm(ps:name, $name)
+    if ($norm = null) { return() }
+    [ ps:contact=({"name": $norm}) ]  // noqa: M001
+    return($node.value())  // noqa: R002
 }
 
 // ---- Actors ----
@@ -121,21 +204,42 @@ function getThreat(id) {
     return($node)
 }
 
+// The ou:industry for a sector name (created if needed), or null if the name isn't valid.
+function industry(name) {
+    $norm = $tryNorm(ou:industryname, $name)
+    if ($norm = null) { return() }
+    return($lib.gen.industryByName($norm))  // noqa: R005
+}
+
+// Every existing ou:industry with a sector name, without creating any.
+function industries(name) {
+    $norm = $tryNorm(ou:industryname, $name)
+    if ($norm != null) {
+        ou:industryname=$norm -> ou:industry  // noqa: M002
+    }
+}
+
 function _actorProps(n, rec, drop) {
-    $country = $lib.null
-    if $rec.country { $country = $lib.gen.polCountryByIso2($rec.country, try=(true)) }
+    $country = (null)
+    if $rec.country { $country = $lib.gen.polCountryByIso2($rec.country, try=(true)) }  // noqa: R005
+    $orgname = $tryNorm(ou:name, $rec.name)
+    $aliases = $tryNorms(ou:name, $rec.aliases)
 
     yield $n
-    [ :name=$rec.name :org:name?=$rec.name ]
+    [ :name=$rec.name ]
 
-    if $rec.aliases { [ :org:names?=$rec.aliases ] }
+    if $orgname { [ :org:name=$orgname ] }
+    else { [ -:org:name ] }
+
+    if $aliases { [ :org:names=$aliases ] }
     else { [ -:org:names ] }
 
     if $rec.desc { [ :desc=$rec.desc ] }
     elif $drop.desc { [ -:desc ] }
 
-    if $rec.uuid { [ :ext:ids?=($rec.uuid,) ] }
-    elif $drop.uuid { [ -:ext:ids ] }
+    // Other sources may add their own IDs, only Malpedia's UUID is Malpedia's to change.
+    if $drop.uuid { [ :ext:ids--=($drop.uuid,) ] }
+    if $rec.uuid { [ :ext:ids++=($rec.uuid,) ] }
 
     if $rec.country {
         [ :country:code?=$rec.country ]
@@ -157,15 +261,15 @@ function actor(item, conf) {
     $n = $threat($rec.id, $rec.tag, $conf)
     $_actorProps($n, $rec, $drop)
     $seen($n, $conf)
+    $delTag($n, $fullTag($conf.oldprefix, $rec.tag))
     $_tagTitle($fullTag($conf.prefix, $rec.tag), $rec.name, $rec.url)
 
     for $sector in $rec.sectors {
-        $edge($n, targets, $lib.gen.industryByName($sector))
+        $edge($n, targets, $industry($sector))
     }
-    if $drop.sectors {
-        for $sector in $drop.sectors {
-            $edge($n, targets, $lib.gen.industryByName($sector), add=(false))
-        }
+    for $sector in $drop.sectors {
+        // Removing an edge never creates the ou:industry it pointed to.
+        for ($ind, $path) in $industries($sector) { $edge($n, targets, $ind, add=(false)) }
     }
     return($n)
 }
@@ -184,7 +288,7 @@ function _tagTitle(tag, title, url) {
 // The risk:tool:software for a family ID, created with its identity if it doesn't exist.
 function software(id, suffix, conf) {
     $tag = $fullTag($conf.prefix, $suffix)
-    [ risk:tool:software=(malpedia, $id)
+    [ risk:tool:software=(malpedia, $id)  // noqa: M001
         :id=$id
         :reporter=$conf.reporter
         :reporter:name=malpedia
@@ -202,15 +306,23 @@ function softwareRef(id, suffix, conf) {
 
 // The existing risk:tool:software for a family ID, or null.
 function getSoftware(id) {
-    risk:tool:software=(malpedia, $id)
+    risk:tool:software=(malpedia, $id)  // noqa: M001
     return($node)
 }
 
 function _familyProps(n, rec, drop) {
-    yield $n
-    [ :soft:name?=$rec.name ]
+    $softname = $tryNorm(it:prod:softname, $rec.name)
+    $aliases = $tryNorms(it:prod:softname, $rec.aliases)
+    // The it:prod:soft named like the family, so pivots from software reach the tool.
+    $soft = (null)
+    if $softname { $soft = $lib.gen.softByName($softname) }  // noqa: R005
 
-    if $rec.aliases { [ :soft:names?=$rec.aliases ] }
+    yield $n
+    if $softname { [ :soft:name=$softname ] }
+    else { [ -:soft:name ] }
+    if $soft { [ :soft=$soft ] }
+
+    if $aliases { [ :soft:names=$aliases ] }
     else { [ -:soft:names ] }
 
     if $rec.desc { [ :desc=$rec.desc ] }
@@ -222,7 +334,7 @@ function _familyProps(n, rec, drop) {
 function uses(actorid, actortag, tool, conf, add=(true)) {
     if $add { $actor = $threatRef($actorid, $actortag, $conf) }
     else { $actor = $getThreat($actorid) }
-    if ($actor = $lib.null) { return() }
+    if ($actor = null) { return() }
     $edge($actor, uses, $tool, add=$add)
     return()
 }
@@ -235,12 +347,11 @@ function family(item, conf) {
     $n = $software($rec.id, $rec.tag, $conf)
     $_familyProps($n, $rec, $drop)
     $seen($n, $conf)
+    $delTag($n, $fullTag($conf.oldprefix, $rec.tag))
     $_tagTitle($fullTag($conf.prefix, $rec.tag), $rec.name, $rec.url)
 
     for ($aid, $atag) in $rec.actortags { $uses($aid, $atag, $n, $conf) }
-    if $drop.actortags {
-        for ($aid, $atag) in $drop.actortags { $uses($aid, $atag, $n, $conf, add=(false)) }
-    }
+    for ($aid, $atag) in $drop.actortags { $uses($aid, $atag, $n, $conf, add=(false)) }
     return($n)
 }
 
@@ -257,20 +368,42 @@ function _newsProps(n, rec, publisher, authors) {
     return($n)
 }
 
-// Tag an article with an actor's or family's tag and link it with an -(about)> edge, or undo that.
-function about(n, dest, tag, add=(true)) {
+// Tag an article with an actor's or family's tag and link it with a -(refs)> edge, or undo
+// that. Older versions linked articles with -(about)> edges (not a verb the model declares for
+// media:news), so those are replaced by (or removed with) the -(refs)> edge.
+function refs(n, dest, tag, add=(true), oldtag=(null)) {
     if $add { $addTag($n, $tag) }
     else { $delTag($n, $tag) }
-    $edge($n, about, $dest, add=$add)
+    $delTag($n, $oldtag)
+    $edge($n, refs, $dest, add=$add)
+    $edge($n, about, $dest, add=(false))
     return($n)
 }
 
-// The existing media:news for a URL, or null.
-function getNews(url) {
-    ($ok, $norm) = $lib.trycast(inet:url, $url)
-    if (not $ok) { return($lib.null) }
-    media:news:url=$norm
+// The media:news $lib.gen.newsByUrl() creates for a normalized URL, or null.
+function _genNews(url) {
+    media:news=(gen, url, $url)  // noqa: M001
     return($node)
+}
+
+// Every media:news with a normalized URL.
+function _newsByUrl(url) {
+    media:news:url=$url  // noqa: M001
+}
+
+// The existing media:news for a URL, or null. Several sources may have made one for the same
+// URL, so this always picks the same one: the one $lib.gen.newsByUrl() makes, or else the
+// oldest. Syncs and removals edit the same article.
+function getNews(url) {
+    $norm = $tryNorm(inet:url, $url)
+    if ($norm = null) { return() }
+    $n = $_genNews($norm)
+    if $n { return($n) }
+    $best = (null)
+    for ($cand, $path) in $_newsByUrl($norm) {
+        if ($best = null or $cand.props.".created" < $best.props.".created") { $best = $cand }
+    }
+    return($best)
 }
 
 // Model a news record as a media:news. Returns the node, or null if its URL isn't valid.
@@ -278,17 +411,18 @@ function news(item, conf) {
     $rec = $item.rec
     $drop = $item.drop
 
-    $n = $lib.gen.newsByUrl($rec.url, try=(true))
-    if ($n = $lib.null) { return($lib.null) }
+    $n = $getNews($rec.url)
+    if ($n = null) { $n = $lib.gen.newsByUrl($rec.url, try=(true)) }  // noqa: R005
+    if ($n = null) { return() }
 
     // Only build the publisher and authors if the article doesn't have them yet. The
     // publisher ou:org must match the article's :publisher:name, if another source set one.
-    $publisher = $lib.null
+    $publisher = (null)
     if ($rec.publisher and not $n.props.publisher) {
-        ($ok, $pname) = $lib.trycast(ou:name, $rec.publisher)
+        $pname = $tryNorm(ou:name, $rec.publisher)
         $have = $n.props."publisher:name"
-        if ($ok and ($have = $lib.null or $have = $pname)) {
-            $publisher = $lib.gen.orgByName($pname).value()
+        if ($pname and ($have = null or $have = $pname)) {
+            $publisher = $lib.gen.orgByName($pname).value()  // noqa: R005 R002
         }
     }
     $authors = ([])
@@ -303,27 +437,47 @@ function news(item, conf) {
     $seen($n, $conf)
 
     for ($id, $suffix) in $rec.actors {
-        $about($n, $threatRef($id, $suffix, $conf), $fullTag($conf.prefix, $suffix))
+        $refs($n, $threatRef($id, $suffix, $conf), $fullTag($conf.prefix, $suffix),
+            oldtag=$fullTag($conf.oldprefix, $suffix))
     }
     for ($id, $suffix) in $rec.families {
-        $about($n, $softwareRef($id, $suffix, $conf), $fullTag($conf.prefix, $suffix))
+        $refs($n, $softwareRef($id, $suffix, $conf), $fullTag($conf.prefix, $suffix),
+            oldtag=$fullTag($conf.oldprefix, $suffix))
     }
-    if $drop.actors {
-        for ($id, $suffix) in $drop.actors {
-            $about($n, $getThreat($id), $fullTag($conf.prefix, $suffix), add=(false))
-        }
+    $_unrefs($n, $drop, $conf)
+    return($n)
+}
+
+// Undo the tags and edges an article got for the actors and families in rec (a record, or
+// a drop diff), under the current and the old tag prefix.
+function _unrefs(n, rec, conf) {
+    for ($id, $suffix) in $rec.actors {
+        $refs($n, $getThreat($id), $fullTag($conf.prefix, $suffix), add=(false),
+            oldtag=$fullTag($conf.oldprefix, $suffix))
     }
-    if $drop.families {
-        for ($id, $suffix) in $drop.families {
-            $about($n, $getSoftware($id), $fullTag($conf.prefix, $suffix), add=(false))
-        }
+    for ($id, $suffix) in $rec.families {
+        $refs($n, $getSoftware($id), $fullTag($conf.prefix, $suffix), add=(false),
+            oldtag=$fullTag($conf.oldprefix, $suffix))
     }
     return($n)
 }
 
 // ---- YARA ----
 
+// The it:app:yara:rule for a rule file, created if it doesn't exist.
+function _rule(file) {
+    [ it:app:yara:rule=(malpedia, $file) ]
+    return($node)
+}
+
+// The existing it:app:yara:rule for a rule file, or null.
+function getRule(file) {
+    it:app:yara:rule=(malpedia, $file)
+    return($node)
+}
+
 function _yaraProps(n, rec, author) {
+    $family = $tryNorm(it:prod:softname, $rec.familyname)
     yield $n
     [ :name=$rec.name :text=$rec.text :ext:id=$rec.file ]
 
@@ -331,7 +485,7 @@ function _yaraProps(n, rec, author) {
     if $rec.created { [ :created?=$rec.created ] }
     if $rec.updated { [ :updated?=$rec.updated ] }
 
-    if $rec.familyname { [ :family?=$rec.familyname ] }
+    if $family { [ :family=$family ] }
     else { [ -:family ] }
 
     if $author { [ :author=$author ] }
@@ -339,9 +493,10 @@ function _yaraProps(n, rec, author) {
     return($n)
 }
 
-function _inRuleset(n, ruleset) {
+function _inRuleset(n, ruleset, add=(true)) {
     yield $n
-    [ <(has)+ { meta:ruleset=$ruleset } ]
+    if $add { [ <(has)+ { meta:ruleset=$ruleset } ] }
+    else { [ <(has)- { meta:ruleset=$ruleset } ] }
     return($n)
 }
 
@@ -352,24 +507,31 @@ function yara(item, conf) {
     $rec = $item.rec
     $drop = $item.drop
 
-    $author = $lib.null
+    $author = (null)
     if $rec.author { $author = $contact($rec.author) }
 
-    [ it:app:yara:rule=(malpedia, $rec.file) ]
-    $n = $node
+    $n = $_rule($rec.file)
     $_yaraProps($n, $rec, $author)
     $seen($n, $conf)
 
     $_inRuleset($n, $conf.ruleset)
 
     if $drop.tlp { $delTag($n, $fullTag($conf.tlp, $drop.tlp)) }
-    if $rec.tlp { $addTag($n, $fullTag($conf.tlp, $rec.tlp)) }
+    if $rec.tlp {
+        $delTag($n, $fullTag($conf.oldtlp, $rec.tlp))
+        $addTag($n, $fullTag($conf.tlp, $rec.tlp))
+    }
+    if $conf.oldtlp { $delTag($n, $fullTag($conf.oldtlp, $drop.tlp)) }
 
-    if $drop.familytag { $delTag($n, $fullTag($conf.prefix, $drop.familytag)) }
+    if $drop.familytag {
+        $delTag($n, $fullTag($conf.prefix, $drop.familytag))
+        $delTag($n, $fullTag($conf.oldprefix, $drop.familytag))
+    }
     if $drop.family { $edge($n, detects, $getSoftware($drop.family), add=(false)) }
 
     if $rec.family {
         $tool = $softwareRef($rec.family, $rec.familytag, $conf)
+        $delTag($n, $fullTag($conf.oldprefix, $rec.familytag))
         $addTag($n, $fullTag($conf.prefix, $rec.familytag))
         $edge($n, detects, $tool)
     }
@@ -391,28 +553,23 @@ function model(kind, item, conf) {
 
 // Handle a record Malpedia removed. Articles lose the tags and edges they got from Malpedia,
 // actors, families, and YARA rules are tagged <prefix>.removed (and rules leave the ruleset).
+// A record whose node isn't in the view (ex. an analyst deleted it) is done, there's nothing
+// left to undo. Returns the node, or null.
 function removed(kind, rec, conf) {
     switch $kind {
         news: {
             $n = $getNews($rec.url)
-            if ($n = $lib.null) { return($lib.null) }
-            for ($id, $suffix) in $rec.actors {
-                $about($n, $getThreat($id), $fullTag($conf.prefix, $suffix), add=(false))
-            }
-            for ($id, $suffix) in $rec.families {
-                $about($n, $getSoftware($id), $fullTag($conf.prefix, $suffix), add=(false))
-            }
-            return($n)
+            if ($n = null) { return() }
+            return($_unrefs($n, $rec, $conf))
         }
         actor: { $n = $getThreat($rec.id) }
         family: { $n = $getSoftware($rec.id) }
         yara: {
-            it:app:yara:rule=(malpedia, $rec.file)
-            [ <(has)- { meta:ruleset=$conf.ruleset } ]
-            $n = $node
+            $n = $getRule($rec.file)
+            if $n { $_inRuleset($n, $conf.ruleset, add=(false)) }
         }
         *: { $lib.raise(BadArg, `Unknown slib.malpedia record kind: {$kind}`) }
     }
-    if ($n = $lib.null) { return($lib.null) }
+    if ($n = null) { return() }
     return($addTag($n, $conf.removed))
 }

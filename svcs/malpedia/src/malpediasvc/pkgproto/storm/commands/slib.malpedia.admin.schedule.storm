@@ -4,24 +4,22 @@ init {
     $name = "slib.malpedia.admin.schedule"
 
     if ($cmdopts.enable and $cmdopts.disable) {
-        $lib.warn("{name}: Use --enable or --disable, not both.", name=$name)
+        $lib.warn(`{$name}: Use --enable or --disable, not both.`)
     } elif $cmdopts.delete {
-        if $admin.unschedule() { $lib.print("{name}: Deleted the sync cron job.", name=$name) }
-        else { $lib.print("{name}: There is no sync cron job.", name=$name) }
+        if $admin.unschedule() { $lib.print(`{$name}: Deleted the sync cron job.`) }
+        else { $lib.print(`{$name}: There is no sync cron job.`) }
     } else {
         if $cmdopts.period {
             try {
                 $job = $admin.schedule($cmdopts.period)
-                $lib.print("{name}: slib.malpedia.sync now runs {period} (cron {iden}).",
-                    name=$name, period=$cmdopts.period, iden=$job.iden)
+                $lib.print(`{$name}: slib.malpedia.sync now runs {$cmdopts.period} (cron {$job.iden}).`)
             } catch * as err {
-                $lib.warn("{name}: Unable to schedule slib.malpedia.sync with period {period}: {err}",
-                    name=$name, period=$cmdopts.period, err=$err.mesg)
+                $lib.warn(`{$name}: Unable to schedule slib.malpedia.sync with period {$cmdopts.period}: {$err.mesg}`)
             }
         }
         if ($cmdopts.enable or $cmdopts.disable) {
             if (not $admin.enable(enabled=$cmdopts.enable)) {
-                $lib.warn("{name}: There is no sync cron job, create one with --period.", name=$name)
+                $lib.warn(`{$name}: There is no sync cron job, create one with --period.`)
             }
         }
 
@@ -30,10 +28,9 @@ init {
             $info = $job.pack()
             $state = disabled
             if $info.enabled { $state = enabled }
-            $lib.print("{name}: cron {iden} ({state}) runs slib.malpedia.sync, in view {view}, last run: {last}",
-                name=$name, iden=$info.iden, state=$state, view=$info.view, last=$util.when($info.laststarttime))
+            $lib.print(`{$name}: cron {$info.iden} ({$state}) runs slib.malpedia.sync, in view {$info.view}, last run: {$util.when($info.laststarttime)}`)
         } else {
-            $lib.print("{name}: There is no sync cron job, create one with --period.", name=$name)
+            $lib.print(`{$name}: There is no sync cron job, create one with --period.`)
         }
     }
 }

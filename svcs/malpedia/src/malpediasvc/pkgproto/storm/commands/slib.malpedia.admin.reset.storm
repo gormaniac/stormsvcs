@@ -3,10 +3,10 @@ init {
     $name = "slib.malpedia.admin.reset"
 
     if (not $cmdopts.yes) {
-        $lib.warn("{name}: This makes the next sync model every record into this view again, use --yes to confirm.", name=$name)
+        $lib.warn(`{$name}: This makes the next sync model every record into this view again, use --yes to confirm.`)
     } else {
         $retn = $admin.resetView()
-        if $retn.status { $lib.print("{name}: Reset this view, its next sync models every record.", name=$name) }
-        else { $lib.warn("{name}: Unable to reset this view: {err}", name=$name, err=$retn.mesg) }
+        if $retn.status { $lib.print(`{$name}: Reset this view, its next sync models every record.`) }
+        else { $lib.warn(`{$name}: Unable to reset this view: {$retn.mesg}`) }
     }
 }

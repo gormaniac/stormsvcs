@@ -2,11 +2,14 @@
 
 import asyncio
 import pathlib
+from unittest import mock
 
 import synapse.tests.utils as s_tests
 from stormlibpp.testing import assertMainHelp, assertVersionsMatch
 
 from malpediasvc import __version__
+from malpediasvc import defs
+from malpediasvc import svc as m_svc
 from malpediasvc.defs import PKGDEFS, SVC_GUID, SVC_NAME
 
 from . import fakemalpedia as fm
@@ -162,7 +165,7 @@ class TestMalpediaStormSync(s_tests.SynTest):
             assert news.get("ext:id") == "research:20260310:sednit:86e9801"
             for tag in ("rep.malpedia.threat.apt28", "rep.malpedia.mal.win.xagent"):
                 assert tag in news.tags
-            assert await nodeset(core, getNews(fm.URL_SEDNIT) + " -(about)> *") == {
+            assert await nodeset(core, getNews(fm.URL_SEDNIT) + " -(refs)> *") == {
                 ("risk:threat", (await core.nodes(THREAT.format("apt28")))[0].repr()),
                 ("risk:tool:software", (await core.nodes(TOOL.format("win.xagent")))[0].repr()),
             }
@@ -171,7 +174,7 @@ class TestMalpediaStormSync(s_tests.SynTest):
             names = {n.get("name") for n in await core.nodes(getNews(fm.URL_XAGENT_PDF) + " :authors -> ps:contact")}
             assert names == {"fireeye", "jane doe"}
             # Tagged with the family through the family's library entries.
-            assert await count(core, getNews(fm.URL_XAGENT_PDF) + " +#rep.malpedia.mal.win.xagent -(about)> risk:tool:software") == 1
+            assert await count(core, getNews(fm.URL_XAGENT_PDF) + " +#rep.malpedia.mal.win.xagent -(refs)> risk:tool:software") == 1
             # In the references but not the bib, so it only has a URL.
             nodes = await core.nodes(getNews(fm.URL_NOBIB))
             assert nodes[0].get("title") is None
@@ -292,9 +295,11 @@ class TestMalpediaStormSync(s_tests.SynTest):
             # The article isn't about APT28 anymore.
             news = (await core.nodes(getNews(fm.URL_SEDNIT)))[0]
             assert "rep.malpedia.threat.apt28" not in news.tags
+            # Its only threat tag is gone, so the parent tag is too.
+            assert "rep.malpedia.threat" not in news.tags
             assert "rep.malpedia.mal.win.xagent" in news.tags
             assert news.get("title") == "my title"
-            assert await nodeset(core, getNews(fm.URL_SEDNIT) + " -(about)> *") == {
+            assert await nodeset(core, getNews(fm.URL_SEDNIT) + " -(refs)> *") == {
                 ("risk:tool:software", (await core.nodes(TOOL.format("win.xagent")))[0].repr()),
             }
 
@@ -349,7 +354,7 @@ class TestMalpediaStormSync(s_tests.SynTest):
             self.stormHasNoErr(await core.stormlist("slib.malpedia.sync"))
             nodes = await core.nodes(getNews(fm.URL_NOBIB))
             assert "rep.malpedia.mal.win.sedreco" not in nodes[0].tags
-            assert await count(core, getNews(fm.URL_NOBIB) + " -(about)> *") == 0
+            assert await count(core, getNews(fm.URL_NOBIB) + " -(refs)> *") == 0
 
     async def test_sync_existing_news(self):
         async with fm.malpediaSvc(self) as (core, svc, fake):
@@ -494,13 +499,12 @@ class TestMalpediaStormSync(s_tests.SynTest):
             msgs = await core.stormlist("slib.malpedia.search bear")
             self.stormHasNoErr(msgs)
             self.stormIsInPrint("2 actors match bear:", msgs)
-            self.stormIsInPrint("No familys match bear.", msgs) if False else None
-            self.stormIsInPrint("No familys match bear.", msgs)
+            self.stormIsInPrint("No families match bear.", msgs)
             assert await count(core, "slib.malpedia.search bear --yield") == 0
 
             self.stormHasNoErr(await core.stormlist("slib.malpedia.sync"))
             msgs = await core.stormlist("slib.malpedia.search wcry --families")
-            self.stormIsInPrint("1 familys match wcry:", msgs)
+            self.stormIsInPrint("1 families match wcry:", msgs)
             self.stormIsInPrint("win.wannacryptor", msgs)
             self.stormIsInPrint("WannaCryptor", msgs)
             self.stormNotInPrint("actors match", msgs)
@@ -587,3 +591,379 @@ class TestMalpediaStormSync(s_tests.SynTest):
             self.stormIsInPrint("Pulled Malpedia version 26601", msgs)
             self.stormHasNoErr(await core.stormlist("slib.malpedia.admin.tags", opts=opts))
             self.stormHasNoErr(await core.stormlist("slib.malpedia.admin.reset --yes", opts=opts))
+
+
+async def syncSummary(core, opts=None, **kwargs):
+    """Run slib.malpedia.priv.sync.sync() and return its summary."""
+    q = "return($lib.import(slib.malpedia.priv.sync).sync(full=$full, pull=$pull))"
+    vars = {"full": kwargs.get("full", False), "pull": kwargs.get("pull", True)}
+    return await core.callStorm(q, opts={**(opts or {}), "vars": vars})
+
+
+class TestMalpediaStormAuditFixes(s_tests.SynTest):
+    async def test_seen_in_new_view(self):
+        # MALP-01: the meta:source is created in a view that doesn't have it, so every node
+        # gets its -(seen)> edge.
+        async with fm.malpediaSvc(self) as (core, svc, fake):
+            self.stormHasNoErr(await core.stormlist("slib.malpedia.sync"))
+            layr = (await core.addLayer())["iden"]
+            view = (await core.addView({"layers": [layr]}))["iden"]
+            opts = {"view": view}
+            assert await count(core, f"meta:source={SVC_GUID}", opts=opts) == 0
+            self.stormHasNoErr(await core.stormlist("slib.malpedia.sync --no-pull", opts=opts))
+            nodes = await core.nodes(f"meta:source={SVC_GUID}", opts=opts)
+            assert nodes[0].get("name") == "malpedia"
+            for form, num in (("media:news", 5), ("risk:threat", 4), ("risk:tool:software", 3), ("it:app:yara:rule", 3)):
+                assert await count(core, f"meta:source={SVC_GUID} -(seen)> {form}", opts=opts) == num, form
+
+    async def test_removed_missing_nodes(self):
+        # MALP-02: a removed record whose node isn't in the view (ex. an analyst deleted it)
+        # is done, not a failure on every sync.
+        async with fm.malpediaSvc(self) as (core, svc, fake):
+            self.stormHasNoErr(await core.stormlist("slib.malpedia.sync"))
+            await core.nodes(RULE.format("win.xagent_auto.yar") + " | delnode --force")
+            await core.nodes(THREAT.format("[vault_7_8]") + " | delnode --force")
+            await core.nodes(TOOL.format("win.sedreco") + " | delnode --force")
+            await core.nodes(getNews(fm.URL_PLAIN) + " | delnode --force")
+
+            state = fake.state
+            state["version"]["version"] += 1
+            state["yara"]["tlp_white"].pop("win.xagent_auto.yar")
+            state["actors"].pop("[Vault 7/8]")
+            state["actorids"].remove("[vault_7_8]")
+            state["families"].pop("win.sedreco")
+            state["references"].pop(fm.URL_NOBIB)
+            state["actors"]["APT28"]["related"] = []
+            state["bib"] = [e for e in state["bib"] if e[6] != fm.URL_PLAIN]
+
+            summary = await syncSummary(core)
+            assert not summary["errors"]
+            for kind in ("news", "actor", "family", "yara"):
+                assert summary["kinds"][kind]["failed"] == 0, kind
+            # Two articles were removed (the plain report, and the article only Sedreco had).
+            assert {k: c["removed"] for k, c in summary["kinds"].items()} == {"news": 2, "actor": 1, "family": 1, "yara": 1}
+            # Nothing is left to retry, and nothing was recreated.
+            summary = await syncSummary(core, pull=False)
+            assert all(c["total"] == 0 for c in summary["kinds"].values())
+            assert await count(core, RULE.format("win.xagent_auto.yar")) == 0
+            assert await count(core, getNews(fm.URL_PLAIN)) == 0
+
+    async def test_refresh_case(self):
+        # MALP-03: IDs are normalized, so no duplicate risk:threat is made for APT28.
+        async with fm.malpediaSvc(self) as (core, svc, fake):
+            self.stormHasNoErr(await core.stormlist("slib.malpedia.sync"))
+            nodes = await core.nodes("slib.malpedia.refresh --actor APT28 --yield")
+            assert [n.get("ext:id") for n in nodes] == ["apt28"]
+            nodes = await core.nodes("slib.malpedia.refresh --family WIN.XAGENT --yield")
+            assert [n.get("id") for n in nodes] == ["win.xagent"]
+            assert await count(core, "risk:threat") == 4
+            assert await count(core, "risk:tool:software") == 3
+            msgs = await core.stormlist("slib.malpedia.refresh --actor 'a b'")
+            self.stormIsInWarn("Unable to refresh actor a b: Invalid Malpedia actor ID", msgs)
+
+    async def test_refresh_limits(self):
+        # MALP-06: a refresh asks for at most 25 actors and families, and each one only once.
+        async with fm.malpediaSvc(self) as (core, svc, fake):
+            self.stormHasNoErr(await core.stormlist("slib.malpedia.sync"))
+
+            args = " ".join(f"--actor a{i}" for i in range(26))
+            start = len(fake.requests)
+            msgs = await core.stormlist(f"slib.malpedia.refresh {args}")
+            self.stormIsInWarn("Not refreshing 26 actors and families at once, the limit is 25.", msgs)
+            assert len(fake.requests) == start
+            # Unless an admin uses --no-limit.
+            msgs = await core.stormlist(f"slib.malpedia.refresh {args} --no-limit")
+            self.stormHasNoErr(msgs)
+            self.stormIsInWarn("Unable to refresh actor a", msgs)
+            assert fake.countPaths("/api/get/actor/a") == 26
+
+            # Inbound nodes: duplicates are refreshed once, and the rest are skipped past the limit.
+            start = len(fake.requests)
+            q = "risk:threat:ext:id=apt28 risk:threat:ext:id=apt28 | slib.malpedia.refresh"
+            nodes = await core.nodes(q)
+            assert len(nodes) == 2
+            assert fake.requests[start:].count("/api/get/actor/apt28") == 1
+            assert len(await core.nodes(q + " --yield")) == 1
+
+            await core.nodes("for $i in $lib.range(30) { [ risk:threat=(fake, $i) :reporter:name=malpedia :ext:id=`fake{$i}` ] }")
+            start = len(fake.requests)
+            msgs = await core.stormlist("risk:threat:ext:id^=fake | slib.malpedia.refresh")
+            self.stormIsInWarn("Refreshed 25 actors and families, skipping the rest.", msgs)
+            assert fake.countPaths("/api/get/actor/fake") == 25
+
+            visi = await core.auth.addUser("visi")
+            await visi.addRule((True, ("slib", "malpedia", "sync")))
+            for form in ("media:news", "risk:threat", "risk:tool:software", "it:app:yara:rule"):
+                await visi.addRule((True, ("node", "add", form)))
+            msgs = await core.stormlist("slib.malpedia.refresh --actor apt28 --no-limit", opts={"user": visi.iden})
+            self.stormIsInErr("--no-limit needs the slib.malpedia.admin permission", msgs)
+
+    async def test_module_checks(self):
+        # Anyone with slib.malpedia.sync can import slib.malpedia.priv.sync, so its functions
+        # check the same permissions and limits as the commands.
+        async with fm.malpediaSvc(self) as (core, svc, fake):
+            self.stormHasNoErr(await core.stormlist("slib.malpedia.sync"))
+            visi = await core.auth.addUser("visi")
+            await visi.addRule((True, ("slib", "malpedia", "sync")))
+            opts = {"user": visi.iden}
+            mod = "$sync = $lib.import(slib.malpedia.priv.sync) "
+
+            async def raises(query, mesg):
+                with self.raises(Exception) as cm:
+                    await core.callStorm(mod + query, opts=opts)
+                assert mesg in str(cm.exception), str(cm.exception)
+
+            # Modeling as root needs permission to add the nodes.
+            start = len(fake.requests)
+            await raises("return($sync.sync(pull=(false)))", "needs permission to add media:news nodes")
+            await raises("return($sync.refresh((apt28,), ([])))", "needs permission to add media:news nodes")
+            for form in ("media:news", "risk:threat", "risk:tool:software", "it:app:yara:rule"):
+                await visi.addRule((True, ("node", "add", form)))
+
+            # Forced pulls and refreshes past the limit are for admins.
+            await raises("return($sync.pull(force=(true)))", "--force needs the slib.malpedia.admin permission")
+            await raises("return($sync.sync(force=(true)))", "--force needs the slib.malpedia.admin permission")
+            ids = [f"a{i}" for i in range(26)]
+            q = "return($sync.refresh($ids, ([])))"
+            with self.raises(Exception) as cm:
+                await core.callStorm(mod + q, opts={**opts, "vars": {"ids": ids}})
+            assert "Not refreshing 26 actors and families at once, the limit is 25." in str(cm.exception)
+            q = "return($sync.refresh($ids, ([]), nolimit=(true)))"
+            with self.raises(Exception) as cm:
+                await core.callStorm(mod + q, opts={**opts, "vars": {"ids": ids}})
+            assert "--no-limit needs the slib.malpedia.admin permission" in str(cm.exception)
+            assert fake.requests[start:] == []
+
+            # Within the limit, it works.
+            summary = await core.callStorm(mod + "return($sync.refresh((apt28,), ([])))", opts=opts)
+            assert summary["counts"]["actor"] == 1
+            summary = await core.callStorm(mod + "return($sync.sync(pull=(false)))", opts=opts)
+            assert summary["error"] is None
+
+    async def test_refresh_no_input(self):
+        # MALP-20: a refresh with nothing to refresh says so.
+        async with fm.malpediaSvc(self) as (core, svc, fake):
+            msgs = await core.stormlist("slib.malpedia.refresh")
+            self.stormHasNoErr(msgs)
+            self.stormIsInWarn("Nothing to refresh.", msgs)
+            assert fake.requests == []
+            # A mix of nodes from Malpedia and others.
+            self.stormHasNoErr(await core.stormlist("slib.malpedia.sync"))
+            await core.nodes("[ risk:threat=* :name=other ]")
+            msgs = await core.stormlist("risk:threat:name=other risk:threat:ext:id=apt28 | slib.malpedia.refresh")
+            self.stormIsInWarn("isn't a Malpedia actor or family", msgs)
+            self.stormIsInPrint("Modeled news=1, actor=1, family=1, yara=0.", msgs)
+            self.stormNotInWarn("Nothing to refresh", msgs)
+
+    async def test_service_del(self):
+        # MALP-07: deleting the service deletes its cron jobs.
+        async with fm.malpediaSvc(self) as (core, svc, fake):
+            await core.stormlist("slib.malpedia.admin.schedule --period daily@03:17")
+            assert await syncJobs(core) == 1
+            jobs = await core.callStorm("$l = ([]) for $c in $lib.cron.list() { $l.append($c.pack().name) } return($l)")
+            assert "slib.malpedia (initial setup and sync)" in jobs
+
+            iden = core.getStormSvc(SVC_NAME).iden
+            await core.nodes(f"service.del {iden}")
+            for _ in range(100):
+                jobs = await core.callStorm("return($lib.cron.list())")
+                if not jobs:
+                    break
+                await asyncio.sleep(0.1)
+            assert not jobs
+            assert await core.callStorm('return($lib.globals.get("slib:malpedia:cron"))') is None
+            # The tag settings are kept for when it's added again.
+            assert await core.callStorm('return($lib.globals.get("slib:malpedia:tag:prefix"))') == "rep.malpedia"
+
+    async def test_prefix_change_cleans_old_tags(self):
+        # MALP-09: after a prefix change, the next sync re-models every record and removes the
+        # tags it added under the old prefix.
+        async with fm.malpediaSvc(self) as (core, svc, fake):
+            self.stormHasNoErr(await core.stormlist("slib.malpedia.sync"))
+            assert await count(core, "#rep.malpedia.threat.apt28") == 2
+
+            msgs = await core.stormlist("slib.malpedia.admin.tags --prefix rep.mp --tlp-prefix tlp")
+            self.stormIsInPrint("models every record again", msgs)
+            # An article that loses an actor while the prefix changes loses the old tag too.
+            fake.state["version"]["version"] += 1
+            fake.state["references"][fm.URL_SEDNIT] = fake.state["references"][fm.URL_SEDNIT][:1]
+
+            msgs = await core.stormlist("slib.malpedia.sync")
+            self.stormHasNoErr(msgs)
+            self.stormIsInPrint("The tag prefixes changed since this view's last sync", msgs)
+            self.stormIsInPrint("Modeling 5 news records.", msgs)
+            # The old tags are gone, parents included.
+            assert await count(core, "#rep.malpedia") == 0
+            assert await count(core, "#rep.mp.threat.apt28") == 1
+            assert await count(core, "#rep.mp.mal.win.xagent") == 5
+            assert await count(core, "#tlp.white") == 3
+            news = (await core.nodes(getNews(fm.URL_SEDNIT)))[0]
+            assert "rep.mp.threat.apt28" not in news.tags
+
+            # The next sync is incremental again.
+            msgs = await core.stormlist("slib.malpedia.sync")
+            self.stormNotInPrint("Modeling", msgs)
+            self.stormNotInPrint("tag prefixes changed", msgs)
+
+    async def test_prefix_change_with_failures(self):
+        # The new tag prefixes aren't recorded until every record was modeled with them, so a
+        # record that failed still loses its old tags on a later sync.
+        async with fm.malpediaSvc(self) as (core, svc, fake):
+            self.stormHasNoErr(await core.stormlist("slib.malpedia.sync"))
+            view = await core.callStorm("return($lib.view.get().iden)")
+            self.stormHasNoErr(await core.stormlist("slib.malpedia.admin.tags --prefix rep.mp --tlp-prefix tlp"))
+
+            changes = svc.changes
+
+            async def broken(view, kind, **kwargs):
+                async for batch in changes(view, kind, **kwargs):
+                    for item in batch["upsert"]:
+                        if kind == "actor" and item["key"] == "apt28":
+                            item["rec"] = None
+                    yield batch
+
+            with mock.patch.object(svc, "changes", broken):
+                summary = await syncSummary(core, pull=False)
+            assert summary["retagged"] is True
+            assert summary["kinds"]["actor"]["failed"] == 1
+            assert (await svc.viewInfo(view))["tags"]["prefix"] == "rep.malpedia"
+            assert await count(core, "risk:threat#rep.malpedia.threat.apt28") == 1
+
+            # The next sync models every record again, and APT28 loses its old tags.
+            summary = await syncSummary(core, pull=False)
+            assert summary["retagged"] is True
+            assert summary["kinds"]["actor"]["failed"] == 0
+            assert await count(core, "#rep.malpedia") == 0
+            assert await count(core, "risk:threat#rep.mp.threat.apt28") == 1
+            assert (await svc.viewInfo(view))["tags"] == {"prefix": "rep.mp", "tlp": "tlp"}
+            assert (await syncSummary(core, pull=False))["retagged"] is False
+
+    async def test_modeling(self):
+        # MALP-13: :soft, :ext:ids from other sources, and -(refs)> instead of -(about)>.
+        async with fm.malpediaSvc(self) as (core, svc, fake):
+            await core.nodes("[ risk:threat=(malpedia, apt28) :ext:ids=(other-id,) ]")
+            self.stormHasNoErr(await core.stormlist("slib.malpedia.sync"))
+            apt28 = (await core.nodes(THREAT.format("apt28")))[0]
+            assert apt28.get("ext:ids") == ("5b4ee3ea-eee3-4c8e-8323-85ae32658754", "other-id")
+            assert await count(core, TOOL.format("win.xagent") + " :soft -> it:prod:soft +:name=x-agent") == 1
+
+            # A changed UUID replaces only Malpedia's.
+            fake.state["version"]["version"] += 1
+            fake.state["actors"]["APT28"]["uuid"] = "11111111-0000-0000-0000-000000000000"
+            self.stormHasNoErr(await core.stormlist("slib.malpedia.sync"))
+            apt28 = (await core.nodes(THREAT.format("apt28")))[0]
+            assert apt28.get("ext:ids") == ("11111111-0000-0000-0000-000000000000", "other-id")
+
+            # -(about)> edges from older versions are replaced by -(refs)> edges.
+            await core.nodes(getNews(fm.URL_SEDNIT) + " [ -(refs)> { " + THREAT.format("apt28") + " } +(about)> { " + THREAT.format("apt28") + " } ]")
+            self.stormHasNoErr(await core.stormlist("slib.malpedia.sync --full --no-pull"))
+            assert await count(core, "media:news -(about)> *") == 0
+            assert await count(core, getNews(fm.URL_SEDNIT) + " -(refs)> risk:threat") == 1
+
+            # MALP-14: values that don't normalize are dropped one by one.
+            q = "return($lib.import(slib.malpedia.model).tryNorms(ou:name, $items))"
+            assert await core.callStorm(q, opts={"vars": {"items": ["A", {"x": 1}, " B ", "   "]}}) == ("a", "b")
+
+    async def test_industries(self):
+        # MALP-15: removing a sector never creates its ou:industry.
+        async with fm.malpediaSvc(self) as (core, svc, fake):
+            self.stormHasNoErr(await core.stormlist("slib.malpedia.sync"))
+            await core.nodes("ou:industry:name=military | delnode --force")
+            fake.state["version"]["version"] += 1
+            fake.state["actors"]["APT28"]["meta"]["targeted-sector"] = []
+            fake.state["actors"]["APT28"]["meta"]["cfr-target-category"] = ["Government"]
+            self.stormHasNoErr(await core.stormlist("slib.malpedia.sync"))
+            assert await count(core, "ou:industry:name=military") == 0
+            assert {n.get("name") for n in await core.nodes(THREAT.format("apt28") + " -(targets)> ou:industry")} == {"government"}
+
+    async def test_duplicate_news(self):
+        # MALP-16: with several media:news for one URL, the same (oldest) one is always used.
+        async with fm.malpediaSvc(self) as (core, svc, fake):
+            first = (await core.nodes(f"[ media:news=* :url={fm.URL_SEDNIT!r} ]"))[0]
+            await asyncio.sleep(0.01)
+            second = (await core.nodes(f"[ media:news=* :url={fm.URL_SEDNIT!r} ]"))[0]
+            self.stormHasNoErr(await core.stormlist("slib.malpedia.sync"))
+            nodes = {n.ndef: n for n in await core.nodes(getNews(fm.URL_SEDNIT))}
+            assert "rep.malpedia.threat.apt28" in nodes[first.ndef].tags
+            assert "rep.malpedia.threat.apt28" not in nodes[second.ndef].tags
+            # The one $lib.gen.newsByUrl() makes wins over the others.
+            await core.callStorm("$lib.gen.newsByUrl($u)", opts={"vars": {"u": fm.URL_WANNACRY}})
+            n = await core.callStorm("return($lib.import(slib.malpedia.model).getNews($u))", opts={"vars": {"u": fm.URL_WANNACRY}})
+            assert n is not None
+
+    async def test_tag_prefix_validation(self):
+        async with fm.malpediaSvc(self) as (core, svc, fake):
+            for bad in ("'a b'", "''", "'rep..x'", "'#rep'"):
+                msgs = await core.stormlist(f"slib.malpedia.admin.tags --prefix {bad}")
+                self.stormIsInWarn("Invalid tag prefix", msgs)
+            msgs = await core.stormlist("slib.malpedia.admin.tags --tlp-prefix 'a b'")
+            self.stormIsInWarn("The tlp prefix wasn't changed.", msgs)
+            self.stormIsInPrint("prefix=rep.malpedia tlp=rep.malpedia.tlp", msgs)
+
+    async def test_error_paths(self):
+        async with fm.malpediaSvc(self) as (core, svc, fake):
+            # A search that fails.
+            fake.state["errors"]["/api/find/actor/bear"] = [500] * 10
+            msgs = await core.stormlist("slib.malpedia.search bear --actors")
+            self.stormIsInWarn("Searching the actors failed: Malpedia returned HTTP 500", msgs)
+
+            self.stormHasNoErr(await core.stormlist("slib.malpedia.sync"))
+            # Within malpedia:pull:minage hours of the last check.
+            svc.conf["malpedia:pull:minage"] = 12
+            msgs = await core.stormlist("slib.malpedia.sync")
+            self.stormIsInPrint("Malpedia was checked recently, not pulling it again yet.", msgs)
+            svc.conf["malpedia:pull:minage"] = 0
+
+            async def boom(*args, **kwargs):
+                raise m_svc.MalpediaSvcError("boom")
+
+            # The service failing mid-sync.
+            with mock.patch.object(svc, "synced", boom):
+                msgs = await core.stormlist("slib.malpedia.sync --full --no-pull")
+            self.stormIsInWarn("The sync stopped early, the next sync will continue it: boom", msgs)
+
+            with mock.patch.object(svc, "resetView", boom):
+                msgs = await core.stormlist("slib.malpedia.admin.reset --yes")
+            self.stormIsInWarn("Unable to reset this view: boom", msgs)
+
+            with mock.patch.object(svc, "schedInfo", boom):
+                msgs = await core.stormlist("$lib.print($lib.import(slib.malpedia.priv.admin).autoSchedule())")
+            self.stormIsInWarn("Unable to read the sync schedule: boom", msgs)
+            self.stormIsInPrint("false", msgs)
+
+            # A record that fails to model is counted, and reported.
+            q = """
+                $sync = $lib.import(slib.malpedia.priv.sync)
+                $s = ({"kinds": {"nope": {"failed": 0, "removed": 0}}, "errors": []})
+                $batch = ({"upsert": [{"key": "k", "hash": "h", "new": true, "rec": {}}], "removed": [{"key": "r", "rec": {}}]})
+                $mesg = $sync._batch($lib.view.get().iden, nope, $batch, $lib.import(slib.malpedia.model).conf(), $s)
+                return(($s, $mesg))
+            """
+            summary, mesg = await core.callStorm(q)
+            assert summary["kinds"]["nope"]["failed"] == 2
+            assert summary["errors"][0].startswith("nope k: Unknown slib.malpedia record kind: nope")
+            assert "Unknown record kind 'nope'" in mesg
+
+    def test_readmes_match(self):
+        # The package's README (shown in the Cortex) is a copy of the service's README.
+        svcdir = pathlib.Path(__file__).parents[1]
+        pkgreadme = svcdir / "src" / "malpediasvc" / "pkgproto" / "README.md"
+        assert pkgreadme.read_text() == (svcdir / "README.md").read_text(), \
+            "Copy README.md to src/malpediasvc/pkgproto/README.md"
+
+    def test_readme_names_every_command(self):
+        readme = (pathlib.Path(__file__).parents[1] / "README.md").read_text()
+        for cmd in CMDS:
+            assert f"`{cmd}" in readme, cmd
+
+    def test_storm_str(self):
+        # MALP-18: the add event's query is a real Storm string literal, not a Python repr.
+        assert defs.stormStr('a "b" \\c') == '"a \\"b\\" \\\\c"'
+        with self.raises(ValueError):
+            defs.stormStr("é")
+        assert defs.stormStr(defs.AUTO_QUERY) in defs.SVC_EVTS["add"]["storm"]
+
+    async def test_storm_str_parses(self):
+        async with self.getTestCore() as core:
+            for text in ('a "b" \\c', defs.AUTO_QUERY, "it's"):
+                assert await core.callStorm(f"return({defs.stormStr(text)})") == text
