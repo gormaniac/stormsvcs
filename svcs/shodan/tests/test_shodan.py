@@ -333,9 +333,10 @@ class TestNorm(s_tests.SynTest):
         assert norm.normSoftvers([], None, None) == []
 
     def test_tcp_ports(self):
-        assert norm.tcpPorts([22, 53, 80, 123, 161, 443, 1900, 5353, "8080", None, "x", 70000, 22]) == [
+        assert norm.tcpPorts([22, 53, 80, 111, 123, 161, 443, 1900, 3671, 5353, "8080", 27015, None, "x", 70000, 22]) == [
             22,
             80,
+            111,
             443,
             8080,
         ]
@@ -713,7 +714,13 @@ class TestNorm(s_tests.SynTest):
         # SHODAN-06: cvss_v3 is v3.0 or v3.1, and cvss is cvss_version's score, so cvss_version
         # picks the prop. Unversioned (and v4.0) scores are left out.
         scores = norm.cvssScores
-        assert scores({"cvss": 9.8, "cvss_version": 3.0, "cvss_v3": 9.8}) == {"v3_0": 9.8}
+        # CVEDB's own cvss_version is a number, and only ever 2.0, 3.0, or 4.0 (ex. 3.0 for
+        # Log4Shell, which NVD scored with CVSS 3.1), so its 3.0 is "3.x" and goes in v3_1.
+        assert scores({"cvss": 9.8, "cvss_version": 3.0, "cvss_v3": 9.8}) == {"v3_1": 9.8}
+        assert scores({"cvss": 9.8, "cvss_version": 3, "cvss_v3": 9.8}) == {"v3_1": 9.8}
+        # A string (EUVD) or vector version is exact.
+        assert scores({"cvss": 9.8, "cvss_version": "3.0", "cvss_v3": 9.8}) == {"v3_0": 9.8}
+        assert scores({"cvss": 9.8, "cvss_version": "CVSS:3.0/AV:N"}) == {"v3_0": 9.8}
         assert scores({"cvss": 9.8, "cvss_version": "3.1", "cvss_v3": 9.8}) == {"v3_1": 9.8}
         assert scores({"cvss": 7.5, "cvss_version": 2, "cvss_v2": 7.5}) == {"v2_0": 7.5}
         assert scores({"cvss": 7.5, "cvss_version": 2.0}) == {"v2_0": 7.5}
@@ -733,8 +740,8 @@ class TestNorm(s_tests.SynTest):
         assert ghsa["aliases"] == ["EUVD-2021-34768", "GHSA-JFH8-C2JP-5V3Q"]
         assert ghsa["cwes"] == ["CWE-20", "CWE-502"]
         assert ghsa["cvss_v3"] == 10.0
-        # The CVE CVEDB linked the GHSA to says its scores are v3.0.
-        assert ghsa["cvss_scores"] == {"v2_0": 9.3, "v3_0": 10.0}
+        # The linked CVE's CVEDB cvss_version of 3.0 is any v3.x (Log4Shell's is v3.1).
+        assert ghsa["cvss_scores"] == {"v2_0": 9.3, "v3_1": 10.0}
         # GHSA references are {"type", "url"} dicts.
         assert "https://nvd.nist.gov/vuln/detail/CVE-2021-44228" in ghsa["references"]
 
@@ -756,6 +763,28 @@ class TestNorm(s_tests.SynTest):
         assert ghsa["cvss_scores"] == {"v3_0": 8.1}
         # Without either, the score is unversioned and left out.
         assert norm.normAdvisory({"id": "GHSA-yyyy-yyyy-yyyy", "cvss": 8.1})["cvss_scores"] == {}
+
+        # CVEDB's GHSAs have no cvss, only GitHub's vectors, so the v3 base score is computed
+        # from the vector (a temporal metric, ex. E:H, doesn't change it). A v4.0 vector is
+        # skipped, Synapse 2.x has no prop for it.
+        ghsa = norm.normAdvisory(
+            {
+                "id": "GHSA-zzzz-zzzz-zzzz",
+                "severity": [
+                    {"type": "CVSS_V3", "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N/E:U"},
+                    {"type": "CVSS_V4", "score": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:N/VA:N/SC:N/SI:N/SA:N"},
+                ],
+            }
+        )
+        assert ghsa["cvss"] == 7.5
+        assert ghsa["cvss_scores"] == {"v3_1": 7.5}
+        ghsa = norm.normAdvisory(
+            {"id": "GHSA-zzzz-zzzz-zzzz", "severity": [{"type": "CVSS_V3", "score": "CVSS:3.0/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H"}]}
+        )
+        assert ghsa["cvss_scores"] == {"v3_0": 8.1}
+        # An invalid vector has no score.
+        ghsa = norm.normAdvisory({"id": "GHSA-zzzz-zzzz-zzzz", "severity": [{"type": "CVSS_V3", "score": "CVSS:3.1/AV:X"}]})
+        assert ghsa["cvss_scores"] == {}
 
 
 class TestClient(s_tests.SynTest):

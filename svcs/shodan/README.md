@@ -284,7 +284,7 @@ the full list:
 | TLS certificates | `crypto:x509:cert` (deconflicted by `:sha256`), `inet:tls:servercert` |
 | TLS fingerprints | `inet:ssl:jarmsample` (the server's JARM, skipped when it's all zeros) and `inet:tls:ja3s:sample` (its JA3S) |
 | DNS records | `inet:dns:a/aaaa/cname/mx/ns/txt/soa` |
-| CVEDB | `risk:vuln` `:cve:desc`, `:cve:references`, `:cvss:v2_0:score`, `:cvss:v3_0:score` or `:cvss:v3_1:score` (picked by CVEDB's `cvss_version`, or a GHSA's CVSS vector; a score without a version, or a v4.0 one, is left unset), `:timeline:published`, GHSA/EUVD IDs in `:names`, GHSA CWEs in `:cwes`; `it:prod:softver:cves` with `--cpes`. Advisories without a CVE are deconflicted by `risk:vuln:id`. |
+| CVEDB | `risk:vuln` `:cve:desc`, `:cve:references`, `:cvss:v2_0:score`, `:cvss:v3_0:score` or `:cvss:v3_1:score` (picked by the CVSS version: CVEDB's own `cvss_version` is only the major version, so its v3 scores go in `:cvss:v3_1:score`, while EUVD's version and a GHSA's CVSS vector are exact; a GHSA's score is computed from its v3 vector; a score without a version, or a v4.0 one, is left unset), `:timeline:published`, GHSA/EUVD IDs in `:names`, GHSA CWEs in `:cwes`; `it:prod:softver:cves` with `--cpes`. Advisories without a CVE are deconflicted by `risk:vuln:id`. |
 | Shodan tags, CISA KEV | Tags under the prefix, ex. `#rep.shodan.cloud`, `#rep.shodan.honeypot`, `#rep.shodan.kev` |
 
 Every node is linked to the service's `meta:source` with a `-(seen)>` edge (including the
@@ -301,7 +301,8 @@ except by `slib.shodan.admin.dns.cleanup`:
 - Bare ports from minified host lookups and InternetDB that Shodan crawls over UDP (ex. 53) are
   no longer guessed as `tcp://` servers.
 - CVEDB scores go in the prop of their CVSS version (`:cvss:v3_0:score` or `:cvss:v3_1:score`),
-  and scores without a version are left unset. CVEDB publish dates are no longer `.seen`.
+  and scores without a version are left unset. GHSAs without a CVE get the score of their CVSS
+  v3 vector. CVEDB publish dates are no longer `.seen`.
 - `inet:asn`, `ou:org`, `it:prod:softver`, and `risk:vuln` nodes are linked to the `meta:source`.
 - JARM and JA3S fingerprints are modeled (`inet:ssl:jarmsample`, `inet:tls:ja3s:sample`).
 - `slib.shodan.alert.edit` refuses `--ignore`/`--unignore` services that aren't `<ip>:<port>`,

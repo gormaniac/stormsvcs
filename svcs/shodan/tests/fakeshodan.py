@@ -229,7 +229,7 @@ CVE_LOG4SHELL = {
     "cve_id": "CVE-2021-44228",
     "summary": "Apache Log4j2 JNDI features do not protect against attacker controlled LDAP.",
     "cvss": 10.0,
-    "cvss_version": 3.1,
+    "cvss_version": 3.0,  # CVEDB says 3.0 for any v3.x score
     "cvss_v2": 9.3,
     "cvss_v3": 10.0,
     "epss": 0.97,

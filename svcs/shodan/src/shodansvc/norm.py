@@ -13,6 +13,10 @@ import re
 import urllib.parse
 from typing import Any
 
+import synapse.exc as s_exc
+import synapse.lib.chop as s_chop
+import synapse.lib.stormlib.infosec as s_infosec
+
 
 def _ts(valu: str | None) -> str | None:
     """Make a Shodan timestamp parseable by Synapse's time type.
@@ -721,9 +725,11 @@ def normBanner(banner: dict) -> dict:
     }
 
 
-# Ports Shodan crawls over UDP (some over TCP too). A bare port, from a minified host lookup or
-# InternetDB, has no transport, so no inet:server is modeled for these: guessing TCP would make a
-# false server, ex. tcp://8.8.8.8:53 for DNS over UDP. See tcpPorts().
+# Ports whose service Shodan crawls over UDP, and that are usually UDP (some over TCP too). A bare
+# port, from a minified host lookup or InternetDB, has no transport, so no inet:server is modeled
+# for these: guessing TCP would make a false server, ex. tcp://8.8.8.8:53 for DNS over UDP. See
+# tcpPorts(). Banners have a transport, which is used instead. Ports usually open on both TCP and
+# UDP, ex. 111 (portmapper), aren't listed, since TCP is right for them.
 UDP_PORTS = frozenset(
     (
         53,  # DNS
@@ -732,24 +738,31 @@ UDP_PORTS = frozenset(
         123,  # NTP
         137,  # NetBIOS
         161,  # SNMP
+        177,  # XDMCP
         500,  # IKE
         520,  # RIP
         623,  # IPMI
         1194,  # OpenVPN
         1434,  # MS SQL Monitor
         1604,  # Citrix
+        1812,  # RADIUS
         1900,  # UPnP
+        2123,  # GTP-C
         3283,  # Apple Remote Desktop
         3478,  # STUN
+        3671,  # KNXnet/IP
         3702,  # WS-Discovery
         4500,  # IKE NAT-T
         5060,  # SIP
+        5093,  # Sentinel license manager
         5351,  # NAT-PMP
         5353,  # mDNS
         5683,  # CoAP
         10001,  # Ubiquiti Discovery
         11211,  # Memcached
         17185,  # VxWorks WDB
+        27015,  # Steam/Source server queries (A2S)
+        30718,  # Lantronix discovery
         47808,  # BACnet
     )
 )
@@ -858,10 +871,20 @@ CVSS_PROPS = {"2.0": "v2_0", "3.0": "v3_0", "3.1": "v3_1"}
 
 
 def _cvssVersion(valu: Any) -> str | None:
-    """Normalize a CVSS version (ex. 3.1, "3.1", 2, "CVSS:3.1/AV:N/...") to "<major>.<minor>"."""
+    """Normalize a CVSS version (ex. 3.1, "3.1", 2, "CVSS:3.1/AV:N/...") to "<major>.<minor>".
+
+    CVEDB's own ``cvss_version`` is a number, and only ever 2.0, 3.0, or 4.0: it's the major
+    version, ex. 3.0 for CVE-2021-44228, which NVD scored with CVSS 3.1. So a numeric 3.x is
+    "3.1", the version NVD has scored with since 2019 (and Synapse's default). A string (EUVD's
+    ``cvss_version``) or a CVSS vector says the exact version.
+    """
 
     if valu is None or isinstance(valu, bool):
         return None
+    if isinstance(valu, (int, float)):
+        if int(valu) == 3:
+            return "3.1"
+        return f"{float(valu):.1f}"
     text = str(valu).strip()
     if text.upper().startswith("CVSS:"):
         text = text[5:].split("/", 1)[0]
@@ -872,12 +895,25 @@ def _cvssVersion(valu: Any) -> str | None:
     return f"{vers:.1f}"
 
 
+def cvssBaseScore(vector: Any) -> float | None:
+    """The base score of a CVSS v3.0/v3.1 vector (ex. "CVSS:3.1/AV:N/..."), or None if invalid."""
+
+    vers = _cvssVersion(vector) if isinstance(vector, str) else None
+    if vers not in ("3.0", "3.1"):
+        return None
+    try:
+        return s_infosec.CVSS_CALC[vers](s_chop.cvss_validate(vector, vers))[0]
+    except s_exc.SynErr:
+        return None
+
+
 def cvssScores(data: dict) -> dict[str, float]:
     """The CVSS scores of a CVEDB CVE/advisory, keyed by their risk:vuln prop (see CVSS_PROPS).
 
     ``cvss_v2`` is always v2.0. ``cvss_v3`` covers both v3.0 and v3.1, and ``cvss`` is the score
-    of ``cvss_version``, so both are only used when ``cvss_version`` says which version they are.
-    An unversioned score (or a v4.0 one, which Synapse 2.x has no prop for) is left out.
+    of ``cvss_version``, so both are only used when ``cvss_version`` says which version they are
+    (see _cvssVersion). An unversioned score (or a v4.0 one, which Synapse 2.x has no prop for)
+    is left out.
     """
 
     retn = {}
@@ -946,11 +982,19 @@ def normAdvisory(data: dict) -> dict:
             for sev in _list(data.get("severity"))
             if isinstance(sev, dict) and str(sev.get("score") or "").upper().startswith("CVSS:")
         ]
+        cvss = data.get("cvss")
         version = data.get("cvss_version") or (vectors[0] if len(vectors) == 1 else None)
+        if cvss is None:
+            # CVEDB's GHSAs have no cvss, only the vectors: score the v3 one (Synapse 2.x has no
+            # v4.0 prop).
+            v3vectors = [v for v in vectors if _cvssVersion(v) in ("3.0", "3.1")]
+            if len(v3vectors) == 1:
+                cvss = cvssBaseScore(v3vectors[0])
+                version = v3vectors[0] if cvss is not None else None
         retn = normCve(
             {
                 "summary": data.get("summary") or data.get("description"),
-                "cvss": data.get("cvss"),
+                "cvss": cvss,
                 "cvss_version": version,
                 "epss": data.get("epss"),
                 "published_time": data.get("published_time"),

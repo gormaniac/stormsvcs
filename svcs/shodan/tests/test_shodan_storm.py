@@ -1843,9 +1843,10 @@ class TestShodanStormVulns(s_tests.SynTest):
             assert vuln.get("names") == ("euvd-2021-34768", "ghsa-jfh8-c2jp-5v3q")
             assert vuln.get("cwes") == ("CWE-20", "CWE-502")
             assert "https://nvd.nist.gov/vuln/detail/CVE-2021-44228" in vuln.get("cve:references")
-            # SHODAN-06: CVEDB says this CVE's v3 score is v3.0, so it isn't labeled v3.1.
-            assert vuln.get("cvss:v3_0:score") == 10.0
-            assert vuln.get("cvss:v3_1:score") is None
+            # SHODAN-06: CVEDB's cvss_version of 3.0 means any v3.x, and goes in v3_1 (Log4Shell's
+            # score is v3.1), not v3_0.
+            assert vuln.get("cvss:v3_1:score") == 10.0
+            assert vuln.get("cvss:v3_0:score") is None
             assert vuln.get("cvss:v2_0:score") == 9.3
 
             # An advisory without a CVE is deconflicted by its ID.
