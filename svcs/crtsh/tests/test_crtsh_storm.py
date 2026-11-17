@@ -435,12 +435,20 @@ class TestCrtshStormAdmin(s_tests.SynTest):
     async def test_tags_bad_stored_prefix(self):
         # A bad prefix stored before it was validated turns tagging off, with a warning,
         # instead of failing the node edits.
+        # Prefixes syn:tag would rewrite (ex. "my tags" to "my_tags") are treated the same way,
+        # as slib.crtsh.admin.tags refuses them.
         async with crtshSvc(self) as (core, svc, fake):
-            await core.callStorm('$lib.globals.set("slib:crtsh:tag:prefix", "bad..prefix")')
-            msgs = await core.stormlist("slib.crtsh.cert 1 --yield")
-            self.stormHasNoErr(msgs)
-            self.stormIsInWarn("The tag prefix bad..prefix isn't a valid tag name", msgs)
-            assert not (await core.nodes(CERT[1]))[0].tags
+            for prefix in ("bad..prefix", "my tags", "#my.tags", ""):
+                opts = {"vars": {"prefix": prefix}}
+                await core.callStorm('$lib.globals.set("slib:crtsh:tag:prefix", $prefix)', opts=opts)
+                msgs = await core.stormlist("slib.crtsh.cert 1 --yield")
+                self.stormHasNoErr(msgs)
+                self.stormIsInWarn(f"The tag prefix {prefix} isn't a valid tag name", msgs)
+                assert not (await core.nodes(CERT[1]))[0].tags
+            # A prefix admin.tags would accept is normed, as it would be.
+            await core.callStorm('$lib.globals.set("slib:crtsh:tag:prefix", " My.Tags ")')
+            nodes = await core.nodes("slib.crtsh.cert 1 --yield")
+            assert "my.tags" in nodes[0].tags
 
     async def test_sql(self):
         async with crtshSvc(self) as (core, svc, fake):

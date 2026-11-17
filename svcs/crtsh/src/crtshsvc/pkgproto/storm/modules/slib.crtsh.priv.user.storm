@@ -6,13 +6,13 @@ init {
 }
 
 // The tag prefix to apply, or null when tagging is off. A prefix stored before
-// slib.crtsh.admin.tags validated it, that isn't a valid tag, turns tagging off with a warning
-// instead of failing every node edit.
+// slib.crtsh.admin.tags validated it, that it would refuse, turns tagging off with a warning
+// instead of failing every node edit (or tagging under a rewritten prefix).
 function tagPrefix() {
     if $lib.globals.get("slib:crtsh:tag:enabled") {  // noqa: R005 - $lib.globals.<name> is 3.x only
         $prefix = $lib.globals.get("slib:crtsh:tag:prefix")  // noqa: R005
-        ($ok, $norm) = $lib.trycast(syn:tag, $prefix)
-        if $ok { return($norm) }
+        $norm = $lib.import(slib.crtsh.util).normTagPrefix($prefix)
+        if ($norm != null) { return($norm) }
         $lib.warn(`slib.crtsh: The tag prefix {$prefix} isn't a valid tag name, no tags are applied. Fix it with slib.crtsh.admin.tags --prefix.`)
     }
     return()

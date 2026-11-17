@@ -7,6 +7,15 @@ function failed(retn, what) {
     return((true))
 }
 
+// The tag prefix as a normed tag name, or null if it isn't one already, apart from case and
+// surrounding whitespace. syn:tag would quietly rewrite others (ex. "my tags" to "my_tags",
+// "#my.tags" to "my.tags"), tagging under a prefix nobody chose.
+function normTagPrefix(prefix) {
+    ($ok, $norm) = $lib.trycast(syn:tag, $prefix)
+    if ($ok and $norm = $lib.cast(str, $prefix).strip().lower()) { return($norm) }
+    return()
+}
+
 // Print a table. columns is a list of (name, width) and rows is a list of lists.
 function table(columns, rows) {
     $cols = ([])
