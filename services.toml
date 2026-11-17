@@ -48,11 +48,6 @@ name = "VirusTotal"
 src = "svcs/virustotal/"
 workflow = ".github/workflows/virustotal.yml"
 
-# [stormsvcs.report-ingest]
-# name = "Report Ingest"
-# src = "svcs/report-ingest/"
-# workflow = ".github/workflows/report-ingest.yml"
-
 # The service contract scripts/check_svcs.py checks every service against. Each rule there is
 # reported for every service; a rule listed in enforce also fails CI. Move a rule into enforce
 # once every service passes it, so a service that regresses (or a new one) can't merge.

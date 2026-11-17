@@ -1,5 +1,7 @@
 # Existing services (slib.snort PR #17, slib.pcap PR #16), repo conventions, and the Synapse IDS/flow model
 
+> **Historical note:** this describes PR #16 and PR #17 as they were during planning. `svcs/snort` was later folded into `svcs/pcap` (`slib.pcap`) and no longer exists; see `svcs/pcap/README.md` for the current service.
+
 Source conventions used below:
 - PR17 = `gormaniac/stormsvcs` PR #17, branch `claude/snort-service`, head `83354b1f3260ff15c0f7e7e95dcdb32721b1f706`. Base `main` @ `f4a31905185171fb4e614c496f38cb2c469ce624`. Files cited as `https://github.com/gormaniac/stormsvcs/blob/83354b1f3260ff15c0f7e7e95dcdb32721b1f706/<path>` (abbreviated `PR17:<path>`). Read via a local `git fetch` of the branch + GitHub MCP (PR body, file list, check runs).
 - PR16 = local checkout `/home/user/stormsvcs`, branch `claude/pcap-flow-analyzer`, HEAD `f37b0a2b01281418cba649c3a2b69c9bef5e2a1c` (4 commits over main: b1c9230, eaf949c, bf410d7, f37b0a2). Cited as `PR16:<path>` = `https://github.com/gormaniac/stormsvcs/blob/claude/pcap-flow-analyzer/<path>` (local path `/home/user/stormsvcs/<path>`).

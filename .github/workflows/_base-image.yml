@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths:
       - "docker/**"
+      - "LICENSE"
+      - "README.md"
+      - "services.toml"
       - ".github/workflows/_base-image.yml"
   # On main, _main.yml calls this before the service pipelines so they build on
   # the new base image, instead of racing it.
@@ -15,24 +18,25 @@ permissions:
   contents: read
   packages: write
 
+env:
+  # In a called workflow, github.event_name is the *caller's* event, so this
+  # is decided by what triggered the top-level workflow. Only publish from main.
+  PUBLISH: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
+
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      # In a called workflow, github.event_name is the *caller's* event, so this
-      # is decided by what triggered the top-level workflow. Only publish from main.
-      PUBLISH: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.1
 
       - name: Set up Buildx
         # The default docker driver can't use the `type=docker` exporter; the
         # docker-container driver from Buildx can, so we can save to a tarball.
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4.2.0
 
       - name: Build image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7.3.0
         with:
           context: ./
           file: ./docker/Dockerfile
@@ -44,12 +48,18 @@ jobs:
           # Save the built image (with both tags) so later steps can either
           # attach it to the run or push it, without rebuilding.
           outputs: type=docker,dest=/tmp/stormsvcs-base.tar
+          # The weekly _main.yml run exists to pick up system package updates, but nothing in
+          # the Dockerfile changes when the apt repositories do, so a cached apt-get upgrade
+          # layer would republish the old packages. Build scheduled runs without the cache.
+          no-cache: ${{ github.event_name == 'schedule' }}
+          cache-from: type=gha,scope=base
+          cache-to: type=gha,mode=max,scope=base
 
       - name: Upload image artifact (pull requests)
         # When not publishing (PRs, manual runs off main), don't touch the registry —
         # surface the image as a downloadable build artifact for review/testing instead.
         if: env.PUBLISH != 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: stormsvcs-base
           path: /tmp/stormsvcs-base.tar
@@ -59,7 +69,7 @@ jobs:
         # Only authenticate when we actually push (skips PRs, where the token
         # is read-only on forks anyway).
         if: env.PUBLISH == 'true'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -67,8 +77,92 @@ jobs:
 
       - name: Push to GHCR
         # Runs on pushes to main via _main.yml and manual runs on main — never on pull_request.
+        # GHCR sometimes fails a push with "unknown blob" while it's busy; pushes are
+        # idempotent, so retry a few times with a backoff (as _service.yml does).
         if: env.PUBLISH == 'true'
         run: |
           docker load -i /tmp/stormsvcs-base.tar
-          docker push ghcr.io/gormaniac/stormsvcs/base:latest
-          docker push ghcr.io/gormaniac/stormsvcs/base:${{ github.sha }}
+          for attempt in 1 2 3 4; do
+            if docker push --all-tags ghcr.io/gormaniac/stormsvcs/base; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 4 ]; then
+              echo "::warning::Pushing to GHCR failed (attempt $attempt of 4), retrying in $((attempt * 15))s."
+              sleep $((attempt * 15))
+            fi
+          done
+          echo "::error::Pushing to GHCR failed after 4 attempts."
+          exit 1
+
+  list:
+    # In a pull request, every service's prod image is built on the new base image before
+    # it's published, so a breaking base change fails the PR instead of every service on main.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      services: ${{ steps.list.outputs.services }}
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v7.0.1
+
+      - name: List the services
+        id: list
+        run: |
+          python3 - <<'EOF' >> "$GITHUB_OUTPUT"
+          import json, pathlib, tomllib
+
+          conf = tomllib.loads(pathlib.Path("services.toml").read_text())
+          srcs = (pathlib.Path(e["src"]) for e in conf.get("stormsvcs", {}).values())
+          # Only services whose prod Dockerfile builds FROM ${BASE_IMAGE} can be pointed at it.
+          docker = ((p.name, p / "docker" / "prod" / "Dockerfile") for p in srcs)
+          svcs = sorted(n for n, f in docker if f.is_file() and "FROM ${BASE_IMAGE}" in f.read_text())
+          print("services=" + json.dumps(svcs))
+          EOF
+
+  services:
+    needs: [build, list]
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJSON(needs.list.outputs.services) }}
+    # A registry that only lives for this job, so the service build (in Buildx's
+    # docker-container builder) can pull the unpublished base image.
+    services:
+      registry:
+        image: registry:2
+        ports:
+          - 5000:5000
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v7.0.1
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v4.2.0
+        with:
+          # Lets the builder reach the job's registry on localhost.
+          driver-opts: network=host
+
+      - name: Build the base image into the job's registry
+        # The build job's cache makes this a cache hit, not a second build.
+        uses: docker/build-push-action@v7.3.0
+        with:
+          context: ./
+          file: ./docker/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: localhost:5000/stormsvcs/base:test
+          cache-from: type=gha,scope=base
+
+      - name: Build the service on the new base image
+        # The service's own cache scope (shared with _service.yml) covers the stages that
+        # don't depend on the base, ex. the engines pcap builds from source.
+        uses: docker/build-push-action@v7.3.0
+        with:
+          context: ./svcs/${{ matrix.service }}
+          file: ./svcs/${{ matrix.service }}/docker/prod/Dockerfile
+          platforms: linux/amd64
+          push: false
+          build-args: BASE_IMAGE=localhost:5000/stormsvcs/base:test
+          cache-from: type=gha,scope=${{ matrix.service }}

@@ -3,9 +3,14 @@ name: Main Merge Pipeline
 # Tests, builds, and publishes every service's image on each push to main
 # (a merged PR is a push to main), regardless of which service changed.
 # If the base image changed, it is rebuilt first so the services build on it.
+# It also runs weekly, which rebuilds the base image (a scheduled run has no "before"
+# commit, see the changes job) and every service, so system package updates from the
+# base's apt-get upgrade land even when nothing in the repo changed.
 on:
   push:
     branches: [main]
+  schedule:
+    - cron: "17 3 * * 1"
   workflow_dispatch:
 
 # Called workflows can't have more permissions than their caller, so this must
@@ -27,7 +32,7 @@ jobs:
 
       - name: Check for base image changes
         id: base
-        # Manual runs have no "before" commit, and a force push's may be gone,
+        # Manual and scheduled runs have no "before" commit, and a force push's may be gone,
         # so rebuild the base image whenever the diff can't be computed.
         env:
           BEFORE: ${{ github.event.before }}
