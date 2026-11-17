@@ -65,7 +65,8 @@ function _batch(view, kind, batch, conf, summary) {
 // "errors", "retagged": whether the tag prefixes changed since the view's last sync}.
 //
 // When a tag prefix changed since the view's last sync, every record is modeled again (like
-// full=(true)) and loses the tags it got under the old prefix.
+// full=(true)) and loses the tags it got under the old prefix. If any record fails to model,
+// the next sync does that again.
 function sync(force=(false), full=(false), pull=(true), progress=(false)) {
     $view = $lib.view.get().iden
     $summary = ({"pull": null, "pullerror": null, "error": null, "kinds": {}, "errors": [], "retagged": false})
@@ -118,7 +119,15 @@ function sync(force=(false), full=(false), pull=(true), progress=(false)) {
         }
     }
 
-    $retn = $svc.viewSynced($view, tags=({"prefix": $conf.prefix, "tlp": $conf.tlp}))
+    // A record that failed to model still has its old tags, so the new prefixes are only
+    // recorded once every record has them (until then, each sync models every record again).
+    $tags = ({"prefix": $conf.prefix, "tlp": $conf.tlp})
+    if $summary.retagged {
+        for $kind in $kinds {
+            if $summary.kinds.$kind.failed { $tags = (null) }
+        }
+    }
+    $retn = $svc.viewSynced($view, tags=$tags)
     if (not $retn.status) { $summary.error = $retn.mesg }
     return($summary)
 }

@@ -69,7 +69,7 @@ Every node is linked `meta:source (malpedia) -(seen)> node`, in every view (the 
 | `rep.malpedia.tlp.<tlp>` | YARA rules, by the TLP Malpedia published them under. |
 | `rep.malpedia.removed` | Actors, families, and YARA rules Malpedia removed (they're never deleted). |
 
-IDs are normalized like Synapse tag parts, ex. `[vault_7_8]` becomes `vault_7_8`. The prefixes are configurable with `slib.malpedia.admin.tags`. The next sync in each view after a prefix change models every record again with the new tags, and removes the tags it added under the old prefix. Removed records (tagged `removed`, not in Malpedia anymore) aren't modeled again, so they keep their old tags.
+IDs are normalized like Synapse tag parts, ex. `[vault_7_8]` becomes `vault_7_8`. The prefixes are configurable with `slib.malpedia.admin.tags`. The next sync in each view after a prefix change models every record again with the new tags, and removes the tags it added under the old prefix (if a record fails to model, the next sync does it all again). Removed records (tagged `removed`, not in Malpedia anymore) aren't modeled again, so they keep their old tags.
 
 #### Updates and removals
 

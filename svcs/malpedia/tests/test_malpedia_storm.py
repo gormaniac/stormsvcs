@@ -763,6 +763,39 @@ class TestMalpediaStormAuditFixes(s_tests.SynTest):
             self.stormNotInPrint("Modeling", msgs)
             self.stormNotInPrint("tag prefixes changed", msgs)
 
+    async def test_prefix_change_with_failures(self):
+        # The new tag prefixes aren't recorded until every record was modeled with them, so a
+        # record that failed still loses its old tags on a later sync.
+        async with fm.malpediaSvc(self) as (core, svc, fake):
+            self.stormHasNoErr(await core.stormlist("slib.malpedia.sync"))
+            view = await core.callStorm("return($lib.view.get().iden)")
+            self.stormHasNoErr(await core.stormlist("slib.malpedia.admin.tags --prefix rep.mp --tlp-prefix tlp"))
+
+            changes = svc.changes
+
+            async def broken(view, kind, **kwargs):
+                async for batch in changes(view, kind, **kwargs):
+                    for item in batch["upsert"]:
+                        if kind == "actor" and item["key"] == "apt28":
+                            item["rec"] = None
+                    yield batch
+
+            with mock.patch.object(svc, "changes", broken):
+                summary = await syncSummary(core, pull=False)
+            assert summary["retagged"] is True
+            assert summary["kinds"]["actor"]["failed"] == 1
+            assert (await svc.viewInfo(view))["tags"]["prefix"] == "rep.malpedia"
+            assert await count(core, "risk:threat#rep.malpedia.threat.apt28") == 1
+
+            # The next sync models every record again, and APT28 loses its old tags.
+            summary = await syncSummary(core, pull=False)
+            assert summary["retagged"] is True
+            assert summary["kinds"]["actor"]["failed"] == 0
+            assert await count(core, "#rep.malpedia") == 0
+            assert await count(core, "risk:threat#rep.mp.threat.apt28") == 1
+            assert (await svc.viewInfo(view))["tags"] == {"prefix": "rep.mp", "tlp": "tlp"}
+            assert (await syncSummary(core, pull=False))["retagged"] is False
+
     async def test_modeling(self):
         # MALP-13: :soft, :ext:ids from other sources, and -(refs)> instead of -(about)>.
         async with fm.malpediaSvc(self) as (core, svc, fake):
