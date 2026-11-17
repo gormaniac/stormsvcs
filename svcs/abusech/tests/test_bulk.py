@@ -423,6 +423,30 @@ class TestBulkLimits(s_tests.SynTest):
             three = await svc.bulkStart("urlhaus", "recent", "a" * 64)
             assert set(svc.bulkjobs) == {two, three}
 
+    async def test_api_nodes_chunk(self):
+        # The Telepath bulkNodes takes the chunk size, by keyword or position, like the svc's.
+        import hashlib
+
+        async with abusechSvc(self) as (core, svc, fake):
+            byts = fd.BAZAAR_CSV.encode()
+            sha = hashlib.sha256(byts).hexdigest()
+            async with svc.getLocalProxy() as prox:
+                jobid = (await prox.bulkStart("bazaar", "recent", sha, user="alice"))["data"]
+                assert (await prox.bulkStage(jobid, byts, user="alice"))["status"]
+                items = [i async for i in prox.bulkBuild(jobid, user="alice")]
+                size = items[-1]["data"]["size"]
+                assert size > 100
+
+                whole = [i async for i in prox.bulkNodes(jobid, user="alice")]
+                assert len(whole) == 1 and len(whole[0]["data"]) == size
+                for items in (
+                    [i async for i in prox.bulkNodes(jobid, chunk=100, user="alice")],
+                    [i async for i in prox.bulkNodes(jobid, 100, user="alice")],
+                ):
+                    assert all(i["status"] for i in items)
+                    assert len(items) == -(-size // 100)
+                    assert b"".join(i["data"] for i in items) == whole[0]["data"]
+
     async def test_api_owner(self):
         # Over Telepath, a job belongs to the Telepath user and the Storm user it names.
         async with abusechSvc(self) as (core, svc, fake):

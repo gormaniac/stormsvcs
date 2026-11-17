@@ -196,10 +196,13 @@ class AbuseChCellApi(RetnApi, s_cell.CellApi, s_stormsvc.StormSvc):
         async for item in retnGenr(genr, **self._retnKwargs("bulkBuild")):
             yield item
 
-    async def bulkNodes(self, jobid: str, user: str | None = None) -> AsyncIterator[TelepathRetn]:
+    async def bulkNodes(
+        self, jobid: str, chunk: int | None = None, user: str | None = None
+    ) -> AsyncIterator[TelepathRetn]:
         """Stream the caller's job's .nodes file (see ``AbuseChSvc.bulkNodes``)."""
 
-        genr = self.cell.bulkNodes(jobid, owner=self._bulkOwner(user))
+        kwargs = {} if chunk is None else {"chunk": chunk}
+        genr = self.cell.bulkNodes(jobid, owner=self._bulkOwner(user), **kwargs)
         async for item in retnGenr(genr, **self._retnKwargs("bulkNodes")):
             yield item
 
