@@ -1,5 +1,5 @@
 name: slib.crtsh
-version: 0.5.0
+version: 0.5.1
 guid: 5dd9492c3e05485eb09964fa9508b23f
 
 synapse_version: ">=2.145.0,<3.0.0"
