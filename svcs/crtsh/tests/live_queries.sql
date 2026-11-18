@@ -1,6 +1,5 @@
 \timing on
 \pset pager off
-SET statement_timeout = '600s';
 
 -- The sample certificate and the values the lookups use.
 \set certid 29578180990
@@ -19,6 +18,7 @@ SELECT encode(digest(c.CERTIFICATE, 'sha256'), 'hex') AS sha256,
 \echo sha256=:sha256 serial=:serial ski=:ski
 
 \echo '-- 1. Lookup by crt.sh ID'
+SET LOCAL statement_timeout = '600s' \;
 SELECT count(*) AS certs, sum(length(q.der)) AS der_bytes, count(q.ctlog) AS with_ctlog, count(q.issuer_name) AS with_issuer FROM (WITH m AS MATERIALIZED (SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate c WHERE (c.ID = ANY(ARRAY[:certid]::bigint[])) LIMIT 1)
 SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
        ca.NAME AS issuer_name,
@@ -38,6 +38,7 @@ SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
     FROM m LEFT JOIN ca ON ca.ID = m.ISSUER_CA_ID) q;
 
 \echo '-- 2. Lookup by sha256'
+SET LOCAL statement_timeout = '600s' \;
 SELECT count(*) AS certs, sum(length(q.der)) AS der_bytes, count(q.ctlog) AS with_ctlog, count(q.issuer_name) AS with_issuer FROM (WITH m AS MATERIALIZED (SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate c WHERE (digest(c.CERTIFICATE, 'sha256') = ANY(ARRAY[decode(:'sha256', 'hex')]::bytea[])) LIMIT 100)
 SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
        ca.NAME AS issuer_name,
@@ -57,6 +58,7 @@ SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
     FROM m LEFT JOIN ca ON ca.ID = m.ISSUER_CA_ID) q;
 
 \echo '-- 3. Lookup by sha1'
+SET LOCAL statement_timeout = '600s' \;
 SELECT count(*) AS certs, sum(length(q.der)) AS der_bytes, count(q.ctlog) AS with_ctlog, count(q.issuer_name) AS with_issuer FROM (WITH m AS MATERIALIZED (SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate c WHERE (digest(c.CERTIFICATE, 'sha1') = ANY(ARRAY[decode(:'sha1', 'hex')]::bytea[])) LIMIT 100)
 SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
        ca.NAME AS issuer_name,
@@ -76,6 +78,7 @@ SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
     FROM m LEFT JOIN ca ON ca.ID = m.ISSUER_CA_ID) q;
 
 \echo '-- 4. Lookup by ski'
+SET LOCAL statement_timeout = '600s' \;
 SELECT count(*) AS certs, sum(length(q.der)) AS der_bytes, count(q.ctlog) AS with_ctlog, count(q.issuer_name) AS with_issuer FROM (WITH m AS MATERIALIZED (SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate c WHERE (x509_subjectKeyIdentifier(c.CERTIFICATE) = ANY(ARRAY[decode(:'ski', 'hex')]::bytea[])) LIMIT 100)
 SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
        ca.NAME AS issuer_name,
@@ -95,6 +98,7 @@ SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
     FROM m LEFT JOIN ca ON ca.ID = m.ISSUER_CA_ID) q;
 
 \echo '-- 5. Lookup by spki'
+SET LOCAL statement_timeout = '600s' \;
 SELECT count(*) AS certs, sum(length(q.der)) AS der_bytes, count(q.ctlog) AS with_ctlog, count(q.issuer_name) AS with_issuer FROM (WITH m AS MATERIALIZED (SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate c WHERE (digest(x509_publicKey(c.CERTIFICATE), 'sha256') = ANY(ARRAY[decode(:'spki', 'hex')]::bytea[])) LIMIT 100)
 SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
        ca.NAME AS issuer_name,
@@ -114,6 +118,7 @@ SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
     FROM m LEFT JOIN ca ON ca.ID = m.ISSUER_CA_ID) q;
 
 \echo '-- 6. Lookup by spkisha1'
+SET LOCAL statement_timeout = '600s' \;
 SELECT count(*) AS certs, sum(length(q.der)) AS der_bytes, count(q.ctlog) AS with_ctlog, count(q.issuer_name) AS with_issuer FROM (WITH m AS MATERIALIZED (SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate c WHERE (digest(x509_publicKey(c.CERTIFICATE), 'sha1') = ANY(ARRAY[decode(:'spkisha1', 'hex')]::bytea[])) LIMIT 100)
 SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
        ca.NAME AS issuer_name,
@@ -133,6 +138,7 @@ SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
     FROM m LEFT JOIN ca ON ca.ID = m.ISSUER_CA_ID) q;
 
 \echo '-- 7. Lookup by subjectsha1'
+SET LOCAL statement_timeout = '600s' \;
 SELECT count(*) AS certs, sum(length(q.der)) AS der_bytes, count(q.ctlog) AS with_ctlog, count(q.issuer_name) AS with_issuer FROM (WITH m AS MATERIALIZED (SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate c WHERE (digest(x509_name(c.CERTIFICATE), 'sha1') = ANY(ARRAY[decode(:'subjectsha1', 'hex')]::bytea[])) LIMIT 100)
 SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
        ca.NAME AS issuer_name,
@@ -152,6 +158,7 @@ SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
     FROM m LEFT JOIN ca ON ca.ID = m.ISSUER_CA_ID) q;
 
 \echo '-- 8. Lookup by serial (with and without the DER sign byte)'
+SET LOCAL statement_timeout = '600s' \;
 SELECT count(*) AS certs, sum(length(q.der)) AS der_bytes, count(q.ctlog) AS with_ctlog, count(q.issuer_name) AS with_issuer FROM (WITH m AS MATERIALIZED (SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate c WHERE (x509_serialNumber(c.CERTIFICATE) = ANY(ARRAY[decode(:'serial', 'hex'), decode(:'serial00', 'hex')]::bytea[])) LIMIT 100)
 SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
        ca.NAME AS issuer_name,
@@ -171,6 +178,7 @@ SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
     FROM m LEFT JOIN ca ON ca.ID = m.ISSUER_CA_ID) q;
 
 \echo '-- 9. Lookup by several kinds at once (crt.sh ID and SHA-256)'
+SET LOCAL statement_timeout = '600s' \;
 SELECT count(*) AS certs, sum(length(q.der)) AS der_bytes, count(q.ctlog) AS with_ctlog, count(q.issuer_name) AS with_issuer FROM (WITH m AS MATERIALIZED (SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate c WHERE (c.ID = ANY(ARRAY[:certid]::bigint[]) OR digest(c.CERTIFICATE, 'sha256') = ANY(ARRAY[decode(:'sha256', 'hex')]::bytea[])) LIMIT 100)
 SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
        ca.NAME AS issuer_name,
@@ -190,6 +198,7 @@ SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
     FROM m LEFT JOIN ca ON ca.ID = m.ISSUER_CA_ID) q;
 
 \echo '-- 10. Search --dns www.comodo.com'
+SET LOCAL statement_timeout = '600s' \;
 SELECT count(*) AS certs, sum(length(q.der)) AS der_bytes, count(q.ctlog) AS with_ctlog, count(q.issuer_name) AS with_issuer FROM (WITH cand AS MATERIALIZED (SELECT c.CERTIFICATE_ID AS ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate_and_identities c WHERE plainto_tsquery('certwatch', 'www.comodo.com') @@ identities(c.CERTIFICATE) AND c.NAME_VALUE ILIKE '%www.comodo.com' AND c.NAME_TYPE = ANY(ARRAY['san:dNSName', '2.5.4.3']::text[]) LIMIT 500), m AS MATERIALIZED (SELECT cand.ID, cand.ISSUER_CA_ID, cand.CERTIFICATE FROM cand GROUP BY cand.ID, cand.ISSUER_CA_ID, cand.CERTIFICATE)
 SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
        ca.NAME AS issuer_name,
@@ -209,6 +218,7 @@ SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
     FROM m LEFT JOIN ca ON ca.ID = m.ISSUER_CA_ID) q;
 
 \echo '-- 11. Search --cn www.comodo.com'
+SET LOCAL statement_timeout = '600s' \;
 SELECT count(*) AS certs, sum(length(q.der)) AS der_bytes, count(q.ctlog) AS with_ctlog, count(q.issuer_name) AS with_issuer FROM (WITH cand AS MATERIALIZED (SELECT c.CERTIFICATE_ID AS ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate_and_identities c WHERE plainto_tsquery('certwatch', 'www.comodo.com') @@ identities(c.CERTIFICATE) AND c.NAME_VALUE ILIKE '%www.comodo.com%' AND c.NAME_TYPE = ANY(ARRAY['2.5.4.3']::text[]) LIMIT 500), m AS MATERIALIZED (SELECT cand.ID, cand.ISSUER_CA_ID, cand.CERTIFICATE FROM cand GROUP BY cand.ID, cand.ISSUER_CA_ID, cand.CERTIFICATE)
 SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
        ca.NAME AS issuer_name,
@@ -228,6 +238,7 @@ SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
     FROM m LEFT JOIN ca ON ca.ID = m.ISSUER_CA_ID) q;
 
 \echo '-- 12. Search --org Sectigo Limited'
+SET LOCAL statement_timeout = '600s' \;
 SELECT count(*) AS certs, sum(length(q.der)) AS der_bytes, count(q.ctlog) AS with_ctlog, count(q.issuer_name) AS with_issuer FROM (WITH cand AS MATERIALIZED (SELECT c.CERTIFICATE_ID AS ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate_and_identities c WHERE plainto_tsquery('certwatch', 'Sectigo Limited') @@ identities(c.CERTIFICATE) AND c.NAME_VALUE ILIKE '%Sectigo Limited%' AND c.NAME_TYPE = ANY(ARRAY['2.5.4.10']::text[]) LIMIT 500), m AS MATERIALIZED (SELECT cand.ID, cand.ISSUER_CA_ID, cand.CERTIFICATE FROM cand GROUP BY cand.ID, cand.ISSUER_CA_ID, cand.CERTIFICATE)
 SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
        ca.NAME AS issuer_name,
@@ -247,6 +258,7 @@ SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
     FROM m LEFT JOIN ca ON ca.ID = m.ISSUER_CA_ID) q;
 
 \echo '-- 13. Search --ou Domain Control Validated'
+SET LOCAL statement_timeout = '600s' \;
 SELECT count(*) AS certs, sum(length(q.der)) AS der_bytes, count(q.ctlog) AS with_ctlog, count(q.issuer_name) AS with_issuer FROM (WITH cand AS MATERIALIZED (SELECT c.CERTIFICATE_ID AS ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate_and_identities c WHERE plainto_tsquery('certwatch', 'Domain Control Validated') @@ identities(c.CERTIFICATE) AND c.NAME_VALUE ILIKE '%Domain Control Validated%' AND c.NAME_TYPE = ANY(ARRAY['2.5.4.11']::text[]) LIMIT 500), m AS MATERIALIZED (SELECT cand.ID, cand.ISSUER_CA_ID, cand.CERTIFICATE FROM cand GROUP BY cand.ID, cand.ISSUER_CA_ID, cand.CERTIFICATE)
 SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
        ca.NAME AS issuer_name,
@@ -266,6 +278,7 @@ SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
     FROM m LEFT JOIN ca ON ca.ID = m.ISSUER_CA_ID) q;
 
 \echo '-- 14. Search --email comodo.com'
+SET LOCAL statement_timeout = '600s' \;
 SELECT count(*) AS certs, sum(length(q.der)) AS der_bytes, count(q.ctlog) AS with_ctlog, count(q.issuer_name) AS with_issuer FROM (WITH cand AS MATERIALIZED (SELECT c.CERTIFICATE_ID AS ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate_and_identities c WHERE plainto_tsquery('certwatch', 'comodo.com') @@ identities(c.CERTIFICATE) AND c.NAME_VALUE ILIKE '%comodo.com%' AND c.NAME_TYPE = ANY(ARRAY['san:rfc822Name', '1.2.840.113549.1.9.1']::text[]) LIMIT 500), m AS MATERIALIZED (SELECT cand.ID, cand.ISSUER_CA_ID, cand.CERTIFICATE FROM cand GROUP BY cand.ID, cand.ISSUER_CA_ID, cand.CERTIFICATE)
 SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
        ca.NAME AS issuer_name,
@@ -285,6 +298,7 @@ SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
     FROM m LEFT JOIN ca ON ca.ID = m.ISSUER_CA_ID) q;
 
 \echo '-- 15. Search --ip 8.8.8.8'
+SET LOCAL statement_timeout = '600s' \;
 SELECT count(*) AS certs, sum(length(q.der)) AS der_bytes, count(q.ctlog) AS with_ctlog, count(q.issuer_name) AS with_issuer FROM (WITH cand AS MATERIALIZED (SELECT c.CERTIFICATE_ID AS ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate_and_identities c WHERE plainto_tsquery('certwatch', '8.8.8.8') @@ identities(c.CERTIFICATE) AND c.NAME_VALUE ILIKE '8.8.8.8' AND c.NAME_TYPE = ANY(ARRAY['san:iPAddress']::text[]) LIMIT 500), m AS MATERIALIZED (SELECT cand.ID, cand.ISSUER_CA_ID, cand.CERTIFICATE FROM cand GROUP BY cand.ID, cand.ISSUER_CA_ID, cand.CERTIFICATE)
 SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
        ca.NAME AS issuer_name,
@@ -304,6 +318,7 @@ SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
     FROM m LEFT JOIN ca ON ca.ID = m.ISSUER_CA_ID) q;
 
 \echo '-- 16. Search --uri comodo.com'
+SET LOCAL statement_timeout = '600s' \;
 SELECT count(*) AS certs, sum(length(q.der)) AS der_bytes, count(q.ctlog) AS with_ctlog, count(q.issuer_name) AS with_issuer FROM (WITH cand AS MATERIALIZED (SELECT c.CERTIFICATE_ID AS ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate_and_identities c WHERE plainto_tsquery('certwatch', 'comodo.com') @@ identities(c.CERTIFICATE) AND c.NAME_VALUE ILIKE '%comodo.com%' AND c.NAME_TYPE = ANY(ARRAY['san:uniformResourceIdentifier']::text[]) LIMIT 500), m AS MATERIALIZED (SELECT cand.ID, cand.ISSUER_CA_ID, cand.CERTIFICATE FROM cand GROUP BY cand.ID, cand.ISSUER_CA_ID, cand.CERTIFICATE)
 SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
        ca.NAME AS issuer_name,
@@ -323,6 +338,7 @@ SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
     FROM m LEFT JOIN ca ON ca.ID = m.ISSUER_CA_ID) q;
 
 \echo '-- 17. Search --dns www.comodo.com --exact'
+SET LOCAL statement_timeout = '600s' \;
 SELECT count(*) AS certs, sum(length(q.der)) AS der_bytes, count(q.ctlog) AS with_ctlog, count(q.issuer_name) AS with_issuer FROM (WITH cand AS MATERIALIZED (SELECT c.CERTIFICATE_ID AS ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate_and_identities c WHERE plainto_tsquery('certwatch', 'www.comodo.com') @@ identities(c.CERTIFICATE) AND c.NAME_VALUE ILIKE 'www.comodo.com' AND c.NAME_TYPE = ANY(ARRAY['san:dNSName', '2.5.4.3']::text[]) LIMIT 500), m AS MATERIALIZED (SELECT cand.ID, cand.ISSUER_CA_ID, cand.CERTIFICATE FROM cand GROUP BY cand.ID, cand.ISSUER_CA_ID, cand.CERTIFICATE)
 SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
        ca.NAME AS issuer_name,
@@ -342,6 +358,7 @@ SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
     FROM m LEFT JOIN ca ON ca.ID = m.ISSUER_CA_ID) q;
 
 \echo '-- 18. Search --ip 2606:4700:4700::1111'
+SET LOCAL statement_timeout = '600s' \;
 SELECT count(*) AS certs, sum(length(q.der)) AS der_bytes, count(q.ctlog) AS with_ctlog, count(q.issuer_name) AS with_issuer FROM (WITH cand AS MATERIALIZED (SELECT c.CERTIFICATE_ID AS ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate_and_identities c WHERE plainto_tsquery('certwatch', ':2606:4700:4700:0:0:0:0:1111') @@ identities(c.CERTIFICATE) AND c.NAME_VALUE ILIKE ':2606:4700:4700:0:0:0:0:1111' AND c.NAME_TYPE = ANY(ARRAY['san:iPAddress']::text[]) LIMIT 500), m AS MATERIALIZED (SELECT cand.ID, cand.ISSUER_CA_ID, cand.CERTIFICATE FROM cand GROUP BY cand.ID, cand.ISSUER_CA_ID, cand.CERTIFICATE)
 SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
        ca.NAME AS issuer_name,
@@ -361,6 +378,7 @@ SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
     FROM m LEFT JOIN ca ON ca.ID = m.ISSUER_CA_ID) q;
 
 \echo '-- 19. Search --identity comodo.com'
+SET LOCAL statement_timeout = '600s' \;
 SELECT count(*) AS certs, sum(length(q.der)) AS der_bytes, count(q.ctlog) AS with_ctlog, count(q.issuer_name) AS with_issuer FROM (WITH cand AS MATERIALIZED (SELECT c.CERTIFICATE_ID AS ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate_and_identities c WHERE plainto_tsquery('certwatch', 'comodo.com') @@ identities(c.CERTIFICATE) AND c.NAME_VALUE ILIKE '%comodo.com%' LIMIT 500), m AS MATERIALIZED (SELECT cand.ID, cand.ISSUER_CA_ID, cand.CERTIFICATE FROM cand GROUP BY cand.ID, cand.ISSUER_CA_ID, cand.CERTIFICATE)
 SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
        ca.NAME AS issuer_name,
@@ -380,6 +398,7 @@ SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
     FROM m LEFT JOIN ca ON ca.ID = m.ISSUER_CA_ID) q;
 
 \echo '-- 20. Search --subject ''O=Sectigo Limited'' (full text only)'
+SET LOCAL statement_timeout = '600s' \;
 SELECT count(*) AS certs, sum(length(q.der)) AS der_bytes, count(q.ctlog) AS with_ctlog, count(q.issuer_name) AS with_issuer FROM (WITH m AS MATERIALIZED (SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate c WHERE plainto_tsquery('certwatch', 'Sectigo Limited') @@ identities(c.CERTIFICATE) LIMIT 500)
 SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
        ca.NAME AS issuer_name,
@@ -399,6 +418,7 @@ SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
     FROM m LEFT JOIN ca ON ca.ID = m.ISSUER_CA_ID) q;
 
 \echo '-- 21. Search --dns comodo.com --valid --since 2025-01-01 --until 2027-01-01 --caid'
+SET LOCAL statement_timeout = '600s' \;
 SELECT count(*) AS certs, sum(length(q.der)) AS der_bytes, count(q.ctlog) AS with_ctlog, count(q.issuer_name) AS with_issuer FROM (WITH cand AS MATERIALIZED (SELECT c.CERTIFICATE_ID AS ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate_and_identities c WHERE plainto_tsquery('certwatch', 'comodo.com') @@ identities(c.CERTIFICATE) AND c.NAME_VALUE ILIKE '%comodo.com' AND c.NAME_TYPE = ANY(ARRAY['san:dNSName', '2.5.4.3']::text[]) AND coalesce(x509_notAfter(c.CERTIFICATE), 'infinity'::timestamp) >= date_trunc('year', now() AT TIME ZONE 'UTC') AND x509_notAfter(c.CERTIFICATE) >= now() AT TIME ZONE 'UTC' AND x509_notBefore(c.CERTIFICATE) >= to_timestamp(1735689600.0) AT TIME ZONE 'UTC' AND coalesce(x509_notAfter(c.CERTIFICATE), 'infinity'::timestamp) >= to_timestamp(1735689600.0) AT TIME ZONE 'UTC' AND x509_notBefore(c.CERTIFICATE) < to_timestamp(1798761600.0) AT TIME ZONE 'UTC' LIMIT 500), m AS MATERIALIZED (SELECT cand.ID, cand.ISSUER_CA_ID, cand.CERTIFICATE FROM cand WHERE cand.ISSUER_CA_ID = ANY(ARRAY[:issuer]::int[]) GROUP BY cand.ID, cand.ISSUER_CA_ID, cand.CERTIFICATE)
 SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
        ca.NAME AS issuer_name,
@@ -418,6 +438,7 @@ SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
     FROM m LEFT JOIN ca ON ca.ID = m.ISSUER_CA_ID) q;
 
 \echo '-- 22. Search --dns comodo.com --issuer ''Sectigo Public Server Authentication CA OV R36'' (the CA name is a subquery)'
+SET LOCAL statement_timeout = '600s' \;
 SELECT count(*) AS certs, sum(length(q.der)) AS der_bytes, count(q.ctlog) AS with_ctlog, count(q.issuer_name) AS with_issuer FROM (WITH cand AS MATERIALIZED (SELECT c.CERTIFICATE_ID AS ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate_and_identities c WHERE plainto_tsquery('certwatch', 'comodo.com') @@ identities(c.CERTIFICATE) AND c.NAME_VALUE ILIKE '%comodo.com' AND c.NAME_TYPE = ANY(ARRAY['san:dNSName', '2.5.4.3']::text[]) LIMIT 500), m AS MATERIALIZED (SELECT cand.ID, cand.ISSUER_CA_ID, cand.CERTIFICATE FROM cand WHERE cand.ISSUER_CA_ID IN (SELECT ca.ID FROM ca WHERE ca.NAME ILIKE '%Sectigo Public Server Authentication CA OV R36%' LIMIT 1000) GROUP BY cand.ID, cand.ISSUER_CA_ID, cand.CERTIFICATE)
 SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
        ca.NAME AS issuer_name,
@@ -437,6 +458,7 @@ SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
     FROM m LEFT JOIN ca ON ca.ID = m.ISSUER_CA_ID) q;
 
 \echo '-- 23. Search --cn microsoft --issuer "Let''s Encrypt" (a common word and a rare issuer)'
+SET LOCAL statement_timeout = '600s' \;
 SELECT count(*) AS certs, sum(length(q.der)) AS der_bytes, count(q.ctlog) AS with_ctlog, count(q.issuer_name) AS with_issuer FROM (WITH cand AS MATERIALIZED (SELECT c.CERTIFICATE_ID AS ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate_and_identities c WHERE plainto_tsquery('certwatch', 'microsoft') @@ identities(c.CERTIFICATE) AND c.NAME_VALUE ILIKE '%microsoft%' AND c.NAME_TYPE = ANY(ARRAY['2.5.4.3']::text[]) LIMIT 10000), m AS MATERIALIZED (SELECT cand.ID, cand.ISSUER_CA_ID, cand.CERTIFICATE FROM cand WHERE cand.ISSUER_CA_ID IN (SELECT ca.ID FROM ca WHERE ca.NAME ILIKE '%Let''s Encrypt%' LIMIT 1000) GROUP BY cand.ID, cand.ISSUER_CA_ID, cand.CERTIFICATE)
 SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
        ca.NAME AS issuer_name,
@@ -456,6 +478,7 @@ SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
     FROM m LEFT JOIN ca ON ca.ID = m.ISSUER_CA_ID) q;
 
 \echo '-- 24. Search --cn ''microsoft*'' (a prefix)'
+SET LOCAL statement_timeout = '600s' \;
 SELECT count(*) AS certs, sum(length(q.der)) AS der_bytes, count(q.ctlog) AS with_ctlog, count(q.issuer_name) AS with_issuer FROM (WITH cand AS MATERIALIZED (SELECT c.CERTIFICATE_ID AS ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate_and_identities c WHERE '''microsoft'':*'::tsquery @@ identities(c.CERTIFICATE) AND c.NAME_VALUE ILIKE '%microsoft%' AND c.NAME_TYPE = ANY(ARRAY['2.5.4.3']::text[]) LIMIT 500), m AS MATERIALIZED (SELECT cand.ID, cand.ISSUER_CA_ID, cand.CERTIFICATE FROM cand GROUP BY cand.ID, cand.ISSUER_CA_ID, cand.CERTIFICATE)
 SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
        ca.NAME AS issuer_name,
@@ -475,6 +498,7 @@ SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
     FROM m LEFT JOIN ca ON ca.ID = m.ISSUER_CA_ID) q;
 
 \echo '-- 25. Search --cn ''microsoft*'' --issuer "Let''s Encrypt" --valid --since 2026-10-01 (a prefix of a common word in a recent window: MAY NEED A RETRY, it can hit the statement timeout on a cold cache and finish when rerun; the service retries once, crtsh:timeout:retries)'
+SET LOCAL statement_timeout = '600s' \;
 SELECT count(*) AS certs, sum(length(q.der)) AS der_bytes, count(q.ctlog) AS with_ctlog, count(q.issuer_name) AS with_issuer FROM (WITH cand AS MATERIALIZED (SELECT c.CERTIFICATE_ID AS ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate_and_identities c WHERE '''microsoft'':*'::tsquery @@ identities(c.CERTIFICATE) AND c.NAME_VALUE ILIKE '%microsoft%' AND c.NAME_TYPE = ANY(ARRAY['2.5.4.3']::text[]) AND coalesce(x509_notAfter(c.CERTIFICATE), 'infinity'::timestamp) >= date_trunc('year', now() AT TIME ZONE 'UTC') AND x509_notAfter(c.CERTIFICATE) >= now() AT TIME ZONE 'UTC' AND x509_notBefore(c.CERTIFICATE) >= to_timestamp(1790812800.0) AT TIME ZONE 'UTC' AND coalesce(x509_notAfter(c.CERTIFICATE), 'infinity'::timestamp) >= to_timestamp(1790812800.0) AT TIME ZONE 'UTC' LIMIT 10000), m AS MATERIALIZED (SELECT cand.ID, cand.ISSUER_CA_ID, cand.CERTIFICATE FROM cand WHERE cand.ISSUER_CA_ID IN (SELECT ca.ID FROM ca WHERE ca.NAME ILIKE '%Let''s Encrypt%' LIMIT 1000) GROUP BY cand.ID, cand.ISSUER_CA_ID, cand.CERTIFICATE)
 SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
        ca.NAME AS issuer_name,
@@ -494,6 +518,7 @@ SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
     FROM m LEFT JOIN ca ON ca.ID = m.ISSUER_CA_ID) q;
 
 \echo '-- 26. Search --cn ''microsoft*'' --issuer "Let''s Encrypt" --expires-after 2027-01-01 --expires-before 2027-04-01 (a prefix pinned to one partition, c2027q1: MAY NEED A RETRY, it can hit the statement timeout on a cold cache and finish when rerun; the service retries once)'
+SET LOCAL statement_timeout = '600s' \;
 SELECT count(*) AS certs, sum(length(q.der)) AS der_bytes, count(q.ctlog) AS with_ctlog, count(q.issuer_name) AS with_issuer FROM (WITH cand AS MATERIALIZED (SELECT c.CERTIFICATE_ID AS ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate_and_identities c WHERE '''microsoft'':*'::tsquery @@ identities(c.CERTIFICATE) AND c.NAME_VALUE ILIKE '%microsoft%' AND c.NAME_TYPE = ANY(ARRAY['2.5.4.3']::text[]) AND x509_notAfter(c.CERTIFICATE) >= to_timestamp(1798761600.0) AT TIME ZONE 'UTC' AND coalesce(x509_notAfter(c.CERTIFICATE), 'infinity'::timestamp) >= to_timestamp(1798761600.0) AT TIME ZONE 'UTC' AND x509_notAfter(c.CERTIFICATE) < to_timestamp(1806537600.0) AT TIME ZONE 'UTC' AND coalesce(x509_notAfter(c.CERTIFICATE), 'infinity'::timestamp) < to_timestamp(1806537600.0) AT TIME ZONE 'UTC' LIMIT 10000), m AS MATERIALIZED (SELECT cand.ID, cand.ISSUER_CA_ID, cand.CERTIFICATE FROM cand WHERE cand.ISSUER_CA_ID IN (SELECT ca.ID FROM ca WHERE ca.NAME ILIKE '%Let''s Encrypt%' LIMIT 1000) GROUP BY cand.ID, cand.ISSUER_CA_ID, cand.CERTIFICATE)
 SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
        ca.NAME AS issuer_name,
@@ -513,6 +538,7 @@ SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
     FROM m LEFT JOIN ca ON ca.ID = m.ISSUER_CA_ID) q;
 
 \echo '-- 27. Search --identity ''login microsoft*'' (plain words and a prefix)'
+SET LOCAL statement_timeout = '600s' \;
 SELECT count(*) AS certs, sum(length(q.der)) AS der_bytes, count(q.ctlog) AS with_ctlog, count(q.issuer_name) AS with_issuer FROM (WITH cand AS MATERIALIZED (SELECT c.CERTIFICATE_ID AS ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate_and_identities c WHERE (plainto_tsquery('certwatch', 'login') && '''microsoft'':*'::tsquery) @@ identities(c.CERTIFICATE) AND c.NAME_VALUE ILIKE '%login microsoft%' LIMIT 500), m AS MATERIALIZED (SELECT cand.ID, cand.ISSUER_CA_ID, cand.CERTIFICATE FROM cand GROUP BY cand.ID, cand.ISSUER_CA_ID, cand.CERTIFICATE)
 SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
        ca.NAME AS issuer_name,
@@ -532,6 +558,7 @@ SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
     FROM m LEFT JOIN ca ON ca.ID = m.ISSUER_CA_ID) q;
 
 \echo '-- 28. Issued by a CA ID (ca --issued, search --caid)'
+SET LOCAL statement_timeout = '600s' \;
 SELECT count(*) AS certs, sum(length(q.der)) AS der_bytes, count(q.ctlog) AS with_ctlog, count(q.issuer_name) AS with_issuer FROM (WITH m AS MATERIALIZED (SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM (SELECT unnest(ARRAY[:issuer]::int[]) AS CA_ID) cas CROSS JOIN LATERAL (SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate c WHERE c.ISSUER_CA_ID = cas.CA_ID ORDER BY x509_notBefore(c.CERTIFICATE) DESC LIMIT 100) c)
 SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
        ca.NAME AS issuer_name,
@@ -551,6 +578,7 @@ SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
     FROM m LEFT JOIN ca ON ca.ID = m.ISSUER_CA_ID) q;
 
 \echo '-- 29. Issued by a CA ID, --valid --since'
+SET LOCAL statement_timeout = '600s' \;
 SELECT count(*) AS certs, sum(length(q.der)) AS der_bytes, count(q.ctlog) AS with_ctlog, count(q.issuer_name) AS with_issuer FROM (WITH m AS MATERIALIZED (SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM (SELECT unnest(ARRAY[:issuer]::int[]) AS CA_ID) cas CROSS JOIN LATERAL (SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate c WHERE c.ISSUER_CA_ID = cas.CA_ID AND coalesce(x509_notAfter(c.CERTIFICATE), 'infinity'::timestamp) >= date_trunc('year', now() AT TIME ZONE 'UTC') AND x509_notAfter(c.CERTIFICATE) >= now() AT TIME ZONE 'UTC' AND x509_notBefore(c.CERTIFICATE) >= to_timestamp(1735689600.0) AT TIME ZONE 'UTC' AND coalesce(x509_notAfter(c.CERTIFICATE), 'infinity'::timestamp) >= to_timestamp(1735689600.0) AT TIME ZONE 'UTC' ORDER BY x509_notBefore(c.CERTIFICATE) DESC LIMIT 100) c)
 SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
        ca.NAME AS issuer_name,
@@ -570,6 +598,7 @@ SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
     FROM m LEFT JOIN ca ON ca.ID = m.ISSUER_CA_ID) q;
 
 \echo '-- 30. Issued by a CA name (search --issuer)'
+SET LOCAL statement_timeout = '600s' \;
 SELECT count(*) AS certs, sum(length(q.der)) AS der_bytes, count(q.ctlog) AS with_ctlog, count(q.issuer_name) AS with_issuer FROM (WITH m AS MATERIALIZED (SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM (SELECT ID AS CA_ID FROM (SELECT ca.ID FROM ca WHERE ca.NAME ILIKE '%Sectigo Public Server Authentication CA OV R36%' LIMIT 1000) named) cas CROSS JOIN LATERAL (SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate c WHERE c.ISSUER_CA_ID = cas.CA_ID ORDER BY x509_notBefore(c.CERTIFICATE) DESC LIMIT 100) c)
 SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
        ca.NAME AS issuer_name,
@@ -589,6 +618,7 @@ SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
     FROM m LEFT JOIN ca ON ca.ID = m.ISSUER_CA_ID) q;
 
 \echo '-- 31. Issued by the CA of a CA certificate (pivot --by issued)'
+SET LOCAL statement_timeout = '600s' \;
 SELECT count(*) AS certs, sum(length(q.der)) AS der_bytes, count(q.ctlog) AS with_ctlog, count(q.issuer_name) AS with_issuer FROM (WITH m AS MATERIALIZED (SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM (SELECT cac.CA_ID FROM ca_certificate cac WHERE cac.CERTIFICATE_ID = (SELECT s.ID FROM certificate s WHERE (s.ID = ANY(ARRAY[:cacert]::bigint[])) LIMIT 1)) cas CROSS JOIN LATERAL (SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate c WHERE c.ISSUER_CA_ID = cas.CA_ID ORDER BY x509_notBefore(c.CERTIFICATE) DESC LIMIT 100) c)
 SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
        ca.NAME AS issuer_name,
@@ -608,6 +638,7 @@ SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
     FROM m LEFT JOIN ca ON ca.ID = m.ISSUER_CA_ID) q;
 
 \echo '-- 32. Pivot --by siblings'
+SET LOCAL statement_timeout = '600s' \;
 SELECT count(*) AS certs, sum(length(q.der)) AS der_bytes, count(q.ctlog) AS with_ctlog, count(q.issuer_name) AS with_issuer FROM (WITH m AS MATERIALIZED (SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate c WHERE c.ISSUER_CA_ID = (SELECT s.ISSUER_CA_ID FROM certificate s WHERE (s.ID = ANY(ARRAY[:certid]::bigint[])) LIMIT 1) AND NOT (c.ID = ANY(ARRAY[:certid]::bigint[])) ORDER BY x509_notBefore(c.CERTIFICATE) DESC LIMIT 100)
 SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
        ca.NAME AS issuer_name,
@@ -627,6 +658,7 @@ SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
     FROM m LEFT JOIN ca ON ca.ID = m.ISSUER_CA_ID) q;
 
 \echo '-- 33. Pivot --by key'
+SET LOCAL statement_timeout = '600s' \;
 SELECT count(*) AS certs, sum(length(q.der)) AS der_bytes, count(q.ctlog) AS with_ctlog, count(q.issuer_name) AS with_issuer FROM (WITH m AS MATERIALIZED (SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate c WHERE digest(x509_publicKey(c.CERTIFICATE), 'sha256') = (SELECT digest(x509_publicKey(s.CERTIFICATE), 'sha256') FROM certificate s WHERE (s.ID = ANY(ARRAY[:certid]::bigint[])) LIMIT 1) AND NOT (c.ID = ANY(ARRAY[:certid]::bigint[])) LIMIT 100)
 SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
        ca.NAME AS issuer_name,
@@ -646,6 +678,7 @@ SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
     FROM m LEFT JOIN ca ON ca.ID = m.ISSUER_CA_ID) q;
 
 \echo '-- 34. Pivot --by subject'
+SET LOCAL statement_timeout = '600s' \;
 SELECT count(*) AS certs, sum(length(q.der)) AS der_bytes, count(q.ctlog) AS with_ctlog, count(q.issuer_name) AS with_issuer FROM (WITH m AS MATERIALIZED (SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate c WHERE digest(x509_name(c.CERTIFICATE), 'sha1') = (SELECT digest(x509_name(s.CERTIFICATE), 'sha1') FROM certificate s WHERE (s.ID = ANY(ARRAY[:certid]::bigint[])) LIMIT 1) AND NOT (c.ID = ANY(ARRAY[:certid]::bigint[])) LIMIT 100)
 SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
        ca.NAME AS issuer_name,
@@ -665,6 +698,7 @@ SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
     FROM m LEFT JOIN ca ON ca.ID = m.ISSUER_CA_ID) q;
 
 \echo '-- 35. Pivot --by serial'
+SET LOCAL statement_timeout = '600s' \;
 SELECT count(*) AS certs, sum(length(q.der)) AS der_bytes, count(q.ctlog) AS with_ctlog, count(q.issuer_name) AS with_issuer FROM (WITH m AS MATERIALIZED (SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate c WHERE x509_serialNumber(c.CERTIFICATE) = (SELECT x509_serialNumber(s.CERTIFICATE) FROM certificate s WHERE (s.ID = ANY(ARRAY[:certid]::bigint[])) LIMIT 1) AND NOT (c.ID = ANY(ARRAY[:certid]::bigint[])) LIMIT 100)
 SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
        ca.NAME AS issuer_name,
@@ -684,6 +718,7 @@ SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
     FROM m LEFT JOIN ca ON ca.ID = m.ISSUER_CA_ID) q;
 
 \echo '-- 36. Pivot --by ski'
+SET LOCAL statement_timeout = '600s' \;
 SELECT count(*) AS certs, sum(length(q.der)) AS der_bytes, count(q.ctlog) AS with_ctlog, count(q.issuer_name) AS with_issuer FROM (WITH m AS MATERIALIZED (SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate c WHERE x509_subjectKeyIdentifier(c.CERTIFICATE) = (SELECT x509_subjectKeyIdentifier(s.CERTIFICATE) FROM certificate s WHERE (s.ID = ANY(ARRAY[:certid]::bigint[])) LIMIT 1) AND NOT (c.ID = ANY(ARRAY[:certid]::bigint[])) LIMIT 100)
 SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
        ca.NAME AS issuer_name,
@@ -703,6 +738,7 @@ SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
     FROM m LEFT JOIN ca ON ca.ID = m.ISSUER_CA_ID) q;
 
 \echo '-- 37. Chain (slib.crtsh.chain)'
+SET LOCAL statement_timeout = '600s' \;
 SELECT count(*) AS certs, sum(length(q.der)) AS der_bytes, count(q.ctlog) AS with_ctlog, count(q.issuer_name) AS with_issuer FROM (WITH RECURSIVE chain AS ((SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE, NULL::bigint AS CHILD_ID, 0 AS DEPTH, ARRAY[c.ID] AS PATH FROM certificate c WHERE (c.ID = ANY(ARRAY[:certid]::bigint[])) LIMIT 1) UNION ALL SELECT p.ID, p.ISSUER_CA_ID, p.CERTIFICATE, ch.ID, ch.DEPTH + 1, ch.PATH || p.ID FROM chain ch JOIN ca_certificate cac ON cac.CA_ID = ch.ISSUER_CA_ID JOIN certificate p ON p.ID = cac.CERTIFICATE_ID WHERE ch.DEPTH < 10 AND NOT p.ID = ANY(ch.PATH) AND NOT EXISTS (SELECT 1 FROM ca_certificate r WHERE r.CERTIFICATE_ID = ch.ID AND r.CA_ID = ch.ISSUER_CA_ID)), m AS MATERIALIZED (SELECT ID, ISSUER_CA_ID, CERTIFICATE, CHILD_ID, DEPTH FROM chain LIMIT 500)
 SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der, m.CHILD_ID AS child_id, m.DEPTH AS depth,
        ca.NAME AS issuer_name,
@@ -722,12 +758,15 @@ SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der, m.CHILD
     FROM m LEFT JOIN ca ON ca.ID = m.ISSUER_CA_ID) q;
 
 \echo '-- 38. CAs by ID (ca --id)'
+SET LOCAL statement_timeout = '600s' \;
 WITH cas AS MATERIALIZED (SELECT ca.ID, ca.NAME FROM ca WHERE ca.ID = ANY(ARRAY[:issuer]::int[]) ORDER BY ca.ID LIMIT 100) SELECT cas.ID AS ca_id, cas.NAME AS ca_name, cac.CERTIFICATE_ID AS id FROM cas LEFT JOIN ca_certificate cac ON cac.CA_ID = cas.ID;
 
 \echo '-- 39. CAs by name (ca ''Sectigo Public Server Authentication CA OV R36'')'
+SET LOCAL statement_timeout = '600s' \;
 WITH cas AS MATERIALIZED (SELECT ca.ID, ca.NAME FROM ca WHERE ca.NAME ILIKE '%Sectigo Public Server Authentication CA OV R36%' ORDER BY ca.ID LIMIT 100) SELECT cas.ID AS ca_id, cas.NAME AS ca_name, cac.CERTIFICATE_ID AS id FROM cas LEFT JOIN ca_certificate cac ON cac.CA_ID = cas.ID;
 
 \echo '-- 40. CAs with their certificates (ca --certs)'
+SET LOCAL statement_timeout = '600s' \;
 SELECT count(*) AS certs, sum(length(q.der)) AS der_bytes, count(q.ctlog) AS with_ctlog, count(q.issuer_name) AS with_issuer FROM (WITH cas AS MATERIALIZED (SELECT ca.ID, ca.NAME FROM ca WHERE ca.ID = ANY(ARRAY[:issuer]::int[]) ORDER BY ca.ID LIMIT 100), m AS MATERIALIZED (SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE, cas.ID AS CA_ID, cas.NAME AS CA_NAME FROM cas LEFT JOIN ca_certificate cac ON cac.CA_ID = cas.ID LEFT JOIN certificate c ON c.ID = cac.CERTIFICATE_ID)
 SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der, m.CA_ID AS ca_id, m.CA_NAME AS ca_name,
        ca.NAME AS issuer_name,

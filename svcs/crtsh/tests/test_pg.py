@@ -226,12 +226,45 @@ class TestPostgres(s_tests.SynTest):
             dyn = "query_to_xml('SELECT pg_advisory_' || 'lock(7)', false, false, '')"
             assert await svc.rawQuery(f"SELECT {dyn} IS NOT NULL AS ok") == [{"ok": True}]
             assert await svc.db.fetch(locks) == [{"n": 0}]
+            # Even when it returns no rows.
+            assert await svc.rawQuery(f"SELECT 1 AS ok WHERE {dyn} IS NULL") == []
+            assert await svc.db.fetch(locks) == [{"n": 0}]
+            # A query that fails can't release them in its statement, a follow-up statement does.
+            # (pg_locks shows every backend's locks, but behind PgBouncer's statement pooling the
+            # follow-up only reaches the same server connection while nothing else uses the pool.)
+            conn = svc.db._conn
             with pytest.raises(CrtshDbError, match="division by zero"):
                 await svc.rawQuery(f"SELECT {dyn} IS NOT NULL, (random() * 0)::int / 0")
             assert await svc.db.fetch(locks) == [{"n": 0}]
-            # The connection is still usable, on the same backend.
-            pid = await svc.db.fetch("SELECT pg_backend_pid() AS pid")
-            assert await svc.rawQuery("SELECT pg_backend_pid() AS pid") == pid
+            # The connection is still usable, it wasn't dropped.
+            assert (await svc.rawQuery("VALUES (1)")) == [{"column1": 1}]
+            assert svc.db._conn is conn
+
+            # Neither the service's queries nor raw ones can write, even with a writable account.
+            for query in (svc.db.fetch, svc.rawQuery):
+                with pytest.raises(CrtshDbError, match="read-only transaction"):
+                    await query("SELECT nextval('ca_id_seq')")
+            # The service's queries inline their arguments as literals (a simple query has no
+            # parameters), which round trip exactly, whatever they contain.
+            text = "it's \\ a 'test' $1 E'x' \\' ); SELECT pg_sleep(5); -- \u00e9\u682a"
+            args = (text, b"\x00\xff'\\", [1, 2**40], 1.5, [], [b"\x01", None], True, None)
+            rows = await svc.db.fetch(
+                "SELECT $1::text AS t, $2::bytea AS der, $3::bigint[] AS a, $4::float8 AS f, "
+                "$5::text[] AS e, $6::bytea[] IS NOT NULL AS b, $7::bool AS y, $8::int AS n",
+                *args,
+            )
+            assert rows == [
+                {
+                    "t": text,
+                    "der": args[1],
+                    "a": args[2],
+                    "f": 1.5,
+                    "e": [],
+                    "b": True,
+                    "y": True,
+                    "n": None,
+                }
+            ]
 
     async def test_cycles(self):
         # CAs that cross-sign each other: CA 2 (certs 2, 4) is signed by CA 3, whose certificate
@@ -245,11 +278,26 @@ class TestPostgres(s_tests.SynTest):
             assert [c["crtsh"]["id"] for c in chain["certs"]] == [10, 2, 4, 1, 14]
             assert all(len(path) == len(set(path)) for path in chain["paths"])
             assert len(await svc.db.chain({"id": [10]}, maxrows=3)) == 3
-            # Each query sets its own statement_timeout (SET LOCAL), in a read-only transaction.
-            rows = await svc.rawQuery(
-                "SELECT current_setting('statement_timeout') AS st, current_setting('transaction_read_only') AS ro"
+            # The service's queries set their own statement_timeout (SET LOCAL), read-only, in
+            # the same message as the query, so it doesn't outlast it (raw queries, which keep
+            # their parameters, run under the server's).
+            settings = (
+                "SELECT current_setting('statement_timeout') AS st, "
+                "current_setting('transaction_read_only') AS ro"
             )
-            assert rows == [{"st": "30s", "ro": "on"}]
+            assert await svc.db.fetch(settings) == [{"st": "30s", "ro": "on"}]
+            assert await svc.rawQuery(settings) == [{"st": "0", "ro": "on"}]
+
+    async def test_statement_timeout(self):
+        # The statement_timeout applies to the query itself, behind PgBouncer's statement
+        # pooling too (a session SET, or set_config() in the query, wouldn't).
+        await pgstub.load(DSN)
+        conf = {"crtsh:dsn": DSN, "crtsh:statement:timeout": 0.2, "crtsh:timeout:retries": 0}
+        async with self.getTestCell(CrtshSvc, conf=conf) as svc:
+            with pytest.raises(CrtshDbError, match="statement timeout"):
+                await svc.db.fetch("SELECT pg_sleep(1)")
+            assert await svc.db.fetch("SELECT pg_sleep(0.01) IS NULL AS ok") == [{"ok": False}]
+            assert svc.db._useCopy
 
     async def test_identity_tokens(self):
         # The fakes decide which certificates a search matches with tsTokens; check it makes the
@@ -259,7 +307,7 @@ class TestPostgres(s_tests.SynTest):
         for live in LIVE_IDENTITIES:
             der = base64.b64decode(live["der"])
             texts.append(identityText(x509.load_der_x509_certificate(der)))
-        conn = await asyncpg.connect(DSN)
+        conn = await asyncpg.connect(DSN, statement_cache_size=0)
         try:
             for text in texts:
                 words = await conn.fetchval(
@@ -303,7 +351,7 @@ class TestPostgres(s_tests.SynTest):
         after = int(datetime.datetime(2030, 1, 1, tzinfo=datetime.UTC).timestamp() * 1000)
         before = int(datetime.datetime(2030, 4, 1, tzinfo=datetime.UTC).timestamp() * 1000)
         conds = _filters(params, expires_after=after, expires_before=before)
-        conn = await asyncpg.connect(DSN)
+        conn = await asyncpg.connect(DSN, statement_cache_size=0)
         try:
             rows = await conn.fetch(
                 f"EXPLAIN SELECT c.ID FROM certificate c WHERE {' AND '.join(conds)}", *params.args

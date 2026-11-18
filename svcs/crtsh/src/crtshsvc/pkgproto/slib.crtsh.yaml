@@ -402,9 +402,10 @@ commands:
       Run a raw SQL query against the crt.sh database and print the rows as JSON.
 
       The SQL must be a single query that returns rows (SELECT, VALUES, TABLE, or WITH ... SELECT).
-      It runs in a read-only transaction, wrapped as SELECT * FROM (<sql>) q LIMIT <limit>, so it
-      can't change data or session settings. The service's crtsh:sql:limit caps --limit, and
-      crtsh:statement:timeout bounds how long it may run.
+      It runs read-only as one statement, wrapped as SELECT * FROM (<sql>) q LIMIT <limit>, which
+      sets back any session setting the query changed and releases its session advisory locks.
+      The service's crtsh:sql:limit caps --limit. Its arguments stay query parameters, so it runs
+      under crt.sh's own statement timeout (30s), not crtsh:statement:timeout.
 
       Examples:
 

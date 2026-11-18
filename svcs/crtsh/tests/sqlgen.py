@@ -286,7 +286,6 @@ async def record(samples: dict, caname: str) -> Recorder:
 
 SETUP = """\\timing on
 \\pset pager off
-SET statement_timeout = '600s';
 
 -- The sample certificate and the values the lookups use.
 \\set certid {certid}
@@ -306,13 +305,20 @@ SELECT encode(digest(c.CERTIFICATE, 'sha256'), 'hex') AS sha256,
 """
 
 
+TIMEOUT = "SET LOCAL statement_timeout = '600s' \\;\n"
+"""Sent in front of each query: ``\\;`` makes psql send both as one message (one implicit
+transaction), so the timeout reaches the query behind crt.sh's PgBouncer statement pooling,
+like the service's own ``SET LOCAL`` (see ``CrtshDb``). A separate ``SET statement_timeout``
+only reaches whichever server connection ran it."""
+
+
 def main() -> None:
     vals = STUB if "--stub" in sys.argv[1:] else CRTSH
     db = asyncio.run(record(vals["samples"], vals["caname"]))
     out = [SETUP.format(**vals)]
     for num, (title, sql) in enumerate(db.queries, start=1):
         title = title.replace("'", "''")  # Quoted for psql's \\echo.
-        out.append(f"\\echo '-- {num}. {title}'\n{sql};\n")
+        out.append(f"\\echo '-- {num}. {title}'\n{TIMEOUT}{sql};\n")
     sys.stdout.write("\n".join(out))
 
 

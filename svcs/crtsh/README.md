@@ -17,8 +17,9 @@ The service registers the `slib.crtsh` Storm package.
 
 > **Status:** the SQL in `src/crtshsvc/db.py` follows the certwatch schema
 > (https://github.com/crtsh/certwatch_db) and libx509pq sources, every query uses one of crt.sh's
-> indexes, every query runs against a PostgreSQL stub of crt.sh, and the live test passes against
-> crt.sh itself (2026-10, about 6.5 minutes). See [Testing](#testing).
+> indexes, every query runs against a PostgreSQL stub of crt.sh, directly and behind PgBouncer in
+> statement pooling mode like crt.sh's, and the live test passed against crt.sh itself (2026-10,
+> about 6.5 minutes, before the statement pooling fix in 0.6.0). See [Testing](#testing).
 
 crt.sh's database is slow per round trip (often 20s+ even for trivial queries) rather than per
 row, so every operation is a single query: lookups, searches, and pivots return each certificate
@@ -47,10 +48,33 @@ it alive while it's busy, closes it after `crtsh:idle` seconds, and reconnects w
 when crt.sh refuses a new connection. While the service holds the connection, other clients
 on the same IP (ex. psql) are refused, and vice versa.
 
-Queries run one at a time, so every query is bounded: each runs in a read-only transaction that
-sets its own `statement_timeout` (`SET LOCAL`, which works behind any PgBouncer pooling mode), and
-the service stops waiting after `crtsh:timeout`. Setting both to `0` lets one slow query block
-every other call.
+crt.sh's PgBouncer pools by **statement**: each statement may run on a different server
+connection, explicit transactions (`BEGIN`, savepoints) are refused ("transaction blocks not
+allowed in statement pooling mode"), and a session `SET` only reaches the server connection that
+ran it (where it stays, for other clients). Its guest role's `statement_timeout` is 30s. So every
+query is a single round trip without an explicit transaction, which also works behind
+transaction or session pooling and against plain PostgreSQL:
+
+- The service's own queries are one simple-query message, `SET LOCAL statement_timeout = <ms>;
+  SET LOCAL bytea_output = hex; SET TRANSACTION READ ONLY; COPY (<query as JSON rows>) TO STDOUT`.
+  The statements of one message run in one implicit transaction on one server connection, so
+  the query gets `crtsh:statement:timeout` and read-only mode, and both end with it. A simple
+  query has no parameters, so their arguments are inlined as escaped literals (user text is only
+  ever an argument). If the server refuses the `SET`s, the queries run under its own timeout.
+- Startup parameters can't set the timeout: PgBouncer rejects `statement_timeout` as an
+  "unsupported startup parameter", ignores it when it's in `ignore_startup_parameters`, and can't
+  track it (PostgreSQL doesn't report it), and a `set_config()` inside a query only affects later
+  statements.
+- `slib.crtsh.admin.sql` queries keep their parameters, so they run as one plain query under
+  crt.sh's 30s (see [Raw SQL](#raw-sql)).
+
+Queries run one at a time, so every query is bounded: by its `statement_timeout`, and the service
+stops waiting after `crtsh:timeout`. Setting both to `0` lets one slow query block every other
+call.
+
+crt.sh's guest role is read-only and its database is a read-only replica, so dropping explicit
+`BEGIN READ ONLY` transactions doesn't allow writes there. The service's queries still run read-only
+(`SET TRANSACTION READ ONLY`), and admin.sql queries too (see below).
 
 ### Configuration
 
@@ -58,7 +82,7 @@ every other call.
 |---|---|---|
 | `crtsh:dsn` | `postgresql://guest@crt.sh:5432/certwatch` | The database DSN (or a mirror's). |
 | `crtsh:timeout` | `660` | Seconds before the service gives up waiting on a query, `0` for none. Keep it longer than `crtsh:statement:timeout`. |
-| `crtsh:statement:timeout` | `600` | The `statement_timeout` set for each query, in seconds, `0` for none. crt.sh's default cancels big queries. |
+| `crtsh:statement:timeout` | `600` | The `statement_timeout` of each of the service's queries (a `SET LOCAL` sent with the query), in seconds, `0` for none. crt.sh's default (30s) cancels big queries. admin.sql runs under crt.sh's. |
 | `crtsh:retries` | `3` | Retries when the connection drops mid-query. |
 | `crtsh:timeout:retries` | `1` | Retries of a query crt.sh cancels for its statement timeout (a heavy search often finishes when rerun on crt.sh's warm cache), `0` for none. |
 | `crtsh:keepalive` | `10` | Seconds between keepalive pings while the connection is in use. |
@@ -136,16 +160,41 @@ word and an issuer together, so a common word with a rare issuer (`--cn microsof
 ### Raw SQL
 
 `slib.crtsh.admin.sql` runs a single query that returns rows (`SELECT`, `VALUES`, `TABLE`, or
-`WITH ... SELECT`), wrapped as `SELECT * FROM (<sql>) q LIMIT <limit>` in a read-only
-transaction that's rolled back once the rows are fetched. So it can't change data or session
-settings, even with a writable `crtsh:dsn`: a function that changes a setting (ex.
-`set_config('search_path', ..., false)`) only lasts for the query. Session advisory locks outlive
-a rollback, so every session advisory lock is released (`pg_advisory_unlock_all()`) before the
-rollback, even ones taken through dynamic SQL (ex. `query_to_xml`) or by a query that then failed.
-As a first line, queries that mention `pg_advisory_lock` and friends anywhere (even in a comment or
-string) are refused, as are Unicode escaped identifiers (`U&"..."`) that could spell them; the
-`pg_advisory_xact_lock` ones work.
-Statements like `SHOW` or `EXPLAIN` aren't accepted.
+`WITH ... SELECT`), wrapped as `SELECT * FROM (<sql>) q LIMIT <limit>`. Statements like `SET`,
+`COMMIT`, `SHOW`, or `EXPLAIN` aren't accepted, and neither are data-modifying ones.
+
+Its arguments stay query parameters, so it's one plain (extended protocol) statement and runs
+under crt.sh's own `statement_timeout` (30s), not `crtsh:statement:timeout`: narrow heavy queries
+(ex. an expiry window on the `certificate` partition key, see the searches above), or run them
+in psql with `SET LOCAL statement_timeout = 0 \;` in front (see [Testing](#testing)).
+
+With statement pooling there's no transaction to roll back, so the wrapper does it in the same
+statement, ordered by the plan (`RAW_SQL` in `db.py`, checked with `EXPLAIN ANALYZE` and against
+PgBouncer by `test_pg.py`):
+
+- `transaction_read_only` is set before the query runs, so functions that write (ex.
+  `nextval`, `lo_create`) fail, and the query can't turn it back off.
+- The session's settings are snapshotted first and any the query changed (ex.
+  `set_config('search_path', ..., false)`) are set back before its rows are returned. A query
+  that fails aborts its implicit transaction, which undoes them too. Placeholder settings a query
+  creates (`set_config('x.y', ...)`) aren't removed.
+- Every session advisory lock is released (`pg_advisory_unlock_all()`) after the query and
+  before its rows are returned, even ones taken through dynamic SQL (ex. `query_to_xml`) or by a
+  query that returns no rows. As a first line, queries that mention `pg_advisory_lock` and
+  friends anywhere (even in a comment or string) are refused, as are Unicode escaped identifiers
+  (`U&"..."`) that could spell them; the `pg_advisory_xact_lock` ones work.
+- **Limitation:** a query that takes a session advisory lock (only possible through dynamic SQL)
+  and then *fails* can't release it in its statement. The service sends
+  `SELECT pg_advisory_unlock_all()` next, which reaches the same session directly or behind
+  session pooling, but behind statement pooling (crt.sh) or transaction pooling it may land on
+  another server connection, leaving the lock on that PgBouncer server connection until
+  PgBouncer closes it. The service's own queries never take advisory locks, so they aren't
+  affected.
+- These protections run inside the statement the raw SQL is part of, so they guard against
+  mistakes and dynamic SQL, not deliberately malformed SQL (ex. unbalanced parentheses that
+  restructure the wrapper). On crt.sh the read-only guest role and replica are what keep data
+  from changing; only point `crtsh:dsn` at a writable account if everyone allowed to run
+  admin.sql may write.
 
 The library behind the commands is the `slib.crtsh.lib` Storm module, ex.
 `for $cert in $lib.import(slib.crtsh.lib).lookup((1234567,)) { $lib.print($cert) }`.
@@ -180,6 +229,14 @@ same test certificates. The database's public schema is replaced:
 SLIB_CRTSH_PGDSN=postgresql://postgres@127.0.0.1:5432/certwatch uv run pytest tests/test_pg.py
 ```
 
+CI runs them a second time through PgBouncer in statement pooling mode, like crt.sh's, which
+refuses explicit transactions. Locally, with a `pgbouncer.ini` of `pool_mode = statement` in
+front of the same database (ex. on port 6432):
+
+```bash
+SLIB_CRTSH_PGDSN=postgresql://postgres@127.0.0.1:6432/certwatch uv run pytest tests/test_pg.py
+```
+
 Against the real crt.sh (one connection per IP, so close psql first; takes a few minutes):
 
 ```bash
@@ -192,5 +249,10 @@ Every query the service runs, as a psql script, generated from `CrtshDb` by `tes
 uv run python -m tests.sqlgen > tests/live_queries.sql
 psql -h crt.sh -p 5432 -U guest certwatch -f tests/live_queries.sql
 ```
+
+Each query is sent with `SET LOCAL statement_timeout = '600s' \;` in front: psql's `\;` sends both
+in one message, one implicit transaction, so the timeout reaches the query behind statement
+pooling. A plain `SET statement_timeout = 0;` line (or `SET ...; SELECT ...;` on one line, which
+psql sends as two messages) only reaches whichever server connection ran it, and stays there.
 
 `--stub` generates the same queries with values from the test certificates, for the stub database.

@@ -112,7 +112,8 @@ async def load(dsn: str, pki: Pki = PKI) -> None:
         f"FOR VALUES FROM ('{year}-01-01') TO ('{year + 1}-01-01');"
         for year in range(2020, 2060)
     )
-    conn = await asyncpg.connect(dsn)
+    # No statement cache, so the stub also loads through PgBouncer (statement pooling).
+    conn = await asyncpg.connect(dsn, statement_cache_size=0)
     try:
         await conn.execute(SCHEMA.replace("{partitions}", partitions))
 

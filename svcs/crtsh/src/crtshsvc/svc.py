@@ -209,8 +209,10 @@ class CrtshSvc(s_cell.Cell):
             "type": "number",
             "default": 600,
             "description": (
-                "The statement_timeout, in seconds, set for each crt.sh query, 0 for no limit. "
-                "crt.sh's default cancels big queries (chains, wide searches) that finish given time."
+                "The statement_timeout, in seconds, of each of the service's crt.sh queries (a "
+                "SET LOCAL sent with the query), 0 for no limit. crt.sh's default (30s) cancels "
+                "big queries (chains, wide searches) that finish given time. admin.sql queries "
+                "run under crt.sh's own."
             ),
         },
         "crtsh:retries": {
@@ -688,8 +690,8 @@ class CrtshSvc(s_cell.Cell):
         """Run a raw SQL query against crt.sh. Bytes are hex encoded and times are epoch millis.
 
         ``sql`` must be a single query that returns rows (SELECT, VALUES, TABLE, or WITH ... SELECT),
-        it runs in a read-only transaction. At most ``limit`` rows are returned, capped by
-        ``crtsh:sql:limit``.
+        it runs read-only, as one statement (see ``CrtshDb.raw``). At most ``limit`` rows are
+        returned, capped by ``crtsh:sql:limit``.
         """
 
         if args is not None and not isinstance(args, (list, tuple)):
