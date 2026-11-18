@@ -30,9 +30,6 @@ ISSUER = 204411
 ISSUER_CERT = 4267304698
 """The certificate of CA 204411."""
 
-RECENT = 1790812800000
-"""2026-10-01, epoch millis."""
-
 Q1_2027 = (1798761600000, 1806537600000)
 """2027-01-01 and 2027-04-01, epoch millis: crt.sh's c2027q1 partition."""
 
@@ -89,18 +86,11 @@ class TestLive(s_tests.SynTest):
                 assert norm.matches(details, "cn", "microsoftonl", "prefix"), norm.fieldValues(
                     details, "cn"
                 )
-            # A prefix of a common word in a recent window, with an issuer: the heaviest search,
-            # it may time out on crt.sh's cold cache, which crtsh:timeout:retries retries once.
-            async for details in svc.searchGenr(
-                cn="microsoft*", issuer="Let's Encrypt", valid=True, since=RECENT, limit=20
-            ):
-                assert "Let's Encrypt" in details["crtsh"]["issuer"]["name"]
-                assert details["notbefore"] >= RECENT
-                assert norm.matches(details, "cn", "microsoft", "prefix"), norm.fieldValues(
-                    details, "cn"
-                )
-
-            # The same, pinned to one partition (c2027q1) with expiry bounds on its key.
+            # A prefix of a common word with an issuer, pinned to one partition (c2027q1) with
+            # expiry bounds on its key. Without the expiry bounds (ex. --valid --since a recent
+            # date) it scans every partition from this year on, and times out on crt.sh even with
+            # the service's statement timeout and retry (checked live 2026-11-18); that's what
+            # the expiry options are for. tests/live_queries.sql still has it, to run by hand.
             async for details in svc.searchGenr(
                 cn="microsoft*",
                 issuer="Let's Encrypt",
