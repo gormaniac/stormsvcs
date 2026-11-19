@@ -76,7 +76,7 @@ Results:
 - `_parse(rows)` drops duplicate rows by crt.sh ID and calls `norm.certDetails` on each.
 - `_sort(items)` sorts newest notBefore first, then highest crt.sh ID (`norm.certTime` returns
   the negated notBefore).
-- `searchGenr` (see [How matching works](commands.md#how-matching-works)) picks the most
+- `searchGenr` (see [How matching works](commands.md#slibcrtshsearch)) picks the most
   specific field, sizes the candidate limit, runs `certsByIdentity` (or `certsByIssuer` for an
   issuer-only search), then filters every field with `norm.matches` in the right mode
   (`exact`, `contains`, `suffix`, or `prefix`).

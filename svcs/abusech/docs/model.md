@@ -28,7 +28,7 @@ rules, matches, scans, certificates, families, C2 configs, subfiles, URL files, 
 gets a `meta:source -(seen)>` edge from the platform it came from (`seen()`), and its `.seen`
 widened with abuse.ch's first/last seen times when it has them. Supporting nodes do not get a
 `-(seen)>` edge: `meta:note`, `ps:contact`, `inet:passwd`, `inet:asn`, `inet:service:platform`,
-`inet:service:account`, `crypto:x509:signedfile` (which gets one only when made for a file).
+`inet:service:account`.
 
 ```text
 // Everything ThreatFox has told you about.

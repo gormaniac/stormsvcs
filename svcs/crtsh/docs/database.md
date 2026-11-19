@@ -84,7 +84,7 @@ Closing
 
 The service's own queries (everything but raw SQL) are sent as **one simple-query message**:
 
-```sql
+```text
 SET statement_timeout = 600000; SET LOCAL bytea_output = hex; SET TRANSACTION READ ONLY;
 COPY (SELECT row_to_json(crtsh_r)::text FROM (
 <the query, with its arguments inlined>
@@ -176,7 +176,7 @@ into a materialized CTE `m` (after their `LIMIT`), and the crt.sh metadata is ad
 correlated subqueries, like crt.sh's own `certificate_lifecycle` view. So the metadata is only
 looked up for the rows actually returned:
 
-```sql
+```text
 WITH m AS MATERIALIZED (<inner query: ID, ISSUER_CA_ID, CERTIFICATE ...>)
 SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
        ca.NAME AS issuer_name,
@@ -198,7 +198,7 @@ SELECT m.ID AS id, m.ISSUER_CA_ID AS issuer_ca_id, m.CERTIFICATE AS der,
 
 ### Lookups: `certs()`
 
-```sql
+```text
 SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate c
 WHERE (<cond for kind 1> OR <cond for kind 2> ...) LIMIT $n
 ```
@@ -231,7 +231,7 @@ position-less `identities()`.
 Without a field pattern (a `--subject` search), the candidates come straight from
 `certificate`:
 
-```sql
+```text
 SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate c WHERE <tsquery> @@ identities(c.CERTIFICATE) AND <filters> LIMIT $n
 ```
 
@@ -239,7 +239,7 @@ With a pattern (every other field), they come from `certificate_and_identities`,
 per matching identity that is grouped back into one. The `NAME_TYPE` condition is only added
 for fields that have name types (every field but `identity`):
 
-```sql
+```text
 WITH cand AS MATERIALIZED (
   SELECT c.CERTIFICATE_ID AS ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate_and_identities c
   WHERE <tsquery> @@ identities(c.CERTIFICATE) AND c.NAME_VALUE ILIKE $2
@@ -289,7 +289,7 @@ is partitioned on. A condition on exactly that expression lets PostgreSQL skip w
 
 ### Issued by a CA: `certsByIssuer()`
 
-```sql
+```text
 SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM (<CA sources, UNIONed>) cas
 CROSS JOIN LATERAL (SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate c
   WHERE c.ISSUER_CA_ID = cas.CA_ID AND <filters>
@@ -307,7 +307,7 @@ applies per CA. The service then keeps the newest `limit` overall.
 
 ### Pivots: `related()`
 
-```sql
+```text
 SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate c
 WHERE <expr on c> = (SELECT <expr on s> FROM certificate s WHERE <lookup on s> LIMIT 1)
   AND NOT <lookup on c> [AND <valid filters>] [ORDER BY x509_notBefore(c.CERTIFICATE) DESC] LIMIT $n
@@ -320,7 +320,7 @@ subquery, so a pivot is one round trip.
 
 ### Chains: `chain()`
 
-```sql
+```text
 WITH RECURSIVE chain AS (
   (SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE, NULL::bigint AS CHILD_ID, 0 AS DEPTH,
           ARRAY[c.ID] AS PATH FROM certificate c WHERE <lookup> LIMIT 1)
@@ -341,7 +341,7 @@ and `depth`, and a certificate can be a row once per child. `maxdepth` is 10 and
 
 ### CAs: `cas()`
 
-```sql
+```text
 WITH cas AS MATERIALIZED (SELECT ca.ID, ca.NAME FROM ca WHERE ca.ID = ANY($1::int[]) OR ca.NAME ILIKE $2
                           ORDER BY ca.ID LIMIT $3)
 SELECT cas.ID AS ca_id, cas.NAME AS ca_name, cac.CERTIFICATE_ID AS id
@@ -366,7 +366,7 @@ refused. That catches any mention of the session advisory lock functions, even i
 string, and any Unicode escaped identifier that could spell one. The SQL is then wrapped in
 `RAW_SQL`:
 
-```sql
+```text
 WITH crtsh_pre AS MATERIALIZED (
     SELECT set_config('transaction_read_only', 'on', true) AS ro,
            array_agg(name) AS names, array_agg(setting) AS vals FROM pg_settings),
