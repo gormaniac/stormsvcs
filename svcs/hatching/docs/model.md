@@ -139,7 +139,7 @@ are only modeled when the sample has a verdict.
 Each family is a `risk:tool:software=(slib.hatching, family, <family>)` with
 `:soft:name=<family>`, `:reporter:name="hatching triage"`, and `:tag=<prefix>.<family tag part>`
 (unset when tags are disabled). Families aren't linked to the sample by an edge; pivot on the
-tag, ex. `risk:tool:software:tag=rep.hatching.cobaltstrike -> syn:tag -> *`.
+tag, ex. `risk:tool:software:tag=rep.hatching.cobaltstrike` and `#rep.hatching.cobaltstrike`.
 
 ## Malware configs
 

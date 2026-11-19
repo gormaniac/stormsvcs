@@ -3,7 +3,7 @@
 The commands for [MalwareBazaar](https://bazaar.abuse.ch) (base URLs `bazaar` and
 `bazaar:export`). Nodes they create are linked to the MalwareBazaar `meta:source` and tagged
 `<prefix>.bazaar.*`. What a sample is modeled as is in
-[the data model](model.md#samples-file-bytes).
+[the data model](model.md#samples).
 
 ## `slib.abusech.bazaar.lookup`
 

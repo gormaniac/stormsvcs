@@ -2,7 +2,7 @@
 
 The commands for [URLhaus](https://urlhaus.abuse.ch) (base URLs `urlhaus`, `urlhaus:submit`
 and `urlhaus:export`). Nodes they create are linked to the URLhaus `meta:source` and tagged
-`<prefix>.urlhaus.*`. What a URL is modeled as is in [the data model](model.md#urls-inet-url).
+`<prefix>.urlhaus.*`. What a URL is modeled as is in [the data model](model.md#urls).
 
 ## `slib.abusech.urlhaus.lookup`
 

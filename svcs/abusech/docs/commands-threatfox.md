@@ -2,7 +2,7 @@
 
 The commands for [ThreatFox](https://threatfox.abuse.ch) (base URLs `threatfox` and
 `threatfox:export`). Nodes they create are linked to the ThreatFox `meta:source` and tagged
-`<prefix>.threatfox.*`. How an IOC is modeled is in [the data model](model.md#iocs-threatfox).
+`<prefix>.threatfox.*`. How an IOC is modeled is in [the data model](model.md#threatfox-iocs).
 
 ## `slib.abusech.threatfox.lookup`
 
