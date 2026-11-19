@@ -33,7 +33,7 @@ myst_enable_extensions = ["colon_fence", "deflist", "fieldlist"]
 # Lets pages link to any heading up to ### with [text](page.md#the-heading-slug).
 myst_heading_anchors = 3
 
-# {src}`svcs/vt/src/vtsvc/svc.py` links a file in the repo, {gh}`55` a PR or issue.
+# {src}`svcs/virustotal/src/vtsvc/svc.py` links a file in the repo, {gh}`55` a PR or issue.
 extlinks = {
     "src": (f"{REPO}/blob/main/%s", "%s"),
     "gh": (f"{REPO}/issues/%s", "#%s"),

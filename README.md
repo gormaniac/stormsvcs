@@ -2,20 +2,20 @@
 
 A collection of custom Storm services.
 
-This is a monorepo of custom Storm services I've developed for personal projects. Each service lives as it's own package under `svcs/`.
+This is a monorepo of custom Storm services I've developed for personal projects. Each service lives as its own package under `svcs/`.
 
-Shared utility code lives upstream in the StormLib++ project. Each service should be treated as a standalone project, they can intercommunicate if desired (like the ``enrich`` package), but they must be workable and installable individually.
+Shared utility code lives upstream in the StormLib++ project. Treat each service as a standalone project. Services can talk to each other if needed (the planned `enrich` service would), but each one must work and install on its own.
 
-Actions run specific to each service, each service must maintain its own actions to build and test code + build and deploy docker images. However, a push to main requires that all tests pass regardless of which code is edited. The all in one testing action will call a registered test action for each service, as some services require custom environments/image builds.
+Each service has its own CI workflow that tests it and builds its Docker image, and a PR only runs the workflows of the services it touches. A push to `main` runs every service's workflow (`_main.yml` calls each one, since some need custom environments or image builds) and publishes the images.
 
-All original code in this repo is covered under the same MIT license (see ``LICENSE``).
+All original code in this repo is covered under the same MIT license (see `LICENSE`).
 
 Each service must have the following:
-- An entry in `services.toml` pointing to that service's:
-	- unique name
-		- can be different from the services folder name if desired
-	- path to the service's source code
-	- path to the service's CI workflow
+- An entry in `services.toml` (`[stormsvcs.<key>]`, the key is also the service's path on the docs site) with:
+	- `name`, its display name
+	- `summary`, one line for the docs site's service index
+	- `src`, the path to the service's folder (`svcs/<folder>/`)
+	- `workflow`, the path to the service's CI workflow
 - A uniquely named folder under `svcs/` that has:
 	- A `README.md` file.
 	- `pyproject.toml` and `uv.lock` file
@@ -75,7 +75,7 @@ The `Docs` workflow builds it on every PR that touches the docs (warnings fail t
 - `crtsh`
   - Look up, search, and pivot on certificates straight from the crt.sh certwatch database.
 - `shodan`
-  - Every Shodan API: host lookups, search, scanning, alerts, DNS, streaming, InternetDB, CVEDB, exploits, and trends.
+  - Every Shodan API: host lookups, search, scanning, alerts, DNS, streaming, InternetDB, CVEDB, and trends.
 - `abusech`
   - Every abuse.ch platform: MalwareBazaar, URLhaus, ThreatFox, YARAify, Feodo Tracker, SSL Blacklist, and the false positive list.
 - `capa`

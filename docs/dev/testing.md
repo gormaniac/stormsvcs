@@ -16,8 +16,8 @@ that only exists in the image, such as system tools and bundled rule sets.
 ## The ground rules
 
 - **Never call the real upstream by default.** Tests that reach a real API or database have
-  to be gated behind an opt-in flag or environment variable. They're in `tests/test_live.py`,
-  and each service's Internals page says how to enable them. Everything else runs offline.
+  to be gated behind an opt-in flag or environment variable. Where a service has them they're in `tests/test_live.py`,
+  and its Internals page says how to enable them. Everything else runs offline.
 - **Fake the upstream strictly.** Most services test against a fake server in `tests/` (for
   example `fakevt.py`, `fakeabusech.py`, `fakebgphe.py`) that serves the API's real response
   shapes on localhost. A fake that accepts what the real API rejects hides bugs, so it should
@@ -104,4 +104,5 @@ A service that lints clean sets `storm_lint: block` in its workflow, so it stays
 ## The README copy
 
 The service README is packaged into its Storm package, at `src/<pkg>/pkgproto/README.md`, so
-Storm users can read it in the Cortex. A test checks that the two copies are the same. Edit `README.md`, then copy it over.
+Storm users can read it in the Cortex. A test checks that the two copies are the same. Edit
+`README.md`, then copy it over.
