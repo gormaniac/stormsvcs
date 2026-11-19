@@ -1,5 +1,5 @@
 name: slib.pcap
-version: 0.11.2
+version: 0.11.3
 guid: e02a89d21d5b4eb588a03a7156b3b467
 
 synapse_version: ">=2.234.0,<3.0.0"
@@ -29,7 +29,7 @@ perms:
     desc: Sync the rule feeds into the Cortex (creating and editing rule and meta:ruleset nodes) and push every enabled rule to the service.
   - perm: [ slib, pcap, admin ]
     gate: cortex
-    desc: Manage the rule feeds, the scheduled sync, and the Decode As rules used for every run.
+    desc: Manage the rule feeds, the scheduled sync, and the network variables and Decode As rules used for every run.
 
 modules:
   # Privileged modules - the only modules that talk to the service (and the Axon).
@@ -83,7 +83,7 @@ commands:
         file:bytes=sha256:<sha256> | slib.pcap.flows --yield --timeout 60 --tag cno.case.x
 
         // The rules that matched.
-        file:bytes=sha256:<sha256> | slib.pcap.flows --hits | -> *
+        file:bytes=sha256:<sha256> | slib.pcap.flows --hits --yield | -> *
 
         // Decrypt TLS (1.2 and 1.3) with a key log in the Axon, and decode TLS on port 8443.
         file:bytes=sha256:<sha256> | slib.pcap.flows --keylog <sha256> --decode-as "tcp.port==8443,tls"

@@ -218,7 +218,7 @@ for `id`.
 | `yaraifyRulesExport` | `limit=0` | rules |
 | `feodoBlocklist` | `kind="all"` (`all`, `recommended`, `aggressive`), `limit=0` | C2s |
 | `sslblBlocklist` | `kind="certs"` (`certs`, `ja3`), `limit=0` | SSLBL certs or JA3s |
-| `bulkPull` | `plat`, `kind`, `apikey=None` | raw bytes chunks of the export, as served (zipped or not) |
+| `bulkPull` | `plat`, `kind`, `apikey=None` | raw bytes chunks of the export, as served (zipped or not); an error once it's over `abusech:bulk:maxsize` |
 | `bulkBuild` | `jobid`, `prefix=None`, `batch=None` (default 1000), `user=None` | progress dicts, see [Bulk imports](bulk.md#service-side-steps) |
 | `bulkNodes` | `jobid`, `chunk=None` (default 1 MiB), `user=None` | raw bytes chunks of the job's `.nodes` file |
 

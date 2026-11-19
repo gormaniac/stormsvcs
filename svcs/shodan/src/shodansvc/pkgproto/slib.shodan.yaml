@@ -1,5 +1,5 @@
 name: slib.shodan
-version: 0.17.2
+version: 0.18.0
 guid: 0f6c1d0f1d8a4c3bb7a1e3d5c9b2a864
 
 synapse_version: ">=2.256.0,<3.0.0"
@@ -1018,10 +1018,10 @@ commands:
     cmdargs:
       - - type
         - type: str
-          default: banners
+          default: null
           nargs: "?"
           choices: [ banners, asn, countries, ports, tags, vulns, custom, alert ]
-          help: The type of stream to read.
+          help: The type of stream to read. Defaults to the first inbound node's type, or banners.
       - - --value
         - type: str
           action: append
@@ -1548,8 +1548,10 @@ commands:
       - - --base
         - type: str
           default: api
-          choices: [ api, trends, internetdb, cvedb ]
-          help: The Shodan API to send the request to.
+          choices: [ api, stream, trends, internetdb, cvedb ]
+          help: |
+            The Shodan API to send the request to. A stream never ends, so a request to one
+            that succeeds fails at the shodan:timeout. Use slib.shodan.stream to read banners.
       - - --params
         - default: null
           help: A dict of query params.

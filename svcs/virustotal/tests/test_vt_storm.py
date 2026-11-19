@@ -448,6 +448,14 @@ class TestVtStormPkg(s_tests.SynTest):
 
             msgs = await core.stormlist("[file:bytes=*] | slib.vt.submit")
             self.stormIsInWarn("has no :sha256", msgs)
+
+            # A URL VirusTotal didn't accept isn't modeled.
+            await core.stormlist("slib.vt.apikey badkey")
+            msgs = await core.stormlist("slib.vt.submit --url https://failed.example/x --yield")
+            self.stormIsInWarn("Submitting https://failed.example/x failed", msgs)
+            assert await count(core, "inet:url='https://failed.example/x'") == 0
+            assert await count(core, "inet:fqdn=failed.example") == 0
+            await core.stormlist("slib.vt.apikey --clear")
             msgs = await core.stormlist(
                 f"[file:bytes=sha256:{'1' * 64} :sha256={'1' * 64}] | slib.vt.submit"
             )
@@ -485,7 +493,7 @@ class TestVtStormPkg(s_tests.SynTest):
             msgs = await core.stormlist(f"slib.vt.admin.apikey {fv.APIKEY}")
             self.stormIsInPrint("Set the slib.vt API key.", msgs)
             msgs = await core.stormlist("slib.vt.admin.apikey")
-            self.stormIsInPrint("A service-wide API key is set.", msgs)
+            self.stormIsInPrint("A service-wide API key is set (with slib.vt.admin.apikey).", msgs)
 
             msgs = await core.stormlist("slib.vt.admin.request /popular_threat_categories")
             self.stormIsInPrint('"ransomware"', msgs)
@@ -497,12 +505,34 @@ class TestVtStormPkg(s_tests.SynTest):
             msgs = await core.stormlist("slib.vt.admin.request /search --param bad")
             self.stormIsInWarn("Invalid --param", msgs)
 
+            # A full URL is only sent to the VirusTotal API's host, never anywhere else.
+            before = len(fake.requests)
+            for url in (
+                "https://evil.example/api/v3/search",
+                "//evil.example/api/v3/search",
+                f"{fake.base}@evil.example/api/v3/search",
+                fake.url.replace("http://", "https://") + "/popular_threat_categories",
+            ):
+                msgs = await core.stormlist("slib.vt.admin.request $url", opts={"vars": {"url": url}})
+                self.stormIsInWarn("Only requests to the VirusTotal API", msgs)
+            assert len(fake.requests) == before
+            msgs = await core.stormlist(
+                "slib.vt.admin.request $url",
+                opts={"vars": {"url": f"{fake.url}/popular_threat_categories"}},
+            )
+            self.stormIsInPrint('"ransomware"', msgs)
+            assert fake.keys[-1] == fv.APIKEY
+
             msgs = await core.stormlist("slib.vt.admin.tags --prefix rep.virustotal --disable")
             self.stormIsInPrint("enabled=false prefix=rep.virustotal", msgs)
             await core.stormlist("slib.vt.enrich --fqdn example.com")
             assert not (await core.nodes("inet:fqdn=example.com"))[0].tags
+            # An invalid prefix changes nothing, not even --enable.
             msgs = await core.stormlist("slib.vt.admin.tags --prefix '..' --enable")
             self.stormIsInWarn("Invalid tag prefix", msgs)
+            self.stormIsInPrint("enabled=false prefix=rep.virustotal", msgs)
+            msgs = await core.stormlist("slib.vt.admin.tags --enable")
+            self.stormIsInPrint("enabled=true prefix=rep.virustotal", msgs)
             await core.stormlist("slib.vt.enrich --fqdn example.com --no-cache")
             assert (await core.nodes("inet:fqdn=example.com"))[0].getTag(
                 "rep.virustotal.verdict.benign"
@@ -510,6 +540,80 @@ class TestVtStormPkg(s_tests.SynTest):
 
             msgs = await core.stormlist("slib.vt.admin.apikey --clear")
             self.stormIsInPrint("Cleared the slib.vt API key.", msgs)
+            self.stormNotInPrint("vt:apikey", msgs)
+            msgs = await core.stormlist("slib.vt.admin.apikey")
+            self.stormIsInPrint("No service-wide API key is set.", msgs)
+
+    async def test_admin_apikey_config(self):
+        # The check says which key is in use, and --clear can't remove the vt:apikey key.
+        async with fv.vtSvc(self) as (core, svc, fake):
+            msgs = await core.stormlist("slib.vt.admin.apikey")
+            self.stormIsInPrint("from the vt:apikey config option is in use", msgs)
+            self.stormIsInPrint("--clear can't remove it", msgs)
+
+            await core.stormlist(f"slib.vt.admin.apikey {fv.OTHERKEY}")
+            msgs = await core.stormlist("slib.vt.admin.apikey")
+            self.stormIsInPrint("A service-wide API key is set (with slib.vt.admin.apikey).", msgs)
+
+            msgs = await core.stormlist("slib.vt.admin.apikey --clear")
+            self.stormIsInPrint("Cleared the slib.vt API key.", msgs)
+            self.stormIsInPrint("The vt:apikey config option is still set and is now in use", msgs)
+            assert await svc.apiKeySource() == "config"
+
+    async def test_redact(self):
+        # Errors never include the service's stored or configured key, ex. quota --remote,
+        # which puts the key in the URL path.
+        async with fv.vtSvc(self) as (core, svc, fake):
+            fake.text[f"/users/{fv.APIKEY}/overall_quotas"] = "<html>Oops</html>"
+            msgs = await core.stormlist("slib.vt.quota --remote")
+            self.stormIsInWarn("Unable to parse the JSON response from GET /users/<redacted>/", msgs)
+            assert fv.APIKEY not in str(msgs)
+
+            await core.stormlist(f"slib.vt.admin.apikey {fv.OTHERKEY}")
+            fake.text[f"/users/{fv.OTHERKEY}/overall_quotas"] = "<html>Oops</html>"
+            msgs = await core.stormlist("slib.vt.quota --remote")
+            self.stormIsInWarn("/users/<redacted>/overall_quotas", msgs)
+            assert fv.OTHERKEY not in str(msgs)
+
+            async with svc.getLocalProxy() as prox:
+                retn = await prox.quota(remote=True)
+            assert retn["status"] is False
+            assert fv.OTHERKEY not in retn["mesg"] and "<redacted>" in retn["mesg"]
+
+    async def test_rels(self):
+        # rels() works over Telepath.
+        async with fv.vtSvc(self) as (core, svc, fake):
+            async with svc.getLocalProxy() as prox:
+                retn = await prox.rels("file")
+                assert retn["status"] is True, retn
+                assert "execution_parents" in retn["data"]
+                assert "contacted_domains" in retn["data"]
+                retn = await prox.rels("domains")
+                assert "resolutions" in retn["data"] and "urls" not in retn["data"]
+                retn = await prox.rels("nope")
+                assert retn["status"] is False
+                assert "Unknown VirusTotal object type" in retn["mesg"]
+            retn = await core.callStorm("return($lib.import(slib.vt.priv.user).rels(url))")
+            assert retn["status"] is True and "network_location" in retn["data"]
+            assert fake.requests == []
+
+    def test_wait_defaults(self):
+        # The Python, Storm module, and command defaults for waitAnalysis agree.
+        import inspect
+
+        from vtsvc.svc import VtSvc
+
+        sig = inspect.signature(VtSvc.waitAnalysis).parameters
+        for cname in ("slib.vt.analysis", "slib.vt.submit"):
+            cdef = next(c for c in PKGDEFS[0]["commands"] if c["name"] == cname)
+            args = {a[0]: a[1] for a in cdef["cmdargs"]}
+            assert args["--interval"]["default"] == sig["interval"].default, cname
+            assert args["--timeout"]["default"] == sig["timeout"].default, cname
+        mod = next(m for m in PKGDEFS[0]["modules"] if m["name"] == "slib.vt.priv.user")
+        assert (
+            f"function waitAnalysis(ident, timeout=({sig['timeout'].default:g}), "
+            f"interval=({sig['interval'].default:g}))" in mod["storm"]
+        )
 
     async def test_apikey(self):
         async with fv.vtSvc(self) as (core, svc, fake):

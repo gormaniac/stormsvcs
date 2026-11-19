@@ -35,7 +35,7 @@ with `$lib.warn()` and return null (or an empty list), they don't raise.
 | --- | --- |
 | `host(ip, history=(false), minify=(false), internetdb=(false), timeline=(null))` | The IP node, or null. Falls back to InternetDB without a key. `timeline` defaults to `history`. See {ref}`shodan-cmd-host`. |
 | `search(query, limit=(100), minify=(false), page=(1), ref=(null))` | `{"query": <it:exec:query>, "ips": [<ip nodes>]}`, or null. `ref` is linked `-(refs)>` from the query. |
-| `count(query, size=(null), facets=(null), ref=(null))` | `{"query": <it:exec:query>, "ips": [...], "size": <n>, "full": <bool>, "facets": {...}}`, or null. |
+| `count(query, size=(null), facets=(null), ref=(null), command="slib.shodan.lib.count")` | `command` is recorded as the `it:exec:query`'s `:opts.command` (`slib.shodan.count` passes its own name). `{"query": <it:exec:query>, "ips": [...], "size": <n>, "full": <bool>, "facets": {...}}`, or null. |
 | `ingest(retns, what, text, apiurl, opts, ref=(null))` | Emits `{"query": <it:exec:query>, "ip": <ip or null>}` per banner, then `{"query": ..., "ip": null, "done": true}`. Models a generator of banner retns and records the run. |
 | `domain(domain, history=(false), rtype=(null), maxpages=(10))` | A list of the subdomain `inet:fqdn` nodes. |
 | `resolve(fqdn)` | The IP node, or null. |
@@ -137,7 +137,9 @@ retn:
 | `ValueError`, `TypeError`, `BadArg` | `Invalid input: <message>` |
 | Anything else | `Unexpected error: <Type>: <message>`, logged with its traceback |
 
-`ShodanCellApi` doesn't override `_retnRedact()`, so messages are returned unchanged.
+`ShodanCellApi._retnRedact()` replaces the stored service-wide key and the `shodan:apikey`
+option (as-is or URL encoded) with `<redacted>` in every error message. The client already
+removes the key it sent from its own messages (see [internals](internals.md#error-handling)).
 
 A generator yields one `status=true` retn per item. An error ends it after one final
 `status=false` retn.
@@ -247,8 +249,8 @@ These return Shodan's JSON as-is.
 | `normCve(cveid)` | same | `normCve` dict |
 | `ghsa(ghsaid)`, `euvd(euvdid)` | `GET cvedb:/ghsa/{ID}`, `/euvd/{ID}` | Raw |
 | `normVuln(vulnid)` | `/ghsa`, `/euvd` or `/cve` by prefix | `normCve`-shaped dict |
-| `cves(cpe23=None, product=None, is_kev=False, sort_by_epss=False, skip=0, limit=1000, start_date=None, end_date=None, count=False)` | `GET cvedb:/cves` | `{"cves": [normCve]}`, or `{"total": n}` with `count` |
-| `cpes(product, skip=0, limit=1000, count=False)` | `GET cvedb:/cpes` | `{"cpes": [padded CPE 2.3]}`, or `{"total": n}` |
+| `cves(cpe23=None, product=None, is_kev=False, sort_by_epss=False, skip=0, limit=1000, start_date=None, end_date=None, count=False)` | `GET cvedb:/cves` | `{"cves": [normCve]}`, or `{"total": n}` with `count`. An empty body is `{"cves": []}` (or `{"total": 0}`) |
+| `cpes(product, skip=0, limit=1000, count=False)` | `GET cvedb:/cpes` | `{"cpes": [padded CPE 2.3]}`, or `{"total": n}`. An empty body is `{"cpes": []}` (or `{"total": 0}`) |
 
 #### Streams and provenance
 

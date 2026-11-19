@@ -129,7 +129,7 @@ Requires `slib.crtsh.user`.
 
 | Option | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `--dns` | str | none | A domain in a DNS SAN or the CN. Includes subdomains unless `--exact`. A leading `*.` or `.` is ignored. |
+| `--dns` | str | none | A domain in a DNS SAN or the CN. Includes subdomains unless `--exact`. A leading `*.` or `.` is ignored, except with `--exact`, which matches the whole name (`*.vertex.link` finds that wildcard name). |
 | `--cn` | str | none | The subject common name. Whole words or domains, or a trailing `*` for a prefix. |
 | `--org` | str | none | The subject organization (O). Whole words. |
 | `--ou` | str | none | The subject organizational unit (OU). Whole words. |
@@ -183,7 +183,7 @@ How each field matches in step 4:
 
 | Field | Matched against | Default match | With `--exact` | With a trailing `*` |
 | --- | --- | --- | --- | --- |
-| `dns` | DNS SANs and CN | the domain or any subdomain (`*.` stripped from the certificate's names) | equal | a word starts with it |
+| `dns` | DNS SANs and CN | the domain or any subdomain (`*.` stripped from the certificate's names) | equal (a wildcard value equals the wildcard name) | a word starts with it |
 | `cn` | CN | substring | equal | a word starts with it |
 | `org` | O | substring | equal | a word starts with it |
 | `ou` | OU | substring | equal | a word starts with it |
@@ -475,8 +475,9 @@ Requires `slib.crtsh.admin`.
 | `--args` | any | none | A list of positional query arguments for `$1`, `$2`, and so on. |
 | `--limit` | int | `100` | The most rows to return. Capped by `crtsh:sql:limit` (1000 by default). |
 
-It prints `<n> rows` (or `<n> rows (the --limit, there may be more)` when exactly `--limit`
-came back), then the rows as indented JSON. In the rows, bytes are lowercase hex, timestamps are
+It prints the service's count, `<n> rows` (or `<n> rows (the limit of <limit>, there may be
+more)` when as many rows as the effective limit came back: `--limit`, capped by
+`crtsh:sql:limit`), then the rows as indented JSON. In the rows, bytes are lowercase hex, timestamps are
 epoch milliseconds, arrays are lists, and any other type that isn't a str, int, float, bool, or
 null is converted with `str()`.
 

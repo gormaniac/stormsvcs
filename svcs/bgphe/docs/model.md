@@ -20,8 +20,9 @@ The service's `meta:source` node:
 | `:url` | `https://bgp.he.net` |
 
 It is created by the service's `add` event (once, as root). Every node the package models is
-linked from it with a `-(seen)>` edge, and the edge's helper also (re)sets `:name`, so the node
-is created as the user if it is missing.
+linked from it with a `-(seen)>` edge. The edge's helper only lifts the node, it doesn't edit
+it, so users don't need permission to edit the `meta:source`. If the node is missing (ex. it
+was deleted), the helper recreates it as the user, with `:name`.
 
 ```text
 meta:source=5cb263934371467b8844e789c39f81aa -(seen)> *

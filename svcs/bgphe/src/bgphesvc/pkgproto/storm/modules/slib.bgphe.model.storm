@@ -14,10 +14,29 @@ init {
 // function early. So functions here only yield a node when they don't loop, and
 // loops call helpers that yield/edit the node in their own runtime instead.
 
+// The slib.bgphe meta:source node. The service's add event creates it (as root), so it's only
+// created here (as the user) if it was deleted. An existing node isn't edited, so users don't
+// need permission to edit it.
+function source() {
+    $src = $liftSource()
+    if (not $src) { $src = $addSource() }
+    return($src)
+}
+
+function liftSource() {
+    meta:source=$sourceGuid
+    return($node)
+}
+
+function addSource() {
+    [ meta:source=$sourceGuid :name="bgp.he.net" ]
+    return($node)
+}
+
 // Link the node to the slib.bgphe meta:source.
 function seen(n) {
     yield $n
-    [ <(seen)+ { [ meta:source=$sourceGuid :name="bgp.he.net" ] } ]
+    [ <(seen)+ { yield $source() } ]
     return($n)
 }
 

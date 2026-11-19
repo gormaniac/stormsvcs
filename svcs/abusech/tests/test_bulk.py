@@ -142,6 +142,16 @@ class TestBulkSvc(s_tests.SynTest):
             with self.raises(AbuseChApiError):
                 [b async for b in svc.bulkPull("bazaar", "recent", apikey="badkey")]
 
+            # The download is capped at abusech:bulk:maxsize, like the staged copy.
+            maxsize, svc.bulkmaxsize = svc.bulkmaxsize, len(fd.BAZAAR_CSV.encode()) - 1
+            with self.raises(AbuseChApiError) as cm:
+                [b async for b in svc.bulkPull("bazaar", "recent")]
+            assert "abusech:bulk:maxsize" in cm.exception.mesg
+            svc.bulkmaxsize = len(fd.BAZAAR_CSV.encode())
+            byts = b"".join([b async for b in svc.bulkPull("bazaar", "recent")])
+            assert byts == fd.BAZAAR_CSV.encode()
+            svc.bulkmaxsize = maxsize
+
             with self.raises(AbuseChApiError):
                 await svc.bulkStart("bazaar", "recent", "nothex")
             with self.raises(AbuseChApiError):

@@ -1,5 +1,5 @@
 name: slib.hatching
-version: 0.5.1
+version: 0.6.0
 guid: 921df2db53ea47a49328d32b3b7c7d62
 
 synapse_version: ">=2.137.0,<3.0.0"
@@ -201,7 +201,7 @@ commands:
       - - sample
         - type: str
           nargs: "+"
-          help: The sample IDs.
+          help: The sample IDs (or hashes).
       - - --timeout
         - type: int
           default: 600
@@ -285,7 +285,7 @@ commands:
     cmdargs:
       - - sample
         - type: str
-          help: The sample ID.
+          help: The sample ID (or hash).
       - - task
         - type: str
           help: The task name (ex. behavioral1).
@@ -336,15 +336,15 @@ commands:
       - - --pcap
         - default: false
           action: store_true
-          help: Download the network capture (pcap) of each behavioral task, or --task.
+          help: Download the network capture (pcap) of each reported behavioral task in the overview report, or of --task.
       - - --pcapng
         - default: false
           action: store_true
-          help: Download the network capture (pcapng) of each behavioral task, or --task.
+          help: Download the network capture (pcapng) of each reported behavioral task in the overview report, or of --task.
       - - --dumped
         - default: false
           action: store_true
-          help: Download the files dropped during each behavioral task.
+          help: Download the files dropped during each reported behavioral task in the overview report.
       - - --screenshot
         - default: false
           action: store_true
@@ -353,7 +353,7 @@ commands:
         - type: str
           default: null
           choices: [ tar, zip ]
-          help: Download an archive of the sample's reports and files.
+          help: Download an archive of the sample's reports and files, named "<sample ID>.<tar|zip>".
       - - --yield
         - default: false
           action: store_true
@@ -540,6 +540,10 @@ commands:
     descr: |
       Pick the profiles for a sample submitted with --interactive, starting its analysis.
 
+      Either name the profiles with --profile, or let the sandbox pick them with --auto (or
+      --pick, which implies --auto). --profile can't be combined with --auto or --pick: to run
+      a file in an archive with a profile, use --profile "profile:file".
+
       Examples:
 
         slib.hatching.sample.profile 261031-a1b2c3d4e5 --profile win10-internet
@@ -550,21 +554,21 @@ commands:
     cmdargs:
       - - sample
         - type: str
-          help: The sample ID.
+          help: The sample ID (or hash).
       - - --profile
         - type: str
           action: append
           default: []
-          help: A profile to run, or "profile:file" to run a file in an archive with it. May be used multiple times.
+          help: A profile to run, or "profile:file" to run a file in an archive with it. Can't be used with --auto or --pick. May be used multiple times.
       - - --auto
         - default: false
           action: store_true
-          help: Let the sandbox pick the profiles.
+          help: Let the sandbox pick the profiles. Can't be used with --profile.
       - - --pick
         - type: str
           action: append
           default: []
-          help: A file in an archive to analyze, with profiles the sandbox picks. May be used multiple times.
+          help: A file in an archive to analyze, with profiles the sandbox picks (implies --auto). Can't be used with --profile. May be used multiple times.
 
   - name: slib.hatching.sample.import
     perms:
@@ -596,7 +600,7 @@ commands:
       - - sample
         - type: str
           nargs: "+"
-          help: The sample IDs.
+          help: The sample IDs (or hashes).
 
   # ---- Manage commands ----
 

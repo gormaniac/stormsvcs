@@ -14,7 +14,7 @@ init {
             $rows.append(($period, $q.used.$period, $limit))
         }
         $util.table(([["period", 8], ["used", 8], ["limit", 8]]), $rows)
-        $lib.print(`Next request can be sent in {$q.wait}s. The daily count resets at {$util.when($q.resets)}. {$q.cached} responses are cached.`)
+        $lib.print(`Next request can be sent in {$q.wait}s. The daily count resets at {$util.when($q.resets)}, the monthly count at {$util.when($q.resetsMonth)}. {$q.cached} responses are cached.`)
         if $q.remote {
             $lib.print("VirusTotal's counts for the key:")
             $rows = ([])

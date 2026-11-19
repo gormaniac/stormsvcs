@@ -150,7 +150,7 @@ other commands don't cover.
 
 ```text
 slib.shodan.admin.request <path> [--method get|post|put|delete]
-                          [--base api|trends|internetdb|cvedb]
+                          [--base api|stream|trends|internetdb|cvedb]
                           [--params <dict>] [--json <dict>] [--form <dict>]
 ```
 
@@ -158,12 +158,12 @@ slib.shodan.admin.request <path> [--method get|post|put|delete]
 | --- | --- | --- | --- |
 | `path` | str | required | The endpoint path, ex. `/shodan/host/count`. A missing leading `/` is added. |
 | `--method` | `get`, `post`, `put`, `delete` | `get` | The HTTP method. |
-| `--base` | `api`, `trends`, `internetdb`, `cvedb` | `api` | The API to send it to. |
+| `--base` | `api`, `stream`, `trends`, `internetdb`, `cvedb` | `api` | The API to send it to. A stream never ends, so a request to one that succeeds fails at `shodan:timeout`: use it to check the Streaming API's errors (ex. whether the key's plan includes it), and {ref}`slib.shodan.stream <shodan-cmd-stream>` to read banners. |
 | `--params` | any | null | A dict of query params. |
 | `--json` | any | null | A dict to send as the JSON body. |
 | `--form` | any | null | A dict to send as a form body (ex. for `POST /shodan/scan`, which ignores query params). Can't be used with `--json`. |
 
-The key is added as the `key` param for `api` and `trends`. Param and form values are
+The key is added as the `key` param for `api`, `stream` and `trends`. Param and form values are
 converted like every other request: booleans to `true`/`false`, lists to comma separated
 strings, dicts to JSON, and `null` values left out. The request goes through the same rate
 limiter, retries and error handling as every other call (see [internals](internals.md)).

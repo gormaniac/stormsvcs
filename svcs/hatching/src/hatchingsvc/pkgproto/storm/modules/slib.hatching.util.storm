@@ -77,19 +77,6 @@ function printSamples(samples) {
     $table((("id", 20), ("status", 16), ("kind", 6), ("target", 48), ("submitted", 22)), $rows)
 }
 
-// The names of a sample's reported behavioral tasks, from its metadata. Failed tasks are skipped,
-// they have no files to download.
-function behavioralTasks(sample) {
-    $ret = ([])
-    for $task in $sample.tasks {
-        if ($task.status != "reported") { continue }
-        $name = $task.id
-        if $name.startswith(`{$sample.id}-`) { $name = $name.slice($lib.len(`{$sample.id}-`)) }
-        if $name.startswith("behavioral") { $ret.append($name) }
-    }
-    return($ret)
-}
-
 // The last part of a file path (Windows or POSIX).
 function basename(path) {
     if ($path = null) { return() }

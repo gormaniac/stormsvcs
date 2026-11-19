@@ -39,7 +39,8 @@ upper-cased, and the service picks the endpoint by its prefix:
 | anything else | `GET /cve/{ID}` |
 
 A search (`--cpe` or `--product`) calls `GET /cves`, prints `slib.shodan.cve: Found <n> CVEs.`,
-and models each one. `--cve` and a search can be combined.
+and models each one. `--cve` and a search can be combined. An empty CVEDB response is no results
+(`{"cves": []}`, or a total of 0 with `--count`), not an error.
 
 Inbound nodes:
 
@@ -83,7 +84,8 @@ slib.shodan.cpe <product> [--limit <n>] [--count] [--yield]
 CVEDB returns shortened CPE 2.3 strings (ex. `cpe:2.3:a:f5:nginx:1.25.3`). The service pads
 them to all 13 components with `*` so Synapse accepts them, and the command prints one per
 line. With `--yield`, each is made as an `it:sec:cpe` linked to the `meta:source` (values
-Synapse rejects are skipped). Inbound nodes are dropped.
+Synapse rejects are skipped). An empty CVEDB response is no CPEs (or `Total CPEs: 0`), not an
+error. Inbound nodes are dropped.
 
 ```text
 slib.shodan.cpe nginx

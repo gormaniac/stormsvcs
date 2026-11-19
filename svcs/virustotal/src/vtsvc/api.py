@@ -21,6 +21,7 @@ class VtCellApi(RetnApi, s_cell.CellApi, s_stormsvc.StormSvc):
     # VtSvc methods exposed over Telepath as-is, wrapped in a TelepathRetn.
     # See VtSvc for each method's arguments and the VirusTotal endpoint it calls.
     RETN_METHS = (
+        "apiKeySource",
         "rawRequest",
         "quota",
         "getObject",
@@ -49,6 +50,14 @@ class VtCellApi(RetnApi, s_cell.CellApi, s_stormsvc.StormSvc):
     _storm_svc_vers = normver(SVC_VER)[1]
     _storm_svc_evts = SVC_EVTS
     _storm_svc_pkgs = PKGDEFS
+
+    def _retnRedact(self, mesg: str) -> str:
+        """Scrub the service's stored and configured API keys from error messages.
+
+        ``quota(remote=True)`` puts the key in the URL path, so an error can contain it.
+        """
+
+        return self.cell.redact(mesg)
 
     async def setApiKey(self, apikey: str | None) -> BoolRetn:
         """Set (or clear) the service-wide VirusTotal API key."""

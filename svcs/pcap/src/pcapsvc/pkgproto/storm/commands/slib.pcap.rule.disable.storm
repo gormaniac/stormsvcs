@@ -1,11 +1,14 @@
 init {
     $rules = $lib.import(slib.pcap.priv.rules)
     $util = $lib.import(slib.pcap.util)
+    // Check the view first, so rules aren't edited when the push would be refused.
+    $deny = $rules.denied()
+    if $deny { $lib.warn(`slib.pcap.rule.disable: {$deny} The rules weren't changed.`) }
     $dels = ([])
 }
 
 $form = $node.form()  // noqa: R002
-if ($form = "it:app:snort:rule" or $form = "it:app:suricata:rule") {
+if (not $deny and ($form = "it:app:snort:rule" or $form = "it:app:suricata:rule")) {
     [ :enabled=(false) ]
     $dels.append($node.repr())
 }

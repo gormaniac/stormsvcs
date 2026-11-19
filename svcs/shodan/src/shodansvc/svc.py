@@ -815,6 +815,9 @@ class ShodanSvc(s_cell.Cell):
             "count": count or None,
         }
         data = await self.client.request("get", "/cves", base="cvedb", params=params)
+        if not data:
+            # An empty body (or object) means no results.
+            return {"total": 0} if count else {"cves": []}
         if "cves" in data:
             data["cves"] = [norm.normCve(c) for c in data["cves"] or []]
         return data
@@ -837,6 +840,9 @@ class ShodanSvc(s_cell.Cell):
                 "count": count or None,
             },
         )
+        if not data:
+            # An empty body (or object) means no results.
+            return {"total": 0} if count else {"cpes": []}
         if "cpes" in data:
             data["cpes"] = norm.normCpes(data["cpes"])
         return data

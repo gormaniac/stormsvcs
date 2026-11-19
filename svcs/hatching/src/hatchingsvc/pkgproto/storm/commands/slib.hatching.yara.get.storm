@@ -2,10 +2,12 @@ init {
     $priv = $lib.import(slib.hatching.priv.user)
     $util = $lib.import(slib.hatching.util)
 
-    // An it:app:yara:rule node for a rule from Triage.
+    $model = $lib.import(slib.hatching.model)
+
+    // An it:app:yara:rule node for a rule from Triage, linked to the Hatching Triage meta:source.
     function ruleNode(rule) {
         [ it:app:yara:rule=({"name": $rule.name, "text": $rule.rule}) :name=$rule.name :text=$rule.rule ]
-        return($node)
+        return($model.seen($node))
     }
 
     // Runs once per query (not once per inbound node).

@@ -3,7 +3,10 @@ init {
     $yaraingest = $lib.import(slib.yara.ingest)
 
     $count = $yaralib.ruleCount()
-    if ($count.status and $count.data = 0) {
+    if (not $count.status) {
+        $lib.warn(`Unable to get the slib.yara service's rule count: {$count.mesg}`)
+    }
+    elif ($count.data = 0) {
         $lib.warn("The slib.yara service has no rules to scan with, enable rules with slib.yara.enable or run slib.yara.sync.")
     }
 }

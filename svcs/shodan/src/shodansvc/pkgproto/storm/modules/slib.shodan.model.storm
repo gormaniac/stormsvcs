@@ -540,7 +540,7 @@ function localRule(text, name, desc=(null)) {
     if (not :name) { [ :name=$name ] }
     if ((not :desc) and $desc) { [ :desc=$desc ] }
     if (not :created) { [ :created=now ] }
-    return($node)
+    return($seen($node))
 }
 
 // ---- Query executions ----

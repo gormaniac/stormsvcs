@@ -322,16 +322,22 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
         "pcap:feeds:interval": {
             "type": "number",
             "default": 24,
-            "description": "Hours between feed downloads (a sync downloads a feed when it's due).",
+            "minimum": 0,
+            "description": (
+                "Hours between feed downloads (a sync downloads a feed when it's due), 0 to "
+                "download feeds on every sync."
+            ),
         },
         "pcap:feeds:timeout": {
             "type": "number",
             "default": 300,
+            "minimum": 1,
             "description": "Seconds before a feed download times out.",
         },
         "pcap:feeds:maxsize": {
             "type": "integer",
             "default": 268435456,
+            "minimum": 1,
             "description": "The max size, in bytes, of a feed (and of the rules it unpacks to).",
         },
         "suricata:enabled": {
@@ -369,7 +375,8 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
         "suricata:timeout": {
             "type": "number",
             "default": 900,
-            "description": "Seconds before a Suricata run is killed.",
+            "minimum": 0,
+            "description": "Seconds before a Suricata run is killed, 0 for no limit.",
         },
         "snort:enabled": {
             "type": "boolean",
@@ -411,7 +418,10 @@ class PcapSvc(p_rulesvc.RuleMixin, s_cell.Cell):
         "snort:timeout": {
             "type": "number",
             "default": 900,
-            "description": "Seconds before a Snort run (a rule build or a scan) is killed.",
+            "minimum": 0,
+            "description": (
+                "Seconds before a Snort run (a rule build or a scan) is killed, 0 for no limit."
+            ),
         },
         "tshark:enabled": {
             "type": "boolean",

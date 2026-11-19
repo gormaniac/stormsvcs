@@ -14,7 +14,8 @@ init {
 // NOTE: No return() here, it would make this a function that returns a value instead of yielding nodes.
 function run(query, ref=(null)) {
     $state.ran.$query = ({"query": null})
-    $res = $shodan.count($query, size=$cmdopts.size, facets=$cmdopts.facets, ref=$ref)
+    $res = $shodan.count($query, size=$cmdopts.size, facets=$cmdopts.facets, ref=$ref,
+                         command="slib.shodan.count")
     if $res {
         $state.ran.$query.query = $res.query
         $lib.print(`slib.shodan.count: {$res.ips.size()} IPs ({$query})`)

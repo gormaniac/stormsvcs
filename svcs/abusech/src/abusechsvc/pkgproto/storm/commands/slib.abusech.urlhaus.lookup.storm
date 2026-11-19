@@ -25,7 +25,8 @@ if $usecli {
 else {
     switch $node.form() {  // noqa: R002
         "inet:url": { $results = ($abusech.urlhausUrl(url=$node.repr()),) }
-        ("inet:fqdn", "inet:ipv4", "inet:ipv6"): { $results = ($abusech.urlhausHost($node.repr()),) }
+        // URLhaus doesn't support IPv6 hosts, so inet:ipv6 isn't an input (and is warned about).
+        ("inet:fqdn", "inet:ipv4"): { $results = ($abusech.urlhausHost($node.repr()),) }
         ("file:bytes", "hash:md5", "hash:sha256"): {
             $results = ([])
             $sha = $node.props.sha256

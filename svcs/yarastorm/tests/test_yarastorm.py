@@ -358,14 +358,184 @@ class TestYaraStorm(s_tests.SynTest):
                 self.stormHasNoErr(msgs)
                 self.stormIsInWarn("are not in the Axon", msgs)
 
-                # A rule that can't be loaded is reported for that rule.
+                # A rule file that can't be loaded (ex. corrupted on disk after startup) is
+                # reported for that rule, logged once, and the other rules still scan.
                 xsha = hashlib.sha256(b"x").hexdigest()
                 await core.nodes(f"file:bytes | delnode | [ file:bytes={xsha} ]")
                 await axon.put(b"x")
-                svc.rules.rules[rule_id] = None
+                corrupt = s_common.guid()
+                with open(os.path.join(svc.rules.ruledir, corrupt), "wb") as fd:
+                    fd.write(b"not a rule")
+                with self.getLoggerStream("yarastorm.svc") as stream:
+                    msgs = await core.stormlist(f"file:bytes | {SVC_NAME}.scan")
+                    self.stormHasNoErr(msgs)
+                    self.stormIsInWarn(f"with it:app:yara:rule={corrupt}: Couldn't load", msgs)
+                    self.stormIsInPrint(f"it:app:yara:rule={rule_id} matched", msgs)
+                    msgs = await core.stormlist(f"file:bytes | {SVC_NAME}.scan")
+                    self.stormIsInWarn(f"with it:app:yara:rule={corrupt}: Couldn't load", msgs)
+                stream.seek(0)
+                self.eq(1, stream.read().count("Skipping unreadable"))
+
+                # Unreadable rule files are listed but not counted, and sync removes them.
+                self.eq(sorted([rule_id, corrupt]), (await svc.listRules())["data"])
+                self.eq(1, (await svc.getRuleCount())["data"])
+                msgs = await core.stormlist(f"{SVC_NAME}.sync")
+                self.stormIsInPrint("0 compiled, 2 removed, 0 failed", msgs)
+                self.eq([], os.listdir(svc.rules.ruledir))
+                self.eq({}, svc.rules.bad)
+
+    async def test_rules_on_disk(self):
+        # Rule files added to (or removed from) rule_dir after startup are scanned, listed,
+        # and counted without a restart.
+        async with self.getTestAxon() as axon:
+            _, sha256 = await axon.put(b"test")
+            conf = {"axon_url": axon.getLocalUrl()}
+            async with self.getTestCoreProxSvc(YaraSvc, ssvc_conf=conf) as (core, prox, svc):
+                rule_id = s_common.guid()
+                YaraRules(svc.rules.ruledir).add(rule_id, yara_x.compile(HIT_RULE))
+                self.eq(1, (await svc.getRuleCount())["data"])
+                self.eq([rule_id], (await svc.listRules())["data"])
+
+                await core.nodes(f"[ file:bytes={sha256.hex()} ]")
                 msgs = await core.stormlist(f"file:bytes | {SVC_NAME}.scan")
-                self.stormHasNoErr(msgs)
-                self.stormIsInWarn(f"with it:app:yara:rule={rule_id}: Couldn't load", msgs)
+                self.stormHasNoWarnErr(msgs)
+                self.stormIsInPrint(f"it:app:yara:rule={rule_id} matched", msgs)
+
+                # A rule file replaced on disk is reloaded.
+                YaraRules(svc.rules.ruledir).add(rule_id, yara_x.compile("rule m { condition: false }"))
+                msgs = await core.stormlist(f"file:bytes | {SVC_NAME}.scan")
+                self.stormNotInPrint("matched", msgs)
+
+                os.remove(os.path.join(svc.rules.ruledir, rule_id))
+                self.eq([], (await svc.listRules())["data"])
+                msgs = await core.stormlist(f"file:bytes | {SVC_NAME}.scan")
+                self.stormIsInWarn("has no rules to scan with", msgs)
+                self.len(0, svc.rules.rules)
+
+    async def test_scan_rulecount_fails(self):
+        async with self.getTestCoreProxSvc(YaraSvc) as (core, prox, svc):
+
+            async def fail():
+                return {"status": False, "mesg": "nope", "data": None}
+
+            svc.getRuleCount = fail
+            msgs = await core.stormlist(f"[ inet:fqdn=vertex.link ] | {SVC_NAME}.scan")
+            self.stormHasNoErr(msgs)
+            self.stormIsInWarn("Unable to get the slib.yara service's rule count: nope", msgs)
+
+    async def test_sync_listrules_fails(self):
+        async with self.getTestCoreProxSvc(YaraSvc) as (core, prox, svc):
+
+            async def fail():
+                return {"status": False, "mesg": "nope", "data": None}
+
+            svc.listRules = fail
+            msgs = await core.stormlist(f"{SVC_NAME}.sync")
+            self.stormHasNoErr(msgs)
+            self.stormIsInWarn("Unable to sync the slib.yara rules: Unable to list", msgs)
+            self.stormIsInWarn("nope", msgs)
+
+            # The module itself still raises.
+            msgs = await core.stormlist(f"$lib.import({SVC_NAME}.lib).sync()")
+            self.stormIsInErr("Unable to list the slib.yara service's rules: nope", msgs)
+
+    def test_scanbytes(self):
+        rules = yara_x.compile(HIT_RULE)
+        self.true(y_svc.scanBytes(rules, b"a test", 5))
+        self.false(y_svc.scanBytes(rules, b"nothing", 5))
+
+        with mock.patch.object(y_svc.yara_x, "Scanner") as scanner:
+            scanner.return_value.scan.return_value.matching_rules = ()
+            self.false(y_svc.scanBytes(rules, b"x", 7))
+            scanner.return_value.set_timeout.assert_called_once_with(7)
+
+    async def test_scan_timeout(self):
+        async with self.getTestAxon() as axon:
+            _, sha256 = await axon.put(b"test")
+            conf = {"axon_url": axon.getLocalUrl(), "scan_timeout": 3}
+            async with self.getTestCell(YaraSvc, conf=conf) as svc:
+                self.eq(3, svc.scantimeout)
+                rule_id = s_common.guid()
+                svc.rules.add(rule_id, yara_x.compile(HIT_RULE))
+
+                calls = []
+
+                def slow(rules, byts, timeout):
+                    calls.append(timeout)
+                    raise yara_x.TimeoutError("timed out")
+
+                with mock.patch.object(y_svc, "scanBytes", slow):
+                    retns = [r async for r in svc.matchFile(sha256.hex())]
+                self.eq([3], calls)
+                self.len(1, retns)
+                self.false(retns[0]["status"])
+                self.eq(rule_id, retns[0]["data"]["rule"])
+                self.isin("timed out after 3 seconds (scan_timeout)", retns[0]["mesg"])
+
+                def boom(rules, byts, timeout):
+                    raise yara_x.ScanError("bad scan")
+
+                with mock.patch.object(y_svc, "scanBytes", boom):
+                    retns = [r async for r in svc.matchFile(sha256.hex())]
+                self.isin(f"Error scanning with it:app:yara:rule={rule_id}: bad scan", retns[0]["mesg"])
+
+            async with self.getTestCell(YaraSvc) as svc:
+                self.eq(y_svc.SCAN_TIMEOUT, svc.scantimeout)
+
+    async def test_match_version(self):
+        async with self.getTestAxon() as axon:
+            _, sha256 = await axon.put(b"test")
+            conf = {"axon_url": axon.getLocalUrl()}
+            async with self.getTestCoreProxSvc(YaraSvc, ssvc_conf=conf) as (core, prox, svc):
+                versioned = s_common.guid()
+                plain = s_common.guid()
+                await core.nodes(ruleQuery(versioned, HIT_RULE, "v") + " [ :version=1.2.3 ]")
+                await core.nodes(ruleQuery(plain, HIT_RULE, "p"))
+                await core.nodes(f"it:app:yara:rule | {SVC_NAME}.enable")
+                await core.nodes(f"[ file:bytes={sha256.hex()} ]")
+                msgs = await core.stormlist(f"file:bytes | {SVC_NAME}.scan")
+                self.stormHasNoWarnErr(msgs)
+
+                nodes = await core.nodes(f"it:app:yara:match:rule={versioned}")
+                self.eq(nodes[0].get("version"), (await core.nodes(f"it:app:yara:rule={versioned}"))[0].get("version"))
+                self.nn(nodes[0].get("version"))
+                nodes = await core.nodes(f"it:app:yara:match:rule={plain}")
+                self.none(nodes[0].get("version"))
+
+    async def test_scan_perms(self):
+        # The node permissions a user needs to run slib.yara.scan, as documented in the README.
+        async with self.getTestAxon() as axon:
+            _, sha256 = await axon.put(b"test")
+            conf = {"axon_url": axon.getLocalUrl()}
+            async with self.getTestCoreProxSvc(YaraSvc, ssvc_conf=conf) as (core, prox, svc):
+                rule_id = s_common.guid()
+                await core.nodes(ruleQuery(rule_id, HIT_RULE) + " [ :version=1.0.0 ]")
+                await core.nodes(f"it:app:yara:rule | {SVC_NAME}.enable")
+                await core.nodes(f"[ file:bytes={sha256.hex()} ]")
+
+                user = await core.auth.addUser("scanner")
+                await user.addRule((True, ("service", "get")))
+                opts = {"user": user.iden}
+                q = f"file:bytes | {SVC_NAME}.scan"
+
+                perms = (
+                    ("node", "add", "it:app:yara:match"),
+                    ("node", "prop", "set", "it:app:yara:match"),
+                    ("node", "edge", "add", "seen"),
+                    ("node", "add", "meta:source"),
+                    ("node", "prop", "set", "meta:source", "name"),
+                )
+                for perm in perms:
+                    msgs = await core.stormlist(q, opts=opts)
+                    self.stormIsInErr("must have permission", msgs)
+                    await user.addRule((True, perm))
+
+                msgs = await core.stormlist(q, opts=opts)
+                self.stormHasNoWarnErr(msgs)
+                nodes = await core.nodes(f"it:app:yara:match:rule={rule_id}")
+                self.len(1, nodes)
+                self.nn(nodes[0].get(".seen"))
+                self.nn(nodes[0].get("version"))
 
     async def test_scan_no_axon(self):
         async with self.getTestCoreProxSvc(YaraSvc) as (core, prox, svc):
@@ -496,10 +666,25 @@ class TestYaraStorm(s_tests.SynTest):
             # Removing a rule that isn't on disk (FileNotFoundError) is fine.
             self.false(rules.remove(rule_id))
 
-            # A rule file added on disk after load is loaded on demand.
+            # A rule file added on disk after load is loaded on demand, and by load().
             other = s_common.guid()
             YaraRules(dirn).add(other, yara_x.compile(TRUE_RULE))
             self.nn(rules.get(other))
+            third = s_common.guid()
+            YaraRules(dirn).add(third, yara_x.compile(TRUE_RULE))
+            rules.load()
+            self.eq({other, third}, set(rules.rules))
+
+            # A rule file removed from disk is dropped by load().
+            os.remove(os.path.join(dirn, third))
+            rules.load()
+            self.eq([other], list(rules.rules))
+
+            # A missing rule_dir reads as no rules.
+            os.remove(os.path.join(dirn, other))
+            os.rmdir(dirn)
+            rules.load()
+            self.eq({}, rules.rules)
 
     def test_rules_load_skips(self):
         with self.getTestDir() as dirn:
@@ -529,7 +714,28 @@ class TestYaraStorm(s_tests.SynTest):
             stream.seek(0)
             self.isin("Skipping unreadable", stream.read())
             self.eq([good], list(rules.rules))
+            self.eq([corrupt], list(rules.bad))
             self.none(rules.get(corrupt))
+
+            # An unreadable file is only re-read (and logged) once it changes, and a fixed one
+            # loads.
+            with self.getLoggerStream("yarastorm.svc") as stream:
+                rules.load()
+            stream.seek(0)
+            self.notin("Skipping unreadable", stream.read())
+            with open(os.path.join(dirn, corrupt), "wb") as fd:
+                fd.write(byts)
+            rules.load()
+            self.eq({good, corrupt}, set(rules.rules))
+            self.eq({}, rules.bad)
+
+            # A rule replaced by a corrupt file is dropped.
+            with open(os.path.join(dirn, corrupt), "wb") as fd:
+                fd.write(b"garbage, longer than before so the size changes" * 10)
+            rules.load()
+            self.eq([good], list(rules.rules))
+            self.true(rules.remove(corrupt))
+            self.eq({}, rules.bad)
             self.none(rules.get("notaguid"))
             self.none(rules.get("../sub"))
 

@@ -32,19 +32,22 @@ subqueries.
 ```bash
 docker run -d --name slib-crtsh \
     -v /srv/slib-crtsh:/vertex/storage \
+    -e SYN_CRTSHSVC_AUTH_PASSWD=secret \
     -p 27492:27492 \
     ghcr.io/gormaniac/stormsvcs/crtsh:latest
 ```
 
 ```
-service.add slib.crtsh tcp://<user>:<passwd>@<host>:27492/*
+service.add slib.crtsh tcp://root:secret@<host>:27492/*
 ```
 
-The host needs outbound access to `crt.sh` on TCP 5432.
+`SYN_CRTSHSVC_AUTH_PASSWD` sets the cell's `root` password (`auth:passwd`), which `service.add`
+connects with. The host needs outbound access to `crt.sh` on TCP 5432.
 
 crt.sh's database is behind PgBouncer, which allows **one connection per client** and drops
-idle clients quickly. The service uses a single connection, queues every query on it, keeps
-it alive while it's busy, closes it after `crtsh:idle` seconds, and reconnects with backoff
+idle clients quickly. The service uses a single connection, queues every query on it, pings it
+every `crtsh:keepalive` seconds between queries (never during one), closes it after `crtsh:idle`
+seconds without a query, and reconnects with backoff
 when crt.sh refuses a new connection. While the service holds the connection, other clients
 on the same IP (ex. psql) are refused, and vice versa.
 
@@ -83,17 +86,20 @@ crt.sh's guest role is read-only and its database is a read-only replica, so dro
 
 | Option | Default | Description |
 |---|---|---|
-| `crtsh:dsn` | `postgresql://guest@crt.sh:5432/certwatch` | The database DSN (or a mirror's). |
+| `crtsh:dsn` | `postgresql://guest@crt.sh:5432/certwatch` | The database DSN (or a mirror's). A password in it is redacted from error messages. |
 | `crtsh:timeout` | `660` | Seconds before the service gives up waiting on a query, `0` for none. Keep it longer than `crtsh:statement:timeout`. |
-| `crtsh:statement:timeout` | `600` | The `statement_timeout` of each of the service's queries (a `SET LOCAL` sent with the query), in seconds, `0` for none. crt.sh's default (30s) cancels big queries. admin.sql runs under crt.sh's. |
+| `crtsh:statement:timeout` | `600` | The `statement_timeout` of each of the service's queries (a session `SET statement_timeout` sent in the same message as the query, then `RESET`), in seconds, `0` for none. crt.sh's default (30s) cancels big queries. admin.sql runs under crt.sh's. |
 | `crtsh:retries` | `3` | Retries when the connection drops mid-query. |
 | `crtsh:timeout:retries` | `1` | Retries of a query crt.sh cancels for its statement timeout (a heavy search often finishes when rerun on crt.sh's warm cache), `0` for none. |
-| `crtsh:keepalive` | `10` | Seconds between keepalive pings while the connection is in use. |
-| `crtsh:idle` | `300` | Seconds without a query before the connection is closed. |
+| `crtsh:keepalive` | `10` | Seconds between keepalive pings while the connection is open and no query is running, until `crtsh:idle` closes it. More than `0`. |
+| `crtsh:idle` | `300` | Seconds without a query before the connection is closed. More than `0`. |
 | `crtsh:connect:timeout` | `300` | Seconds to keep retrying (with backoff) when crt.sh refuses a connection. |
-| `crtsh:limit` | `10000` | Max certificates any call returns. Limits below 1 are errors. |
-| `crtsh:sql:limit` | `1000` | Max rows `slib.crtsh.admin.sql` returns. |
-| `crtsh:candidates` | `10000` | Max full text search candidates a search filters. |
+| `crtsh:limit` | `10000` | Max certificates any call returns, at least `1`. A call's limit below 1 is an error. |
+| `crtsh:sql:limit` | `1000` | Max rows `slib.crtsh.admin.sql` returns, at least `1`. |
+| `crtsh:candidates` | `10000` | Max full text search candidates a search filters, at least `1`. |
+
+The timeouts and retry counts can't be negative, and the service refuses to start with an option
+below its minimum.
 
 ## Permissions
 
@@ -124,7 +130,8 @@ and addresses, not substrings. `--org vertex` matches "The Vertex Project" and `
 matches `www.vertex.link`, but `--cn old` doesn't match `old.vertex.link` and `--email visi`
 doesn't match `visi@vertex.link`. `--dns` matches the domain and its subdomains (a leading `*.` or
 `.` is ignored), `--ip` matches the address exactly (in any notation), and `--exact` requires
-whole field values.
+whole field values (`--dns "*.vertex.link" --exact` matches the wildcard name itself, not
+`vertex.link`).
 
 A trailing `*` makes the last word a prefix (the tsquery `'microsoft':*`):
 `--cn "microsoft*"` matches any indexed word that starts with `microsoft`, and crt.sh indexes
@@ -164,7 +171,9 @@ word and an issuer together, so a common word with a rare issuer (`--cn microsof
 
 `slib.crtsh.admin.sql` runs a single query that returns rows (`SELECT`, `VALUES`, `TABLE`, or
 `WITH ... SELECT`), wrapped as `SELECT * FROM (<sql>) q LIMIT <limit>`. Statements like `SET`,
-`COMMIT`, `SHOW`, or `EXPLAIN` aren't accepted, and neither are data-modifying ones.
+`COMMIT`, `SHOW`, or `EXPLAIN` aren't accepted, and neither are data-modifying ones. It prints
+`<n> rows`, or `<n> rows (the limit of <limit>, there may be more)` when it got as many rows as
+the limit (`--limit`, capped by `crtsh:sql:limit`), then the rows as JSON.
 
 Its arguments stay query parameters, so it's one plain (extended protocol) statement and runs
 under crt.sh's own `statement_timeout` (30s), not `crtsh:statement:timeout`: narrow heavy queries

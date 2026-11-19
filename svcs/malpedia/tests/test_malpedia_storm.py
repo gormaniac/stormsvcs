@@ -741,7 +741,11 @@ class TestMalpediaStormSync(s_tests.SynTest):
                 await core.stormlist("slib.malpedia.refresh --actor apt28", opts=opts)
             )
 
-            # Forcing a pull is for admins.
+            # Forcing a pull is for admins, but there's nothing to force without a pull.
+            msgs = await core.stormlist("slib.malpedia.sync --force --no-pull", opts=opts)
+            self.stormHasNoErr(msgs)
+            self.stormIsInWarn("--force does nothing with --no-pull", msgs)
+            self.stormIsInPrint("Modeled the changes into this view", msgs)
             msgs = await core.stormlist("slib.malpedia.sync --force", opts=opts)
             self.stormIsInErr(
                 "slib.malpedia.sync --force needs the slib.malpedia.admin permission.", msgs
@@ -972,6 +976,47 @@ class TestMalpediaStormAuditFixes(s_tests.SynTest):
                 await core.callStorm('return($lib.globals.get("slib:malpedia:tag:prefix"))')
                 == "rep.malpedia"
             )
+
+    async def test_readd_no_duplicate_jobs(self):
+        # The add event deletes setup jobs left behind, and the setup job adopts a sync cron
+        # job left behind (ex. by a service.del that couldn't delete it) instead of adding one.
+        async with fm.malpediaSvc(self) as (core, svc, fake):
+            await core.stormlist("slib.malpedia.admin.schedule --period daily@03:17")
+            iden = await core.callStorm('return($lib.globals.get("slib:malpedia:cron"))')
+            await core.callStorm('$lib.globals.pop("slib:malpedia:cron")')
+
+            svc.conf["malpedia:autosync"] = True
+            q = "return($lib.import(slib.malpedia.priv.admin).autoSchedule())"
+            assert await core.callStorm(q) is True
+            assert await syncJobs(core) == 1
+            assert await core.callStorm('return($lib.globals.get("slib:malpedia:cron"))') == iden
+
+            # The add event again (as for a re-added service) leaves one setup job.
+            await core.runStormSvcEvent(core.getStormSvc(SVC_NAME).iden, "add")
+            q = "$l = ([]) for $c in $lib.cron.list() { $l.append($c.pack().name) } return($l)"
+            names = await core.callStorm(q)
+            assert names.count("slib.malpedia (initial setup and sync)") == 1
+            for _ in range(600):
+                if await count(core, "it:app:yara:rule"):
+                    break
+                await asyncio.sleep(0.1)
+            assert await syncJobs(core) == 1
+
+    async def test_reset_tags_removed(self):
+        # Records Malpedia removed between a view's reset and its next sync are still tagged.
+        async with fm.malpediaSvc(self) as (core, svc, fake):
+            self.stormHasNoErr(await core.stormlist("slib.malpedia.sync"))
+            self.stormHasNoErr(await core.stormlist("slib.malpedia.admin.reset --yes"))
+            fake.state["version"]["version"] += 1
+            fake.state["actors"].pop("[Vault 7/8]")
+            fake.state["actorids"].remove("[vault_7_8]")
+            msgs = await core.stormlist("slib.malpedia.sync")
+            self.stormHasNoErr(msgs)
+            self.stormIsInPrint("Modeling 4 actor records.", msgs)
+            vault = (await core.nodes(THREAT.format("[vault_7_8]")))[0]
+            assert "rep.malpedia.removed" in vault.tags
+            apt28 = (await core.nodes(THREAT.format("apt28")))[0]
+            assert "rep.malpedia.removed" not in apt28.tags
 
     async def test_prefix_change_cleans_old_tags(self):
         # MALP-09: after a prefix change, the next sync re-models every record and removes the

@@ -96,20 +96,27 @@ function downloadTaskFile(sample, task, name) {
                    name=$util.basename($name)))
 }
 
-// Download an archive (tar or zip) of a sample's reports and files into the Axon.
+// Download an archive (tar or zip) of a sample's reports and files into the Axon, named
+// "<sample ID>.<fmt>" (a hash is resolved to its sample's ID first).
 function downloadArchive(sample, fmt=tar) {
-    return($_saved($priv.downloadArchive($sample, fmt=$fmt), `the {$fmt} archive of {$sample}`,
-                   name=`{$sample}.{$fmt}`))
+    $retn = $priv.resolve($sample)
+    if $util.failed($retn, `Finding the sample of {$sample}`) { return() }
+    $sid = $retn.data
+    return($_saved($priv.downloadArchive($sid, fmt=$fmt), `the {$fmt} archive of {$sid}`,
+                   name=`{$sid}.{$fmt}`))
 }
 
 // Download the network captures of a sample's behavioral tasks (or one task). Returns a list of nodes.
+// Without a task, every reported behavioral task in the sample's overview report is used (like
+// downloadDumped and modeling with tasks), failed tasks have no capture to download.
 function downloadPcaps(sample, task=(null), pcapng=(false)) {
     if $pcapng { $name = "dump.pcapng" } else { $name = "dump.pcap" }
     if $task { $tasks = ($task,) }
     else {
-        $retn = $priv.sample($sample)
-        if $util.failed($retn, `Getting sample {$sample}`) { return(([])) }
-        $tasks = $util.behavioralTasks($retn.data)
+        $retn = $priv.sampleTasks($sample)
+        if $util.failed($retn, `Listing the behavioral tasks of {$sample}`) { return(([])) }
+        $sample = $retn.data.id
+        $tasks = $retn.data.tasks
     }
     $nodes = ([])
     for $t in $tasks {

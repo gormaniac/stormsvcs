@@ -72,6 +72,14 @@ def nextDay(now: float) -> float:
     return datetime.datetime(day.year, day.month, day.day, tzinfo=datetime.UTC).timestamp()
 
 
+def nextMonth(now: float) -> float:
+    """The epoch time of 00:00 UTC on the first day of the next month."""
+
+    dt = _utcnow(now)
+    year, month = (dt.year + 1, 1) if dt.month == 12 else (dt.year, dt.month + 1)
+    return datetime.datetime(year, month, 1, tzinfo=datetime.UTC).timestamp()
+
+
 class QuotaLimiter:
     """Reserve VirusTotal request slots, per API key, within the configured limits.
 
@@ -146,7 +154,8 @@ class QuotaLimiter:
             )
         if self.month and counts["month"] >= self.month:
             raise VtQuotaError(
-                f"The VirusTotal monthly quota ({self.month} requests) for this API key is used up."
+                f"The VirusTotal monthly quota ({self.month} requests) for this API key is used up, "
+                "it resets at 00:00 UTC on the 1st of next month."
             )
 
     def _windowWait(self, kid: str, now: float) -> float:
@@ -166,10 +175,13 @@ class QuotaLimiter:
         return wait
 
     def _record(self, kid: str, now: float) -> None:
-        """Count a request."""
+        """Count a request.
 
-        keep = max(self.minute, MINUTE_LIMIT)
-        recent = sorted(self._recent(kid, now))[-(keep - 1) :] if keep > 1 else []
+        Every request time in the window is kept (not just ``minute`` of them), so the minute
+        count is accurate even when the limit isn't enforced.
+        """
+
+        recent = sorted(self._recent(kid, now))
         recent.append(now)
         self.kv.set(f"{kid}:recent", recent)
 
@@ -180,12 +192,16 @@ class QuotaLimiter:
         self._prune(kid, now)
 
     def _prune(self, kid: str, now: float) -> None:
-        """Drop counters from earlier days and months."""
+        """Drop counters from earlier days and months, and an expired cooldown."""
 
         keep = {f"{kid}:day:{dayKey(now)}", f"{kid}:month:{monthKey(now)}"}
         for name in list(self.kv.keys()):
             if name.startswith((f"{kid}:day:", f"{kid}:month:")) and name not in keep:
                 self.kv.pop(name)
+        cooldown = f"{kid}:cooldown"
+        until = self.kv.get(cooldown)
+        if until is not None and until <= now:
+            self.kv.pop(cooldown)
 
     async def acquire(self, apikey: str) -> None:
         """Wait for (and take) a request slot for an API key.
@@ -236,4 +252,5 @@ class QuotaLimiter:
             "used": self.counts(kid, now),
             "wait": round(self._windowWait(kid, now), 1),
             "resets": int(nextDay(now) * 1000),
+            "resetsMonth": int(nextMonth(now) * 1000),
         }

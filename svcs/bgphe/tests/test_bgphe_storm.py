@@ -185,8 +185,21 @@ class TestBgpHeStormPkg(s_tests.SynTest):
 
             msgs = await core.stormlist("$lib.debug = (true) slib.bgphe.certs gormo.co --limit 2")
             self.stormIsInPrint(
-                "slib.bgphe: gormo.co: 2 certificates (0 filtered) from 1 pages, of 12", msgs
+                "slib.bgphe: gormo.co: 2 certificates (0 filtered, 0 unparsable) from 1 pages, of 12",
+                msgs,
             )
+
+            # Entries without a usable DER are dropped, and counted in the debug summary.
+            fake.state["certs"]["bad.com"] = [
+                fake.state["certs"]["gormo.co"][0],
+                {"certificate_der": None},
+                "nope",
+            ]
+            msgs = await core.stormlist("$lib.debug = (true) slib.bgphe.certs bad.com")
+            self.stormIsInPrint(
+                "slib.bgphe: bad.com: 1 certificates (0 filtered, 2 unparsable) from 1 pages", msgs
+            )
+            assert len([m for m in msgs if m[0] == "node"]) == 1
 
     async def test_subdomains(self):
         async with fb.bgpheSvc(self) as (core, svc, fake):
@@ -524,8 +537,12 @@ class TestBgpHeStormPkg(s_tests.SynTest):
         async with fb.bgpheSvc(self) as (core, svc, fake):
             msgs = await core.stormlist("slib.bgphe.asn.prefixes 15169")
             self.stormHasNoWarnErr(msgs)
-            self.stormIsInPrint("slib.bgphe: AS15169 originates 4 IPv4 and 2 IPv6 prefixes.", msgs)
+            # The counts are only printed with $lib.debug, like the other commands' summaries.
+            self.stormNotInPrint("originates", msgs)
             assert len([m for m in msgs if m[0] == "node"]) == 6
+
+            msgs = await core.stormlist("$lib.debug = (true) slib.bgphe.asn.prefixes 15169")
+            self.stormIsInPrint("slib.bgphe: AS15169 originates 4 IPv4 and 2 IPv6 prefixes.", msgs)
 
             nodes = await core.nodes("inet:asnet4=(15169, 8.8.8.0/24)")
             assert len(nodes) == 1
@@ -555,6 +572,60 @@ class TestBgpHeStormPkg(s_tests.SynTest):
 
             msgs = await core.stormlist("[ inet:fqdn=x.com ] | slib.bgphe.asn.prefixes")
             self.stormIsInWarn("it needs an inet:asn.", msgs)
+
+    async def test_values_once(self):
+        # Values are looked up once per command, not once per inbound node, and the inbound
+        # nodes are dropped.
+        async with fb.bgpheSvc(self) as (core, svc, fake):
+            queries = (
+                "slib.bgphe.certs gormo.co",
+                "slib.bgphe.certs.subdomains gormo.co",
+                "slib.bgphe.certs.ip 8.8.8.0/24",
+                "slib.bgphe.whois microsoft.com",
+                "slib.bgphe.asn 15169",
+                "slib.bgphe.asn.prefixes 15169",
+            )
+            for query in queries:
+                fake.requests.clear()
+                alone = await core.nodes(query)
+                requests = len(fake.requests)
+                assert alone and requests, query
+
+                fake.requests.clear()
+                nodes = await core.nodes(f"[ inet:fqdn=a.com inet:fqdn=b.com ] | {query}")
+                assert len(fake.requests) == requests, query
+                assert [n.ndef for n in nodes] == [n.ndef for n in alone], query
+
+            nodes = await core.nodes("[ inet:fqdn=a.com inet:fqdn=b.com ] | slib.bgphe.asn 15169")
+            assert [n.ndef for n in nodes] == [("inet:asn", 15169)]
+
+    async def test_source(self):
+        async with fb.bgpheSvc(self) as (core, svc, fake):
+            # Linking to the meta:source doesn't edit it, so a user only needs permission to
+            # add the edge, not to set its props.
+            user = await core.auth.addUser("user")
+            await user.addRule((True, USER_PERM))
+            await user.addRule((True, ("node", "add")))
+            await user.addRule((True, ("node", "edge", "add")))
+            await user.addRule((True, ("node", "data", "set")))
+            await user.addRule((False, ("node", "prop", "set", "meta:source")))
+            await user.addRule((True, ("node", "prop", "set")))
+            msgs = await core.stormlist("slib.bgphe.asn.prefixes 15169", opts={"user": user.iden})
+            self.stormHasNoWarnErr(msgs)
+            assert await count(core, f"{SEEN} inet:asnet4") == 4
+
+            # A renamed meta:source keeps its name.
+            await core.nodes(f"meta:source={SVC_GUID} [ :name=renamed ]")
+            await core.nodes("slib.bgphe.asn 15169")
+            nodes = await core.nodes(f"meta:source={SVC_GUID}")
+            assert nodes[0].get("name") == "renamed"
+
+            # A deleted meta:source is recreated.
+            await core.nodes(f"meta:source={SVC_GUID} | delnode --force")
+            await core.nodes("slib.bgphe.asn 15169")
+            nodes = await core.nodes(f"meta:source={SVC_GUID}")
+            assert len(nodes) == 1 and nodes[0].get("name") == "bgp.he.net"
+            assert await count(core, f"{SEEN} inet:asn") == 1
 
     async def test_lib(self):
         async with fb.bgpheSvc(self) as (core, svc, fake):

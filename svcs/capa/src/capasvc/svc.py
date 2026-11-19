@@ -254,7 +254,7 @@ class CapaSvc(s_cell.Cell):
         )
         self.cacheReady = asyncio.Event()
         self.schedCoro(self._warmCache(self.capaRules, self.cacheReady))
-        return info
+        return await self.rulesInfo()
 
     async def _warmCache(self, rules: CapaRules, ready: asyncio.Event) -> None:
         """Have capa build its cache of the rules, so the first scan doesn't have to.

@@ -45,6 +45,7 @@ class HatchingCellApi(RetnApi, s_cell.CellApi, s_stormsvc.StormSvc):
         "urlscanReport",
         "normSample",
         "dumpedFiles",
+        "sampleTasks",
         # Profiles
         "profiles",
         "profile",
@@ -92,6 +93,18 @@ class HatchingCellApi(RetnApi, s_cell.CellApi, s_stormsvc.StormSvc):
     _storm_svc_vers = normver(SVC_VER)[1]
     _storm_svc_evts = SVC_EVTS
     _storm_svc_pkgs = PKGDEFS
+
+    def _retnRedact(self, mesg: str) -> str:
+        """Replace the service's API keys (stored and configured) in an error message.
+
+        A caller's own key (ex. from a user's vault) is theirs, the service's keys must never
+        reach a Storm user, ex. from an HTTP library error that includes a request header.
+        """
+
+        keys = {self.cell.hatchinginfo.get("apikey"), self.cell.conf.get("hatching:apikey")}
+        for key in sorted(filter(None, keys), key=len, reverse=True):
+            mesg = mesg.replace(key, "<redacted>")
+        return mesg
 
     async def setApiKey(self, apikey: str | None) -> BoolRetn:
         """Set (or clear) the service-wide Hatching Triage API key."""

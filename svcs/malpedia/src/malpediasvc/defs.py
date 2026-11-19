@@ -32,9 +32,10 @@ def stormStr(text: str) -> str:
 
 SVC_EVTS = {
     "add": {
-        # Runs once, as root, when the service is added to a Cortex. It sets up the meta:source
-        # and default settings, then (unless malpedia:autosync is off) schedules the daily sync
-        # and starts the initial one in the background.
+        # Runs once, as root, when the service is added to a Cortex (again after a
+        # service.del, the Cortex gives a re-added service a new iden). It sets up the
+        # meta:source and default settings, then starts the setup job, which (unless
+        # malpedia:autosync is off) schedules the daily sync and runs the initial one.
         "storm": (
             f"$autoquery = {stormStr(AUTO_QUERY)} "
             f"[(meta:source={SVC_GUID} :name=malpedia :type=slib.malpedia "
@@ -45,7 +46,15 @@ SVC_EVTS = {
             'if ($lib.globals.get("slib:malpedia:tag:tlp") = null) { '
             '    $lib.globals.set("slib:malpedia:tag:tlp", "rep.malpedia.tlp") '
             "} "
-            # The service isn't ready while this runs, so a one time cron job does the rest.
+            # Setup jobs an earlier service.del couldn't delete would never run again.
+            "for $old in $lib.cron.list() { "
+            f"    if ($old.pack().name = {stormStr(SETUP_JOB)}) {{ "
+            "        try { $lib.cron.del($old.iden) } catch * as err { } "
+            "    } "
+            "} "
+            # The service isn't ready while this runs, so a one time cron job does the rest. It
+            # is created (and runs once) even when malpedia:autosync is off, because only the
+            # service can read its config: then it doesn't schedule or sync anything.
             "$job = $lib.cron.at(query=$autoquery, now=(true)) "
             f"$job.set(name, {stormStr(SETUP_JOB)})"
         )

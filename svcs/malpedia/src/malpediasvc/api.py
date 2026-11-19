@@ -25,7 +25,6 @@ class MalpediaCellApi(RetnApi, s_cell.CellApi, s_stormsvc.StormSvc):
         "viewInfo",
         "resetView",
         "status",
-        "record",
         "find",
         "refresh",
         "schedInfo",

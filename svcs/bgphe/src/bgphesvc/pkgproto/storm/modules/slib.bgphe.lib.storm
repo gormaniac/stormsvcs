@@ -24,7 +24,7 @@ function certs(domain, limit=(200), valid=(false), precerts=(true)) {
             emit $model.cert($item.cert)
         } else {
             if $lib.debug {
-                $lib.print(`slib.bgphe: {$item.domain}: {$item.returned} certificates ({$item.skipped} filtered) from {$item.pages} pages, of {$item.total} in bgp.he.net.`)
+                $lib.print(`slib.bgphe: {$item.domain}: {$item.returned} certificates ({$item.skipped} filtered, {$item.invalid} unparsable) from {$item.pages} pages, of {$item.total} in bgp.he.net.`)
             }
             if (not $item.returned) {
                 $lib.warn(`slib.bgphe: bgp.he.net has no matching certificates for {$item.domain}.`)
@@ -123,7 +123,9 @@ function prefixes(valu) {
         $lib.warn(`slib.bgphe: AS{$data.asn} doesn't originate any prefixes.`)
         stop
     }
-    $lib.print(`slib.bgphe: AS{$data.asn} originates {$data.v4} IPv4 and {$data.v6} IPv6 prefixes.`)
+    if $lib.debug {
+        $lib.print(`slib.bgphe: AS{$data.asn} originates {$data.v4} IPv4 and {$data.v6} IPv6 prefixes.`)
+    }
     for $p in $data.prefixes { emit $model.asnet($data.asn, $p) }
 }
 

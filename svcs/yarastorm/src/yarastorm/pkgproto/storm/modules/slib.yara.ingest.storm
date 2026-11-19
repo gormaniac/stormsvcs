@@ -2,10 +2,21 @@
 // Must match SVC_GUID in yarastorm/defs.py.
 $srcguid = "12bc0c8c1a37a29808d97972875d3913"
 
+// The :version of an it:app:yara:rule, or $lib.null if it has none (or doesn't exist).
+function ruleVersion(rule) {
+    it:app:yara:rule=$rule
+    return(:version)
+}
+
 // Model a Yara match of a rule on a file.
 // rule is the it:app:yara:rule guid, file is the file:bytes node's value (its repr).
+// The match's :version is set to the rule's current :version, when it has one.
 function yaraMatch(rule, file) {
+    $vers = $ruleVersion($rule)
     [ it:app:yara:match=($rule, $file) .seen=now ]  // noqa: M004 - 3.x model, the package needs 2.x
+    if ($vers != $lib.null) {
+        [ :version=$vers ]
+    }
     [ <(seen)+ { [ meta:source=$srcguid :name=slib.yara ] } ]
     return()
 }

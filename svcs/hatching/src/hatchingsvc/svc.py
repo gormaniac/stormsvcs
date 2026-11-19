@@ -356,14 +356,23 @@ class HatchingSvc(s_cell.Cell):
         """POST /v0/samples/{id}/profile - pick profiles for an interactive submission.
 
         ``profiles`` items are a profile name, ``"profile:pick"``, or a ``{profile, pick}`` dict.
+        Either name the profiles (each with its own file to run, if any), or let the sandbox
+        pick them (``auto``, with ``pick`` naming the files to analyze). The API takes one or
+        the other, so ``profiles`` can't be combined with ``auto`` or ``pick``.
         """
-        sid = await self.resolve(sample, apikey)
         profiles = profileList(profiles)
         if not profiles and not auto and not pick:
             raise HatchingApiError("Pick at least one profile, a file to analyze, or auto.")
-        if pick and not profiles:
+        if profiles and (auto or pick):
+            # The API ignores profiles with auto, and pick without it.
+            raise HatchingApiError(
+                "Profiles can't be combined with auto or pick: pick a file to run with a "
+                'profile as "profile:file", or leave out the profiles to let the sandbox pick them.'
+            )
+        if pick:
             # Picking files without profiles lets the sandbox pick the profiles for them.
             auto = True
+        sid = await self.resolve(sample, apikey)
         await self._call(
             apikey, "set_sample_profile", sid, profiles=profiles, auto=auto, pick=list(pick or [])
         )
@@ -696,6 +705,16 @@ class HatchingSvc(s_cell.Cell):
                 ret.append(name)
         return ret
 
+    async def sampleTasks(self, sample: str, apikey: str | None = None) -> dict:
+        """A sample's ID and the names of its reported behavioral tasks, from its overview.
+
+        Returns ``{"id": str, "tasks": [str]}``. ``sample`` is a sample ID or a file hash.
+        """
+
+        sid = await self.resolve(sample, apikey)
+        overview = await self._call(apikey, "overview", sid)
+        return {"id": sid, "tasks": self.behavioralTasks(sid, overview)}
+
     async def normSample(self, sample: str, tasks: bool = False, apikey: str | None = None) -> dict:
         """Get a reported sample's reports and normalize them for modeling (see ``hatchingsvc.norm``).
 
@@ -750,9 +769,8 @@ class HatchingSvc(s_cell.Cell):
         report that can't be retrieved is skipped and described in ``errors``.
         """
 
-        sid = await self.resolve(sample, apikey)
-        overview = await self._call(apikey, "overview", sid)
-        names = self.behavioralTasks(sid, overview)
+        info = await self.sampleTasks(sample, apikey)
+        sid, names = info["id"], info["tasks"]
         ret, errors = [], []
         for task, report in zip(names, await self._taskReports(sid, names, apikey)):
             if isinstance(report, HatchingApiError):

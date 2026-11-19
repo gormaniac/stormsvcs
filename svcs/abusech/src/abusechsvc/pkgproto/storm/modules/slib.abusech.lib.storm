@@ -26,7 +26,8 @@ function _samples(retn, what, plat) {
 
 // ---- MalwareBazaar ----
 
-// Look up a sample (MD5, SHA1, SHA256, or SHA3-384). Returns the file:bytes node, or null.
+// Look up a sample (MD5, SHA1, or SHA256, MalwareBazaar's get_info doesn't take a SHA3-384).
+// Returns the file:bytes node, or null.
 function bazaarLookup(sha) {
     $sha = $lib.cast(str, $sha).lower()
     $retn = $priv.bazaarInfo($sha)
@@ -39,7 +40,8 @@ function bazaarLookup(sha) {
 }
 
 // Search samples by tag, signature, filetype, clamav, imphash, tlsh, telfhash, gimphash,
-// dhash, yara, issuer, or subject. Returns a list of file:bytes nodes.
+// dhash, yara, issuer, subject, or serial (a code signing certificate's serial number).
+// Returns a list of file:bytes nodes.
 function bazaarSearch(by, valu, limit=(100)) {
     return($_samples($priv.bazaarSearch($by, $valu, limit=$limit), `MalwareBazaar {$by} search for {$valu}`, bazaar))
 }
@@ -228,7 +230,7 @@ function yaraifyRule(uuid) {
     return($_rules($retn.data))
 }
 
-// Emit it:app:yara:rule nodes for every TLP:CLEAR YARAhub rule.
+// Emit it:app:yara:rule nodes for every TLP:CLEAR (formerly TLP:WHITE) YARAhub rule.
 function yaraifyRulesExport(limit=(0)) {
     for $retn in $priv.yaraifyRulesExport(limit=$limit) {
         if $util.failed($retn, "YARAify rule export") { break }

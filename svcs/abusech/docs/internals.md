@@ -200,13 +200,14 @@ the five permissions, the modules and the commands. There are no `configvars` an
 | `slib.abusech.model` | unprivileged | Models normalized records; every node edit runs as the caller. |
 | `slib.abusech.download` | unprivileged | `download(plat, sha256, unpacked)`: downloads via the priv module and models the file. |
 | `slib.abusech.util` | unprivileged | `userKey()`, `isIpv6()`, `failed()`, `hashType()`, `nodeHash()`, `table()`, `printJson()`, `printSubmission()`, `first()`. |
-| `slib.abusech.families` | unprivileged | The 0.4.0 family merge used by `slib.abusech.admin.families.merge`. |
+| `slib.abusech.families` | unprivileged, checks `slib.abusech.admin` on import | The 0.4.0 family merge used by `slib.abusech.admin.families.merge`. |
 
 Only the priv modules call `$lib.service.get("slib.abusech")` or the Axon, which is why users
 need neither `service.get` nor Axon permissions, and the service-wide key is never readable
-from Storm. `slib.abusech.lib` and `slib.abusech.families` also list `perms` in the YAML;
-Synapse doesn't enforce `perms` on modules, so in practice `slib.abusech.lib` is gated by the
-priv modules it imports, and `slib.abusech.families` only by node permissions.
+from Storm. Synapse doesn't check permissions on importing a module (only `asroot:perms`), so
+`slib.abusech.lib` is gated by the priv modules it imports (importing it without
+`slib.abusech.user` raises `AuthDeny`), and `slib.abusech.families` raises `AuthDeny` in its
+`init` unless the caller has `slib.abusech.admin`.
 
 ### Patterns in the Storm code
 

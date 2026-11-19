@@ -71,9 +71,10 @@ def identityQuery(field: str, valu: str, exact: bool = False) -> tuple[str, str 
 
     if field == "dns" and not exact:
         valu = normDomain(valu)
-    pattern = likeEscape(valu.lstrip("*").lstrip(".") if field == "dns" else valu)
     if exact:
-        return valu, pattern
+        # The whole value, a wildcard too: crt.sh's identities hold ``*.x.com`` as-is.
+        return valu, likeEscape(valu)
+    pattern = likeEscape(valu.lstrip("*").lstrip(".") if field == "dns" else valu)
     if field == "dns":
         # The domain itself, its subdomains, and wildcards for it.
         return valu, "%" + pattern
@@ -198,6 +199,7 @@ class CrtshSvc(s_cell.Cell):
         "crtsh:timeout": {
             "type": "number",
             "default": 660,
+            "minimum": 0,
             "description": (
                 "Seconds before the service gives up waiting on a single query, 0 for no timeout. "
                 "crt.sh is slow, big searches can take minutes. Queries run one at a time, so a "
@@ -208,16 +210,18 @@ class CrtshSvc(s_cell.Cell):
         "crtsh:statement:timeout": {
             "type": "number",
             "default": 600,
+            "minimum": 0,
             "description": (
                 "The statement_timeout, in seconds, of each of the service's crt.sh queries (a "
-                "SET LOCAL sent with the query), 0 for no limit. crt.sh's default (30s) cancels "
-                "big queries (chains, wide searches) that finish given time. admin.sql queries "
-                "run under crt.sh's own."
+                "SET statement_timeout sent in the same message as the query, then RESET), 0 for "
+                "no limit. crt.sh's default (30s) cancels big queries (chains, wide searches) "
+                "that finish given time. admin.sql queries run under crt.sh's own."
             ),
         },
         "crtsh:retries": {
             "type": "integer",
             "default": 3,
+            "minimum": 0,
             "description": "How many times to retry a query when the connection drops.",
         },
         "crtsh:timeout:retries": {
@@ -232,14 +236,17 @@ class CrtshSvc(s_cell.Cell):
         "crtsh:keepalive": {
             "type": "number",
             "default": 10,
+            "exclusiveMinimum": 0,
             "description": (
-                "Seconds between keepalive pings while the connection is in use. crt.sh drops "
-                "idle clients quickly (client_idle_timeout)."
+                "Seconds between keepalive pings while the connection is open and no query is "
+                "running, until crtsh:idle closes it. crt.sh drops idle clients quickly "
+                "(client_idle_timeout)."
             ),
         },
         "crtsh:idle": {
             "type": "number",
             "default": 300,
+            "exclusiveMinimum": 0,
             "description": (
                 "Seconds without a query before the connection is closed. crt.sh only allows one "
                 "connection per client, closing it frees it for others from the same IP."
@@ -248,6 +255,7 @@ class CrtshSvc(s_cell.Cell):
         "crtsh:connect:timeout": {
             "type": "number",
             "default": 300,
+            "minimum": 0,
             "description": (
                 "Seconds to keep retrying (with backoff) when crt.sh refuses a connection, "
                 "ex. max_client_conn right after a dropped connection."
@@ -256,16 +264,19 @@ class CrtshSvc(s_cell.Cell):
         "crtsh:limit": {
             "type": "integer",
             "default": 10000,
+            "minimum": 1,
             "description": "The max number of certificates any one call may return.",
         },
         "crtsh:sql:limit": {
             "type": "integer",
             "default": 1000,
+            "minimum": 1,
             "description": "The max number of rows slib.crtsh.admin.sql (rawQuery) may return.",
         },
         "crtsh:candidates": {
             "type": "integer",
             "default": 10000,
+            "minimum": 1,
             "description": (
                 "The max number of full text search candidates a search will filter (crt.sh's "
                 "own search uses 10000). Searches for very common names only see this many."

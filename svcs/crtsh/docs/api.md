@@ -70,10 +70,14 @@ prefix). `rawQuery(sql, args=(null), limit=(100))` calls the service.
 `stormlibpp.svc.RetnApi`, `synapse.lib.cell.CellApi`, and `synapse.lib.stormsvc.StormSvc`.
 `RetnApi` generates one Telepath method for each name in:
 
-- `RETN_METHS = ("lookup", "get", "chain", "cas", "rawQuery")`: each calls the cell method and
+- `RETN_METHS = ("lookup", "get", "chain", "cas")`: each calls the cell method and
   returns a single `TelepathRetn`.
 - `GENR_METHS = ("searchGenr", "issuedGenr", "pivotGenr")`: each is a generator that yields a
   `TelepathRetn` per item.
+
+`rawQuery` is hand-written (see [rawQuery](#rawquery)), so its `mesg` can count the rows.
+`_retnRedact` replaces the password of `crtsh:dsn`, if it has one, with `<redacted>` in every
+error message (see [Secrets](deployment.md#secrets)).
 
 The arguments are those of the `CrtshSvc` methods in {src}`svcs/crtsh/src/crtshsvc/svc.py`.
 
@@ -102,7 +106,8 @@ or pivots, missing required arguments) and every database failure. The database 
 | Message | Cause |
 | --- | --- |
 | `Unable to connect to the crt.sh database: <error>` | Connecting failed with a non-transient error, or kept failing for `crtsh:connect:timeout`. |
-| `crt.sh canceled the query (statement timeout) after <n>s, try a narrower search: <error>` | The server canceled the query (SQLSTATE 57014) and the retries ran out, or it wasn't a statement timeout. |
+| `crt.sh canceled the query (statement timeout) after <n>s, try a narrower search: <error>` | The server canceled the query for its statement timeout (SQLSTATE 57014, "statement timeout" in the message) and the retries ran out. |
+| `crt.sh canceled the query after <n>s: <error>` | The server canceled the query for another reason (SQLSTATE 57014, ex. "canceling statement due to user request"). It isn't retried. |
 | `crt.sh query timed out after <crtsh:timeout>s.` | The client-side `crtsh:timeout` expired. |
 | `crt.sh query failed: <error>` | Any other PostgreSQL error, or connection errors after `crtsh:retries` retries. |
 
@@ -165,6 +170,11 @@ a list of ints). At most `limit` CAs, ordered by ID:
 ### rawQuery
 
 `rawQuery(sql, args=None, limit=None) -> list[dict]`
+
+Over Telepath, `rawQuery` is hand-written in `CrtshCellApi`: on success its `mesg` is
+`<n> rows`, or `<n> rows (the limit of <limit>, there may be more)` when as many rows as the
+effective limit (`limit` capped by `crtsh:sql:limit`) came back. `slib.crtsh.admin.sql`
+prints it.
 
 A read-only raw query (see [Raw SQL](database.md#raw-sql)). `args` must be a list or tuple
 (`Invalid args, expected a list of positional query arguments.`). `limit` defaults to, and is

@@ -51,9 +51,23 @@ function unschedule() {
     return((true))
 }
 
+// A sync cron job schedule() made that isn't the tracked one (ex. one a failed service.del
+// left behind), or null.
+function _orphan() {
+    for $job in $lib.cron.list() {
+        $info = $job.pack()
+        if ($info.name = "slib.malpedia.sync" and $info.query = "slib.malpedia.sync") {
+            return($job)
+        }
+    }
+    return()
+}
+
 // Run by the one time cron job the service's add event starts (the service isn't ready during
 // the add event itself): unless malpedia:autosync is off, schedule the daily sync (at the
-// service's random time) if there isn't one. Returns whether the initial sync should run.
+// service's random time) if there isn't one. A sync cron job left behind by an earlier
+// service.del is kept instead of adding a second one. Returns whether the initial sync should
+// run.
 function autoSchedule() {
     $retn = $svc.schedInfo()
     if (not $retn.status) {
@@ -62,7 +76,11 @@ function autoSchedule() {
     }
     $info = $retn.data
     if (not $info.autosync) { return((false)) }
-    if (not $cron()) { $schedule($info.period) }
+    if (not $cron()) {
+        $orphan = $_orphan()
+        if $orphan { $lib.globals.set($cronglobal, $orphan.iden) }  // noqa: R005
+        else { $schedule($info.period) }
+    }
     return((true))
 }
 

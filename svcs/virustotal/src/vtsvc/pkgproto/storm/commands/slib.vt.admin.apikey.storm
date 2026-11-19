@@ -4,15 +4,26 @@ init {
 
     if $cmdopts.clear {
         $retn = $admin.setApiKey((null))
-        if (not $util.failed($retn, "Clearing the API key")) { $lib.print($retn.mesg) }
+        if (not $util.failed($retn, "Clearing the API key")) {
+            $lib.print($retn.mesg)
+            $sretn = $admin.apiKeySource()
+            if ((not $util.failed($sretn, "Checking the API key")) and ($sretn.data = "config")) {
+                $lib.print("slib.vt: The vt:apikey config option is still set and is now in use. Remove it from the service's config to stop using it.")
+            }
+        }
     }
     elif $cmdopts.apikey {
         $retn = $admin.setApiKey($cmdopts.apikey)
         if (not $util.failed($retn, "Setting the API key")) { $lib.print($retn.mesg) }
     }
     else {
-        $retn = $admin.hasApiKey()
-        if $retn.data { $lib.print("slib.vt: A service-wide API key is set.") }
-        else { $lib.print("slib.vt: No service-wide API key is set.") }
+        $retn = $admin.apiKeySource()
+        if (not $util.failed($retn, "Checking the API key")) {
+            switch $retn.data {
+                "stored": { $lib.print("slib.vt: A service-wide API key is set (with slib.vt.admin.apikey).") }
+                "config": { $lib.print("slib.vt: The service-wide API key from the vt:apikey config option is in use. --clear can't remove it, change the service's config instead.") }
+                *: { $lib.print("slib.vt: No service-wide API key is set.") }
+            }
+        }
     }
 }

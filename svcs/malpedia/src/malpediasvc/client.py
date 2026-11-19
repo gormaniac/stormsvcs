@@ -239,10 +239,6 @@ class MalpediaClient:
         """GET /api/list/actors - every actor ID."""
         return _reqList(await self.getJson("/list/actors"), "/list/actors")
 
-    async def listFamilies(self) -> list[str]:
-        """GET /api/list/families - every family ID."""
-        return _reqList(await self.getJson("/list/families"), "/list/families")
-
     async def getActors(self) -> dict:
         """GET /api/get/actors - every actor, keyed by its display name (not its ID)."""
         return _reqDict(await self.getJson("/get/actors"), "/get/actors")

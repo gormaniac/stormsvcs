@@ -208,10 +208,9 @@ guid) in one `ruleUpdate` in `fini`.
 it:app:suricata:rule:id=2013502 | slib.pcap.rule.disable
 ```
 
-:::{note}
-`slib.pcap.rule.enable` and `.disable` edit `:enabled` before the push. In a view that isn't the
-rules view the push is refused (a warning) but the edit stays.
-:::
+`slib.pcap.rule.enable` and `.disable` check the view first: in a view that isn't the
+[rules view](rules.md#the-rules-view) they warn once (`The service's rules come from view
+<view>, ... The rules weren't changed.`), don't edit `:enabled`, and pass their nodes through.
 
 ### slib.pcap.rule.check
 

@@ -5,12 +5,17 @@ init {
         $lib.warn("slib.yara.sync requires the slib.yara.admin permission.")
     }
     else {
-        $retn = $yaralib.sync()
-        for $fail in $retn.failed {
-            $lib.warn(`Unable to sync it:app:yara:rule={$fail.rule}: {$fail.mesg}`)
+        try {
+            $retn = $yaralib.sync()
+            for $fail in $retn.failed {
+                $lib.warn(`Unable to sync it:app:yara:rule={$fail.rule}: {$fail.mesg}`)
+            }
+            $nfail = $lib.len($retn.failed)
+            $nremoved = $lib.len($retn.removed)
+            $lib.print(`Synced the slib.yara rules: {$retn.compiled} compiled, {$nremoved} removed, {$nfail} failed.`)
         }
-        $nfail = $lib.len($retn.failed)
-        $nremoved = $lib.len($retn.removed)
-        $lib.print(`Synced the slib.yara rules: {$retn.compiled} compiled, {$nremoved} removed, {$nfail} failed.`)
+        catch StormRaise as err {
+            $lib.warn(`Unable to sync the slib.yara rules: {$err.mesg}`)
+        }
     }
 }

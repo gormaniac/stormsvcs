@@ -40,6 +40,12 @@ async def drain(svc, view, kind, full=False, size=250):
     return merged
 
 
+async def snapRec(svc, kind, key):
+    """A record from the service's snapshot, or None."""
+    item = m_svc._kvget(svc._snapkv(kind), key)
+    return item["rec"] if item else None
+
+
 async def syncView(svc, view):
     """Mark every change as synced in a view, like Storm does. Returns the changes."""
     out = {}
@@ -196,7 +202,7 @@ class TestMalpediaPull(s_tests.SynTest):
             fake.state["version"]["version"] += 1
             fake.state["families"]["win.xagent"]["common_name"] = "XAgent"
             await svc.pull()
-            rec = await svc.record("yara", "win.xagent_w0.yar")
+            rec = await snapRec(svc, "yara", "win.xagent_w0.yar")
             assert rec["familyname"] == "XAgent"
 
     async def test_yara_gaps_use_the_zip(self):
@@ -238,7 +244,7 @@ class TestMalpediaPull(s_tests.SynTest):
             summary = await svc.pull()
             assert any("Unable to get the actor turla" in w for w in summary["warnings"])
             assert summary["removed"]["actor"] == 0
-            assert (await svc.record("actor", "turla"))["name"] == "Turla"
+            assert (await snapRec(svc, "actor", "turla"))["name"] == "Turla"
             fake.state["errors"].clear()
 
             # Same for actors past the per-pull request limit.
@@ -247,7 +253,7 @@ class TestMalpediaPull(s_tests.SynTest):
                 summary = await svc.pull()
             assert summary["removed"]["actor"] == 0
             assert summary["updated"]["actor"] == 0
-            assert (await svc.record("actor", "turla"))["name"] == "Turla"
+            assert (await snapRec(svc, "actor", "turla"))["name"] == "Turla"
 
             # An actor that's no longer listed is removed.
             fake.state["version"]["version"] += 1
@@ -361,6 +367,12 @@ class TestMalpediaViews(s_tests.SynTest):
             assert await svc.resetView(VIEW) is True
             status = await svc.status(view=VIEW)
             assert status["view"] == {"counts": {"news": 0, "actor": 0, "family": 0, "yara": 0}}
+            # Every record is sent again, as an update of the view's old version.
+            again = await drain(svc, VIEW, "news")
+            assert again["total"] == 5
+            assert all(not item["new"] for item in again["upsert"])
+            await syncView(svc, VIEW)
+            assert (await svc.status(view=VIEW))["view"]["counts"]["news"] == 5
             # The other view's state is untouched.
             await syncView(svc, VIEW2)
             await svc.resetView(VIEW)
@@ -370,6 +382,33 @@ class TestMalpediaViews(s_tests.SynTest):
             assert await svc.synced(VIEW2, "actor", removed=["apt28", "nokey"]) == 0
             with self.raises(MalpediaSvcError):
                 await svc.synced(VIEW2, "actor", done=["notapair"])
+
+    async def test_reset_keeps_removals(self):
+        # After a reset, records Malpedia removed since the view's last sync are still sent as
+        # removed (so they're tagged), and the view's tag prefixes are kept.
+        async with fm.malpediaSvc(self) as (core, svc, fake):
+            await svc.pull()
+            await syncView(svc, VIEW)
+            await svc.viewSynced(VIEW, tags={"prefix": "rep.old", "tlp": "rep.old.tlp"})
+            await svc.resetView(VIEW)
+            assert await svc.viewInfo(VIEW) == {"tags": {"prefix": "rep.old", "tlp": "rep.old.tlp"}}
+
+            fake.state["version"]["version"] += 1
+            fake.state["actors"].pop("[Vault 7/8]")
+            fake.state["actorids"].remove("[vault_7_8]")
+            await svc.pull()
+
+            changes = await drain(svc, VIEW, "actor")
+            assert [item["key"] for item in changes["removed"]] == ["[vault_7_8]"]
+            assert changes["removed"][0]["rec"]["name"] == "[Vault 7/8]"
+            assert len(changes["upsert"]) == 3
+            assert changes["total"] == 4
+            await syncView(svc, VIEW)
+            assert (await drain(svc, VIEW, "actor"))["total"] == 0
+
+            # A view that was never synced has nothing to keep.
+            await svc.resetView(VIEW2)
+            assert await svc.viewInfo(VIEW2) == {}
 
     async def test_bad_args(self):
         async with fm.malpediaSvc(self) as (core, svc, fake):
@@ -384,19 +423,16 @@ class TestMalpediaViews(s_tests.SynTest):
             with self.raises(MalpediaSvcError):
                 await svc.resetView("x")
             with self.raises(MalpediaSvcError):
-                await svc.record("nope", "x")
+                await svc.synced(VIEW, "nope")
 
     async def test_lookups(self):
         async with fm.malpediaSvc(self) as (core, svc, fake):
-            assert await svc.record("actor", "apt28") is None
+            assert await snapRec(svc, "actor", "apt28") is None
             await svc.pull()
-            assert (await svc.record("actor", "apt28"))["name"] == "APT28"
-            assert (await svc.record("news", fm.URL_SEDNIT))[
+            assert (await snapRec(svc, "actor", "apt28"))["name"] == "APT28"
+            assert (await snapRec(svc, "news", norm.urlKey(fm.URL_SEDNIT)))[
                 "title"
             ] == "Sednit reloaded: Back in the trenches"
-            assert (await svc.record("news", norm.urlKey(fm.URL_SEDNIT)))["url"] == fm.URL_SEDNIT
-            assert (await svc.record("news", fm.URL_SEDNIT + "?"))["url"] == fm.URL_SEDNIT
-            assert await svc.record("news", "?") is None
 
             found = await svc.find("actor", " fancy ")
             assert found == [
@@ -478,7 +514,7 @@ class TestMalpediaViews(s_tests.SynTest):
                         assert retn["status"] is True
                         assert retn["data"]["pulled"] is True
 
-                        retn = await prox.record("nope", "x")
+                        retn = await prox.synced(VIEW, "nope")
                         assert retn["status"] is False
                         assert "Unknown record kind" in retn["mesg"]
 
@@ -538,7 +574,7 @@ class TestMalpediaAuditFixes(s_tests.SynTest):
             summary = await svc.pull()
             assert summary["yarafull"] is False
             assert fake.countPaths("/api/get/yara/tlp_white/zip") == 1
-            assert (await svc.record("yara", "win.xagent_w0.yar"))["text"] == fm.YARA_XAGENT_W0
+            assert (await snapRec(svc, "yara", "win.xagent_w0.yar"))["text"] == fm.YARA_XAGENT_W0
 
             # Once the last full download is old enough, the next pull gets the zip.
             svc.info.set("yarafull", s_common.now() - 8 * m_svc.DAY)
@@ -547,7 +583,7 @@ class TestMalpediaAuditFixes(s_tests.SynTest):
             assert summary["yarafull"] is True
             assert summary["updated"]["yara"] == 1
             assert fake.countPaths("/api/get/yara/tlp_white/zip") == 2
-            assert (await svc.record("yara", "win.xagent_w0.yar"))["text"] == text
+            assert (await snapRec(svc, "yara", "win.xagent_w0.yar"))["text"] == text
 
             # 0 turns the periodic download off.
             svc.conf["malpedia:yara:fullage"] = 0
@@ -564,13 +600,13 @@ class TestMalpediaAuditFixes(s_tests.SynTest):
             summary = await svc.pull()
             assert summary["gaps"] == 1
             assert (await svc.status())["gaps"] == 1
-            assert await svc.record("actor", "turla") is None
+            assert await snapRec(svc, "actor", "turla") is None
 
             fake.state["errors"].clear()
             summary = await svc.pull()
             assert summary["pulled"] is True
             assert summary["gaps"] == 0
-            assert (await svc.record("actor", "turla"))["name"] == "Turla"
+            assert (await snapRec(svc, "actor", "turla"))["name"] == "Turla"
             # Now the version check is enough again.
             assert (await svc.pull())["reason"] == "unchanged"
 
@@ -593,11 +629,11 @@ class TestMalpediaAuditFixes(s_tests.SynTest):
             assert any(
                 "Unable to get the YARA rules for win.sedreco" in w for w in summary["warnings"]
             )
-            assert await svc.record("yara", "win.sedreco_w0.yar") is None
+            assert await snapRec(svc, "yara", "win.sedreco_w0.yar") is None
             fake.state["errors"].clear()
             summary = await svc.pull()
             assert summary["pulled"] is True
-            assert (await svc.record("yara", "win.sedreco_w0.yar"))["family"] == "win.sedreco"
+            assert (await snapRec(svc, "yara", "win.sedreco_w0.yar"))["family"] == "win.sedreco"
 
     async def test_gap_requests_rotate(self):
         # Past the per-pull limit, each pull requests different missing actors (new ones
@@ -610,13 +646,13 @@ class TestMalpediaAuditFixes(s_tests.SynTest):
                 summary = await svc.pull()
                 assert summary["gaps"] == 2
                 assert fake.countPaths("/api/get/actor/") == 2
-                assert await svc.record("actor", "xb") is None
+                assert await snapRec(svc, "actor", "xb") is None
 
                 # The gaps make the next check pull again, and it gets the other two.
                 summary = await svc.pull()
                 assert fake.countPaths("/api/get/actor/") == 4
                 for aid in ("turla", "xa", "xb", "xc"):
-                    assert await svc.record("actor", aid) is not None, aid
+                    assert await snapRec(svc, "actor", aid) is not None, aid
 
                 # Then the ones requested longest ago.
                 start = len(fake.requests)
@@ -632,13 +668,13 @@ class TestMalpediaAuditFixes(s_tests.SynTest):
             )
             summary = await svc.pull()
             assert "Skipped the YARA file win.xagent_w9.yar: it has no rule." in summary["warnings"]
-            assert await svc.record("yara", "win.xagent_w9.yar") is None
+            assert await snapRec(svc, "yara", "win.xagent_w9.yar") is None
 
     async def test_long_keys(self):
         # MALP-08: keys too long for the slab are handled, not raised as BadArg.
         async with fm.malpediaSvc(self) as (core, svc, fake):
             await svc.pull()
-            assert await svc.record("actor", "x" * 600) is None
+            assert await snapRec(svc, "actor", "x" * 600) is None
             assert (
                 await svc.synced(VIEW, "actor", done=[["x" * 600, "h"]], removed=["y" * 600]) == 0
             )
@@ -654,8 +690,8 @@ class TestMalpediaAuditFixes(s_tests.SynTest):
             ]
 
             async with svc.getLocalProxy() as prox:
-                retn = await prox.record("actor", "x" * 600)
-                assert retn == {"status": True, "mesg": "", "data": None}
+                retn = await prox.synced(VIEW, "actor", done=[["x" * 600, "h"]])
+                assert retn == {"status": True, "mesg": "", "data": 0}
 
     async def test_store_lock(self):
         # MALP-12: changes() never reads the snapshot while a pull is writing it.

@@ -25,15 +25,17 @@ The service is published as `ghcr.io/gormaniac/stormsvcs/hatching`.
 ```bash
 docker run -d --name slib-hatching \
     -v /srv/slib-hatching:/vertex/storage \
+    -e SYN_HATCHINGSVC_AUTH_PASSWD="<passwd>" \
     -e SYN_HATCHINGSVC_HATCHING_APIKEY=<optional service-wide key> \
     -p 27492:27492 \
     ghcr.io/gormaniac/stormsvcs/hatching:latest
 ```
 
-Then add it to a Cortex:
+`SYN_HATCHINGSVC_AUTH_PASSWD` sets the service's `root` password (on first start), which the
+Cortex connects with. Then add it to a Cortex:
 
 ```
-service.add slib.hatching tcp://<user>:<passwd>@<host>:27492/*
+service.add slib.hatching tcp://root:<passwd>@<host>:27492/*
 ```
 
 ### Configuration
@@ -84,6 +86,11 @@ Users don't need the `service.get` permission. The `slib.hatching.priv.*` module
 service and elevate privileges only for users that hold the matching permission. Users still
 need the normal node permissions for the nodes the commands create.
 
+The service's Telepath API has no per-method permission checks: anyone who can connect to it
+with the service's credentials can call every method (including setting the service-wide key)
+and use the stored key. Keep the Telepath port reachable only by the Cortex, and only grant
+`service.get` to admins.
+
 ## Commands
 
 | Command | Description |
@@ -95,12 +102,12 @@ need the normal node permissions for the nodes the commands create.
 | `slib.hatching.samples` | List the newest `owned`, `org`, or `public` samples (at most 1000). |
 | `slib.hatching.sample.info` | Print a sample's metadata, `--summary`, or a shareable magic `--link`. |
 | `slib.hatching.sample.wait` | Wait for samples to be reported, then optionally model them. |
-| `slib.hatching.sample.profile` | Pick the profiles of an interactive sample (or `--auto`). |
+| `slib.hatching.sample.profile` | Pick the profiles of an interactive sample (`--profile`, `profile:file` to run a file in an archive), or let the sandbox pick them (`--auto`, `--pick` a file). `--profile` can't be combined with `--auto` or `--pick`. |
 | `slib.hatching.sample.delete` | Delete samples. |
 | `slib.hatching.events` | Print the status changes of a sample, or all of your running samples. |
 | `slib.hatching.report` | Print the overview, static (`--static`), a task's (`--task`), or a URL sample's UrlScan (`--urlscan`) report. |
 | `slib.hatching.kernel` | Print a task's kernel monitor events. |
-| `slib.hatching.download` | Download a sample's file, `--task`/`--file`, `--pcap`/`--pcapng`, `--dumped` files, a URL sample's `--screenshot`, or `--archive` into the Axon. |
+| `slib.hatching.download` | Download a sample's file, `--task`/`--file`, `--pcap`/`--pcapng`, `--dumped` files, a URL sample's `--screenshot`, or `--archive` (named `<sample ID>.<fmt>`) into the Axon. `--pcap`, `--pcapng`, and `--dumped` use every reported behavioral task in the overview report, unless `--task` is given. |
 | `slib.hatching.profile.list`, `slib.hatching.profile.add`, `slib.hatching.profile.edit`, `slib.hatching.profile.del` | Manage analysis profiles (`--network vpn --geolocation <region>` for VPN profiles). |
 | `slib.hatching.resources` | List the analysis environments and the tags profiles pick them with. |
 | `slib.hatching.geolocations` | List the VPN regions. |
@@ -130,7 +137,9 @@ Each sample is modeled as a `file:bytes` (or `inet:url`, for URL analyses) with:
   scores 8-10 are malicious, 5-7 suspicious, and 1-4 benign.
 - An `it:av:scan:result` per matched signature (`:signame`, its own verdict, its tags as
   `:categories`, and `-(uses)>` its techniques), linked to the verdict with `:multi:scan`.
-- A `risk:tool:software` per malware family (with `:tag` set to its tag).
+- A `risk:tool:software` per malware family, with `:tag` set to the family's tag. The family is
+  linked to the sample by that tag (the sample is tagged `#rep.hatching.<family>`), not by an
+  edge, so with tagging turned off the two aren't linked.
 - `-(uses)> it:mitre:attack:technique` for the ATT&CK techniques of its signatures.
 - `-(refs)>` edges to the IOCs Triage reported, URLs from droppers and ransom notes, credentials
   (`auth:creds`), and dropped files.
@@ -162,7 +171,8 @@ With `--tasks`, each behavioral task adds, linked to the sample with `:sandbox:f
 - `it:exec:file:add` nodes for dropped files (with their name, path, hashes, and process).
 - Triage's ASN and country (`:asn`, `:loc`) for the IPs, when the graph doesn't have them yet.
 
-Every node is linked to the service's `meta:source` (`hatching triage`) with a `-(seen)>` edge.
+Every node is linked to the service's `meta:source` (`hatching triage`) with a `-(seen)>` edge,
+as are the files `download` saves and the rules `yara.get --yield` creates.
 Modeling a sample again updates the same nodes. A `file:bytes` keeps the `:name` and `:mime` it
 already has. Failures Triage reports in an analysis (ex. a
 task that couldn't run) are printed as warnings.

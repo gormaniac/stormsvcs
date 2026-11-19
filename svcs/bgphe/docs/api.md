@@ -35,7 +35,8 @@ emitter stops, a function that returns returns `null`.
 
 The arguments mean the same as the commands' options (`precerts=(false)` is
 `--no-precerts`, `rdap=(false)` is `--no-rdap`). The functions print the same messages as the
-commands (see [Commands](commands.md)), ex. `prefixes()` always prints the IPv4/IPv6 counts.
+commands (see [Commands](commands.md)), ex. `prefixes()` prints the IPv4/IPv6 counts when
+`$lib.debug` is set.
 
 ```text
 $bgphe = $lib.import(slib.bgphe.lib)
@@ -152,7 +153,7 @@ exactly one summary:
 | `total` | bgp.he.net's `pagination.total_certificates` from the first page. |
 | `returned` | Certificates yielded. |
 | `skipped` | Certificates removed by `valid` or `precerts=False`. |
-| `invalid` | Entries without a usable DER. |
+| `invalid` | Entries without a usable DER (not a dict, or a DER that doesn't decode or parse), which are dropped. `slib.bgphe.certs` reports it as `unparsable` with `$lib.debug`. |
 | `pages` | Pages requested. |
 | `more` | Whether `limit` stopped the lookup with certificates left. |
 

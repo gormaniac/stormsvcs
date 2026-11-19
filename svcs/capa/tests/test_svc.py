@@ -353,7 +353,8 @@ class TestCapaSvc(s_tests.SynTest):
             tags = await svc.tags()
             assert "testing.ops.xor" in [t["tag"] for t in tags]
 
-            assert (await svc.reload())["sha256"] == info["sha256"]
+            # reload() returns the same info as rulesInfo(), capa's version included.
+            assert await svc.reload() == info
 
     async def test_no_rules(self):
         # The service starts without rules, and reports why it can't scan.

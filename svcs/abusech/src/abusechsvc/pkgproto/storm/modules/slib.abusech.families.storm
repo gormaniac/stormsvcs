@@ -7,9 +7,14 @@
 // slib.abusech.model.familyGuid). This finds the tag-keyed nodes and merges each into the
 // node for its name, which slib.abusech.admin.families.merge runs.
 //
-// Unprivileged: node edits run as the calling admin, so their node permissions apply.
+// Unprivileged: node edits run as the calling admin, so their node permissions apply. Importing
+// it requires the slib.abusech.admin permission (Synapse doesn't check permissions on importing
+// a module that isn't asroot).
 
 init {
+    if (not $lib.user.allowed("slib.abusech.admin")) {
+        $lib.raise(AuthDeny, "slib.abusech.families requires the slib.abusech.admin permission.")
+    }
     $model = $lib.import(slib.abusech.model)
 }
 

@@ -1,6 +1,6 @@
 [project]
 name = "abusechsvc"
-version = "0.5.1"
+version = "0.5.2"
 description = "An abuse.ch Storm Service (MalwareBazaar, URLhaus, ThreatFox, YARAify, Feodo Tracker, and SSL Blacklist)"
 readme = "README.md"
 license-files = ["LICENSE"]

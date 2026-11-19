@@ -7,8 +7,13 @@ init {
     // to the view's layer may run it here. slib.malpedia.priv.sync.sync() checks this too,
     // this fails before any output.
     $sync.reqEdit($name)
-    if ($cmdopts.force and not $lib.auth.users.get().allowed(slib.malpedia.admin)) {
-        $lib.raise(AuthDeny, "slib.malpedia.sync --force needs the slib.malpedia.admin permission.")
+    // Only a forced pull needs slib.malpedia.admin, --no-pull means there's nothing to force.
+    if $cmdopts.force {
+        if $cmdopts.no_pull {
+            $lib.warn(`{$name}: --force does nothing with --no-pull, there's no pull to force.`)
+        } elif (not $lib.auth.users.get().allowed(slib.malpedia.admin)) {
+            $lib.raise(AuthDeny, "slib.malpedia.sync --force needs the slib.malpedia.admin permission.")
+        }
     }
 
     if (not $cmdopts.no_pull) {

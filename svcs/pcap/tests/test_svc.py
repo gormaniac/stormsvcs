@@ -4,6 +4,7 @@ import gzip
 import hashlib
 import pathlib
 
+import synapse.exc as s_exc
 import synapse.tests.utils as s_tests
 from stormlibpp.testing import assertMainHelp, assertVersionsMatch
 
@@ -125,6 +126,37 @@ class TestPcapSvc(s_tests.SynTest):
             # The service's own errors still keep their message.
             retn = await prox.call("feedDel", "nope")
             self.eq({"status": False, "mesg": "Unknown feed: nope", "data": None}, retn)
+
+    async def test_api_redacts_feed_secrets(self):
+        # Feed URLs are sent with their secrets filled in, so an unexpected error that carries
+        # one (ex. from aiohttp) has every secret value, plain or URL-quoted, scrubbed.
+        secrets = {
+            "talos:oinkcode": {"value": "s3cr3t/code", "hosts": ["www.snort.org"]},
+            "et:pro": {"value": "etpro", "hosts": ["rules.emergingthreats.net"]},
+        }
+        conf = {**NOENGINES, "pcap:feeds:secrets": secrets}
+        async with self.getTestCell(PcapSvc, conf=conf) as svc:
+            url = "https://www.snort.org/rules?oinkcode=s3cr3t%2Fcode&raw=s3cr3t/code&et=etpro"
+
+            async def boom(*args, **kwargs):
+                raise RuntimeError(f"Cannot connect to {url}")
+
+            async def boomGenr(*args, **kwargs):
+                raise RuntimeError(f"Cannot connect to {url}")
+                yield None
+
+            svc.feedPull = boom
+            svc.flows = boomGenr
+            prox = SvcProx(svc)
+            want = (
+                "Unexpected error: RuntimeError: Cannot connect to https://www.snort.org/rules"
+                "?oinkcode=${talos:oinkcode}&raw=${talos:oinkcode}&et=${et:pro}"
+            )
+            retn = await prox.call("feedPull", "x")
+            self.eq({"status": False, "mesg": want, "data": None}, retn)
+            self.eq(
+                [{"status": False, "mesg": want, "data": None}], await collect(prox.flows("0" * 64))
+            )
 
     async def test_svc_starts(self):
         async with self.getTestCoreProxSvc(PcapSvc) as (core, _, svc):
@@ -466,6 +498,31 @@ class TestPcapSvcTshark(s_tests.SynTest):
 
 
 class TestPcapSvcOptions(s_tests.SynTest):
+    async def test_conf_minimums(self):
+        # Negative timeouts, intervals, and sizes (and a zero feed timeout or max size) are
+        # refused at startup.
+        bad = {
+            "pcap:feeds:interval": -1,
+            "pcap:feeds:timeout": 0,
+            "pcap:feeds:maxsize": 0,
+            "suricata:timeout": -1,
+            "snort:timeout": -1,
+        }
+        for name, valu in bad.items():
+            with self.raises(s_exc.BadConfValu):
+                async with self.getTestCell(PcapSvc, conf={**NOENGINES, name: valu}):
+                    pass
+        good = {
+            "pcap:feeds:interval": 0,
+            "pcap:feeds:timeout": 1,
+            "pcap:feeds:maxsize": 1,
+            "suricata:timeout": 0,
+            "snort:timeout": 0,
+        }
+        async with self.getTestCell(PcapSvc, conf={**NOENGINES, **good}) as svc:
+            for name, valu in good.items():
+                self.eq(valu, svc.conf.get(name))
+
     async def test_bad_suricata_set(self):
         # A suricata:set key that can't apply fails at startup, not on every run.
         with self.getTestDir() as dirn:

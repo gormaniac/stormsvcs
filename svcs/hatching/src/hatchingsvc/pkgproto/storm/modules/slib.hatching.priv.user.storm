@@ -43,6 +43,7 @@ function staticReport(sample) { return($svc.staticReport($sample, apikey=$userKe
 function taskReport(sample, task) { return($svc.taskReport($sample, $task, apikey=$userKey())) }
 function urlscanReport(sample, task=urlscan1) { return($svc.urlscanReport($sample, task=$task, apikey=$userKey())) }
 function dumpedFiles(sample) { return($svc.dumpedFiles($sample, apikey=$userKey())) }
+function sampleTasks(sample) { return($svc.sampleTasks($sample, apikey=$userKey())) }
 
 function normSample(sample, tasks=(false)) {
     return($svc.normSample($sample, tasks=$tasks, apikey=$userKey()))

@@ -6,7 +6,7 @@ from stormlibpp.svc import RetnApi
 from stormlibpp.telepath import BoolRetn
 from stormlibpp.utils import normver
 
-from .client import ShodanApiError
+from .client import ShodanApiError, scrubMesg
 from .defs import PKGDEFS, SVC_EVTS, SVC_NAME, SVC_VER
 
 
@@ -111,6 +111,18 @@ class ShodanCellApi(RetnApi, s_cell.CellApi, s_stormsvc.StormSvc):
     _storm_svc_vers = normver(SVC_VER)[1]
     _storm_svc_evts = SVC_EVTS
     _storm_svc_pkgs = PKGDEFS
+
+    def _retnRedact(self, mesg: str) -> str:
+        """Remove the service's API keys (stored and configured) from an error message.
+
+        Keys go to Shodan in the URL (``?key=``), and an error from ``aiohttp`` can include the
+        URL. The client already scrubs the key it sent, this catches any other copy.
+        """
+
+        keys = {self.cell.shodaninfo.get("apikey"), self.cell.conf.get("shodan:apikey")}
+        for key in sorted(filter(None, keys), key=len, reverse=True):
+            mesg = scrubMesg(mesg, key)
+        return mesg
 
     async def setApiKey(self, apikey: str | None) -> BoolRetn:
         """Set (or clear) the service-wide Shodan API key."""

@@ -61,6 +61,11 @@ commands:
       malpedia:pull:minage hours (12 by default) unless --force is used. A pull that couldn't
       get everything pulls again on the next check, even if Malpedia's version didn't change.
 
+      A pull that would remove over half of a kind's records (of 20 or more) is refused as a
+      likely upstream problem, and so is that Malpedia version until a new one comes out. A
+      forced pull (--force, which needs slib.malpedia.admin) skips both checks and stores
+      whatever Malpedia returned. --force does nothing with --no-pull.
+
       Then every record that changed since this view's last sync is modeled, in this order:
 
         media:news          The library's articles (from Malpedia's BibTeX), with their
@@ -90,7 +95,7 @@ commands:
       - - --force
         - default: false
           action: store_true
-          help: Pull Malpedia now (and every YARA rule) even if it was checked recently or hasn't changed (needs slib.malpedia.admin).
+          help: Pull Malpedia now (and every YARA rule) even if it was checked recently or hasn't changed, and store it even if it removes over half of a kind's records or is a version an earlier pull refused for that (needs slib.malpedia.admin, does nothing with --no-pull).
       - - --full
         - default: false
           action: store_true
@@ -197,6 +202,10 @@ commands:
       Cortex, in the Cortex's default view. --period replaces the job with one on a new
       schedule in the current view. Periods use cron.add --period syntax, ex. daily@03:17.
 
+      service.del deletes the job. Adding the service again schedules a new one at the
+      service's random time in the default view (not the old --period or view), and runs a
+      sync there.
+
       Malpedia is a free community resource, please don't sync more than daily. Syncs within
       malpedia:pull:minage hours of the last check don't contact Malpedia anyway.
 
@@ -235,6 +244,9 @@ commands:
       rep.malpedia.mal.win.xagent), and YARA rules <tlp prefix>.<tlp> (ex.
       rep.malpedia.tlp.white). Records Malpedia removed are tagged <prefix>.removed.
 
+      The two prefixes are separate settings: --prefix doesn't move the TLP prefix (by
+      default rep.malpedia.tlp), use --tlp-prefix to change it too.
+
       Changing a prefix doesn't retag nodes right away. The next slib.malpedia.sync in each
       view (ex. slib.malpedia.sync --no-pull) models every record again with the new tags, and
       removes the tags it added under the old prefix. Prefixes must already be valid tag names.
@@ -248,7 +260,7 @@ commands:
       - - --prefix
         - type: str
           default: null
-          help: The tag prefix for actors, families, and removed records.
+          help: The tag prefix for actors, families, and removed records (not YARA rule TLPs, see --tlp-prefix).
       - - --tlp-prefix
         - type: str
           default: null
@@ -260,7 +272,10 @@ commands:
     descr: |
       Forget what the current view has synced, so its next sync models every record again.
 
-      This doesn't contact Malpedia, or change any nodes.
+      This doesn't contact Malpedia, or change any nodes. The view's last synced version of
+      each record (and the tag prefixes it was synced with) is kept, so the next sync still
+      tags the records Malpedia removed since then <prefix>.removed, undoes what changed
+      records lost, and removes the tags under a prefix that changed since.
 
       Examples:
 

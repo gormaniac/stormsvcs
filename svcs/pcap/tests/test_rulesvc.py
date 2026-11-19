@@ -540,6 +540,18 @@ class TestFeedSync(s_tests.SynTest):
                 opts=fopts,
             )
             self.stormIsInWarn(f"The service's rules come from view {main}", msgs)
+
+            # Enabling or disabling rules in the fork is refused before any edit, so the
+            # fork's rules don't drift from the service's.
+            enabled = len(await core.nodes("it:app:snort:rule +:enabled=(true)", opts=fopts))
+            assert enabled
+            for cmd in ("slib.pcap.rule.disable", "slib.pcap.rule.enable"):
+                msgs = await core.stormlist(f"it:app:snort:rule | {cmd}", opts=fopts)
+                self.stormIsInWarn(f"The service's rules come from view {main}", msgs)
+                self.stormIsInWarn("The rules weren't changed.", msgs)
+                self.len(0, [m for m in msgs if m[0] == "node:edits"])
+                nodes = await core.nodes("it:app:snort:rule +:enabled=(true)", opts=fopts)
+                self.len(enabled, nodes)
             msgs = await core.stormlist("slib.pcap.sync --no-feeds", opts=opts)
             self.stormHasNoErr(msgs)
 

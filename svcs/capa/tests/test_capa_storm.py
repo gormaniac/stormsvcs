@@ -169,6 +169,15 @@ class TestCapaStormSync(s_tests.SynTest):
 
             nodes = await core.nodes(f"meta:source={SVC_GUID} -(seen)> meta:rule")
             assert len(nodes) == 6
+            # The ruleset, the ATT&CK techniques and the authors are linked too, the tags aren't.
+            for form, count in (
+                ("meta:ruleset", 1),
+                ("it:mitre:attack:technique", 2),
+                ("ps:contact", 1),
+                ("syn:tag", 0),
+            ):
+                nodes = await core.nodes(f"meta:source={SVC_GUID} -(seen)> {form}")
+                assert len(nodes) == count, form
 
             # Every namespace (and the namespaces above them) is a documented tag.
             tags = {n.ndef[1]: n for n in await core.nodes("syn:tag^=rep.capa")}
@@ -242,6 +251,31 @@ class TestCapaStormSync(s_tests.SynTest):
             msgs = await core.stormlist("slib.capa.admin.sync")
             self.stormIsInPrint("Imported 6 capa rules (vtest2)", msgs)
             assert len(await core.nodes(f"meta:ruleset={rulesetGuid('vtest2')} -(has)> *")) == 6
+
+    async def test_sync_removed_rule(self):
+        # A rule that's gone from the rules (with the same capa:rules:version, so the same
+        # ruleset) is removed from the ruleset, its meta:rule is kept.
+        async with capaSvc(self) as (core, svc, axon):
+            guid = ruleGuid("contain xor")
+            rset = f"meta:ruleset={rulesetGuid(RULES_VERSION)}"
+            # Another source's edge to a non-capa rule is left alone.
+            await core.nodes(f"{rset} [ +(has)> {{[ meta:rule=* :type=other ]}} ]")
+
+            del svc.capaRules.rules["contain xor"]
+            msgs = await core.stormlist("slib.capa.admin.sync --force")
+            self.stormHasNoWarnErr(msgs)
+            self.stormIsInPrint("Imported 5 capa rules (vtest).", msgs)
+            self.stormIsInPrint(
+                "Removed 1 rules that aren't in the capa rules anymore from the ruleset", msgs
+            )
+            members = {n.ndef[1] for n in await core.nodes(f"{rset} -(has)> meta:rule +:type^=capa.")}
+            assert len(members) == 5 and guid not in members
+            assert len(await core.nodes(f"{rset} -(has)> meta:rule +:type=other")) == 1
+            assert len(await core.nodes(f"meta:rule={guid}")) == 1
+
+            # Nothing more to remove.
+            msgs = await core.stormlist("slib.capa.admin.sync --force")
+            self.stormNotInPrint("Removed", msgs)
 
     async def test_sync_errors(self):
         async with capaSvc(self, conf={"capa:rules": None}) as (core, svc, axon):
@@ -409,7 +443,8 @@ class TestCapaStormScan(s_tests.SynTest):
             assert not [t for t in file.tags if t.startswith("my")]
 
             msgs = await core.stormlist("slib.capa.admin.tags --enable --disable")
-            self.stormIsInErr("Use --enable or --disable, not both.", msgs)
+            self.stormIsInWarn("Use --enable or --disable, not both.", msgs)
+            self.stormHasNoErr(msgs)
 
     async def test_scan_shared_prefix(self):
         # A prefix shared with other tags (ex. "rep"), only the tags capa applied are removed.
@@ -541,6 +576,36 @@ class TestCapaStormScan(s_tests.SynTest):
             msgs = await core.stormlist("slib.capa.admin.sync --force", opts=opts)
             self.stormHasNoWarnErr(msgs)
             self.stormIsInPrint("Imported 6 capa rules", msgs)
+
+    async def test_perms_admin_only(self):
+        # The admin commands (and the onload's sync) only need slib.capa.admin.
+        async with capaSvc(self) as (core, svc, axon):
+            await putSample(core, axon)
+            user = await core.auth.addUser("admin")
+            await user.addRule((True, ADMIN_PERM))
+            await user.addRule((True, ("node",)))
+            opts = {"user": user.iden}
+
+            for query in (
+                "slib.capa.admin.sync --force --reload",
+                "slib.capa.admin.tags --prefix my.capa --disable",
+                "slib.capa.admin.tags --enable",
+                "$lib.import(slib.capa.sync).sync(force=(true))",
+            ):
+                self.stormHasNoWarnErr(await core.stormlist(query, opts=opts))
+            msgs = await core.stormlist("slib.capa.admin.tags", opts=opts)
+            self.stormIsInPrint("slib.capa tags: enabled=true prefix=my.capa", msgs)
+            assert len(await core.nodes("syn:tag=my.capa.testing.ops.xor +:doc")) == 1
+
+            # slib.capa.priv.admin doesn't give an admin the user API.
+            msgs = await core.stormlist(SCAN, opts=opts)
+            self.stormIsInErr("slib.capa.user", msgs)
+            for query in (
+                "$lib.import(slib.capa.priv.user)",
+                "$lib.import(slib.capa.priv.admin).scan($lib.null)",
+            ):
+                msgs = await core.stormlist(query, opts=opts)
+                assert [m for m in msgs if m[0] == "err"], query
 
 
 class TestCapaStormCustom(s_tests.SynTest):
@@ -856,19 +921,38 @@ class TestCapaStormFixes(s_tests.SynTest):
 
     async def test_tags_prefix_invalid(self):
         async with capaSvc(self) as (core, svc, axon):
-            for prefix in ("", "a b", "my..capa", "#nope"):
+            for prefix in ("", "my..capa", ".", "#"):
                 msgs = await core.stormlist(
                     "slib.capa.admin.tags --prefix $p --disable", opts={"vars": {"p": prefix}}
                 )
-                self.stormIsInErr("isn't a valid tag name", msgs)
+                self.stormHasNoErr(msgs)
+                self.stormIsInWarn("isn't a valid tag name. Nothing was changed.", msgs)
+                # Nothing changed, not even --disable.
+                self.stormIsInPrint("slib.capa tags: enabled=true prefix=rep.capa", msgs)
 
-            # Nothing changed, not even --disable.
-            msgs = await core.stormlist("slib.capa.admin.tags")
+            msgs = await core.stormlist("slib.capa.admin.tags --enable --disable --prefix my.capa")
+            self.stormHasNoErr(msgs)
+            self.stormIsInWarn("Use --enable or --disable, not both. Nothing was changed.", msgs)
             self.stormIsInPrint("slib.capa tags: enabled=true prefix=rep.capa", msgs)
 
-            # Case and surrounding space are normalized.
-            msgs = await core.stormlist("slib.capa.admin.tags --prefix ' My.Capa '")
-            self.stormIsInPrint("prefix=my.capa", msgs)
+            # A valid prefix is normalized as a tag (case, space, and a leading #).
+            for prefix, norm in (
+                ("REP.capa", "rep.capa"),
+                (" My.Capa ", "my.capa"),
+                ("#Your.Capa", "your.capa"),
+                ("a b.capa", "a_b.capa"),
+            ):
+                msgs = await core.stormlist(
+                    "slib.capa.admin.tags --prefix $p", opts={"vars": {"p": prefix}}
+                )
+                self.stormHasNoWarnErr(msgs)
+                self.stormIsInPrint(f"Using the normalized prefix {norm}.", msgs)
+                self.stormIsInPrint(f"slib.capa tags: enabled=true prefix={norm}", msgs)
+                assert len(await core.nodes(f"syn:tag={norm}.testing.ops.xor +:doc")) == 1
+
+            # An already normalized prefix isn't mentioned.
+            msgs = await core.stormlist("slib.capa.admin.tags --prefix rep.capa")
+            self.stormNotInPrint("normalized", msgs)
 
     async def test_scan_lazy_init(self):
         # An empty pipeline doesn't send the custom rules or get the rules info.

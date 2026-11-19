@@ -345,8 +345,11 @@ async def test_retry_statement_timeout(caplog):
             asyncpg.exceptions.QueryCanceledError("canceling statement due to user request"),
             None,
         ]
-        with pytest.raises(CrtshDbError, match="user request"):
+        with pytest.raises(CrtshDbError, match="user request") as exc:
             await db.fetch("SELECT 3")
+        # Nor reported as a statement timeout.
+        assert str(exc.value).startswith("crt.sh canceled the query after ")
+        assert "(statement timeout)" not in str(exc.value)
         assert server.errors == [None]
 
         # Nor are timeouts without retries, and they don't use up connection retries.
@@ -468,9 +471,9 @@ async def test_query_errors():
             await db.fetch("SELECT * FROM nope")
         assert (await db.fetch("SELECT 1"))[0]["conn"] == 0
 
-        # crt.sh canceling the query (statement timeout) too.
+        # crt.sh canceling the query too (not for its statement timeout, that's retried).
         server.errors = [asyncpg.exceptions.QueryCanceledError("canceling statement")]
-        with pytest.raises(CrtshDbError, match="statement timeout"):
+        with pytest.raises(CrtshDbError, match="canceled the query after .*: canceling statement"):
             await db.fetch("SELECT 2")
         assert (await db.fetch("SELECT 3"))[0]["conn"] == 0
         assert server.executed == server.refused == [] and len(server.conns) == 1

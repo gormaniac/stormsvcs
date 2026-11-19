@@ -16,6 +16,9 @@ function userKey() {
 function setApiKey(apikey) { return($svc.setApiKey($apikey)) }
 function hasApiKey() { return($svc.hasApiKey()) }
 
+// Which service-wide key is in use: "stored", "config" (vt:apikey), or null.
+function apiKeySource() { return($svc.apiKeySource()) }
+
 function tagSettings() {
     return(({
         "enabled": $lib.globals.get("slib:vt:tag:enabled"),  // noqa: R005 - the 2.x API, the package needs 2.x
