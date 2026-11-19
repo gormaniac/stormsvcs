@@ -74,9 +74,9 @@ SET_LOCAL_RE = re.compile(r"^\s*SET\s+LOCAL\b", re.IGNORECASE)
 
 # The simple-query message CrtshDb._copy sends for the service's own queries.
 COPY_RE = re.compile(
-    r"SET LOCAL statement_timeout = (\d+); SET LOCAL bytea_output = hex; "
+    r"SET statement_timeout = (\d+); SET LOCAL bytea_output = hex; "
     r"SET TRANSACTION READ ONLY; COPY \(SELECT row_to_json\(crtsh_r\)::text FROM \(\n"
-    r"(.*)\n\) crtsh_r\) TO STDOUT \(FORMAT binary\)",
+    r"(.*)\n\) crtsh_r\) TO STDOUT \(FORMAT binary\); RESET statement_timeout",
     re.DOTALL,
 )
 
@@ -404,7 +404,7 @@ async def test_statement_pooling():
         db._conn = None
 
         # So every query is one message, without a transaction block, and nothing else is
-        # sent: the service's own queries set their statement_timeout (SET LOCAL) and read-only
+        # sent: the service's own queries set their statement_timeout (SET, then RESET) and read-only
         # mode in the same simple query as their COPY.
         assert (await db.fetch("SELECT 1"))[0]["sql"] == "SELECT 1"
         assert server.messages == [db._copyStmt("SELECT 1", ())]

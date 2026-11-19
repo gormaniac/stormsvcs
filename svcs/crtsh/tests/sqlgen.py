@@ -305,11 +305,14 @@ SELECT encode(digest(c.CERTIFICATE, 'sha256'), 'hex') AS sha256,
 """
 
 
-TIMEOUT = "SET LOCAL statement_timeout = '600s' \\;\n"
-"""Sent in front of each query: ``\\;`` makes psql send both as one message (one implicit
-transaction), so the timeout reaches the query behind crt.sh's PgBouncer statement pooling,
-like the service's own ``SET LOCAL`` (see ``CrtshDb``). A separate ``SET statement_timeout``
-only reaches whichever server connection ran it."""
+TIMEOUT = "SET statement_timeout = '600s' \\;\n"
+"""Sent in front of each query, with ``RESET`` after it: ``\\;`` makes psql send them
+as one message (one implicit transaction, on one server connection), so the timeout reaches
+the query behind crt.sh's PgBouncer statement pooling, like the service's own (see
+``CrtshDb``). A ``SET LOCAL`` doesn't take effect on crt.sh's PostgreSQL 12, and a separate
+``SET statement_timeout`` only reaches whichever server connection ran it, where it stays."""
+
+RESET = " \\; RESET statement_timeout"
 
 
 def main() -> None:
@@ -318,7 +321,7 @@ def main() -> None:
     out = [SETUP.format(**vals)]
     for num, (title, sql) in enumerate(db.queries, start=1):
         title = title.replace("'", "''")  # Quoted for psql's \\echo.
-        out.append(f"\\echo '-- {num}. {title}'\n{TIMEOUT}{sql};\n")
+        out.append(f"\\echo '-- {num}. {title}'\n{TIMEOUT}{sql}{RESET};\n")
     sys.stdout.write("\n".join(out))
 
 

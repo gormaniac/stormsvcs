@@ -55,10 +55,13 @@ ran it (where it stays, for other clients). Its guest role's `statement_timeout`
 query is a single round trip without an explicit transaction, which also works behind
 transaction or session pooling and against plain PostgreSQL:
 
-- The service's own queries are one simple-query message, `SET LOCAL statement_timeout = <ms>;
-  SET LOCAL bytea_output = hex; SET TRANSACTION READ ONLY; COPY (<query as JSON rows>) TO STDOUT`.
-  The statements of one message run in one implicit transaction on one server connection, so
-  the query gets `crtsh:statement:timeout` and read-only mode, and both end with it. A simple
+- The service's own queries are one simple-query message, `SET statement_timeout = <ms>;
+  SET LOCAL bytea_output = hex; SET TRANSACTION READ ONLY; COPY (<query as JSON rows>) TO STDOUT;
+  RESET statement_timeout`. The statements of one message run in one implicit transaction on
+  one server connection, so the query gets `crtsh:statement:timeout` and read-only mode. The
+  timeout is a session `SET` because crt.sh's PostgreSQL 12 ignores a `SET LOCAL` there (it still
+  cancels at its own timeout, checked live); the `RESET` ends it, and if the query fails the
+  aborted implicit transaction reverts it, so it never stays on the shared server connection. A simple
   query has no parameters, so their arguments are inlined as escaped literals (user text is only
   ever an argument). If the server refuses the `SET`s, the queries run under its own timeout.
 - Startup parameters can't set the timeout: PgBouncer rejects `statement_timeout` as an
@@ -166,7 +169,8 @@ word and an issuer together, so a common word with a rare issuer (`--cn microsof
 Its arguments stay query parameters, so it's one plain (extended protocol) statement and runs
 under crt.sh's own `statement_timeout` (30s), not `crtsh:statement:timeout`: narrow heavy queries
 (ex. an expiry window on the `certificate` partition key, see the searches above), or run them
-in psql with `SET LOCAL statement_timeout = 0 \;` in front (see [Testing](#testing)).
+in psql with `SET statement_timeout = 0 \;` in front and `\; RESET statement_timeout` after
+(see [Testing](#testing)).
 
 With statement pooling there's no transaction to roll back, so the wrapper does it in the same
 statement, ordered by the plan (`RAW_SQL` in `db.py`, checked with `EXPLAIN ANALYZE` and against
@@ -250,9 +254,11 @@ uv run python -m tests.sqlgen > tests/live_queries.sql
 psql -h crt.sh -p 5432 -U guest certwatch -f tests/live_queries.sql
 ```
 
-Each query is sent with `SET LOCAL statement_timeout = '600s' \;` in front: psql's `\;` sends both
-in one message, one implicit transaction, so the timeout reaches the query behind statement
-pooling. A plain `SET statement_timeout = 0;` line (or `SET ...; SELECT ...;` on one line, which
-psql sends as two messages) only reaches whichever server connection ran it, and stays there.
+Each query is sent as `SET statement_timeout = '600s' \; <query> \; RESET statement_timeout`:
+psql's `\;` sends them in one message, one implicit transaction, so the timeout reaches the
+query behind statement pooling and doesn't stay on the server connection (`SET LOCAL` doesn't
+take effect on crt.sh's PostgreSQL 12). A plain `SET statement_timeout = 0;`
+line (or `SET ...; SELECT ...;` on one line, which psql sends as two messages) only reaches
+whichever server connection ran it, and stays there.
 
 `--stub` generates the same queries with values from the test certificates, for the stub database.

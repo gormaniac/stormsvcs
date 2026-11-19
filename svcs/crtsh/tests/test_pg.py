@@ -278,8 +278,8 @@ class TestPostgres(s_tests.SynTest):
             assert [c["crtsh"]["id"] for c in chain["certs"]] == [10, 2, 4, 1, 14]
             assert all(len(path) == len(set(path)) for path in chain["paths"])
             assert len(await svc.db.chain({"id": [10]}, maxrows=3)) == 3
-            # The service's queries set their own statement_timeout (SET LOCAL), read-only, in
-            # the same message as the query, so it doesn't outlast it (raw queries, which keep
+            # The service's queries set their own statement_timeout (SET, then RESET), read-only,
+            # in the same message as the query, so it doesn't outlast it (raw queries, which keep
             # their parameters, run under the server's).
             settings = (
                 "SELECT current_setting('statement_timeout') AS st, "
@@ -290,13 +290,19 @@ class TestPostgres(s_tests.SynTest):
 
     async def test_statement_timeout(self):
         # The statement_timeout applies to the query itself, behind PgBouncer's statement
-        # pooling too (a session SET, or set_config() in the query, wouldn't).
+        # pooling too (a separate SET, or set_config() in the query, wouldn't), and doesn't stay
+        # on the server connection: RESET after a query that finished, reverted with the aborted
+        # implicit transaction of one that failed (raw queries show the server's, 0).
         await pgstub.load(DSN)
         conf = {"crtsh:dsn": DSN, "crtsh:statement:timeout": 0.2, "crtsh:timeout:retries": 0}
         async with self.getTestCell(CrtshSvc, conf=conf) as svc:
+            setting = "SELECT current_setting('statement_timeout') AS st"
             with pytest.raises(CrtshDbError, match="statement timeout"):
                 await svc.db.fetch("SELECT pg_sleep(1)")
+            assert await svc.rawQuery(setting) == [{"st": "0"}]
             assert await svc.db.fetch("SELECT pg_sleep(0.01) IS NULL AS ok") == [{"ok": False}]
+            assert await svc.db.fetch(setting) == [{"st": "200ms"}]
+            assert await svc.rawQuery(setting) == [{"st": "0"}]
             assert svc.db._useCopy
 
     async def test_identity_tokens(self):

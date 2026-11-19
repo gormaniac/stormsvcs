@@ -419,10 +419,14 @@ class CrtshDb:
       session ``SET`` lands on whichever server connection ran it (and stays there, for
       other clients). So every query is a single round trip with no explicit transaction,
       which also works behind transaction or session pooling and against plain PostgreSQL.
-    - The service's own queries are one simple-query message: ``SET LOCAL statement_timeout``,
-      ``SET TRANSACTION READ ONLY``, and the query as a ``COPY ... TO STDOUT`` (see ``_copy``).
-      The statements of one message run in one implicit transaction on one server
-      connection, so the timeout and read-only mode apply to the query and end with it.
+    - The service's own queries are one simple-query message: ``SET statement_timeout``,
+      ``SET TRANSACTION READ ONLY``, the query as a ``COPY ... TO STDOUT`` (see ``_copy``),
+      then ``RESET statement_timeout``. The statements of one message run in one implicit
+      transaction on one server connection. The timeout is a session ``SET``, not ``SET
+      LOCAL``: crt.sh (PostgreSQL 12) still cancels the query at its own timeout after a
+      ``SET LOCAL`` in the same message (checked live), a session ``SET`` takes effect. The
+      ``RESET`` ends it on success, and when the query fails the implicit transaction aborts,
+      which reverts the ``SET``, so it never stays on the shared server connection.
       Startup parameters don't work: PgBouncer rejects ``statement_timeout`` ("unsupported
       startup parameter"), ignores it if it's in ``ignore_startup_parameters``, and can't
       track it (PostgreSQL doesn't report it). A ``set_config()`` inside the query only
@@ -567,10 +571,11 @@ class CrtshDb:
         """The simple-query message ``_copy`` sends for one of the service's own queries."""
 
         return (
-            f"SET LOCAL statement_timeout = {int(self.statement_timeout * 1000)}; "
+            f"SET statement_timeout = {int(self.statement_timeout * 1000)}; "
             "SET LOCAL bytea_output = hex; SET TRANSACTION READ ONLY; "
             "COPY (SELECT row_to_json(crtsh_r)::text FROM (\n"
-            f"{_inline(sql, args)}\n) crtsh_r) TO STDOUT (FORMAT binary)"
+            f"{_inline(sql, args)}\n) crtsh_r) TO STDOUT (FORMAT binary); "
+            "RESET statement_timeout"
         )
 
     async def _copy(self, conn: asyncpg.Connection, sql: str, args: tuple) -> list[dict]:
