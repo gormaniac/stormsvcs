@@ -77,11 +77,11 @@ Add a `.dockerignore` (`.venv/`, `**/__pycache__`, `**/*.pyc`, `**/.pytest_cache
 - `services.toml`:
 
   ```toml
-  [stormsvcs.<svc>]
-  name = "Display Name"
+  [stormsvcs.example]
+  name = "Example"
   summary = "One line for the docs site's service index."
-  src = "svcs/<svc>/"
-  workflow = ".github/workflows/<svc>.yml"
+  src = "svcs/example/"
+  workflow = ".github/workflows/example.yml"
   ```
 
 - `.github/workflows/<svc>.yml` (copy `virustotal.yml`), and a job in `_main.yml`. See

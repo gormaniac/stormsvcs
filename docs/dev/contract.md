@@ -23,7 +23,12 @@ makes the script exit 1).
 # The Synapse every service's uv.lock must have, and the lowest StormLib++ it may have.
 synapse = "2.256.0"
 stormlibpp = "1.0.0"
-enforce = ["registered", "workflow-paths", "versions", ...]
+enforce = [
+    "registered",
+    "workflow-paths",
+    "versions",
+    # ... every other rule in the table below
+]
 ```
 
 A rule listed in `enforce` fails CI. Any other rule is only reported. When every service
