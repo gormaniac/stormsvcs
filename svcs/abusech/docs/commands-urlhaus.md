@@ -30,6 +30,8 @@ Any of `--url`, `--id`, `--host`, `--hash` makes the command ignore the inbound 
 | `file:bytes` (`:sha256`, else `:md5`), `hash:md5`, `hash:sha256` | `/payload/` | The payload sample, and every URL that served it (`inet:urlfile`) |
 
 - Permission: `slib.abusech.user`
+- Any other inbound form, including `inet:ipv6`, warns `slib.abusech.urlhaus.lookup: The node
+  form <form> is not supported.` and sends no request.
 - URLs are tagged with their threat, URLhaus tags, and `status.<url_status>` (ex.
   `#rep.abusech.urlhaus.status.online`, replacing an older `status.*` tag), and `larted` when
   the URL was reported to its host. All of those tags carry the URL's added-to-last-online

@@ -118,8 +118,11 @@ class TestQuota(s_tests.SynTest):
         for _ in range(10):
             await lim.acquire(KEY)
         assert clock.slept == []
-        # Still counted.
-        assert lim.counts(quota.keyId(KEY)) == {"minute": 4, "day": 10, "month": 10}
+        # Still counted, and the minute count isn't capped at the limit.
+        assert lim.counts(quota.keyId(KEY)) == {"minute": 10, "day": 10, "month": 10}
+        clock.now += 61
+        await lim.acquire(KEY)
+        assert lim.counts(quota.keyId(KEY))["minute"] == 1
 
     async def test_persisted(self):
         # A new limiter (ex. after a restart) sees the old one's requests.
@@ -141,6 +144,29 @@ class TestQuota(s_tests.SynTest):
         assert status["enforced"] is True
         assert status["used"]["day"] == 1
         assert status["limits"] == {"minute": 4, "day": 500, "month": 15500}
+
+    async def test_cooldown_pruned(self):
+        kv = Kv()
+        lim, clock = limiter(kv=kv)
+        kid = quota.keyId(KEY)
+        lim.cooldown(KEY, 30)
+        await lim.acquire(KEY)
+        # The request after the cooldown dropped the expired cooldown.
+        assert f"{kid}:cooldown" not in kv
+        lim.cooldown(KEY, 30)
+        assert f"{kid}:cooldown" in kv
+
+    def test_resets(self):
+        # T0 is 2026-11-03 23:58 UTC.
+        lim, clock = limiter()
+        status = lim.status(KEY)
+        day = datetime.datetime(2026, 11, 4, tzinfo=datetime.UTC).timestamp()
+        month = datetime.datetime(2026, 12, 1, tzinfo=datetime.UTC).timestamp()
+        assert status["resets"] == int(day * 1000)
+        assert status["resetsMonth"] == int(month * 1000)
+        dec = datetime.datetime(2026, 12, 31, 23, 59, tzinfo=datetime.UTC).timestamp()
+        jan = datetime.datetime(2027, 1, 1, tzinfo=datetime.UTC).timestamp()
+        assert quota.nextMonth(dec) == jan
 
     async def test_slab_persisted(self):
         # The limiter works with a real SafeKeyVal.

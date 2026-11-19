@@ -8,8 +8,10 @@ service can call any endpoint the same way.
 
 import asyncio
 import json
+import re
 from collections.abc import AsyncIterator, Mapping
 from typing import Any
+from urllib.parse import quote, quote_plus
 
 import aiohttp
 
@@ -30,6 +32,10 @@ RATE_LIMITED_APIS = frozenset(("api", "trends"))
 
 # How many times to retry a request that receives an HTTP 429.
 MAX_RETRIES = 3
+
+
+# A URL's query string, which holds the API key ("?key=..."), in an error message.
+URL_QUERY_RE = re.compile(r"(https?://[^\s'\"?#]*)\?[^\s'\"#]*")
 
 
 class ShodanApiError(Exception):
@@ -66,6 +72,22 @@ def normParams(params: Mapping[str, Any] | None) -> dict[str, str]:
     if not isinstance(params, Mapping):
         raise ShodanApiError(f"Expected a dict of params, got {type(params).__name__}: {params!r}")
     return {k: normParam(v) for k, v in params.items() if v is not None}
+
+
+def scrubMesg(mesg: str, apikey: str | None = None) -> str:
+    """Remove the API key from an error message, ex. ``aiohttp``'s, which can include the URL.
+
+    Drops the query string of any URL in it (where the ``key`` param goes), then replaces any
+    other copy of ``apikey`` (as-is or URL encoded) with ``<redacted>``.
+    """
+
+    mesg = URL_QUERY_RE.sub(r"\1?<redacted>", mesg)
+    if apikey:
+        for valu in sorted(
+            {apikey, quote(apikey, safe=""), quote_plus(apikey)}, key=len, reverse=True
+        ):
+            mesg = mesg.replace(valu, "<redacted>")
+    return mesg
 
 
 def errMesg(code: int, data: Any, text: str, keyed: bool = True) -> str:
@@ -207,7 +229,8 @@ class ShodanClient:
                     text = await resp.text()
                     code = resp.status
             except (aiohttp.ClientError, TimeoutError) as err:
-                raise ShodanApiError(f"Unable to connect to Shodan ({base}): {err}") from err
+                mesg = scrubMesg(str(err), params.get("key"))
+                raise ShodanApiError(f"Unable to connect to Shodan ({base}): {mesg}") from err
 
             if code == 429 and attempt < MAX_RETRIES:
                 await asyncio.sleep(2**attempt)
@@ -282,4 +305,5 @@ class ShodanClient:
             # Hitting the read timeout just means the stream went quiet.
             return
         except aiohttp.ClientError as err:
-            raise ShodanApiError(f"Unable to connect to the Shodan Streaming API: {err}") from err
+            mesg = scrubMesg(str(err), params.get("key"))
+            raise ShodanApiError(f"Unable to connect to the Shodan Streaming API: {mesg}") from err

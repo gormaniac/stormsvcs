@@ -12,7 +12,8 @@ init {
 if ($node.form() != "file:bytes") {  // noqa: R002
     $repr = `{$node.form()}={$node.repr()}`  // noqa: R002
     $lib.warn(`slib.capa.scan: Only file:bytes nodes can be scanned, skipping {$repr}.`)
-    // Drops the node from the output, unless the inbound nodes are yielded.
+    // Like every inbound node it's passed through, but --yield only outputs the matched
+    // meta:rule nodes, so it's dropped then.
     if $cmdopts.yield { spin }  // noqa: P001
 } else {
     if (not $state.ready) {

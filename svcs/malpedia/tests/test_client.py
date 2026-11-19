@@ -28,7 +28,6 @@ async def test_endpoints():
         async with session:
             assert await cli.version() == {"version": 26601, "date": "2026-10-30T16:25:07Z"}
             assert "apt28" in await cli.listActors()
-            assert "win.xagent" in await cli.listFamilies()
             assert "APT28" in await cli.getActors()
             assert "win.xagent" in await cli.getFamilies()
             assert (await cli.getActor("apt28"))["value"] == "APT28"
@@ -152,7 +151,7 @@ async def test_counter():
             async def other():
                 await go.wait()
                 await cli.listActors()
-                await cli.listFamilies()
+                await cli.getFamilies()
 
             # Another task (ex. a concurrent Telepath call) started outside the counter.
             task = asyncio.create_task(other())

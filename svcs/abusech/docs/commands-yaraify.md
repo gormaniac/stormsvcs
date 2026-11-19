@@ -156,7 +156,7 @@ slib.abusech.yaraify.rules [--uuid <uuid> ...] [--recent] [--deployed] [--all [-
 At least one of `--uuid`, `--recent`, `--deployed`, `--all` is required (`BadArg`).
 
 Rule text is only available for rules the author shares (`yarahub_rule_sharing_tlp`
-TLP:WHITE); the others are modeled with their metadata only. `--recent` and
+TLP:CLEAR, formerly TLP:WHITE); the others are modeled with their metadata only. `--recent` and
 `--deployed` download each listed rule's text with `get_yara_rule`, one request per rule
 (rules that can't be downloaded keep their metadata).
 

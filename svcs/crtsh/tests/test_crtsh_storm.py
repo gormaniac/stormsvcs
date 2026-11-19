@@ -502,13 +502,19 @@ class TestCrtshStormAdmin(s_tests.SynTest):
 
             # Rows are capped by --limit (the fake always returns one row).
             msgs = await core.stormlist("slib.crtsh.admin.sql 'SELECT 1' --limit 1")
-            self.stormIsInPrint("1 rows (the --limit, there may be more)", msgs)
+            self.stormIsInPrint("1 rows (the limit of 1, there may be more)", msgs)
             assert fake.last("raw")["limit"] == 1
             msgs = await core.stormlist("slib.crtsh.admin.sql 'SELECT 1' --limit 0")
             self.stormIsInWarn("Invalid limit 0, it must be at least 1.", msgs)
 
             msgs = await core.stormlist("slib.crtsh.admin.sql 'SELECT * FROM nope'")
             self.stormIsInWarn('slib.crtsh: Query failed: relation "nope" does not exist', msgs)
+
+        # crtsh:sql:limit caps --limit, the note says so too.
+        async with crtshSvc(self, conf={"crtsh:sql:limit": 1}) as (core, svc, fake):
+            msgs = await core.stormlist("slib.crtsh.admin.sql 'SELECT 1' --limit 100")
+            self.stormIsInPrint("1 rows (the limit of 1, there may be more)", msgs)
+            assert fake.last("raw")["limit"] == 1
 
 
 class TestCrtshStormPerms(s_tests.SynTest):

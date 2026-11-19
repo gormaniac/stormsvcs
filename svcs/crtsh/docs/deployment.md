@@ -40,17 +40,19 @@ restart the service after you change one.
 
 | Option | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `crtsh:dsn` | string | `postgresql://guest@crt.sh:5432/certwatch` | The PostgreSQL DSN of the certwatch database, or of a mirror of it. |
-| `crtsh:timeout` | number | `660` | Seconds the service waits for one query before it gives up (client side). `0` means no timeout. Keep it a little longer than `crtsh:statement:timeout`, so the server cancels a slow query first. |
-| `crtsh:statement:timeout` | number | `600` | The server `statement_timeout` of each of the service's own queries, in seconds. `0` means no limit. crt.sh's default of 30s cancels big queries. `slib.crtsh.admin.sql` doesn't use it, it runs under the server's own timeout. |
-| `crtsh:retries` | integer | `3` | How many times a query is retried after the connection drops (also after a replica serialization cancel). |
+| `crtsh:dsn` | string | `postgresql://guest@crt.sh:5432/certwatch` | The PostgreSQL DSN of the certwatch database, or of a mirror of it. A password in it is redacted from error messages (see [Secrets](#secrets)). |
+| `crtsh:timeout` | number (min 0) | `660` | Seconds the service waits for one query before it gives up (client side). `0` means no timeout. Keep it a little longer than `crtsh:statement:timeout`, so the server cancels a slow query first. |
+| `crtsh:statement:timeout` | number (min 0) | `600` | The server `statement_timeout` of each of the service's own queries, in seconds, a session `SET statement_timeout` sent in the same message as the query and `RESET` after it (see [Database access](database.md)). `0` means no limit. crt.sh's default of 30s cancels big queries. `slib.crtsh.admin.sql` doesn't use it, it runs under the server's own timeout. |
+| `crtsh:retries` | integer (min 0) | `3` | How many times a query is retried after the connection drops (also after a replica serialization cancel). |
 | `crtsh:timeout:retries` | integer (min 0) | `1` | How many times a query is retried after the server cancels it for its statement timeout. `0` means no retries. |
-| `crtsh:keepalive` | number | `10` | Seconds between keepalive checks of an open connection. |
-| `crtsh:idle` | number | `300` | Seconds without a query before the connection is closed. |
-| `crtsh:connect:timeout` | number | `300` | Seconds to keep retrying, with backoff, while crt.sh refuses a connection. |
-| `crtsh:limit` | integer | `10000` | The most certificates any one call may return. A call's `limit` is capped at this, and a `limit` below 1 is an error. |
-| `crtsh:sql:limit` | integer | `1000` | The most rows `slib.crtsh.admin.sql` (`rawQuery`) may return. |
-| `crtsh:candidates` | integer | `10000` | The most full text search candidates a search filters (crt.sh's own search uses 10000). |
+| `crtsh:keepalive` | number (more than 0) | `10` | Seconds between keepalive checks of an open connection. A check pings it between queries (never during one), until `crtsh:idle` closes it. |
+| `crtsh:idle` | number (more than 0) | `300` | Seconds without a query before the connection is closed. |
+| `crtsh:connect:timeout` | number (min 0) | `300` | Seconds to keep retrying, with backoff, while crt.sh refuses a connection. |
+| `crtsh:limit` | integer (min 1) | `10000` | The most certificates any one call may return. A call's `limit` is capped at this, and a `limit` below 1 is an error. |
+| `crtsh:sql:limit` | integer (min 1) | `1000` | The most rows `slib.crtsh.admin.sql` (`rawQuery`) may return. |
+| `crtsh:candidates` | integer (min 1) | `10000` | The most full text search candidates a search filters (crt.sh's own search uses 10000). |
+
+The cell refuses to start with an option below its minimum.
 
 [Database access](database.md) explains exactly how the timeouts, retries, keepalive, and
 idle close interact.
@@ -96,11 +98,11 @@ secret is the cell's own root password (or whatever Telepath user you create for
 If you point `crtsh:dsn` at a mirror that needs a password, the password is part of the DSN,
 which is stored wherever you set the option (`cell.yaml` or the environment).
 
-:::{note}
-The service doesn't redact error messages (`CrtshCellApi` doesn't override `_retnRedact`).
-Connection errors are returned as `Unable to connect to the crt.sh database: <error>`, with the
-error from `asyncpg`.
-:::
+Every error message returned to Storm has the DSN's password replaced with `<redacted>`
+(`CrtshCellApi._retnRedact`), both as written and percent-decoded. The password is the one in
+the URL's user info (`postgresql://user:<password>@host/db`) or its `password` query parameter
+(or `password=` in a key/value DSN). Connection errors are returned as `Unable to connect to the
+crt.sh database: <error>`, with the error from `asyncpg`, redacted the same way.
 
 ## Persistent state
 

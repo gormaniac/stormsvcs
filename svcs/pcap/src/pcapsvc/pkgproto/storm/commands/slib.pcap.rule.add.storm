@@ -4,11 +4,16 @@ init {
     $model = $lib.import(slib.pcap.model)
     $util = $lib.import(slib.pcap.util)
 
+    // Check the view first, so no rule nodes are made when the push would be refused.
+    $deny = $rules.denied()
+    if $deny { $lib.warn(`slib.pcap.rule.add: {$deny} No rules were added.`) }
+
     $nodes = ([])
     $push = ([])
     $forms = ({})
     $dels = ([])
-    for $text in $cmdopts.text {
+    if $deny { $texts = ([]) } else { $texts = $cmdopts.text }
+    for $text in $texts {
         $r = $util.data($priv.ruleParse($text, engine=$cmdopts.engine), "Parsing the rule")
         if (not $r) { continue }
 

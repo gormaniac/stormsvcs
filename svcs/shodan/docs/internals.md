@@ -38,7 +38,8 @@ builds one at startup from `shodan:urls`, `shodan:ratelimit` and `shodan:timeout
 4. Waits on the `RateLimiter` for `api` and `trends`. It's one `asyncio.Lock` and timestamp for
    the whole service, spacing calls at least `1/rate` seconds apart across every user.
 5. Sends the request with a total timeout of `shodan:timeout`. A connection error or timeout
-   is `ShodanApiError("Unable to connect to Shodan (<base>): <error>")`.
+   is `ShodanApiError("Unable to connect to Shodan (<base>): <error>")`, with the error text
+   passed through `scrubMesg()` so it never holds the key (see [error handling](#error-handling)).
 6. On an HTTP 429, sleeps `2**attempt` seconds (1, 2, 4) and retries, up to 3 retries. Each
    retry waits on the rate limiter again. The last 429 is returned as an error.
 7. Parses the body as JSON (an empty body is `None`). Invalid JSON with a status under 400 is
@@ -179,9 +180,11 @@ The normalizers flatten Shodan's responses for the Storm modeling code (see
 
 API keys are sent as the `key` query parameter, kept apart from the URL (`client._prep()`
 returns the base URL and path, and the params separately). The messages the service builds
-include at most that URL, never the params. `Unable to connect to Shodan (<base>): <error>`
-embeds `aiohttp`'s own error text, and `ShodanCellApi` doesn't override `_retnRedact()`, so
-those messages aren't scrubbed.
+include at most that URL, never the params. `Unable to connect to Shodan (<base>): <error>` and
+`Unable to connect to the Shodan Streaming API: <error>` embed `aiohttp`'s own error text, which
+can include the full URL, so `client.scrubMesg()` first drops the query string of every URL in it
+(`?<redacted>`) and replaces the key that was sent. `ShodanCellApi._retnRedact()` then removes
+the stored and configured keys from every message returned to Storm.
 
 ## State
 

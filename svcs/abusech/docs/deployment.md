@@ -60,7 +60,7 @@ are parsed as YAML, so numbers and objects work.
 | `abusech:ratelimit` | `SYN_ABUSECHSVC_ABUSECH_RATELIMIT` | number | `5.0` | Max requests per second sent to abuse.ch, shared by every platform. `0` disables the limit. |
 | `abusech:timeout` | `SYN_ABUSECHSVC_ABUSECH_TIMEOUT` | number | `120` | Seconds before a single request times out. For the streamed downloads (the MalwareBazaar, URLhaus and ThreatFox exports, `--bulk` pulls, and the YARAhub rule export) it's the connect and per-read timeout instead, with no total timeout. |
 | `abusech:maxsize` | `SYN_ABUSECHSVC_ABUSECH_MAXSIZE` | integer | `67108864` (64 MiB) | Max bytes of a file downloaded from or submitted to abuse.ch, of any response or dataset read into memory, and of anything unzipped (each file, and all of a zip's files together). |
-| `abusech:bulk:maxsize` | `SYN_ABUSECHSVC_ABUSECH_BULK_MAXSIZE` | integer | `17179869184` (16 GiB) | Max bytes of an export streamed to disk: a bulk import's staged copy (and the unzipped ThreatFox export it parses), and the CSV exports the export commands stream without `--bulk`. |
+| `abusech:bulk:maxsize` | `SYN_ABUSECHSVC_ABUSECH_BULK_MAXSIZE` | integer | `17179869184` (16 GiB) | Max bytes of an export streamed to disk: a bulk import's pull into the Axon and its staged copy (and the unzipped ThreatFox export it parses), and the CSV exports the export commands stream without `--bulk`. |
 | `abusech:bulk:maxjobs` | `SYN_ABUSECHSVC_ABUSECH_BULK_MAXJOBS` | integer | `4` | Max bulk import jobs at once. |
 | `abusech:urls` | `SYN_ABUSECHSVC_ABUSECH_URLS` | object | `{}` | Overrides for abuse.ch base URLs (ex. a proxy or mirror), keyed by the names below. |
 

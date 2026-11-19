@@ -222,8 +222,9 @@ Not modeled: the rule's `description` and `malpedia_license` meta. They are in t
 | `<prefix>.removed` | actors, families and rules Malpedia removed | `--prefix` |
 
 The defaults are `prefix=rep.malpedia` and `tlp prefix=rep.malpedia.tlp`. They are stored in
-the Storm globals `slib:malpedia:tag:prefix` and `slib:malpedia:tag:tlp`. If the TLP global is
-unset, `<prefix>.tlp` is used. See
+the Storm globals `slib:malpedia:tag:prefix` and `slib:malpedia:tag:tlp`. They're separate
+settings: changing the prefix doesn't move the TLP prefix. The model only falls back to
+`<prefix>.tlp` when the TLP global is unset, and the add event always sets it. See
 [`slib.malpedia.admin.tags`](commands.md#slib-malpedia-admin-tags).
 
 IDs are turned into tag parts the way `syn:tag:part` normalizes them: lowercased, with every run

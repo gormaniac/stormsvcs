@@ -110,8 +110,12 @@ The rule's full meta is its `slib:capa` node data. Rules `-(refs)>` the `it:mitr
 nodes of their ATT&CK mappings and the `ou:technique` nodes of their
 [MBC](https://github.com/MBCProject/mbc-markdown) behaviors (a rules update that drops a mapping
 removes its edge), and each version of the rules is a
-`meta:ruleset` that `-(has)>` its rules. Every node is linked to the `slib.capa` `meta:source` with a
-`-(seen)>` edge. MAEC categories and families are only in `:desc` and the node data.
+`meta:ruleset` that `-(has)>` its rules. A rule that's no longer in the service's rules (ex. its file was
+deleted, without a new `capa:rules:version`) is removed from the ruleset on the next import, its
+`meta:rule` is kept. The `meta:rule`, `meta:ruleset`, ATT&CK and MBC technique, and author `ps:contact`
+nodes, and every scanned `file:bytes`, are linked to the `slib.capa` `meta:source` with a `-(seen)>`
+edge (the namespace `syn:tag` nodes aren't). MAEC categories and families are only in `:desc` and the
+node data.
 
 An MBC behavior or method (ex. `Anti-Behavioral Analysis::Debugger Detection::Software Breakpoints
 [B0001.025]`) is an `ou:technique` with its ID as `:ext:id` and a `:reporter:name` of `mbc` (a guid made
@@ -144,8 +148,9 @@ and a `:doc` listing the rules in it. Namespaces are converted to tags the way S
 `/` separates tag parts and `-` becomes `_`. Rules without a namespace, and library rules, don't add a
 tag. The tag docs are imported with the rules, and again whenever the tag prefix changes.
 
-`slib.capa.admin.tags --prefix` refuses a prefix that isn't a valid tag name (ex. `""` or one with
-spaces). After a prefix change (or turning tagging on or off), files keep their old tags until they're
+`slib.capa.admin.tags --prefix` normalizes the prefix the way Synapse normalizes a tag (ex. `REP.Capa`
+becomes `rep.capa`). A prefix that isn't a valid tag name (ex. `""` or `my..capa`), or `--enable` with
+`--disable`, is warned about and nothing is changed. After a prefix change (or turning tagging on or off), files keep their old tags until they're
 scanned again. The next scan of a file isn't skipped, it removes the tags under the old prefix and
 applies the new ones. To move every file that has capa tags now:
 

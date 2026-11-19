@@ -37,7 +37,7 @@ the file itself.
 
 1. **Pick the file.** With `--reuse`, the last pull from the datasets global (or a warning and
    stop if there's none). Otherwise, if there's a previous pull and no `--repull`:
-   - a recent export (`recent`, `online`) pulled less than an hour ago warns
+   - a recent export (`recent`, and URLhaus's `online`) pulled less than an hour ago warns
      `The <kind> export was last pulled <n> minutes ago (...). To avoid overusing abuse.ch,
      rerun with --reuse to import that pull again, or --repull to pull a new one.` and stops;
      one pulled longer ago is pulled again;
@@ -48,8 +48,9 @@ the file itself.
    rerun with `--repull`.
 2. **Pull** (when needed). `$lib.axon.upload()` saves the service's `bulkPull()` stream into
    the Cortex's Axon. The service streams it from abuse.ch as served (zipped or not), so the
-   Auth-Key in the export URL never reaches Storm. The pull (`sha256`, `size`, `time`) is
-   recorded in the datasets global right away.
+   Auth-Key in the export URL never reaches Storm. The download stops with an error once it's
+   larger than `abusech:bulk:maxsize`, so an export too big to stage is never saved. The pull
+   (`sha256`, `size`, `time`) is recorded in the datasets global right away.
 3. **Stage.** `bulkStart()` creates a job, then the file is read from the Axon in 1 MiB chunks
    and appended with `bulkStage()`.
 4. **Build.** `bulkBuild()` checks the staged file's SHA256, then builds the nodes in batches
@@ -70,7 +71,7 @@ The service methods behind these steps (see [the Telepath API](api.md#generators
 
 | Method | Does |
 |---|---|
-| `bulkPull(plat, kind)` | Streams the export (`AbuseChClient.stream()`), retried until the first byte. |
+| `bulkPull(plat, kind)` | Streams the export (`AbuseChClient.stream()`), retried until the first byte. Raises once the download is over `abusech:bulk:maxsize` (`The <plat> <kind> export is larger than the max of <n> bytes (abusech:bulk:maxsize).`). |
 | `bulkStart(plat, kind, sha256, owner)` | Checks the export and SHA256, prunes idle jobs if at `abusech:bulk:maxjobs`, refuses a new job past it (`There are already <n> bulk import jobs running ...`), creates `<cell>/tmp/bulk/<job id>/`, returns the job ID. |
 | `bulkStage(jobid, byts, owner)` | Appends to `source`, refusing a copy over `abusech:bulk:maxsize`. |
 | `bulkBuild(jobid, prefix, batch=1000, owner)` | Hashes `source` in a thread and compares it to the job's SHA256, parses it, and writes `export.nodes`. Yields `{"rows", "nodes"}` every `batch` rows, then `{"done": true, "rows", "skipped", "nodes", "size", "builder", "seconds", "familytags"}`. |

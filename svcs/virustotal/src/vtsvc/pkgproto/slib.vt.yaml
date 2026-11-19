@@ -1,5 +1,5 @@
 name: slib.vt
-version: 0.3.2
+version: 0.4.0
 guid: 918e0b7a0cc74c6a957f318056a77f74
 
 synapse_version: ">=2.234.0,<3.0.0"
@@ -43,9 +43,8 @@ modules:
       - [ slib, vt, admin ]
 
   # Unprivileged modules - node edits here run as the calling user.
+  # slib.vt.lib needs slib.vt.user anyway: its init imports slib.vt.priv.user.
   - name: slib.vt.lib
-    perms:
-      - [ slib, vt, user ]
   - name: slib.vt.model
   - name: slib.vt.util
 
@@ -270,7 +269,8 @@ commands:
 
       The service counts every request it sends, per API key. With vt:community (the default)
       it never sends more than vt:limit:minute (4) requests per minute, and refuses requests
-      once vt:limit:day (500) or vt:limit:month are used up, until 00:00 UTC.
+      once vt:limit:day (500) is used up until the next 00:00 UTC, or once vt:limit:month
+      (15500) is used up until the next UTC month.
 
       Examples:
 
@@ -461,6 +461,10 @@ commands:
       Set, check, or clear the service-wide VirusTotal API key, used by everyone without
       their own key (slib.vt.apikey). All of them share its limits.
 
+      A key set here is used before the vt:apikey config option. The check says which of the
+      two is in use. --clear only removes the key set here: a vt:apikey key can only be
+      removed from the service's config.
+
       Examples:
 
         slib.vt.admin.apikey <key>
@@ -474,13 +478,14 @@ commands:
       - - --clear
         - default: false
           action: store_true
-          help: Clear the service-wide API key.
+          help: Clear the key set with this command (not the vt:apikey config option).
 
   - name: slib.vt.admin.tags
     perms:
       - [ slib, vt, admin ]
     descr: |
-      Show or change the tags slib.vt applies (rep.vt by default).
+      Show or change the tags slib.vt applies (rep.vt by default). An invalid --prefix
+      changes nothing, not even --enable or --disable.
 
       Examples:
 
@@ -505,7 +510,8 @@ commands:
       - [ slib, vt, admin ]
     descr: |
       Send a raw request to the VirusTotal API v3 and print the JSON response. It's rate
-      limited like every other request.
+      limited like every other request. Only the VirusTotal API (vt:url's host) can be
+      requested, so the API key is never sent anywhere else.
 
       Examples:
 

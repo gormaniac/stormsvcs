@@ -1,5 +1,5 @@
 name: slib.bgphe
-version: 0.3.2
+version: 0.3.3
 guid: 48c4db1f7420428e87085030a45b3205
 
 synapse_version: ">=2.234.0,<3.0.0"
@@ -199,16 +199,19 @@ commands:
       the organization (ou:org) responsible for it. The parsed record (contacts, emails, dates,
       etc.) and its raw text are stored in the inet:asn's "slib:bgphe:whois" node data.
 
+      With values, the inet:asn nodes are yielded. With inbound nodes, they're passed through,
+      or with --yield, the ou:org nodes are yielded instead.
+
       Examples:
 
         slib.bgphe.asn 15169 --print
 
-        inet:asn=15169 | slib.bgphe.asn
+        inet:asn=15169 | slib.bgphe.asn --yield
     cmdargs:
       - - asns
         - type: str
           nargs: "*"
-          help: ASNs (ex. 15169 or AS15169) to look up instead of using the inbound nodes. Yields the ASNs.
+          help: ASNs (ex. 15169 or AS15169) to look up instead of using the inbound nodes. Yields the inet:asn nodes.
       - - --print
         - default: false
           action: store_true
@@ -216,7 +219,7 @@ commands:
       - - --yield
         - default: false
           action: store_true
-          help: Yield the ou:org nodes instead of the inbound nodes.
+          help: Yield the ou:org nodes instead of the inbound inet:asn nodes (values always yield the inet:asn nodes).
     cmdinputs:
       - form: inet:asn
         help: ASNs to look up the whois of.

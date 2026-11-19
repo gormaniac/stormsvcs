@@ -5,13 +5,18 @@ init {
     if ($cmdopts.enable and $cmdopts.disable) {
         $lib.warn(`{$name}: Use --enable or --disable, not both.`)
     } else {
-        try {
-            if ($cmdopts.prefix != null) { $admin.setTagPrefix($cmdopts.prefix) }
-        } catch * as err {
-            $lib.warn(`{$name}: Invalid tag prefix: {$err.mesg}`)
+        $ok = (true)
+        if ($cmdopts.prefix != null) {
+            try { $admin.setTagPrefix($cmdopts.prefix) }
+            catch * as err {
+                $lib.warn(`{$name}: Invalid tag prefix: {$err.mesg}. Nothing was changed.`)
+                $ok = (false)
+            }
         }
-        if $cmdopts.enable { $admin.setTagsEnabled((true)) }
-        if $cmdopts.disable { $admin.setTagsEnabled((false)) }
+        if $ok {
+            if $cmdopts.enable { $admin.setTagsEnabled((true)) }
+            if $cmdopts.disable { $admin.setTagsEnabled((false)) }
+        }
     }
 
     $settings = $admin.tagSettings()

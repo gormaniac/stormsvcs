@@ -18,6 +18,7 @@ from shodansvc.client import (
     errMesg,
     normParam,
     normParams,
+    scrubMesg,
 )
 
 from .fakeshodan import (
@@ -864,6 +865,15 @@ class TestClient(s_tests.SynTest):
             401, {"error": "<html><title>401 Unauthorized</title></html>"}, ""
         ).startswith("Shodan rejected")
 
+    def test_scrub_mesg(self):
+        # URL query strings (where the key goes) are dropped, and any other copy of the key.
+        mesg = "429, url='https://api.shodan.io/shodan/ports?key=s3cr+t&x=1' (key s3cr+t, s3cr%2Bt)"
+        assert scrubMesg(mesg, "s3cr+t") == (
+            "429, url='https://api.shodan.io/shodan/ports?<redacted>' (key <redacted>, <redacted>)"
+        )
+        assert scrubMesg("URL('http://h/p?key=abc')") == "URL('http://h/p?<redacted>')"
+        assert scrubMesg("Cannot connect to host h:443") == "Cannot connect to host h:443"
+
     async def test_rate_limiter(self):
         limiter = RateLimiter(20)
         loop = asyncio.get_running_loop()
@@ -931,6 +941,21 @@ class TestClient(s_tests.SynTest):
             with self.raises(ShodanApiError) as cm:
                 await client.request("get", "/shodan/ports", apikey="key")
             assert "Unable to connect" in cm.exception.mesg
+
+    async def test_client_error_no_key(self):
+        # aiohttp's error text can include the full URL, with the ?key= param, ex. a redirect loop.
+        async with FakeShodan() as fake, aiohttp.ClientSession() as sess:
+            client = ShodanClient(sess, urls=fake.urls, rate=0)
+
+            def loop(request):
+                return aiohttp.web.Response(status=302, headers={"Location": request.path_qs})
+
+            fake.routes[("GET", "/api/shodan/ports")] = loop
+            with self.raises(ShodanApiError) as cm:
+                await client.request("get", "/shodan/ports", apikey="sekretkey")
+            assert cm.exception.mesg.startswith("Unable to connect to Shodan (api):")
+            assert "/shodan/ports" in cm.exception.mesg
+            assert "sekretkey" not in cm.exception.mesg
 
     async def test_client_stream(self):
         async with FakeShodan() as fake, aiohttp.ClientSession() as sess:
@@ -1179,6 +1204,19 @@ class TestShodanSvc(s_tests.SynTest):
             # CVEDB's short CPEs are padded.
             assert (await svc.cpes("nginx"))["cpes"] == ["cpe:2.3:a:f5:nginx:1.25.3:*:*:*:*:*:*:*"]
 
+            # An empty body (or object) is no results, not an error.
+            def empty(request):
+                return aiohttp.web.Response(status=200)
+
+            fake.routes[("GET", "/cvedb/cves")] = empty
+            fake.routes[("GET", "/cvedb/cpes")] = empty
+            assert await svc.cves(product="nope") == {"cves": []}
+            assert await svc.cves(product="nope", count=True) == {"total": 0}
+            assert await svc.cpes("nope") == {"cpes": []}
+            assert await svc.cpes("nope", count=True) == {"total": 0}
+            fake.routes[("GET", "/cvedb/cves")] = (200, {})
+            assert await svc.cves(product="nope") == {"cves": []}
+
             # normVuln dispatches on the ID's prefix.
             assert (await svc.normVuln("cve-2021-44228"))["cve"] == "CVE-2021-44228"
             assert fake.last()["path"] == "/cvedb/cve/CVE-2021-44228"
@@ -1344,6 +1382,19 @@ class TestShodanSvc(s_tests.SynTest):
             for kwargs in ({"kind": "nope"}, {"kind": "ports"}, {"kind": "custom"}):
                 with self.raises(ShodanApiError):
                     [b async for b in svc.stream(**kwargs)]
+
+    async def test_telepath_redact(self):
+        # Error messages returned to Storm never include the stored or configured API key.
+        async with shodanSvc(self, apikey="conf+key") as (core, svc, fake):
+            await svc.setApiKey("storedkey")
+            fake.routes[("GET", "/api/shodan/ports")] = (
+                400,
+                {"error": "Bad keys storedkey conf+key conf%2Bkey"},
+            )
+            async with svc.getLocalProxy() as prox:
+                retn = await prox.ports()
+                assert retn["status"] is False
+                assert retn["mesg"] == "Bad keys <redacted> <redacted> <redacted>"
 
     async def test_telepath_retn(self):
         async with shodanSvc(self) as (core, svc, fake):

@@ -28,7 +28,6 @@ Every request is a `GET` under `malpedia:url`. Path segments are quoted with
 | --- | --- | --- |
 | `version()` | `/get/version` | `{"version": int, "date": str}`. It must have a `version` key. |
 | `listActors()` | `/list/actors` | list of actor IDs |
-| `listFamilies()` | `/list/families` | list of family IDs (not used by the service) |
 | `getActors()` | `/get/actors` | dict keyed by display name |
 | `getFamilies()` | `/get/families` | dict keyed by family ID |
 | `getActor(id)` | `/get/actor/<id>` | dict, including `families` |
@@ -111,7 +110,7 @@ The cell's slab holds four `SafeKeyVal` stores:
 | --- | --- | --- |
 | `slib:malpedia:info` | `version`, `date`, `complete`, `pulled`, `checked`, `failed`, `rejected`, `gaps`, `gaptried`, `yarafull`, `yaradate`, `storing`, `last`, `requests`, `schedtime` | Pull bookkeeping. Times are epoch ms. `gaptried` is `{actor id: ms}`. `schedtime` is `(hour, minute)`. |
 | `slib:malpedia:snap` | `<kind>:<key>` | `{"hash", "rec"}` |
-| `slib:malpedia:views` | `<view>:<kind>:<key>` | The `{"hash", "rec"}` the view last modeled. |
+| `slib:malpedia:views` | `<view>:<kind>:<key>` | The `{"hash", "rec"}` the view last modeled. `resetView()` sets `hash` to `null`, so the record counts as unsynced but its `rec` is still there for removals and drop diffs. |
 | `slib:malpedia:viewinfo` | `<view>` | `{"synced", "version", "date", "tags"}` |
 
 Keys too long for the store (or not strings) are treated as absent by `_kvget()` / `_kvpop()`,

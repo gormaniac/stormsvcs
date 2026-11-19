@@ -10,13 +10,16 @@ import sys
 from unittest import mock
 
 import pytest
+import synapse.exc as s_exc
 import synapse.tests.utils as s_tests
+from cryptography import x509
+from cryptography.hazmat.primitives.asymmetric import ec
 
 from crtshsvc import CrtshSvc, norm
 from crtshsvc import svc as s_svc
-from crtshsvc.db import CrtshDbError
+from crtshsvc.db import DEFAULT_DSN, CrtshDbError, dsnSecrets
 
-from .fakecrtsh import PKI, FakeCrtshDb
+from .fakecrtsh import DAY, NOW, PKI, FakeCrtshDb, makeCert, name
 
 
 @contextlib.asynccontextmanager
@@ -61,12 +64,17 @@ def test_helpers():
     )
     with pytest.raises(CrtshDbError, match="Invalid IP"):
         s_svc.identityQuery("ip", "nope")
-    # Leading wildcards and dots are dropped from domains, they match subdomains anyway.
+    # Leading wildcards and dots are dropped from domains, they match subdomains anyway...
     assert s_svc.identityQuery("dns", "*.vertex_link") == ("vertex_link", "%vertex\\_link")
     assert s_svc.identityQuery("dns", ".vertex.link") == ("vertex.link", "%vertex.link")
+    # Except exact ones: crt.sh holds a wildcard identity as-is, so *.vertex.link must match it.
     assert s_svc.identityQuery("dns", "*.vertex.link", exact=True) == (
         "*.vertex.link",
-        "vertex.link",
+        "*.vertex.link",
+    )
+    assert s_svc.identityQuery("dns", "*.vertex_link", exact=True) == (
+        "*.vertex_link",
+        "*.vertex\\_link",
     )
     assert s_svc.identityQuery("dns", "vertex.link", exact=True) == ("vertex.link", "vertex.link")
     assert s_svc.identityQuery("org", "Vertex") == ("Vertex", "%Vertex%")
@@ -263,6 +271,32 @@ class TestCrtshSvc(s_tests.SynTest):
 
             with pytest.raises(CrtshDbError, match="at least one"):
                 await ids(svc.searchGenr(dns=""))
+
+    async def test_search_exact_wildcard(self):
+        """An exact wildcard search finds a certificate whose only DNS name is the wildcard."""
+
+        key = ec.generate_private_key(ec.SECP256R1())
+        der = makeCert(
+            name("Wildcard Test"),
+            key,
+            name("Test Issuing CA 1"),
+            key,
+            16,
+            NOW - DAY,
+            NOW + 10 * DAY,
+            sans=[x509.DNSName("*.wild.vertex.link")],
+        )
+        pki = copy.copy(PKI)
+        pki.rows = [*PKI.rows, {"id": 16, "issuer_ca_id": 2, "der": der}]
+        pki.certs = {**PKI.certs, 16: x509.load_der_x509_certificate(der)}
+        async with svcCtx(self, fake=FakeCrtshDb(pki)) as (svc, fake):
+            assert await ids(svc.searchGenr(dns="*.wild.vertex.link", exact=True)) == [16]
+            assert fake.last("certsByIdentity")["like"] == "*.wild.vertex.link"
+            # Exact is the whole name: the wildcard isn't the domain, nor the other way around.
+            assert await ids(svc.searchGenr(dns="wild.vertex.link", exact=True)) == []
+            assert await ids(svc.searchGenr(dns="*.vertex.link", exact=True)) == [10, 9]
+            # Not exact, the wildcard is a name under the domain.
+            assert await ids(svc.searchGenr(dns="wild.vertex.link")) == [16]
 
     async def test_search_issuer_after_limit(self):
         # Like crt.sh, an issuer filters the full text search's candidates (up to the limit), it
@@ -664,3 +698,81 @@ class TestCrtshSvc(s_tests.SynTest):
                 db.statement_timeout,
                 db.timeout_retries,
             ) == ("postgresql://u@db.example:5433/certs", 5, 1, 2, 3, 4, 6, 0)
+
+    async def test_conf_minimums(self):
+        # Numeric options can't be set below what makes sense, ex. a limit of 0 (LIMIT 0).
+        bad = {
+            "crtsh:timeout": -1,
+            "crtsh:statement:timeout": -1,
+            "crtsh:retries": -1,
+            "crtsh:timeout:retries": -1,
+            "crtsh:keepalive": 0,
+            "crtsh:idle": 0,
+            "crtsh:connect:timeout": -1,
+            "crtsh:limit": 0,
+            "crtsh:sql:limit": 0,
+            "crtsh:candidates": 0,
+        }
+        for opt, valu in bad.items():
+            with pytest.raises(s_exc.BadConfValu):
+                async with self.getTestCell(CrtshSvc, conf={opt: valu}):
+                    pass  # pragma: no cover
+        # 0 still means none for the timeouts and retries.
+        conf = {
+            "crtsh:timeout": 0,
+            "crtsh:statement:timeout": 0,
+            "crtsh:retries": 0,
+            "crtsh:connect:timeout": 0,
+            "crtsh:limit": 1,
+            "crtsh:sql:limit": 1,
+            "crtsh:candidates": 1,
+        }
+        async with self.getTestCell(CrtshSvc, conf=conf) as svc:
+            assert (svc.db.timeout, svc.db.statement_timeout, svc.db.retries) == (None, 0, 0)
+
+    async def test_api_rawquery(self):
+        # The message counts the rows, and says when they're the limit (the fake returns one).
+        async with svcCtx(self, conf={"crtsh:sql:limit": 1}) as (svc, fake):
+            async with svc.getLocalProxy() as prox:
+                retn = await prox.rawQuery("SELECT 1", limit=100)
+                assert retn["status"] and retn["data"][0]["id"] == 1
+                assert retn["mesg"] == "1 rows (the limit of 1, there may be more)"
+                assert fake.last("raw")["limit"] == 1
+        async with svcCtx(self) as (svc, fake):
+            async with svc.getLocalProxy() as prox:
+                assert (await prox.rawQuery("SELECT 1"))["mesg"] == "1 rows"
+                assert fake.last("raw")["limit"] == 1000
+                retn = await prox.rawQuery("SELECT 1", limit=0)
+                assert retn == {
+                    "status": False,
+                    "mesg": "Invalid limit 0, it must be at least 1.",
+                    "data": None,
+                }
+                retn = await prox.rawQuery("SELECT * FROM nope")
+                assert not retn["status"] and "nope" in retn["mesg"]
+
+    async def test_redact_dsn_password(self):
+        assert dsnSecrets(DEFAULT_DSN) == [] and dsnSecrets(None) == []
+        assert dsnSecrets("postgresql://u:p%40ss@h/db?sslmode=require&password=q+r") == [
+            "p%40ss",
+            "p@ss",
+            "q r",
+            "q+r",
+        ]
+        assert dsnSecrets("host=h password='a b\\'c' user=u") == ["a b'c"]
+        assert dsnSecrets("host=h password=zz user=u") == ["zz"]
+
+        # A custom DSN's password never reaches Storm in an error message.
+        dsn = "postgresql://mirror:s3cr%40t@db.example/certwatch"
+        async with svcCtx(self, conf={"crtsh:dsn": dsn}) as (svc, fake):
+            fake.fail = f"unable to connect to {dsn} (password s3cr@t rejected)"
+            async with svc.getLocalProxy() as prox:
+                retn = await prox.get(10)
+                assert retn["mesg"] == (
+                    "unable to connect to postgresql://mirror:<redacted>@db.example/certwatch "
+                    "(password <redacted> rejected)"
+                )
+                items = [i async for i in prox.searchGenr(dns="vertex.link")]
+                assert "s3cr" not in items[0]["mesg"] and "<redacted>" in items[0]["mesg"]
+                retn = await prox.rawQuery("SELECT 1")
+                assert "s3cr" not in retn["mesg"] and "<redacted>" in retn["mesg"]

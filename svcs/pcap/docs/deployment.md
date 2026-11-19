@@ -79,9 +79,9 @@ times are seconds unless noted.
 | --- | --- | --- | --- |
 | `pcap:feeds` | array of objects | the five default feeds | Feeds the service starts with, each `{name, url, engine, enabled, exclude, desc}`. Only read the first time the service starts (it sets `feeds:seeded` in its slab), after that feeds are managed with `slib.pcap.admin.feed`. |
 | `pcap:feeds:secrets` | object | `{}` | Secrets feed URLs reference as `${name}`: `{"<name>": {"value": "...", "hosts": ["..."]}}` (both required, no other keys). A secret is only sent to its hosts (exact, or `*.example.com`). |
-| `pcap:feeds:interval` | number | `24` | Hours between downloads of a feed. A sync only downloads a feed that's due. |
-| `pcap:feeds:timeout` | number | `300` | Seconds before a feed download times out (aiohttp total timeout). |
-| `pcap:feeds:maxsize` | integer | `268435456` (256 MiB) | Max size of a download, and of the rules it unpacks to. |
+| `pcap:feeds:interval` | number, min 0 | `24` | Hours between downloads of a feed. A sync only downloads a feed that's due, `0` downloads every feed on every sync. |
+| `pcap:feeds:timeout` | number, min 1 | `300` | Seconds before a feed download times out (aiohttp total timeout). |
+| `pcap:feeds:maxsize` | integer, min 1 | `268435456` (256 MiB) | Max size of a download, and of the rules it unpacks to. |
 
 See [Rules and feeds](rules.md#feeds) for the default feeds.
 
@@ -94,14 +94,14 @@ See [Rules and feeds](rules.md#feeds) for the default feeds.
 | `suricata:conf` | string or null | `null` | The base `suricata.yaml`, the service's outputs and settings are applied over it. Defaults to `<prefix>/etc/suricata/suricata.yaml` of the binary. |
 | `suricata:vars` | object | `HOME_NET: "[10.0.0.0/8,172.16.0.0/12,192.168.0.0/16]"`, `EXTERNAL_NET: "any"` | Suricata `vars.address-groups`. |
 | `suricata:set` | object | `{}` | Overrides of the generated Suricata config as dotted keys, like `suricata --set` (ex. `{"stream.memcap": "2gb"}`, numbers index lists: `outputs.0.eve-log.enabled`). Applied last, so they win over the service's settings and can break what it needs. A key that can't apply stops the service at startup (`BadConfValu`). |
-| `suricata:timeout` | number | `900` | Seconds before a Suricata run is killed. |
+| `suricata:timeout` | number, min 0 | `900` | Seconds before a Suricata run is killed, `0` for no limit. |
 | `snort:enabled` | boolean | `true` | Run Snort (when installed) by default. |
 | `snort:bin` | string | `snort` | The Snort 3 binary. |
 | `snort:snort2lua` | string | `snort2lua` | The binary that converts Snort 2.x rules to Snort 3. |
 | `snort:conf` | string or null | `null` | The base `snort.lua`. Defaults to `<prefix>/etc/snort/snort.lua` of the binary. Relative includes are found in its directory (`--include-path`). |
 | `snort:vars` | object | same as `suricata:vars` | Snort variables. Only variables the base config assigns (a `NAME = ...` line) can be set, anything else fails the Snort run. |
 | `snort:args` | array of strings | `[]` | Extra arguments for every Snort run (rule builds and scans). |
-| `snort:timeout` | number | `900` | Seconds before a Snort run (rule build, check, or scan) is killed. |
+| `snort:timeout` | number, min 0 | `900` | Seconds before a Snort run (rule build, check, or scan) is killed, `0` for no limit. |
 | `tshark:enabled` | boolean | `true` | Run tshark (when installed) by default. |
 | `tshark:path` | string | `tshark` | The tshark binary. |
 | `tshark:args` | array of strings | `[]` | Extra tshark arguments for every run, ex. `["-d", "tcp.port==2222,ssh"]`. |

@@ -104,11 +104,11 @@ function fileNode(file) {
     return($seen($node))
 }
 
-// A file:bytes node for a SHA256 the graph (or this analysis) already has, or null.
+// A file:bytes node for a SHA256 (made if the graph doesn't have it yet), or null.
 function fileBySha256(sha256) {
     if ($sha256 = null) { return() }
     [ file:bytes?=`sha256:{$sha256}` :sha256?=$sha256 ]
-    return($node)
+    return($seen($node))
 }
 
 // A file:bytes node for a file saved in the Axon.

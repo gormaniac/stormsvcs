@@ -40,6 +40,8 @@ Supported captures:
 ```bash
 docker run -d --name slib-pcap \
     -v /srv/slib-pcap:/vertex/storage \
+    -e SYN_PCAPSVC_DMON_LISTEN="tcp://0.0.0.0:27492/" \
+    -e SYN_PCAPSVC_AUTH_PASSWD="<passwd>" \
     -e SYN_PCAPSVC_AXON_URL="aha://axon..." \
     -p 27492:27492 \
     --pids-limit 1024 \
@@ -50,7 +52,7 @@ docker run -d --name slib-pcap \
 `nproc` limit (see [Sandbox](#sandbox)).
 
 ```
-service.add slib.pcap tcp://<user>:<passwd>@<host>:27492/*
+service.add slib.pcap tcp://root:<passwd>@<host>:27492/
 ```
 
 The image builds tshark 4.6, Suricata 8, and Snort 3 (with libdaq) from source on the shared
@@ -172,7 +174,7 @@ engine user's processes.
 | `pcap:files:limit` | `10000` | The max number of files extracted from one capture, `0` for no limit. |
 | `pcap:feeds` | see [Rule feeds](#rule-feeds) | The feeds the service starts with. Only read the first time it starts, after that use `slib.pcap.admin.feed`. |
 | `pcap:feeds:secrets` | `{}` | Secrets feed URLs use as `${name}`, each only sent to its hosts, ex. `{"talos:oinkcode": {"value": "...", "hosts": ["www.snort.org"]}}`. |
-| `pcap:feeds:interval` | `24` | Hours between feed downloads. |
+| `pcap:feeds:interval` | `24` | Hours between feed downloads, `0` to download on every sync. |
 | `pcap:feeds:timeout` | `300` | Seconds before a feed download times out. |
 | `pcap:feeds:maxsize` | `268435456` | The max size of a feed (and of the rules it unpacks to), 256 MiB. |
 | `suricata:enabled` | `true` | Use Suricata, when it's installed, by default. |
@@ -180,14 +182,14 @@ engine user's processes.
 | `suricata:conf` | | The base `suricata.yaml`, the service's outputs and settings are applied over it. Defaults to the installed one. |
 | `suricata:vars` | `HOME_NET` RFC 1918, `EXTERNAL_NET` any | Suricata address variables (admins can override them, see `slib.pcap.admin.vars`). |
 | `suricata:set` | `{}` | Overrides of Suricata's config as dotted keys, like `suricata --set`, ex. `{"stream.memcap": "2gb"}`. They win over the service's own settings. |
-| `suricata:timeout` | `900` | Seconds before a Suricata run is killed. |
+| `suricata:timeout` | `900` | Seconds before a Suricata run is killed, `0` for no limit. |
 | `snort:enabled` | `true` | Use Snort, when it's installed, by default. |
 | `snort:bin` | `snort` | The Snort 3 binary. |
 | `snort:snort2lua` | `snort2lua` | The binary that converts Snort 2.x rules to Snort 3. |
 | `snort:conf` | | The base `snort.lua`. Defaults to the installed one. |
 | `snort:vars` | `HOME_NET` RFC 1918, `EXTERNAL_NET` any | Snort variables the base config assigns. |
 | `snort:args` | `[]` | Extra arguments for every Snort run (operator only). |
-| `snort:timeout` | `900` | Seconds before a Snort run (a rule build or a scan) is killed. |
+| `snort:timeout` | `900` | Seconds before a Snort run (a rule build or a scan) is killed, `0` for no limit. |
 | `tshark:enabled` | `true` | Use tshark, when it's installed, by default. |
 | `tshark:path` | `tshark` | The tshark binary. |
 | `tshark:args` | `[]` | Extra tshark arguments for every run (operator only, see [Engine settings](#engine-settings)). |
@@ -401,8 +403,9 @@ permissions for the rulesets, references, and edges it makes. They do need permi
 The service has one set of rules, so they come from one view: the view the add event ran in (the
 default view), or the view of the last `slib.pcap.admin.schedule --period`. Pushes from any other
 view (`slib.pcap.sync`, `slib.pcap.rule.add`, `.enable`, and `.disable` in a fork, for example)
-are refused, so a fork can't replace or disable the rules everyone's analyses use. Feeds can still
-be synced into other views with `slib.pcap.sync --no-push`.
+are refused, so a fork can't replace or disable the rules everyone's analyses use
+(`slib.pcap.rule.add`, `.enable`, and `.disable` check first, and make or edit no rule nodes).
+Feeds can still be synced into other views with `slib.pcap.sync --no-push`.
 
 ### Matches
 
@@ -416,9 +419,10 @@ Rule matches are grouped into one node per rule and flow:
 - The capture `-(refs)>` its matches, and the service's `meta:source` `-(seen)>` them. Each
   flow's `:raw` also lists its matches with their messages, actions, and counts.
 
-Alerts from rules with a gid other than 1 (the engines' built in decoder and inspector rules)
-aren't modeled as matches, they're counted by gid:sid in the capture's summary (see `$lib.debug`
-above), with alerts for rules the service no longer has. Suricata's anomaly events (ex. invalid
+Only alerts whose gid:sid is in the engine's loaded rules become matches. The others aren't
+modeled, they're counted by gid:sid in the capture's summary (see `$lib.debug` above): as
+`builtin` for a gid other than 1 (the engines' built in decoder and inspector rules) that isn't
+a loaded rule, and as `unknown` for a gid 1 rule the service no longer has. Suricata's anomaly events (ex. invalid
 TLS records, stream gaps) are listed in each flow's `:raw`.
 
 ## Permissions
@@ -516,8 +520,9 @@ updates the same nodes instead of creating duplicates.
 - **TLS certificates** are modeled like `slib.crtsh` models them: `crypto:x509:cert` nodes
   deconflicted by SHA-256 with their subject, issuer, serial, validity, signature, SANs, and
   identities, and `:file` pointing at the DER when it was uploaded to the Axon (not without
-  an Axon, or with `--no-files`). The rest of the chain a
-  side sent is linked with `inet:flow -(refs)> crypto:x509:cert`. TLS 1.3 encrypts certificates,
+  an Axon, or with `--no-files`). A side's leaf certificate is its
+  `:src:ssl:cert`/`:dst:ssl:cert`, and every certificate it sent (the leaf and the rest of the
+  chain) is linked with `inet:flow -(refs)> crypto:x509:cert`. TLS 1.3 encrypts certificates,
   so TLS 1.3 handshakes only have them with a key log.
 - **TLS and QUIC server names** (SNI) clients asked for are linked with
   `inet:flow -(refs)> inet:fqdn`.

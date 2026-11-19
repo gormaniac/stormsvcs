@@ -260,10 +260,10 @@ is resolved to a sample (see [Conventions](#conventions)). `--file` without `--t
 
 With none of the file options, it downloads the sample's own file
 (`GET /v0/samples/{id}/sample`), which fails with a warning for a URL sample. The options can be
-combined; each one adds its files. For `--pcap`/`--pcapng`, "each behavioral task" means the
-tasks in the sample's metadata whose ID (minus the `<sample>-` prefix) starts with `behavioral`
-and whose status is `reported`. For `--dumped`, it's the overview report's tasks of kind
-`behavioral` (or named `behavioral*`) with the status `reported`; the dumped files are read from
+combined; each one adds its files. For `--pcap`/`--pcapng` (without `--task`) and `--dumped`,
+"each behavioral task" means the overview report's tasks of kind `behavioral` (or named
+`behavioral*`) with the status `reported`, the same tasks `enrich --tasks` models. For
+`--dumped`, the dumped files are read from
 each task's report (its `dumped` entries with a SHA256 and a name, except memory `region`s), and a
 task report that can't be read is skipped with a warning.
 
@@ -271,7 +271,8 @@ Each file is streamed from the service into the Axon (`$lib.axon.upload()`), and
 stops with an error once it passes `hatching:maxsize` bytes. For each saved file it prints
 `Saved <what> (<size> bytes, <sha256>) to the Axon.` and creates a `file:bytes` with `:sha256`
 and `:size`, its `:name` when the node has none (the sample's filename, the task file's base
-name, the dropped file's original base name, or `<sample>.<fmt>` for an archive), and a
+name, the dropped file's original base name, or `<sample ID>.<fmt>` for an archive, with a hash
+resolved to its sample's ID), and a
 `-(seen)>` edge from the `meta:source`. A dropped file whose downloaded SHA256 differs from the
 one in the task report is saved anyway, with a warning.
 
@@ -437,16 +438,18 @@ slib.hatching.sample.profile <sample> [--profile <profile>]... [--auto] [--pick 
 
 | Argument | Type | Default | Description |
 | --- | --- | --- | --- |
-| `sample` | str | required | The sample ID. |
-| `--profile` | str, repeatable | `[]` | A profile to run, or `profile:file` to run a file in an archive with it. |
-| `--auto` | flag | `false` | Let the sandbox pick the profiles. |
-| `--pick` | str, repeatable | `[]` | A file in an archive to analyze, with profiles the sandbox picks. |
+| `sample` | str | required | The sample ID (or hash). |
+| `--profile` | str, repeatable | `[]` | A profile to run, or `profile:file` to run a file in an archive with it. Can't be used with `--auto` or `--pick`. |
+| `--auto` | flag | `false` | Let the sandbox pick the profiles. Can't be used with `--profile`. |
+| `--pick` | str, repeatable | `[]` | A file in an archive to analyze, with profiles the sandbox picks (implies `--auto`). Can't be used with `--profile`. |
 
-At least one of `--profile`, `--pick`, or `--auto` is required, otherwise it warns
-`Use --profile or --pick at least once, or --auto.` `--pick` without `--profile` turns on
-`--auto`. The request body is `{"auto": true, "pick": [...]}` when `--auto` is on (any
-`--profile` is not sent), and `{"auto": false, "profiles": [{"profile": ..., "pick": ...}]}`
-otherwise (any `--pick` is not sent).
+Either name the profiles with `--profile`, or let the sandbox pick them with `--auto` and/or
+`--pick`. At least one of them is required, otherwise it warns
+`Use --profile or --pick at least once, or --auto.` The Triage API takes either profiles
+(`{"auto": false, "profiles": [{"profile": ..., "pick": ...}]}`) or `{"auto": true, "pick":
+[...]}`, so `--profile` with `--auto` or `--pick` raises `BadArg` (`--profile cannot be used with
+--auto or --pick, ...`) instead of dropping one of them. To run a file in an archive with a
+profile, use `--profile <profile>:<file>`. `--pick` without `--profile` turns on `--auto`.
 
 ```text
 slib.hatching.sample.profile 261031-a1b2c3d4e5 --profile win10-internet

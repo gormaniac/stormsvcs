@@ -16,7 +16,8 @@ with `?=`/`?+=`), so one bad value never fails a whole host.
 
 Nearly every node the package makes or updates is linked from the `meta:source` with a
 `-(seen)>` edge (`slib.shodan.model.seen()`), including `inet:asn`, its `ou:org` owner,
-`it:prod:softver`, `risk:vuln`, `it:exec:query`, timelines, events and community saved queries.
+`it:prod:softver`, `risk:vuln`, `it:exec:query`, timelines, events and saved queries (community
+and local).
 When Shodan gives a time, the node's `.seen` is updated with it:
 
 | Time | Used for |

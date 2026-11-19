@@ -20,15 +20,18 @@ The service is published as `ghcr.io/gormaniac/stormsvcs/shodan`.
 ```bash
 docker run -d --name slib-shodan \
     -v /srv/slib-shodan:/vertex/storage \
+    -e SYN_SHODANSVC_AUTH_PASSWD=<passwd> \
     -e SYN_SHODANSVC_SHODAN_APIKEY=<optional service-wide key> \
     -p 27492:27492 \
     ghcr.io/gormaniac/stormsvcs/shodan:latest
 ```
 
-Then add it to a Cortex:
+`SYN_SHODANSVC_AUTH_PASSWD` sets the service's `root` password, which the Cortex connects with.
+The service listens for Telepath on `tcp://0.0.0.0:27492` by default, so `dmon:listen` isn't
+needed. Then add it to a Cortex:
 
 ```
-service.add slib.shodan tcp://<user>:<passwd>@<host>:27492/*
+service.add slib.shodan tcp://root:<passwd>@<host>:27492/
 ```
 
 ### Configuration
@@ -67,6 +70,10 @@ CVEDB APIs never need a key.
 Users don't need the `service.get` permission. The `slib.shodan.priv.*` modules talk to the
 service and elevate privileges only for users that hold the matching permission. Users still
 need the normal node permissions for the nodes the commands create.
+
+The service itself checks no permissions. A user with `service.get` for it can call its
+Telepath methods directly (`$lib.service.get(slib.shodan)`), including `setApiKey()` and
+`rawRequest()` with the service-wide key, so grant `service.get` only to admins.
 
 ## Commands
 
@@ -399,6 +406,8 @@ SLIB_SHODAN_LIVE=1 uv run pytest tests/test_live.py
 # POST /shodan/scan, /shodan/scan/internet, and /notifier are only sent invalid arguments.
 SLIB_SHODAN_LIVE=1 SHODAN_API_KEY=<key> uv run pytest tests/test_live.py
 ```
+
+### Known API quirks
 
 Notes from verifying the service against the live APIs (2026-10):
 

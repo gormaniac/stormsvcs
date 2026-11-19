@@ -1,7 +1,8 @@
 // Model normalized abuse.ch data (see abusechsvc.norm) in Synapse.
 //
-// Node edits here run as the calling user. Every node created is linked to the
-// meta:source of the abuse.ch platform it came from with a -(seen)> edge, and
+// Node edits here run as the calling user. Every observable and record created is linked to
+// the meta:source of the abuse.ch platform it came from with a -(seen)> edge (supporting nodes,
+// ex. meta:note, ps:contact, inet:asn, and reporters' accounts, aren't), and
 // abuse.ch's tags/families/statuses are applied as "<prefix>.<platform>.<tag>"
 // tags (see slib.abusech.admin.tags), with the time abuse.ch saw them.
 //

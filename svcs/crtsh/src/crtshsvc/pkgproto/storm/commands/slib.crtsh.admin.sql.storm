@@ -4,12 +4,9 @@ init {
 
     $retn = $privadmin.rawQuery($cmdopts.sql, args=$cmdopts.args, limit=$cmdopts.limit)
     if (not $util.failed($retn, "Query")) {
-        $count = $lib.len($retn.data)
-        if ($count = $cmdopts.limit) {
-            $lib.print(`{$count} rows (the --limit, there may be more)`)
-        } else {
-            $lib.print(`{$count} rows`)
-        }
+        // The service counts the rows, and says when they're the limit (--limit, capped by
+        // crtsh:sql:limit), so there may be more.
+        $lib.print($retn.mesg)
         $util.printJson($retn.data)
     }
 }

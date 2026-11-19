@@ -67,8 +67,8 @@ with lock[kid]:                    # one asyncio.Lock per key, FIFO
   `The VirusTotal daily quota (500 requests) for this API key is used up, it resets at
   00:00 UTC (in <h>h <m>m).`
 - If `vt:limit:month` is non zero and the count for the current UTC month (`YYYY-MM`) is
-  `>=` it: `The VirusTotal monthly quota (15500 requests) for this API key is used up.` It
-  clears when the UTC month changes.
+  `>=` it: `The VirusTotal monthly quota (15500 requests) for this API key is used up, it
+  resets at 00:00 UTC on the 1st of next month.` It clears when the UTC month changes.
 
 These fail immediately instead of waiting, since the wait would be hours. A refused request
 isn't counted. Because the totals are checked again inside the loop, a request that was
@@ -111,10 +111,11 @@ be queued for one key before later ones start failing.
 
 `record()` runs for every request, whether or not limits are enforced:
 
-- Appends `now` to the key's `recent` list, keeping only the newest
-  `max(vt:limit:minute, 4)` times that are inside the window.
+- Appends `now` to the key's `recent` list, keeping every time that's inside the window (so
+  the minute count is accurate whether or not the limit is enforced).
 - Increments the key's counters for the current UTC day and month.
-- Prunes the key's day and month counters for any earlier day or month.
+- Prunes the key's day and month counters for any earlier day or month, and its `cooldown`
+  once it has passed.
 
 ## cooldown()
 
@@ -143,16 +144,16 @@ SafeKeyVal named `slib:vt:quota`. API keys are never stored there; each key is i
 
 | Key | Value |
 | --- | --- |
-| `<kid>:recent` | List of epoch seconds (floats) of the key's latest requests. |
+| `<kid>:recent` | List of epoch seconds (floats) of the key's requests in the last 61 seconds. |
 | `<kid>:day:<YYYY-MM-DD>` | Requests on that UTC day (int). Only the current day is kept. |
 | `<kid>:month:<YYYY-MM>` | Requests in that UTC month (int). Only the current month is kept. |
-| `<kid>:cooldown` | Epoch seconds until which the key is held off. Never deleted; once in the past it has no effect. |
+| `<kid>:cooldown` | Epoch seconds until which the key is held off. Deleted by the key's next request after it has passed; until then, once in the past it has no effect. |
 
 Because the state is persisted, a restart neither resets the daily and monthly counts nor
 allows a burst over the per minute limit. The per key locks are in memory, so the limits are
 only coordinated within one service process: two service instances (or other clients) using
-the same key each count only their own requests. Stale day and month counters are pruned
-only when that key next sends a request.
+the same key each count only their own requests. Stale day and month counters, and an
+expired cooldown, are pruned only when that key next sends a request.
 
 ## Per key
 
@@ -169,10 +170,11 @@ plus two fields from the service:
 | --- | --- |
 | `enforced` | `vt:community`. |
 | `limits` | `{"minute", "day", "month"}`: the configured limits (`0` = no limit, shown as `none`). |
-| `used.minute` | Requests in the last 61 seconds. At most `max(vt:limit:minute, 4)`, since only that many times are kept. |
+| `used.minute` | Requests in the last 61 seconds. |
 | `used.day`, `used.month` | Requests this UTC day and month. |
 | `wait` | Seconds (rounded to 0.1) until the key can send a request: the cooldown or window wait, `0` when not enforced. It doesn't include requests already queued. |
-| `resets` | The next 00:00 UTC, as epoch millis (the daily reset; the monthly count resets when the month changes). |
+| `resets` | The next 00:00 UTC, as epoch millis: when the daily count resets. |
+| `resetsMonth` | 00:00 UTC on the 1st of next month, as epoch millis: when the monthly count resets. |
 | `cached` | Responses in the response cache, for all keys (expired entries are counted until they're evicted or looked up). |
 | `remote` | With `--remote`: VirusTotal's own `api_requests_hourly`, `api_requests_daily`, and `api_requests_monthly` (`allowed`, `used`) from `GET /users/{key}/overall_quotas`. |
 

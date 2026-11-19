@@ -4,9 +4,8 @@ init {
     $util = $lib.import(slib.shodan.util)
 
     // What inbound nodes add to the stream (see slib.shodan.lib.streamTarget). The type is the
-    // type given, or the first inbound node's, when no type is given (the default, banners).
-    $state = ({"kind": null, "values": [], "query": null, "nodes": false})
-    if ($cmdopts.type != "banners") { $state.kind = $cmdopts.type }
+    // type given (even banners), or the first inbound node's when none is given.
+    $state = ({"kind": $cmdopts.type, "values": [], "query": null, "nodes": false})
 }
 
 // Inbound nodes are collected, then streamed together once (one subscription).

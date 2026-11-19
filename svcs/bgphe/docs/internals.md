@@ -220,13 +220,18 @@ Command bodies share one pattern:
 init {
     $bgphe = $lib.import(slib.bgphe.lib)
     $util = $lib.import(slib.bgphe.util)
+    $once = ({"done": false})
+    function byValues() {
+        if $util.first($once) {
+            for $domain in $cmdopts.domains {
+                for $n in $bgphe.certs($domain, ...) { yield $n }
+            }
+        }
+    }
 }
 
 if $cmdopts.domains {
-    spin |
-    for $domain in $cmdopts.domains {
-        for $n in $bgphe.certs($domain, ...) { yield $n }
-    }
+    divert (true) $byValues()
 }
 else {
     if ($node.form() != "inet:fqdn") {
@@ -238,7 +243,10 @@ else {
 }
 ```
 
-`divert` needs a node generator, so `util.nodes()` re-yields what the `lib` emitters emit.
+A command's body runs once per inbound node (or once, without any), so the values are looked
+up in `byValues()`, which `util.first()` lets run only the first time: values are looked up
+once per command, and `divert (true)` drops the inbound nodes. `divert` needs a node
+generator, so `util.nodes()` re-yields what the `lib` emitters emit.
 The work sits in the `else` because statements after an `if` block still run for a node that
 leaves it.
 

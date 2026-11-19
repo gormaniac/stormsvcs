@@ -11,8 +11,9 @@ service's only configuration is its cell config (see
 Every command works the same way:
 
 - **Values or inbound nodes.** Each command takes values (domains, IPs/CIDRs, or ASNs) as
-  positional arguments. When values are given, the command looks them up and yields the nodes
-  it modeled, and inbound nodes are dropped. Without values, it looks up each inbound node.
+  positional arguments. When values are given, the command looks them up once (not once per
+  inbound node), yields the nodes it modeled, and drops any inbound nodes. Without values, it
+  looks up each inbound node.
 - **Inbound nodes are passed through** unless `--yield` is given, in which case the modeled
   nodes are yielded instead (via `divert`).
 - **Unsupported inbound nodes** (a form the command doesn't take) are passed through with a
@@ -23,12 +24,6 @@ Every command works the same way:
   command carries on with the next value or node. Commands don't raise.
 - **Provenance.** Every node modeled is linked from the `slib.bgphe` `meta:source` with a
   `-(seen)>` edge (see [Model](model.md#provenance)).
-
-:::{warning}
-With both values and inbound nodes, the values are looked up once **for each inbound node**
-(each lookup yields its nodes again), because the command's body runs per node. Give values
-on their own, ex. `slib.bgphe.asn 15169`, not `inet:fqdn=a.com inet:fqdn=b.com | slib.bgphe.asn 15169`.
-:::
 
 Values are normalized by the service before any request is made:
 
@@ -74,7 +69,7 @@ still count towards the requests but not towards `--limit`.
 | --- | --- |
 | No certificate was modeled | warning: `slib.bgphe: bgp.he.net has no matching certificates for <domain>.` |
 | `--limit` was reached with more left | `slib.bgphe: Modeled <n> of the <total> certificates for <domain>, raise --limit for more.` |
-| `$lib.debug` is set | `slib.bgphe: <domain>: <n> certificates (<skipped> filtered) from <pages> pages, of <total> in bgp.he.net.` |
+| `$lib.debug` is set | `slib.bgphe: <domain>: <n> certificates (<skipped> filtered, <invalid> unparsable) from <pages> pages, of <total> in bgp.he.net.` Unparsable entries (no usable DER) are dropped. |
 
 **Examples:**
 
@@ -228,7 +223,7 @@ slib.bgphe.asn [asns ...] [--print] [--yield]
 | --- | --- | --- | --- |
 | `asns` | str, `nargs=*` | | ASNs (ex. `15169` or `AS15169`) to look up instead of the inbound nodes. Yields the `inet:asn` nodes. |
 | `--print` | flag | `false` | Print a summary of each record. |
-| `--yield` | flag | `false` | Yield the `ou:org` nodes instead of the inbound nodes. |
+| `--yield` | flag | `false` | Yield the `ou:org` nodes instead of the inbound `inet:asn` nodes (values always yield the `inet:asn` nodes). |
 
 **Inputs:** `inet:asn`.
 
@@ -283,7 +278,7 @@ with `.seen` extended to now and the prefix's visibility in its `slib:bgphe` nod
 
 | When | Message |
 | --- | --- |
-| Always, on success | `slib.bgphe: AS<asn> originates <v4> IPv4 and <v6> IPv6 prefixes.` |
+| `$lib.debug` is set | `slib.bgphe: AS<asn> originates <v4> IPv4 and <v6> IPv6 prefixes.` |
 | No prefixes | warning: `slib.bgphe: AS<asn> doesn't originate any prefixes.` |
 
 ```text

@@ -136,7 +136,9 @@ function countUrl() { return($priv.apiUrl("/shodan/host/count")) }
 // Returns ({"query": <it:exec:query>, "ips": [<inet:ipv4/6>, ...], "size": <n>, "full": <bool>,
 // "facets": {...}}), or null if the count failed (reported as a warning). full is true when the IPs
 // fill the size asked for, so the query likely matches more IPs than were returned.
-function count(query, size=(null), facets=(null), ref=(null)) {
+//
+// command is recorded as the it:exec:query's :opts.command, ex. "slib.shodan.count".
+function count(query, size=(null), facets=(null), ref=(null), command="slib.shodan.lib.count") {
     $query = $lib.cast(str, $query)
     $retn = $priv.countIps($query, size=$size, facets=$facets)
     if $util.failed($retn, `Counting {$query}`) { return() }
@@ -146,7 +148,7 @@ function count(query, size=(null), facets=(null), ref=(null)) {
         $lib.warn(`slib.shodan: Your plan returns at most {$data.size} IPs per count, asked for {$size}.`)
     }
 
-    $opts = ({"command": "slib.shodan.lib.count", "size": $data.size, "facets": $facets, "full": $data.full})
+    $opts = ({"command": $command, "size": $data.size, "facets": $facets, "full": $data.full})
     $qnode = $model.queryNode($query, $countUrl(), $opts, $ref)
 
     $ips = ([])

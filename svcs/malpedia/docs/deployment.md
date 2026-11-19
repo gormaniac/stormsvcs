@@ -49,7 +49,7 @@ The service-specific options are in `MalpediaSvc.confdefs`
 | `malpedia:backoff` | number | `5.0` | `>= 0` | Base, in seconds, of the exponential backoff between retries (`backoff * 2**attempt`). |
 | `malpedia:pull:minage` | number | `12` | `>= 0` | Hours after a version check before a sync checks again. Syncs inside this window model the snapshot without any requests. Forced syncs and syncs after a failed pull ignore it. |
 | `malpedia:yara:fullage` | number | `7` | `>= 0` | Days after the last full YARA download (one ~4MB zip) before a pull downloads every rule again. `0` means only the first pull and forced pulls do. |
-| `malpedia:autosync` | boolean | `true` | | When the service is added to a Cortex, schedule the daily `slib.malpedia.sync` cron job and start the initial sync. |
+| `malpedia:autosync` | boolean | `true` | | When the service is added to a Cortex (or re-added), schedule the daily `slib.malpedia.sync` cron job and start the initial sync. The one-time setup job that checks this is created, and runs, either way. |
 
 All the standard Synapse cell options (`auth:passwd`, `dmon:listen`, `https:port`,
 `aha:*`, ...) apply as well. See the
@@ -162,8 +162,12 @@ Synapse `>=2.234.0,<3.0.0`) and runs the service's `add` event as root. The even
 1. creates the `malpedia` `meta:source` (`15b7f8ff9cef4e8fa9fedd9f2b10c1a5`),
 2. sets `slib:malpedia:tag:prefix` to `rep.malpedia` and `slib:malpedia:tag:tlp` to
    `rep.malpedia.tlp`, unless they're already set,
-3. starts a one-time cron job named `slib.malpedia (initial setup and sync)`. Unless
+3. deletes any cron job named `slib.malpedia (initial setup and sync)` left from an earlier
+   add, and starts a new one-time cron job with that name. It runs once right away, even when
+   `malpedia:autosync` is off (only the service can read its config). Unless
    `malpedia:autosync` is off, the job schedules the daily sync and runs the initial sync.
+   With it off, the job finishes without scheduling or syncing anything. The finished job
+   stays in `cron.list` until `service.del`.
 
 The service isn't ready to answer calls while the `add` event runs, so the event can't do
 step 3 itself. [Syncing](syncing.md#registration-and-the-initial-bulk-pull) has the details.
@@ -182,6 +186,15 @@ slib.malpedia.admin.schedule
 cron job named by `slib:malpedia:cron`, pops that global, and deletes any cron job named
 `slib.malpedia (initial setup and sync)`. The tag prefix globals and every node are kept, so
 adding the service again tags nodes the same way.
+
+Adding the service again (`service.add`) runs the `add` event again, because the Cortex gives
+the re-added service a new iden. So it starts a new setup job, which (unless
+`malpedia:autosync` is off) schedules a new daily sync job, at the service's stored random time
+and in the default view (an earlier `slib.malpedia.admin.schedule --period` isn't kept), and
+runs a sync in the default view. That sync is cheap when the service kept its snapshot: it
+only pulls if a pull is due, and only models what changed. If a sync job named
+`slib.malpedia.sync` was left behind (for example the `del` event couldn't delete it), the
+setup job adopts it instead of adding a second one.
 
 ## Permissions
 
@@ -225,4 +238,8 @@ so the next pull downloads everything again. See [Internals](internals.md#crash-
   `slib.malpedia.sync --full --no-pull` adds them.
 - 0.2.x didn't record the tag prefixes a view was synced with. So the old tags from a prefix
   change made before the upgrade aren't removed.
-- The first pull after the upgrade downloads every YARA rule.
+- Whether the first pull after the upgrade downloads every YARA rule depends on the 0.2.x
+  build. Early 0.2.x builds didn't record when they last downloaded every rule (`yarafull`),
+  so the first pull that downloads anything (Malpedia's version changed, or `--force`)
+  downloads them all, unless `malpedia:yara:fullage` is `0`. Later 0.2.x builds recorded it,
+  so the usual `malpedia:yara:fullage` schedule just carries on.

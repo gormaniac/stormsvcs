@@ -172,8 +172,10 @@ engine family and gid:sid again (ex. a new `rev`) updates the same node. The nod
 
 Then the enabled rules are pushed (`ruleUpdate`), which rebuilds the engines' rules if anything
 changed. The command prints a line per rule and the build summary, and warns for each rule the
-engine couldn't load. The push is refused from a view other than the rules view (see
-[Rules and feeds](rules.md#the-rules-view)), the nodes are still edited.
+engine couldn't load. In a view other than the rules view (see
+[Rules and feeds](rules.md#the-rules-view)) the command checks first: it warns once (`The
+service's rules come from view <view>, ... No rules were added.`), and parses, creates, and
+pushes nothing.
 
 ```text
 slib.pcap.rule.add 'alert http any any -> any any ( msg:"My rule"; http_uri; content:"/evil"; sid:1000001; rev:1; )'
@@ -208,10 +210,9 @@ guid) in one `ruleUpdate` in `fini`.
 it:app:suricata:rule:id=2013502 | slib.pcap.rule.disable
 ```
 
-:::{note}
-`slib.pcap.rule.enable` and `.disable` edit `:enabled` before the push. In a view that isn't the
-rules view the push is refused (a warning) but the edit stays.
-:::
+`slib.pcap.rule.enable` and `.disable` check the view first: in a view that isn't the
+[rules view](rules.md#the-rules-view) they warn once (`The service's rules come from view
+<view>, ... The rules weren't changed.`), don't edit `:enabled`, and pass their nodes through.
 
 ### slib.pcap.rule.check
 

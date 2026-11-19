@@ -37,3 +37,11 @@ function date(valu) {
 function nodes(items) {
     for $item in $items { yield $item }
 }
+
+// True the first time it's called with a state dict (ex. ({"done": false})), false after.
+// Commands use it to look up their values once, not once per inbound node.
+function first(state) {
+    if $state.done { return((false)) }
+    $state.done = (true)
+    return((true))
+}

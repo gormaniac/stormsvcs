@@ -19,8 +19,10 @@ init {
     $found = ([])
 
     for $u in $opts.url {
-        $n = $finish($submit.submitUrl($u), $u)
-        if ($n = null) { $n = $model.urlNode($u) }
+        $retn = $submit.submitUrl($u)
+        $n = $finish($retn, $u)
+        // Only model the URL once VirusTotal has accepted it.
+        if (($n = null) and $retn.status) { $n = $model.urlNode($u) }
         if $n { $found.append($n) }
     }
 }

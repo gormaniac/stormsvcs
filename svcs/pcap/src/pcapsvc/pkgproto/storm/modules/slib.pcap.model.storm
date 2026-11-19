@@ -157,7 +157,7 @@ function enrichSide(n, name, s) {
     if $s."ssl:cert" {
         $leaf = $cert($s."ssl:cert")
         $setProp($n, `{$name}:ssl:cert`, $leaf.value())
-        // The rest of the chain the side sent.
+        // Every cert the side sent (the leaf and the rest of the chain).
         for $c in $s."ssl:certs" { $refs($n, $cert($c)) }
     }
     if $s."ssh:key" {

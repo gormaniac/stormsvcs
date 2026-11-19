@@ -1,5 +1,5 @@
 name: slib.capa
-version: 0.6.1
+version: 0.7.0
 guid: debecd104d154eed9c8bec53a6b2531f
 
 synapse_version: ">=2.145.0,<3.0.0"
@@ -38,19 +38,14 @@ modules:
     asroot:perms:
       - [ slib, capa, admin ]
 
-  # Unprivileged modules - node edits here run as the calling user.
+  # Unprivileged modules - node edits here run as the calling user. Synapse doesn't check
+  # perms on a module import, so these are gated by the commands' perms and the priv modules
+  # they import: slib.capa.lib uses slib.capa.priv.user, slib.capa.sync and slib.capa.contacts
+  # are for slib.capa.admin and use slib.capa.priv.admin.
   - name: slib.capa.lib
-    perms:
-      - [ slib, capa, user ]
   - name: slib.capa.model
-    perms:
-      - [ slib, capa, user ]
   - name: slib.capa.sync
-    perms:
-      - [ slib, capa, admin ]
   - name: slib.capa.contacts
-    perms:
-      - [ slib, capa, admin ]
   - name: slib.capa.util
 
 commands:
@@ -70,6 +65,9 @@ commands:
 
       Files already scanned with the same capa rules, custom rules, --format, --os, and tag
       settings (see slib.capa.admin.tags) are skipped unless --force is used.
+
+      Nodes that aren't file:bytes are warned about and not scanned. Like every inbound node,
+      they're passed through, or dropped with --yield (which only yields matched meta:rules).
 
       Examples:
 
@@ -94,7 +92,9 @@ commands:
       - - --yield
         - default: false
           action: store_true
-          help: Yield the meta:rule nodes that matched instead of the inbound nodes.
+          help: >-
+            Yield the meta:rule nodes that matched instead of the inbound nodes. Without it,
+            every inbound node is passed through, even one that wasn't scanned.
     cmdinputs:
       - form: file:bytes
         help: Files to scan, by :sha256. The bytes must be in the Axon.
@@ -123,6 +123,9 @@ commands:
       (and the tag prefix) are the same as the last import. Use --force to import them again,
       ex. to restore edited rule nodes. Yields the meta:ruleset.
 
+      A rule that's no longer in the service's rules (ex. its file was deleted) is removed from
+      the meta:ruleset (its -(has)> edge), its meta:rule is kept.
+
       Examples:
 
         slib.capa.admin.sync --force
@@ -147,6 +150,10 @@ commands:
       "rep.capa". Changing the prefix imports the tag docs under the new prefix. Prints the
       settings without options.
 
+      The prefix is normalized as a tag (ex. "REP.Capa" becomes "rep.capa"). An invalid prefix
+      (ex. "" or "my..capa"), or --enable with --disable, is warned about and nothing is
+      changed.
+
       Files keep their old tags until they're scanned again. After a prefix change (or turning
       tagging on or off) the next scan of a file isn't skipped, it moves the file's tags to the
       new settings. The syn:tag nodes under the old prefix are left in place.
@@ -161,7 +168,7 @@ commands:
       - - --prefix
         - type: str
           default: null
-          help: The tag prefix to use, a valid tag name.
+          help: The tag prefix to use, a valid tag name (it's normalized, ex. lowercased).
       - - --enable
         - default: false
           action: store_true

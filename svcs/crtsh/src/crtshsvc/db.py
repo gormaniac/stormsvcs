@@ -42,6 +42,7 @@ import random
 import re
 import struct
 from typing import Any
+from urllib.parse import unquote, unquote_plus, urlsplit
 
 import asyncpg
 
@@ -50,6 +51,31 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_DSN = "postgresql://guest@crt.sh:5432/certwatch"
 """crt.sh's public, read-only, password-less database."""
+
+
+def dsnSecrets(dsn: str | None) -> list[str]:
+    """The password(s) in a DSN, as written and decoded, longest first, to redact from errors.
+
+    A password may be in the URL's user info (``postgresql://user:pass@host/db``), its
+    ``password`` query parameter, or a libpq key/value DSN's ``password=``.
+    """
+
+    if not dsn:
+        return []
+    found = set()
+    if "://" in dsn:
+        url = urlsplit(dsn)
+        userinfo = url.netloc.rpartition("@")[0]
+        if ":" in userinfo:
+            found.add(userinfo.split(":", 1)[1])
+        found.update(re.findall(r"(?:^|&)password=([^&]*)", url.query))
+        # As written and percent-decoded, either may end up in an error message.
+        found.update([unquote(f) for f in found] + [unquote_plus(f) for f in found])
+    else:
+        for quoted, bare in re.findall(r"\bpassword\s*=\s*(?:'((?:[^'\\]|\\.)*)'|(\S+))", dsn):
+            found.add(re.sub(r"\\(.)", r"\1", quoted) if quoted else bare)
+    return sorted(filter(None, found), key=lambda s: (-len(s), s))
+
 
 NAME_TYPES = {
     "dns": ["san:dNSName", "2.5.4.3"],
@@ -407,9 +433,9 @@ class CrtshDb:
 
     - Every query runs on one connection, queued behind an ``asyncio.Lock`` (FIFO).
     - The connection is opened on first use (the service starts even when crt.sh is
-      unreachable) and kept alive with ``SELECT 1`` every ``keepalive`` seconds while
-      it's in use. After ``idle`` seconds without a query it's closed, freeing the
-      single slot (ex. for psql from the same IP).
+      unreachable) and kept alive with ``SELECT 1`` every ``keepalive`` seconds between
+      queries (never during one). After ``idle`` seconds without a query it's closed, freeing
+      the single slot (ex. for psql from the same IP).
     - A dropped connection is reopened and the query retried. Reconnecting right after
       a drop is often refused (``max_client_conn``) until crt.sh notices the old one
       is gone, so connecting backs off (with jitter) for up to ``connect_timeout`` seconds.
@@ -585,7 +611,7 @@ class CrtshDb:
         simple-query ``execute`` discards rows. The only simple-query path that returns data
         is ``COPY ... TO STDOUT``, so the query's rows are copied out as one JSON object each
         (``row_to_json``, binary format, so nothing is escaped), in the same message as the
-        ``SET LOCAL``\\s. Its arguments are inlined as literals (``_inline``), a simple query
+        ``SET``\\s. Its arguments are inlined as literals (``_inline``), a simple query
         has no parameters. Only the service's own SQL takes this path, never raw SQL.
 
         It's asyncpg's protocol level ``copy_out`` (what ``Connection.copy_from_query`` uses),
@@ -684,7 +710,11 @@ class CrtshDb:
                     # Only the server's statement timeout is retried, not other cancels (57014
                     # is also "canceling statement due to user request").
                     took = loop.time() - started
-                    if "statement timeout" not in str(err) or canceled >= self.timeout_retries:
+                    if "statement timeout" not in str(err):
+                        raise CrtshDbError(
+                            f"crt.sh canceled the query after {took:.0f}s: {err}"
+                        ) from err
+                    if canceled >= self.timeout_retries:
                         raise CrtshDbError(
                             f"crt.sh canceled the query (statement timeout) after {took:.0f}s, "
                             f"try a narrower search: {err}"

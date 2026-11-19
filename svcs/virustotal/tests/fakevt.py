@@ -47,6 +47,8 @@ class FakeVt:
         self.bodies: list = []
         self.keys: list[str] = []
         self.status: dict[str, int] = {}
+        # Paths answered with a 200 and this (non JSON) text.
+        self.text: dict[str, str] = {}
         self.analysisPolls = 0
         self.votes: set = set()
 
@@ -133,6 +135,8 @@ class FakeVt:
         key = request.headers.get("x-apikey")
         self.keys.append(key)
 
+        if path in self.text:
+            return web.Response(text=self.text[path], content_type="text/html")
         if path in self.status:
             return err(self.status[path], "TransientError", "Fake failure")
         if key == "429":

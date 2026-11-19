@@ -138,8 +138,10 @@ are only modeled when the sample has a verdict.
 
 Each family is a `risk:tool:software=(slib.hatching, family, <family>)` with
 `:soft:name=<family>`, `:reporter:name="hatching triage"`, and `:tag=<prefix>.<family tag part>`
-(unset when tags are disabled). Families aren't linked to the sample by an edge; pivot on the
-tag, ex. `risk:tool:software:tag=rep.hatching.cobaltstrike` and `#rep.hatching.cobaltstrike`.
+(unset when tags are disabled). Families aren't linked to the sample by an edge: the link is the
+tag, which the sample (and its members, C2s, etc.) carries and the family names in `:tag`. Pivot
+on it, ex. `risk:tool:software:tag=rep.hatching.cobaltstrike` and `#rep.hatching.cobaltstrike`.
+With tagging turned off, the family nodes are still made but nothing links them to the sample.
 
 ## Malware configs
 
@@ -248,7 +250,7 @@ samples have no `file:bytes`, so their task nodes have no `:sandbox:file`.
 | `:cmd` | `cmd` (a list of args is joined with spaces) |
 | `:path` | `image` |
 | `:src:proc` | The parent's `it:exec:proc`, by `procid_parent`, when that process is in the report |
-| `:exe` | The file the task ran, for processes whose image's base name matches the task target's base name (case-insensitive): the sample, or the archive member the task picked (by the task's `sha256`) |
+| `:exe` | The file the task ran, for processes whose image's base name matches the task target's base name (case-insensitive): the sample, or the archive member the task picked (a `file:bytes=sha256:<sha256>` by the task's `sha256`, made with a `-(seen)>` edge if the overview didn't list it) |
 
 ### Network flows
 
@@ -327,7 +329,7 @@ The dropped files themselves aren't downloaded; use
 | Command | Writes |
 | --- | --- |
 | `slib.hatching.download` | A `file:bytes=sha256:<sha256>` per downloaded file with `:sha256`, `:size`, `:name` (if unset), and `-(seen)>` from the source. |
-| `slib.hatching.yara.get --yield` | `it:app:yara:rule=({"name": <name>, "text": <rule>})` with `:name` and `:text`. No source edge. |
+| `slib.hatching.yara.get --yield` | `it:app:yara:rule=({"name": <name>, "text": <rule>})` with `:name` and `:text`, and `-(seen)>` from the source. |
 
 ## Not modeled
 

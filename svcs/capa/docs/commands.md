@@ -13,8 +13,8 @@ The `slib.capa` Storm package has five commands. They are defined in
 | [`slib.capa.admin.contacts.migrate`](#slibcapaadmincontactsmigrate) | `slib.capa.admin` | Merge the `@handle` author contacts made before 0.5.0 into `:user` contacts. |
 
 Errors from the service are reported as warnings (`slib.capa: <what> failed: <mesg>`), not
-raised, so a failed file doesn't stop a pipeline. The admin commands need `slib.capa.user` too,
-see [Permissions](deployment.md#permissions).
+raised, so a failed file doesn't stop a pipeline. The admin commands only need
+`slib.capa.admin`, see [Permissions](deployment.md#permissions).
 
 ## Analyst commands
 
@@ -31,7 +31,7 @@ Run capa against files in the Axon and model the capa rules they match.
 | `--format` | str, one of `auto`, `pe`, `dotnet`, `elf`, `sc32`, `sc64` | `auto` | The file's format. `auto` has capa detect PE, .NET and ELF files. Shellcode can't be detected: use `sc32` or `sc64`. |
 | `--os` | str, one of `auto`, `windows`, `linux`, `macos` | `auto` | The file's OS. `auto` has capa detect it. |
 | `--force` | flag | `false` | Scan files that were already scanned with the same rules and options. |
-| `--yield` | flag | `false` | Yield the `meta:rule` nodes that matched instead of the inbound nodes. |
+| `--yield` | flag | `false` | Yield the `meta:rule` nodes that matched instead of the inbound nodes. Without it, every inbound node is passed through, even one that wasn't scanned. |
 
 Formats that describe another file are not supported: sandbox reports (CAPE, DRAKVUF, VMRay)
 and features frozen by capa (`freeze`), since their results are about the sample they came
@@ -40,7 +40,8 @@ from, not the file that was scanned.
 **Input.** `file:bytes` nodes (`cmdinputs`). The file is fetched from the Axon by its
 `:sha256`, so the bytes must be in the Axon the service is configured with. Other nodes are
 warned about (`slib.capa.scan: Only file:bytes nodes can be scanned, skipping <form>=<repr>.`)
-and passed through, or dropped with `--yield`. A `file:bytes` without `:sha256` is warned
+and not scanned. Like every inbound node they're passed through, or dropped with `--yield`
+(which only yields the matched `meta:rule` nodes). A `file:bytes` without `:sha256` is warned
 about (`slib.capa: Unable to scan file:bytes=<repr>, it has no :sha256.`).
 
 **What it does**, once per command run, on the first `file:bytes` (an empty pipeline never calls
@@ -157,12 +158,16 @@ This is what the package's `onload` runs (without options) every time the packag
    same sync key and the `meta:ruleset` exists, the rule import is skipped. Otherwise it
    creates the `meta:ruleset`, clears the sync state (so an import that fails partway is done
    again next time), models every rule from the service's `rules()` generator, and records the
-   key:
+   key. Once every rule is imported, the ruleset's `-(has)>` edges to capa rules
+   (`meta:rule +:type^=capa.`) that aren't in the service's rules anymore are removed:
 
    ```text
    slib.capa: Importing <n> capa rules (v10.0.0).
    slib.capa: Imported <n> capa rules (v10.0.0).
+   slib.capa: Removed <n> rules that aren't in the capa rules anymore from the ruleset (their meta:rule nodes are kept).
    ```
+
+   The last line is only printed when a rule was removed.
 
 3. Imports the tag docs under the current prefix, unless they were already imported for this
    prefix and key (`slib:capa:sync:tags` is `<prefix>:<key>`). They're imported even if tagging
@@ -182,8 +187,14 @@ slib.capa.admin.sync --force
 slib.capa.admin.sync --reload
 ```
 
-The import never deletes nodes. A rule that was removed from the rules keeps its node, and
-custom rules (`:type=capa.custom`) are never touched.
+The import never deletes nodes. A rule that was removed from the rules (ex. its file was
+deleted, without a new `capa:rules:version`, so it's the same ruleset) is removed from the
+`meta:ruleset` but keeps its `meta:rule` node, and its `-(matches)>` edges to the files it
+matched until they're scanned again. Custom rules (`:type=capa.custom`) are never touched.
+A `meta:ruleset` of an older version of the rules keeps its rules.
+
+The command (and the package's `onload`) only uses `slib.capa.priv.admin`, so the
+`slib.capa.admin` perm is enough to run it.
 
 ### slib.capa.admin.tags
 
@@ -196,7 +207,7 @@ slib.capa.admin.tags [--prefix <tag>] [--enable | --disable]
 
 | Option | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `--prefix` | str | `null` (unchanged) | The tag prefix to use. Must be a valid tag name, already normalized (lowercase, no spaces). The package default is `rep.capa`. |
+| `--prefix` | str | `null` (unchanged) | The tag prefix to use, a valid tag name. It's normalized the way Synapse normalizes a tag (ex. lowercased). The package default is `rep.capa`. |
 | `--enable` | flag | `false` | Enable tagging (the default state). |
 | `--disable` | flag | `false` | Disable tagging. Scans still add edges and node data. |
 
@@ -204,10 +215,17 @@ slib.capa.admin.tags [--prefix <tag>] [--enable | --disable]
 slib.capa tags: enabled=true prefix=rep.capa
 ```
 
-- `--enable` with `--disable` raises `BadArg` (`Use --enable or --disable, not both.`).
-- A prefix that isn't a valid tag, or that isn't already in its normalized form (ex. `""`,
-  `has space`, `REP.capa`), raises `BadArg` (`<prefix> isn't a valid tag name.`).
+- `--enable` with `--disable` warns
+  (`slib.capa.admin.tags: Use --enable or --disable, not both. Nothing was changed.`) and
+  changes nothing.
+- A prefix that isn't a valid tag name (ex. `""`, `my..capa`, `#`) warns
+  (`slib.capa.admin.tags: <prefix> isn't a valid tag name. Nothing was changed.`) and changes
+  nothing, not even `--enable`/`--disable`.
+- A valid prefix is normalized as a tag (ex. `REP.Capa` becomes `rep.capa`, `#my capa`
+  becomes `my_capa`). A prefix that changed prints
+  `slib.capa.admin.tags: Using the normalized prefix <prefix>.`
 - Setting a prefix imports the tag docs under the new prefix right away.
+- The settings are printed after any of these.
 
 Files keep their old tags until they're scanned again. After a prefix change (or turning
 tagging on or off) the next scan of a file isn't skipped: it removes the tags the previous

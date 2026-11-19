@@ -37,7 +37,7 @@ A handful of per-entity requests fill gaps in the bulk data, capped at 25 per pu
 
 A daily pull is ~8 requests plus any gap requests (usually ~10 in all) and ~5MB when Malpedia changed (plus the ~4MB zip once a week), and 1 tiny request when it didn't. Requests are serialized and spaced `malpedia:interval` seconds apart (2 by default), send a `User-Agent` naming the service, and back off exponentially on errors and HTTP 429s. A Cortex only ever does the bulk pull once. New views, `--full` syncs, and tag prefix changes all re-model the local snapshot, not Malpedia.
 
-A failed pull changes nothing: everything is downloaded and normalized before the snapshot changes, and if Malpedia returns fewer than half of the records of a kind the snapshot already has, the pull is refused (likely an upstream problem) unless it's forced. Syncs never read the snapshot while a pull is writing it. If the service stops while a pull is writing the snapshot, the next pull downloads (and rewrites) everything again, even if Malpedia's version is the same.
+A failed pull changes nothing: everything is downloaded and normalized before the snapshot changes, and if Malpedia returns fewer than half of the records of a kind the snapshot already has, the pull is refused (likely an upstream problem), and so is that Malpedia version until a new one comes out. A forced pull (`slib.malpedia.sync --force`) skips both of those checks, as well as `malpedia:pull:minage` and the version check, and downloads every YARA rule. Syncs never read the snapshot while a pull is writing it. If the service stops while a pull is writing the snapshot, the next pull downloads (and rewrites) everything again, even if Malpedia's version is the same.
 
 ### Modeling a view (Storm)
 
@@ -69,7 +69,7 @@ Every node is linked `meta:source (malpedia) -(seen)> node`, in every view (the 
 | `rep.malpedia.tlp.<tlp>` | YARA rules, by the TLP Malpedia published them under. |
 | `rep.malpedia.removed` | Actors, families, and YARA rules Malpedia removed (they're never deleted). |
 
-IDs are normalized like Synapse tag parts, ex. `[vault_7_8]` becomes `vault_7_8`. The prefixes are configurable with `slib.malpedia.admin.tags`. The next sync in each view after a prefix change models every record again with the new tags, and removes the tags it added under the old prefix (if a record fails to model, the next sync does it all again). Removed records (tagged `removed`, not in Malpedia anymore) aren't modeled again, so they keep their old tags.
+IDs are normalized like Synapse tag parts, ex. `[vault_7_8]` becomes `vault_7_8`. The prefixes are configurable with `slib.malpedia.admin.tags`. The TLP prefix is its own setting (`rep.malpedia.tlp` by default, set when the service is added), so changing `--prefix` doesn't move it: use `--tlp-prefix` too. The next sync in each view after a prefix change models every record again with the new tags, and removes the tags it added under the old prefix (if a record fails to model, the next sync does it all again). Removed records (tagged `removed`, not in Malpedia anymore) aren't modeled again, so they keep their old tags.
 
 #### Updates and removals
 
@@ -77,12 +77,14 @@ Each record the view synced is remembered, so when Malpedia changes a record the
 
 A record that fails to model isn't marked synced, so the next sync tries it again, and a sync that stops early picks up where it left off. A removed record whose node isn't in the view (ex. an analyst deleted it) has nothing to undo, so it's done.
 
+`slib.malpedia.admin.reset` marks every record the view synced as unsynced, but keeps the version it synced (and its tag prefixes), so the next sync models every record again and still tags the records Malpedia removed in the meantime `removed`.
+
 #### Upgrading from 0.2.x
 
 - Articles were linked with `-(about)>` edges, which the data model doesn't declare for `media:news`. Syncs now use `-(refs)>`, and replace the `-(about)>` edge of every article they model. Run `slib.malpedia.sync --full --no-pull` once per view to replace them all.
 - Views synced in a view without the `malpedia` `meta:source` have no `-(seen)>` edges. `slib.malpedia.sync --full --no-pull` adds them.
 - The tag prefixes a view was synced with weren't recorded, so the old tags from a prefix change before the upgrade aren't removed.
-- The first pull after the upgrade downloads every YARA rule.
+- Early 0.2.x builds didn't record when they last downloaded every YARA rule, so after upgrading from one of those, the first pull that downloads anything (Malpedia's version changed, or `--force`) downloads every rule, unless `malpedia:yara:fullage` is `0`. After upgrading from a later 0.2.x build, the usual `malpedia:yara:fullage` schedule carries on.
 
 ## Installation
 
@@ -92,13 +94,16 @@ Run the image (`ghcr.io/gormaniac/stormsvcs/malpedia`) and add it to the Cortex:
 service.add slib.malpedia tcp://root:<password>@<host>:27492/
 ```
 
-When the service is added, it (unless `malpedia:autosync` is off):
+When the service is added, it:
 
-1. creates the `malpedia` `meta:source` and the default tag settings,
-2. schedules `slib.malpedia.sync` to run **daily** at a random time (so deployments don't all hit Malpedia at once), in the Cortex's default view (move it with `slib.malpedia.admin.schedule --period` from another view),
-3. and starts the **initial sync**, also in the default view, in the background (a one time cron job), so `service.add` doesn't wait for it. The first sync models ~19k articles, ~1.1k actors, ~3.8k families, and ~2.3k YARA rules, which takes 10-15 minutes.
+1. creates the `malpedia` `meta:source` and the default tag settings (if they're unset),
+2. starts a one time setup cron job (`slib.malpedia (initial setup and sync)`), because the service isn't ready during `service.add`. It runs right away even when `malpedia:autosync` is off, and then finishes without doing anything else. Otherwise it:
+3. schedules `slib.malpedia.sync` to run **daily** at a random time (so deployments don't all hit Malpedia at once), in the Cortex's default view (move it with `slib.malpedia.admin.schedule --period` from another view),
+4. and runs the **initial sync**, also in the default view, in the background, so `service.add` doesn't wait for it. The first sync models ~19k articles, ~1.1k actors, ~3.8k families, and ~2.3k YARA rules, which takes 10-15 minutes.
 
-`service.del` deletes the daily sync cron job and the setup job. The tag settings, and the nodes, are kept.
+The finished setup job stays in `cron.list` until `service.del`, which deletes the daily sync cron job and the setup job. The tag settings, the nodes, and the service's own snapshot and per-view state are kept.
+
+Adding the service again (`service.del` then `service.add`) runs all of the above again: a new setup job, and (unless `malpedia:autosync` is off) a new daily sync job at the same random time in the default view (an earlier `slib.malpedia.admin.schedule --period`, or its view, isn't kept), plus a sync in the default view. That sync only pulls if a pull is due, and only models what changed. There's never a second daily job: a setup job left from the last add is deleted, and a `slib.malpedia.sync` job the old service left behind is reused.
 
 ### Configuration
 
@@ -110,19 +115,19 @@ When the service is added, it (unless `malpedia:autosync` is off):
 | `malpedia:backoff` | `5.0` | Base seconds of the exponential backoff between retries. |
 | `malpedia:pull:minage` | `12` | Hours after a version check before a sync checks again (syncs in between model the snapshot without any requests). Failed pulls are retried by the next sync. |
 | `malpedia:yara:fullage` | `7` | Days after the last download of every YARA rule (one ~4MB zip) before a pull downloads them all again, to catch rules that changed without a new version date. `0` only does it on the first pull and forced pulls. |
-| `malpedia:autosync` | `true` | Schedule the daily sync and start the initial sync when the service is added. |
+| `malpedia:autosync` | `true` | Schedule the daily sync and start the initial sync when the service is added. The one time setup job is created (and runs) either way. |
 
 ## Commands
 
 | Command | Permission | Description |
 | --- | --- | --- |
-| `slib.malpedia.sync [--full] [--no-pull] [--force]` | `slib.malpedia.sync` (`--force`: `slib.malpedia.admin`) | Pull (if due) and model the changes into the current view. |
+| `slib.malpedia.sync [--full] [--no-pull] [--force]` | `slib.malpedia.sync` (`--force`: `slib.malpedia.admin`) | Pull (if due) and model the changes into the current view. `--force` pulls now, downloads every YARA rule, and skips the shrink guard and the refusal of a rejected version. It does nothing with `--no-pull`. |
 | `slib.malpedia.refresh [--actor <id>] [--family <id>] [--yield] [--no-limit]` | `slib.malpedia.sync` (`--no-limit`: `slib.malpedia.admin`) | Get actors/families straight from Malpedia (2-3 requests each) and model them, between daily syncs. Also takes Malpedia `risk:threat` / `risk:tool:software` nodes. Refreshes each one once, and at most 25 per run unless `--no-limit` is used. It sets Malpedia's values, but doesn't undo anything (the daily sync does). |
 | `slib.malpedia.search <text> [--actors] [--families] [--yield]` | `slib.malpedia.user` | Search actor and family names and synonyms. |
 | `slib.malpedia.status` | `slib.malpedia.user` | The snapshot's Malpedia version, counts, and the view's sync state. |
 | `slib.malpedia.admin.schedule [--period <period>] [--enable/--disable/--delete]` | `slib.malpedia.admin` | Manage the sync cron job. |
-| `slib.malpedia.admin.tags [--prefix <tag>] [--tlp-prefix <tag>]` | `slib.malpedia.admin` | Change the tag prefixes (they must be valid tag names). Each view's next sync applies them, and removes the old tags. |
-| `slib.malpedia.admin.reset --yes` | `slib.malpedia.admin` | Forget what the view synced, so the next sync models everything. |
+| `slib.malpedia.admin.tags [--prefix <tag>] [--tlp-prefix <tag>]` | `slib.malpedia.admin` | Change the tag prefixes (they must be valid tag names, and `--prefix` doesn't move the TLP prefix). Each view's next sync applies them, and removes the old tags. |
+| `slib.malpedia.admin.reset --yes` | `slib.malpedia.admin` | Forget what the view synced, so the next sync models everything (it still tags what Malpedia removed meanwhile). |
 
 Syncing edits nodes as root (so users don't need permissions on every form, tag, and edge involved), but only for users that can add `media:news`, `risk:threat`, `risk:tool:software`, and `it:app:yara:rule` nodes to the view's layer.
 

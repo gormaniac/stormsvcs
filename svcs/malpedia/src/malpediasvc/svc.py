@@ -195,8 +195,9 @@ class MalpediaSvc(s_cell.Cell):
             "type": "boolean",
             "default": True,
             "description": (
-                "When the service is first added to a Cortex, schedule the daily "
-                "slib.malpedia.sync cron job and start the initial sync."
+                "When the service is added to a Cortex, schedule the daily "
+                "slib.malpedia.sync cron job and start the initial sync. The one time setup "
+                "job that checks this is created either way."
             ),
         },
     }
@@ -779,11 +780,30 @@ class MalpediaSvc(s_cell.Cell):
         return dict(self.viewinfo.get(view) or {})
 
     async def resetView(self, view: str) -> bool:
-        """Forget what a view has synced, so its next sync models every record."""
+        """Forget what a view has synced, so its next sync models every record.
+
+        The view's version of each record is kept, but marked unsynced (its hash is cleared),
+        so ``changes()`` sends every record again, and still finds the ones Malpedia removed
+        since (to tag them removed) and what changed records lost (to undo it). The tag
+        prefixes the view was last synced with are kept too, so its next sync still removes
+        the tags under a prefix that changed since.
+        """
 
         self._reqView(view)
-        await self.views.truncate(f"{view}:")
-        self.viewinfo.pop(view)
+        async with self.storelock:
+            for kind in norm.KINDS:
+                vkv = self._viewkv(view, kind)
+                for i, key in enumerate(list(_kvkeys(vkv))):
+                    item = vkv.get(key)
+                    if item is not None and item.get("hash") is not None:
+                        vkv.set(key, {"hash": None, "rec": item.get("rec")})
+                    if i % 500 == 0:
+                        await asyncio.sleep(0)
+        tags = (self.viewinfo.get(view) or {}).get("tags")
+        if tags:
+            self.viewinfo.set(view, {"tags": tags})
+        else:
+            self.viewinfo.pop(view)
         return True
 
     # ---- Status and lookups ----
@@ -809,23 +829,17 @@ class MalpediaSvc(s_cell.Cell):
         if view is not None:
             self._reqView(view)
             vinfo = dict(self.viewinfo.get(view) or {})
+            # Records a reset marked unsynced (see resetView) don't count.
             vinfo["counts"] = {
-                kind: sum(1 for _ in _kvkeys(self._viewkv(view, kind))) for kind in norm.KINDS
+                kind: sum(
+                    1
+                    for _, item in self._viewkv(view, kind).items()
+                    if item.get("hash") is not None
+                )
+                for kind in norm.KINDS
             }
             info["view"] = vinfo
         return info
-
-    async def record(self, kind: str, key: str) -> dict | None:
-        """A record from the snapshot (news can be looked up by URL), or None."""
-
-        if kind == "news" and not (len(key) == 64 and all(c in "0123456789abcdef" for c in key)):
-            url = norm.canonUrl(key)
-            if url is None:
-                return None
-            key = norm.urlKey(url)
-        # A key that's too long to store can't be in the snapshot.
-        item = _kvget(self._snapkv(kind), key)
-        return item["rec"] if item else None
 
     async def find(self, kind: str, needle: str) -> list:
         """Search Malpedia's actor or family names and synonyms (``/api/find/*``)."""

@@ -122,8 +122,9 @@ class BgpHeSvc(s_cell.Cell):
         dict
             ``{"type": "cert", "cert": <details>}`` for each certificate (see
             ``certs.heCert``), then one ``{"type": "summary", ...}`` with the domain's
-            ``total`` certificates in bgp.he.net, the ``returned`` and ``skipped`` (filtered)
-            counts, the ``pages`` read, and whether there are ``more``.
+            ``total`` certificates in bgp.he.net, the ``returned``, ``skipped`` (filtered), and
+            ``invalid`` (entries without a usable DER, which are dropped) counts, the ``pages``
+            read, and whether there are ``more``.
         """
 
         domain = self._norm(norm.normDomain, domain)

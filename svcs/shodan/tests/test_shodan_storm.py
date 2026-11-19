@@ -1207,7 +1207,7 @@ class TestShodanStormCount(s_tests.SynTest):
             assert qnode.get("api:url") == "https://api.shodan.io/shodan/host/count"
             assert qnode.get("offset") == 3
             assert qnode.get("opts") == {
-                "command": "slib.shodan.lib.count",
+                "command": "slib.shodan.count",
                 "size": 1000,
                 "facets": "country",
                 "full": False,
@@ -1534,6 +1534,11 @@ class TestShodanStormInputs(s_tests.SynTest):
             self.stormIsInWarn("it's for a asn stream, not ports", msgs)
             assert fake.last()["path"] == "/stream/shodan/ports/443"
 
+            # Even banners, which skips every inbound node for another type.
+            msgs = await core.stormlist("inet:asn=15169 | slib.shodan.stream banners --timeout 5")
+            self.stormIsInWarn("it's for a asn stream, not banners", msgs)
+            assert fake.last()["path"] == "/stream/shodan/banners"
+
             msgs = await core.stormlist("[ inet:email=visi@vertex.link ] | slib.shodan.stream")
             self.stormIsInWarn("The node form inet:email is not supported", msgs)
 
@@ -1746,6 +1751,8 @@ class TestShodanStormSavedQueries(s_tests.SynTest):
                 "mine",
             )
             assert local.get("created") is not None
+            # Like every node the package makes, it's linked to the meta:source.
+            assert len(await core.nodes(f"meta:source={SVC_GUID} -(seen)> meta:rule")) == 1
 
             # Saving it again keeps the existing one.
             msgs = await core.stormlist('slib.shodan.query.save "webcam" --name "Other"')
@@ -2318,6 +2325,16 @@ class TestShodanStormAdmin(s_tests.SynTest):
                 "slib.shodan.admin.request /api/v1/search/facets --base trends"
             )
             self.stormIsInPrint("version", msgs)
+
+            # The Streaming API too, ex. to check whether the key's plan includes it.
+            async def noaccess(request):
+                return aiohttp.web.json_response({"error": "No stream access"}, status=403)
+
+            fake.streamhandler = noaccess
+            msgs = await core.stormlist("slib.shodan.admin.request /shodan/banners --base stream")
+            self.stormIsInWarn("No stream access", msgs)
+            assert fake.last()["path"] == "/stream/shodan/banners"
+            fake.streamhandler = None
 
             msgs = await core.stormlist("slib.shodan.admin.apikey --clear")
             self.stormIsInPrint("Cleared the slib.shodan API key", msgs)

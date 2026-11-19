@@ -31,14 +31,16 @@ for $rule in $capa.scan($node, fmt=sc64) { $lib.print($rule.props.name) }
 import of the module, so import it before lifting the files: edits to the custom rules during
 the query aren't used until the next one.
 
-The other modules are internal:
+The other modules are internal. Synapse doesn't check permissions when a module is imported
+(a module's `perms` key isn't enforced, so the package doesn't set one): the unprivileged
+modules are gated by the commands' `perms` and by the `priv` module each one imports.
 
 | Module | Privilege | Contents |
 | --- | --- | --- |
 | `slib.capa.priv.user` | `asroot:perms` `slib.capa.user` | Wrappers around `$lib.service.get("slib.capa")`: `rulesInfo()`, `tags()`, `scan()`, `custom()`, `rules()`, and the tag settings and sync state globals (`tagSettings()`, `tagPrefix()`, `syncState()`). |
-| `slib.capa.priv.admin` | `asroot:perms` `slib.capa.admin` | `setTagPrefix()`, `setTagsEnabled()`, `setSynced(kind, valu)`, `reload()`. |
+| `slib.capa.priv.admin` | `asroot:perms` `slib.capa.admin` | `setTagPrefix()`, `setTagsEnabled()`, `setSynced(kind, valu)`, `reload()`, and the read-only calls the admin commands need, from `slib.capa.priv.user` (imported as root): `tagSettings()`, `syncState()`, `rulesInfo()`, `tags()`, `rules()`. Not `scan()` or `custom()`. |
 | `slib.capa.model` | none (runs as the caller) | The node edits, see [Data model](model.md). |
-| `slib.capa.sync` | none | `onload()`, `sync()`, `syncRules()`, `syncTags()`, the rule and tag doc import. |
+| `slib.capa.sync` | none | `onload()`, `sync()`, `syncRules()`, `syncTags()`, the rule and tag doc import. Only uses `slib.capa.priv.admin`. |
 | `slib.capa.contacts` | none | The contact migration used by `slib.capa.admin.contacts.migrate`. |
 | `slib.capa.util` | none | `failed(retn, what)` (warn on a failed call) and `nodes(items)`. |
 
@@ -253,7 +255,7 @@ reload() -> dict
 
 Reload the rules from `capa:rules` (and `capa:rules:version`, `capa:rules:url`), clear the
 custom rule sets, and start building capa's cache of the new rules in the background. Returns
-the new rules' info, like `rulesInfo()` but without the `capa` key. Fails with the load error,
+the new rules' info, the same as [`rulesInfo()`](#rulesinfo) (with the `capa` key). Fails with the load error,
 and the service then has no rules until a reload succeeds:
 
 | Message | Cause |

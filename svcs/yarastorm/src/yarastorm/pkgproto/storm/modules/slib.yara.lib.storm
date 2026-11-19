@@ -55,7 +55,7 @@ function disableRule(rule) {
 // Compile every enabled rule into the service and remove the service's rules that aren't
 // enabled in the Cortex. Enabled rules that fail to compile are left as they are.
 // Returns a dict of "compiled" (count), "failed" (list of {rule, mesg}),
-// and "removed" (list of rule guids).
+// and "removed" (list of rule guids). Raises YaraError if the service's rules can't be listed.
 function sync() {
     $reqAdmin()
 
@@ -77,7 +77,7 @@ function sync() {
     $removed = ([])
     $retn = $svc.listRules()
     if (not $retn.status) {
-        $lib.raise(StormRaise, `Unable to list the slib.yara service's rules: {$retn.mesg}`)
+        $lib.raise(YaraError, `Unable to list the slib.yara service's rules: {$retn.mesg}`)
     }
     for $iden in $retn.data {
         if (not $enabled.has($iden)) {

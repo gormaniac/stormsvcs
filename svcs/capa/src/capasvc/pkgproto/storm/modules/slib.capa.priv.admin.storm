@@ -1,7 +1,12 @@
 // Privileged (asroot) wrappers around the slib.capa service for slib.capa.admin.
+//
+// The admin commands and slib.capa.sync only use this module, so they only need slib.capa.admin.
+// It re-exports the read-only parts of slib.capa.priv.user they use (imported here, as root),
+// but not scan() or custom(), which stay behind slib.capa.user.
 
 init {
     $svc = $lib.service.get("slib.capa")
+    $user = $lib.import(slib.capa.priv.user)
 }
 
 // $lib.globals.get/set (R005) are kept, $lib.globals.<name> doesn't work on Synapse 2.x.
@@ -15,3 +20,12 @@ function setSynced(kind, valu) { $lib.globals.set(`slib:capa:sync:{$kind}`, $val
 
 // Have the service reload its rules from disk.
 function reload() { return($svc.reload()) }
+
+// See slib.capa.priv.user.
+function tagSettings() { return($user.tagSettings()) }
+function syncState() { return($user.syncState()) }
+function rulesInfo() { return($user.rulesInfo()) }
+function tags() { return($user.tags()) }
+function rules(names=(null)) {
+    for $retn in $user.rules(names=$names) { emit $retn }
+}

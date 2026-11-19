@@ -113,8 +113,11 @@ What it does:
 1. Lifts every `it:app:yara:rule:enabled=(true)` node and calls `compileRule()` for each,
    recompiling it from its current `:text`. A rule that fails is recorded as failed; the
    service's previous compiled copy of it, if any, is left in place.
-2. Calls `listRules()` and `removeRule()`s every rule guid the service has that wasn't in the
-   enabled set from step 1.
+2. Calls `listRules()` and `removeRule()`s every rule file the service has (including ones that
+   can't be loaded) whose guid wasn't in the enabled set from step 1. If `listRules()` fails, it
+   warns `Unable to sync the slib.yara rules: Unable to list the slib.yara service's rules:
+   <mesg>` and stops: the rules from step 1 are compiled, nothing is removed, and no summary is
+   printed.
 3. Warns `Unable to sync it:app:yara:rule=<guid>: <mesg>` for every failure (compile or remove),
    then prints a summary:
 
@@ -142,7 +145,8 @@ does nothing.
 
 Scan `file:bytes` nodes with every rule compiled into the service. The bytes are pulled from the
 service's Axon (`axon_url`) by the node's `:sha256`, so a `file:bytes` without `:sha256` can't be
-scanned. Each matching rule produces an `it:app:yara:match` node.
+scanned. Each matching rule produces an `it:app:yara:match` node, with `:version` set to the
+rule's `:version` when it has one.
 
 ```text
 file:bytes=sha256:<hex> | slib.yara.scan
@@ -153,15 +157,16 @@ file:bytes=sha256:<hex> | slib.yara.scan
 | Inputs | `file:bytes` with `:sha256` (any primary value: `sha256:...` or `guid:...`) |
 | Permissions | `service.get`, plus the node permissions to create the match (see [Deployment](deployment.md#permissions-for-cortex-users)) |
 | Calls | `slib.yara.lib.ruleCount()` once in `init`; `slib.yara.lib.match(:sha256)` per node |
-| Creates | `it:app:yara:match=(<rule guid>, <file:bytes value>)` with `.seen=now`, and a `seen` edge from `meta:source=12bc0c8c1a37a29808d97972875d3913` |
+| Creates | `it:app:yara:match=(<rule guid>, <file:bytes value>)` with `.seen=now` (and `:version` from the rule), and a `seen` edge from `meta:source=12bc0c8c1a37a29808d97972875d3913` |
 
-Per file, the service yields one result per compiled rule:
+Per file, the service yields one result per rule file in its `rule_dir` (rule files added or
+removed there since the last scan are picked up first):
 
 | Result | Output |
 | --- | --- |
 | Rule matched | Creates the match node and prints `it:app:yara:rule=<rule> matched file:bytes=<file>` |
 | Rule didn't match | Nothing, unless `$lib.debug` is set: prints `it:app:yara:rule=<rule> did not match file:bytes=<file>` |
-| Error for one rule | Warns `Unable to scan file:bytes=<file> with it:app:yara:rule=<rule>: <mesg>` and continues with the next rule |
+| Error for one rule | Warns `Unable to scan file:bytes=<file> with it:app:yara:rule=<rule>: <mesg>` and continues with the next rule. `<mesg>` is a rule file that can't be loaded, a scan that hit `scan_timeout`, or a yara-x scan error (see [matchFile](api.md#matchfile)). |
 | Error for the file | Warns `There was an error scanning file:bytes=<file>: <mesg>` and moves to the next node |
 
 File-level `<mesg>` values come from `YaraSvc.matchFile()`:
@@ -180,6 +185,8 @@ Other warnings:
 - `The slib.yara service has no rules to scan with, enable rules with slib.yara.enable or run
   slib.yara.sync.` is warned once in `init` when the service has zero rules. Nodes are still
   passed to the service (and produce no results).
+- `Unable to get the slib.yara service's rule count: <mesg>` is warned once in `init` if the rule
+  count call fails. Nodes are still scanned.
 - `file:bytes=<file> has no :sha256 and can't be scanned.`
 - `slib.yara.scan only supports file:bytes nodes, skipping <form>.`
 
@@ -202,5 +209,7 @@ file:bytes=sha256:<hex> -> it:app:yara:match :rule -> it:app:yara:rule
 :::{note}
 Matching is per `it:app:yara:rule` node, not per Yara rule. A node's `:text` can contain several
 `rule` blocks; the node counts as matched if any of them matches. Which Yara rule names or
-strings matched is not recorded.
+strings matched is not recorded. The match's `:version` is the rule node's `:version` when the
+scan runs, so it's only accurate if the service has the node's current `:text` compiled (run
+`slib.yara.enable` or `slib.yara.sync` after editing a rule).
 :::

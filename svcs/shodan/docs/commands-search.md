@@ -113,7 +113,7 @@ Facet values that aren't IPs are warned about and skipped. Shodan returns the IP
 first, by the number of matching banners.
 
 The run is recorded as an `it:exec:query` with `:api:url` `https://api.shodan.io/shodan/host/count`,
-`:offset` the number of IPs, and `:opts` `{"command": "slib.shodan.lib.count", "size": <asked>,
+`:offset` the number of IPs, and `:opts` `{"command": "slib.shodan.count", "size": <asked>,
 "facets": <facets>, "full": <bool>}`, linked `-(found)>` to every IP and `-(refs)>` to the
 inbound node.
 
@@ -195,7 +195,7 @@ slib.shodan.stream [<type>] [--value <v>]... [--query <q>] [--alert <id>]
 
 | Option | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `type` | one of `banners`, `asn`, `countries`, `ports`, `tags`, `vulns`, `custom`, `alert` | `banners` | The stream to read. |
+| `type` | one of `banners`, `asn`, `countries`, `ports`, `tags`, `vulns`, `custom`, `alert` | null | The stream to read. Without one, the first inbound node's type, or `banners`. |
 | `--value` | str, repeatable | `[]` | An ASN, country code, port, tag or CVE to filter by. Added to the inbound nodes' values. |
 | `--query` | str | null | The query of a `custom` stream. |
 | `--alert` | str | null | A network alert ID, to read one alert's `alert` stream. |
@@ -224,7 +224,8 @@ Inbound nodes are collected and read as one stream (one subscription):
 | `pol:country` | `countries` | `:iso2`, upper case |
 | `meta:rule` | `custom` | `:text`, for saved queries (`:type` `svc.shodan.query.local.` or `.community.`) |
 
-The stream type is the `type` given, or, when it's left as `banners`, the first inbound node's.
+The stream type is the `type` given (`banners` too, which skips every inbound node), or, when
+none is given, the first inbound node's (`banners` without inbound nodes).
 Nodes for another type are skipped with a warning. A custom stream takes one query: `--query`
 wins, then the first `meta:rule`, and the rest are warned about. When there were inbound nodes
 but none could be streamed, the command warns `None of the inbound nodes could be streamed.`
@@ -319,8 +320,9 @@ slib.shodan.query.save <query> --name <name> [--desc <desc>] [--yield]
 | `--yield` | flag | false | Yield the `meta:rule`. |
 
 A query whose text is already a local query (any local `meta:rule` with that `:text`) warns
-`<query> is already a local saved query (<name>).` and keeps the existing node. The command
-prints `slib.shodan.query.save: Saved <name> (<query>).` Inbound nodes are dropped.
+`<query> is already a local saved query (<name>).` and keeps the existing node. The node is
+linked to the `meta:source` like every other. The command prints
+`slib.shodan.query.save: Saved <name> (<query>).` Inbound nodes are dropped.
 
 ```text
 slib.shodan.query.save "ssl.jarm:2ad2ad0002ad2ad00042d42d00000069d641f34fe76acdc05c40262f8815e5" --name "CS JARM"

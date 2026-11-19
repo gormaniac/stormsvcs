@@ -47,7 +47,7 @@ slib.abusech.bazaar.search <by> [<value>] [--limit <n>]
 |---|---|---|---|
 | `by` | str, required | | What to search by, see below. |
 | `value` | str, optional | `null` | The value to search for. Required except for `recent` and `detections`. |
-| `--limit` | int | `100` | The max number of samples (kept in 1-1000, `0` means 1000). Not sent for `issuer`, `subject`, `serial`, `recent` and `detections`, but the result is still cut to it for `issuer`/`subject`/`serial`. |
+| `--limit` | int | `100` | The max number of samples (kept in 1-1000, `0` means 1000). Ignored for `recent` and `detections`. Not sent for `issuer`, `subject` and `serial`, but the result is still cut to it. |
 
 | `by` | abuse.ch query (form field) | `value` |
 |---|---|---|

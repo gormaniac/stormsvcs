@@ -9,6 +9,3 @@ function status() { return($svc.status(view=$lib.view.get().iden)) }
 
 // Search actor (kind=actor) or family (kind=family) names and synonyms.
 function find(kind, needle) { return($svc.find($kind, $needle)) }
-
-// A record from the service's snapshot.
-function record(kind, key) { return($svc.record($kind, $key)) }

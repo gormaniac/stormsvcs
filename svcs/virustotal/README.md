@@ -12,7 +12,7 @@ The Public API allows **4 requests per minute and 500 per day** (the day resets 
 - **Per day / month**: once `vt:limit:day` (500) or `vt:limit:month` (15500) requests have been sent, requests fail right away until the next UTC day or month, instead of waiting for hours.
 - If VirusTotal still answers HTTP 429 (ex. another client uses the same key), the request isn't retried. The key is paused for a minute.
 
-Every request counts, including errors, retries, and each page of a relationship. The counts are kept in the service's storage, so a restart doesn't reset them. They're keyed by a hash of the API key, so keys aren't stored there. Users with their own key (`slib.vt.apikey`) get their own limits. Everyone else shares the service-wide key's limits.
+Every request counts, including errors, retries, and each page of a relationship. The counts are kept in the service's storage, so a restart doesn't reset them. They're only coordinated within one service process: two services (or other clients) using the same key each count only their own requests. They're keyed by a hash of the API key, so keys aren't stored there. Users with their own key (`slib.vt.apikey`) get their own limits. Everyone else shares the service-wide key's limits.
 
 Successful lookups are cached for `vt:cache:ttl` seconds (an hour), so enriching the same node twice only uses quota once. `--no-cache` skips the cache.
 
@@ -35,11 +35,11 @@ With a Public API key, enriching 100 nodes takes about 25 minutes. Use small, ta
 | `slib.vt.rescan` | `slib.vt.submit` | Ask VirusTotal to reanalyze files, URLs, domains, or IPs. | 1 per node |
 | `slib.vt.comment` | `slib.vt.submit` | Add a comment (`#words` are tags). | 1 per node |
 | `slib.vt.vote` | `slib.vt.submit` | Vote `harmless` or `malicious`. | 1 per node |
-| `slib.vt.admin.apikey` | `slib.vt.admin` | Set, check, or clear the service-wide key. | 0 |
+| `slib.vt.admin.apikey` | `slib.vt.admin` | Set, check (shows whether the key set here or `vt:apikey` is in use), or clear the service-wide key. `--clear` can't remove `vt:apikey`. | 0 |
 | `slib.vt.admin.tags` | `slib.vt.admin` | Change the tag prefix (`rep.vt`), or turn tagging off. | 0 |
-| `slib.vt.admin.request` | `slib.vt.admin` | Send a raw API request (still rate limited). | 1 |
+| `slib.vt.admin.request` | `slib.vt.admin` | Send a raw API request (still rate limited). Only to the VirusTotal API's host (`vt:url`). | 1 |
 
-The commands that talk to the service run their service calls in `asroot` modules gated by these perms. Users don't need `service.get`, and the service-wide key is never readable from Storm. Node edits run as the calling user.
+The commands that talk to the service run their service calls in `asroot` modules gated by these perms. Users don't need `service.get`, and the service-wide key is never readable from Storm, or included in error messages. Node edits run as the calling user. The service's own Telepath API isn't permission checked per method, so only let the Cortex connect to it.
 
 ## API coverage
 
@@ -100,7 +100,7 @@ Related objects and comments of a `hash:sha256` are linked to its `file:bytes`, 
 
 Tag parts are lowercased, with runs of other characters replaced by `_` (`Mal/HTMLGen-A` -> `mal_htmlgen_a`).
 
-**Not modeled**: reputation, vote counts, vendor categories, popularity ranks, TLSH, vhash, authentihash, TrID, signature info, PE sections and imports, behaviour command lines, registry keys, and memory patterns. Lists are capped (50 names, 100 rules and detections, 50 of each behaviour), so one object never creates thousands of nodes.
+**Not modeled**: reputation, vote counts, vendor categories (of domains and URLs), popularity ranks, a domain's JARM, an IP's regional internet registry and first seen date, a URL's title, last HTTP response code, and outgoing links, TLSH, vhash, authentihash, TrID, signature info, PE sections and imports, behaviour command lines, registry keys, and memory patterns. Lists are capped (50 names, 100 rules and detections, 50 of each behaviour), so one object never creates thousands of nodes.
 
 ## Configuration
 

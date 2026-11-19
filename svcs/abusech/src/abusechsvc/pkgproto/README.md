@@ -42,9 +42,9 @@ service.add slib.abusech tcp://<user>:<passwd>@<host>:27492/*
 |---|---|---|---|
 | `abusech:apikey` | `SYN_ABUSECHSVC_ABUSECH_APIKEY` | none | Fallback Auth-Key, see [Auth-Keys](#auth-keys). |
 | `abusech:ratelimit` | `SYN_ABUSECHSVC_ABUSECH_RATELIMIT` | `5.0` | Max requests/second sent to abuse.ch (0 disables it). |
-| `abusech:timeout` | `SYN_ABUSECHSVC_ABUSECH_TIMEOUT` | `120` | Seconds before a single request times out. |
+| `abusech:timeout` | `SYN_ABUSECHSVC_ABUSECH_TIMEOUT` | `120` | Seconds before a single request times out. For the streamed downloads (the exports, `--bulk` pulls, and the YARAhub rule export) it's the connect and per-read timeout instead, with no total timeout. |
 | `abusech:maxsize` | `SYN_ABUSECHSVC_ABUSECH_MAXSIZE` | `67108864` | Max bytes of a file downloaded from or submitted to abuse.ch, of any response or dataset read into memory, and of anything unzipped (each file, and all of a zip's files together). |
-| `abusech:bulk:maxsize` | `SYN_ABUSECHSVC_ABUSECH_BULK_MAXSIZE` | `17179869184` | Max bytes of an export streamed to disk: a bulk import's staged copy, and the CSV exports the export commands read without `--bulk`. |
+| `abusech:bulk:maxsize` | `SYN_ABUSECHSVC_ABUSECH_BULK_MAXSIZE` | `17179869184` | Max bytes of an export streamed to disk: a bulk import's pull into the Axon and its staged copy, and the CSV exports the export commands read without `--bulk`. |
 | `abusech:bulk:maxjobs` | `SYN_ABUSECHSVC_ABUSECH_BULK_MAXJOBS` | `4` | Max bulk import jobs at once. |
 | `abusech:urls` | `SYN_ABUSECHSVC_ABUSECH_URLS` | abuse.ch's | Override base URLs (`bazaar`, `bazaar:export`, `urlhaus`, `urlhaus:submit`, `urlhaus:export`, `threatfox`, `threatfox:export`, `yaraify`, `yaraify:export`, `hunting`, `feodo`, `sslbl`). |
 
@@ -193,7 +193,7 @@ Every pull is recorded in the `slib:abusech:datasets` global, keyed `<platform>:
 - **Full exports** (`full`, `payloads`) reuse their last pull by default, so a service update can
   rebuild the same data without pulling it again. `--repull` pulls a new one. When the reused pull
   is more than a day old, the command warns that newer data isn't included.
-- **Recent exports** (`recent`, `online`) can only be pulled once an hour, as abuse.ch asks.
+- **Recent exports** (`recent`, and URLhaus's `online`) can only be pulled once an hour, as abuse.ch asks.
   Within the hour, the command warns and stops: `--reuse` imports the last pull again, and
   `--repull` pulls a new one anyway.
 
@@ -212,7 +212,8 @@ existing node with those props first, so one made some other way (ex. by hand) i
 
 A job belongs to the user that started it: only they can stage, build, read, or remove it (the
 service checks both the Telepath user and the Storm user). At most `abusech:bulk:maxjobs` jobs
-run at once, and a job's staged copy can be at most `abusech:bulk:maxsize` bytes.
+run at once, and an export's pull into the Axon and a job's staged copy can each be at most
+`abusech:bulk:maxsize` bytes.
 
 A job's files are removed from the service's storage when the import finishes or fails. Jobs
 left behind by a cancelled import are removed after 6 hours idle, and every job is removed when
@@ -223,8 +224,11 @@ the service restarts. The export and `.nodes` files stay in the Axon.
 abuse.ch's tags, malware families, threat types, and statuses are applied as tags under the
 prefix (default `rep.abusech`), per platform: `#rep.abusech.<platform>.<tag>` where platform is
 `bazaar`, `urlhaus`, `threatfox`, `yaraify`, `feodo`, `sslbl`, or `hunting`. Tags carry the time
-interval abuse.ch saw the node (ex. a URL's first seen to last online). Every node is linked to
-the platform's `meta:source` with a `-(seen)>` edge, and has `.seen` updated from abuse.ch's timestamps.
+interval abuse.ch saw the node (ex. a URL's first seen to last online). Every observable and
+record (files, URLs, hosts, servers, IOCs, rules, matches, scans, certificates, families, DNS
+records, etc.) is linked to the platform's `meta:source` with a `-(seen)>` edge, and has `.seen`
+updated from abuse.ch's timestamps. Supporting nodes (`meta:note`, `ps:contact`, `inet:passwd`,
+`inet:asn`, and the reporter's `inet:service:platform` and `inet:service:account`) aren't.
 
 | abuse.ch data | Synapse |
 |---|---|
@@ -236,7 +240,7 @@ the platform's `meta:source` with a `-(seen)>` edge, and has `.seen` updated fro
 | ClamAV, vendor intel, VirusTotal | `it:av:scan:result` (`:scanner:name`, `:signame`, `:verdict`, `:time`, `:categories`, `:multi:count`, `:multi:count:malicious`), report links as `inet:url -(about)> file:bytes`. Each vendor (ANY.RUN, CAPE, CERT-PL MWDB, DocGuard, FileScan.IO, Intezer, Kaspersky, ReversingLabs, Spamhaus HBL, Triage, UnpacMe, YOROI) is read according to its own fields and scales |
 | Extracted malware configs (Triage) | `it:sec:c2:config` (`:file`, `:family`, `:servers` with every C2: a URL C2 as itself, `host:port` as `tcp://host:port`, a bare host as `tcp://host`), the C2 host/server tagged `c2` and the family. The config records the file's C2s, there's no edge from the file to them |
 | File format, architecture, Magika type, OLE flags | Tags, ex. `#rep.abusech.bazaar.format.pe`, `.arch.amd64`, `.magika.pebin`, `.ole.vba_macros`; TrID, OLE details, and olevba findings as `meta:note`s. URLs DocGuard found in a file as `file:bytes -(refs)> inet:url` |
-| YARA rules and matches | `it:app:yara:rule` (`:name`, `:ext:id` YARAhub UUID, `:author`, `:url`, `:text`, `:created`, `:family`), matching and sharing TLP tags, description/license/reference as a `meta:note`; `it:app:yara:match`, including the sample the author wrote the rule for. Matches of non-public rules (masked as "xxx") aren't modeled. `:text` is only available for rules the author shares (TLP:WHITE), and is replaced when the author updates the rule. |
+| YARA rules and matches | `it:app:yara:rule` (`:name`, `:ext:id` YARAhub UUID, `:author`, `:url`, `:text`, `:created`, `:family`), matching and sharing TLP tags, description/license/reference as a `meta:note`; `it:app:yara:match`, including the sample the author wrote the rule for. Matches of non-public rules (masked as "xxx") aren't modeled. `:text` is only available for rules the author shares (TLP:CLEAR, formerly TLP:WHITE), and is replaced when the author updates the rule. |
 | Code signing certificates | `crypto:x509:cert` (`:sha256`/`:sha1` thumbprint, `:serial`, `:subject`, `:issuer`, `:validity:*`), `crypto:x509:signedfile`; CSCB listings tagged `#rep.abusech.bazaar.cscb` with the reason as a `meta:note` |
 | Unpacked/related files | `file:subfile` (YARAify/UnpacMe unpacked files), related samples as `file:bytes -(linked)> file:bytes` (a dropper `-(linked)>` the file it dropped) |
 | Comments, file information, OLE info | `meta:note -(about)>` the node |
@@ -244,7 +248,7 @@ the platform's `meta:source` with a `-(seen)>` edge, and has `.seen` updated fro
 | URLhaus URLs | `inet:url` tagged with the threat, tags, `status.<online/offline>`, `larted` (all with the URL's first seen to last online); reference `inet:url -(about)>`; payloads as `inet:urlfile` |
 | URLhaus hosts | `inet:fqdn`/`inet:ipv4`/`inet:ipv6` tagged with Spamhaus DBL/SURBL listings (ex. `#rep.abusech.urlhaus.spamhaus_dbl.abused_legit_malware`), with the same time as the URL's tags. A `host:port` is modeled as the host |
 | ThreatFox IOCs | The observable (`inet:url`, `inet:fqdn`, `inet:server`, `inet:ipv4/6`, `file:bytes`) tagged with the threat type, family, tags, and `compromised`; the IOC record as an `it:sec:stix:indicator` (`:id`, `:confidence`, STIX `:pattern`, `:description` with the comment, `:labels`, `:created`, `:updated`) `-(detects)>` the observable; the reference as `inet:url -(about)>`; samples as `file:bytes -(uses)>` the observable |
-| Feodo Tracker/SSLBL C2s | `inet:server` and `inet:ipv4` tagged `c2`, the family, and `status.<status>`; `inet:ipv4:asn` (with `inet:asn:name`), `:loc`; hostnames as `inet:dns:a` |
+| Feodo Tracker C2s | `inet:server` and `inet:ipv4`/`inet:ipv6` tagged `c2`, the family, and `status.<status>`; the IP's `:asn` (with `inet:asn:name`) and `:loc`; hostnames as `inet:dns:a`/`inet:dns:aaaa` |
 | SSLBL certificates | `crypto:x509:cert:sha1` tagged `c2` and the family, with the listing reason as a `meta:note` |
 | SSLBL JA3 fingerprints | `hash:md5` tagged `ja3` and the family, with the listing reason as a `meta:note`, and a `meta:note` (`:type=slib.abusech.sslbl.ja3`) saying it's a JA3, since Synapse 2.x has no form for a bare JA3 (`inet:tls:ja3:sample` needs the client) |
 | False positive list | The entry's node tagged `#rep.abusech.hunting.fp` and `.fp.<platform>`, with the removal notes as a `meta:note`. A sample's per-hash rows are merged into one `file:bytes` |
@@ -434,7 +438,7 @@ Layout:
 
 - `src/abusechsvc/client.py` - The HTTP transport shared by every abuse.ch API (Auth-Keys, rate limiting, retries, `query_status` errors, zips).
 - `src/abusechsvc/svc.py` - `AbuseChSvc`, with a method per abuse.ch endpoint and dataset.
-- `src/abusechsvc/api.py` - `AbuseChCellApi`, the Telepath API. Wraps every method in a `TelepathRetn`.
+- `src/abusechsvc/api.py` - `AbuseChCellApi`, the Telepath API. Wraps every method in a `TelepathRetn`. It does no permission checks of its own (the Storm package gates every call), so only give Telepath access to the Cortex.
 - `src/abusechsvc/norm.py` - Flattens abuse.ch's responses into a few shared shapes that are easy to model in Storm.
 - `src/abusechsvc/bulk.py` - `NodeBuilder`, which builds the bulk import nodes.
 - `src/abusechsvc/pkgproto/` - The `slib.abusech` Storm package. Its `README.md` is a copy of this

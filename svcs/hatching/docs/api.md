@@ -37,8 +37,8 @@ $hatching = $lib.import(slib.hatching.lib)
 | `enrich(node, tasks=(false))` | The sample node, or `null` | `findSample($nodeQuery($node))`, then `model()`. |
 | `downloadSample(sample)` | A `file:bytes`, or `null` | Download a file sample into the Axon (warns for a URL sample). |
 | `downloadTaskFile(sample, task, name)` | A `file:bytes`, or `null` | Download a task file (ex. `dump.pcap`) into the Axon. |
-| `downloadArchive(sample, fmt=tar)` | A `file:bytes`, or `null` | Download the `tar` or `zip` archive into the Axon, named `<sample>.<fmt>`. |
-| `downloadPcaps(sample, task=(null), pcapng=(false))` | A list of `file:bytes` | `dump.pcap` (or `dump.pcapng`) of `task`, or of every reported behavioral task in the sample's metadata. |
+| `downloadArchive(sample, fmt=tar)` | A `file:bytes`, or `null` | Download the `tar` or `zip` archive into the Axon, named `<sample ID>.<fmt>` (a hash is resolved to its sample's ID first). |
+| `downloadPcaps(sample, task=(null), pcapng=(false))` | A list of `file:bytes` | `dump.pcap` (or `dump.pcapng`) of `task`, or of every reported behavioral task in the overview report (the service's `sampleTasks`). |
 | `downloadDumped(sample)` | A list of `file:bytes` | Every file dropped during the reported behavioral tasks (`dumpedFiles`). |
 | `submitNode(node, opts)` | A node, the sample's metadata dict, or `null` | Submit a `file:bytes` (from the Axon) or `inet:url`. `opts` is the `slib.hatching.submit` options dict (see below). Requires `slib.hatching.submit` too. |
 | `submitUrl(url, opts)` | A node, the sample's metadata dict, or `null` | Submit a URL. Requires `slib.hatching.submit` too. |
@@ -80,7 +80,6 @@ the observable helpers `ipNode`, `hostNode`, `urlNode`, `emailNode`, `mutexNode`
 | `hashType(valu)` | `md5`, `sha1`, `sha256`, or `sha512` for a hex string of that length, else `null`. |
 | `nodeHash(node)` | The best hash of a `file:bytes` or `hash:*` node, or `null`. |
 | `table(columns, rows)`, `printJson(valu)`, `printSamples(samples)` | Output helpers. |
-| `behavioralTasks(sample)` | The names of the reported `behavioral*` tasks in a sample's metadata. |
 | `basename(path)` | The last part of a Windows or POSIX path. |
 
 ## Telepath API
@@ -114,8 +113,10 @@ in `RETN_METHS` (coroutines) and `GENR_METHS` (async generators), and turns any 
 | `ValueError`, `TypeError`, `BadArg` | `Invalid input: <error>` (ex. `limit="nope"`). |
 | Anything else | `Unexpected error: <type>: <error>`, logged with its traceback by `stormlibpp.svc`. |
 
-A generator that fails yields one `status=False` item and stops. The service doesn't override
-`_retnRedact()`, so messages are returned unredacted.
+A generator that fails yields one `status=False` item and stops. `_retnRedact()` replaces the
+service's own API keys (the stored key and `hatching:apikey`) in every error message with
+`<redacted>`, so they can't reach Storm. A caller's own key (its `apikey` argument) isn't
+redacted.
 
 ### Arguments
 
@@ -144,7 +145,7 @@ so `data` has the Triage API's own field names.
 | `sample(sample, apikey=None)` | sample dict | `GET /v0/samples/{id}` |
 | `summary(sample, apikey=None)` | dict | `GET /v0/samples/{id}/summary` |
 | `deleteSample(sample, apikey=None)` | `true` | `DELETE /v0/samples/{id}` |
-| `setProfile(sample, profiles=None, auto=False, pick=None, apikey=None)` | `true` | `POST /v0/samples/{id}/profile`. `profiles` items are a name, `"profile:pick"`, or a `{profile, pick}` dict. `pick` without `profiles` sets `auto`. Fails with `Pick at least one profile, a file to analyze, or auto.` when given none. |
+| `setProfile(sample, profiles=None, auto=False, pick=None, apikey=None)` | `true` | `POST /v0/samples/{id}/profile`. `profiles` items are a name, `"profile:pick"`, or a `{profile, pick}` dict. `pick` without `profiles` sets `auto`. Fails with `Pick at least one profile, a file to analyze, or auto.` when given none, and with `Profiles can't be combined with auto or pick: ...` when given `profiles` and `auto` or `pick` (the API takes either profiles, or `auto` with the files to `pick`). |
 | `magicLink(sample, apikey=None)` | str | `GET /v0/samples/{id}/magic`, returned as `<hatching:url>/<id>/magic/<token>`. |
 | `submitUrl(url, fetch=False, interactive=False, profiles=None, tags=None, timeout=None, network=None, geolocation=None, apikey=None)` | sample dict | `POST /v0/samples`, kind `url` (or `fetch`). |
 | `importSample(sample, apikey=None)` | sample dict | `POST /v0/samples`, kind `import`, with `url` set to the public sample's ID or URL. |
@@ -194,6 +195,7 @@ sandbox picks the profiles), `tags` as `user_tags`, and `name` as `target`.
 | `urlscanReport(sample, task="urlscan1", apikey=None)` | dict | `GET /v0/samples/{id}/{task}/report_urlscan.json` |
 | `normSample(sample, tasks=False, apikey=None)` | dict | The sample's reports normalized for modeling, see [normSample](#normsample). |
 | `dumpedFiles(sample, apikey=None)` | `{"files": [...], "errors": [...]}` | The downloadable files dropped in each reported behavioral task. |
+| `sampleTasks(sample, apikey=None)` | `{"id": str, "tasks": [str]}` | The sample's ID and the names of its reported behavioral tasks, from its overview report (the tasks `normSample`, `dumpedFiles`, and `download --pcap` use). |
 
 A `task` is a task name like `behavioral1`; a full task ID (`<sample>-behavioral1`) works too.
 

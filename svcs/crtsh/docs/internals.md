@@ -42,7 +42,10 @@ svcs/crtsh/
 `CrtshCellApi(RetnApi, s_cell.CellApi, s_stormsvc.StormSvc)` declares `RETN_METHS`,
 `GENR_METHS`, `RETN_ERRORS = (CrtshDbError,)`, and the StormSvc attributes
 (`_storm_svc_name`, `_storm_svc_vers` from `normver(SVC_VER)`, `_storm_svc_evts`,
-`_storm_svc_pkgs`). It has no hand-written methods and doesn't override `_retnRedact`. See
+`_storm_svc_pkgs`). Its one hand-written method is `rawQuery`, which caps the limit
+(`CrtshSvc._limit`), calls the cell's `rawQuery`, and returns the rows with a `mesg` that counts
+them and says when they're the limit. `_retnRedact` replaces every password `db.dsnSecrets()`
+finds in `crtsh:dsn` (as written and percent-decoded, longest first) with `<redacted>`. See
 [Telepath API](api.md#telepath-api).
 
 ### svc.py
@@ -64,7 +67,9 @@ Input handling (module-level helpers):
 - `identityQuery(field, valu, exact)` returns `(text, like)` for `certsByIdentity`: the full
   text search text and the `ILIKE` pattern (see
   [Searches](database.md#searches-certsbyidentity)). It drops DN attribute names for
-  `subject`, rewrites IPs into crt.sh's form, and strips a leading `*.`/`.` from domains.
+  `subject`, rewrites IPs into crt.sh's form, and strips a leading `*.`/`.` from domains,
+  except for an exact search, whose pattern is the whole value (crt.sh holds a wildcard
+  identity like `*.vertex.link` as-is).
 - `isPrefix`, `normDomain`, `normIp`, `toInt`, `toCaids`, `toMillis`, and `toExpires` validate
   arguments from Storm and raise `CrtshDbError` with a user-facing message. `bool` is refused as
   an int.
@@ -159,7 +164,8 @@ The only background task is the keepalive loop (see [The connection](database.md
   traceback and returned as `Unexpected error: ...`.
 - In Storm, `slib.crtsh.util.failed()` turns `status=False` into a `slib.crtsh: <what> failed:
   <mesg>` warning, and the `slib.crtsh.lib` functions stop.
-- There's no secret redaction. The default DSN has no password.
+- `CrtshCellApi._retnRedact` removes the DSN's password from every error message. The default
+  DSN has no password.
 
 ## Storm package internals
 

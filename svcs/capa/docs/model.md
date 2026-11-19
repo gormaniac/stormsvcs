@@ -8,7 +8,8 @@ service builds in {src}`svcs/capa/src/capasvc/rules.py` and
 ## Overview
 
 ```text
-meta:source (slib.capa) -(seen)-> meta:rule, meta:ruleset, ou:technique (MBC), file:bytes
+meta:source (slib.capa) -(seen)-> meta:rule, meta:ruleset, it:mitre:attack:technique,
+                                  ou:technique (MBC), ps:contact (authors), file:bytes
 
 meta:ruleset (capa-rules <version>) -(has)-> meta:rule
 meta:rule :author -> ps:contact
@@ -42,9 +43,13 @@ When the service is added, its `add` event runs:
 ```
 
 The package's `seen()` helper creates the same node (with only `:name=capa`) if it doesn't
-exist, and adds `meta:source -(seen)> <node>` to the `meta:rule`, `meta:ruleset`, MBC
-`ou:technique` and scanned `file:bytes` nodes it writes. ATT&CK techniques, contacts and tags
-are not linked.
+exist, and adds `meta:source -(seen)> <node>` to the `meta:rule`, `meta:ruleset`,
+`it:mitre:attack:technique`, MBC `ou:technique`, author `ps:contact` and scanned `file:bytes`
+nodes it writes. The namespace `syn:tag` nodes aren't linked: a tag's node is shared by every
+node with the tag, and the package only documents it.
+
+The ATT&CK techniques and contacts are linked since 0.7.0 (model version 3), so the first
+package load after an upgrade imports the rules again to add the edges.
 
 ## Rules
 
@@ -115,8 +120,8 @@ Each `att&ck` entry whose text ends with a bracketed technique ID (regex
 | `Execution::Command and Scripting Interpreter [T1059]` | `it:mitre:attack:technique=T1059` |
 | `Execution::Command and Scripting Interpreter::PowerShell [T1059.001]` | `it:mitre:attack:technique=T1059.001` |
 
-Only the primary value is set. Entries without an ID are left out of the edges (they're still
-in `:desc`).
+Only the primary value is set, and the node is `-(seen)>` by the `meta:source`. Entries
+without an ID are left out of the edges (they're still in `:desc`).
 
 ### MBC behaviors
 
@@ -146,6 +151,8 @@ Example: `Anti-Behavioral Analysis::Debugger Detection::Software Breakpoints [B0
 | An `@handle` (`^@([^@\s]+)$`) | `{"user": <handle without @>}` | `@visi` is `:user=visi` |
 | Anything else | `{"name": <author>}` | `Jane Doe` is `:name="jane doe"` |
 
+The contact is `-(seen)>` by the `meta:source`.
+
 Versions before 0.5.0 made `@handle` authors `{"name": "@handle"}`. See
 [`slib.capa.admin.contacts.migrate`](commands.md#slibcapaadmincontactsmigrate).
 
@@ -162,12 +169,16 @@ Each version of the rules is a `meta:ruleset` that `-(has)>` every rule imported
 | node data `slib:capa` | `{"version", "sha256", "capa", "rules", "lib", "namespaces"}` from the rules info |
 
 The ruleset guid only depends on the version. Rules loaded from another directory with the same
-`capa:rules:version` go into the same ruleset.
+`capa:rules:version` go into the same ruleset. Each import that completes removes the ruleset's
+`-(has)>` edges to capa rules (`meta:rule +:type^=capa.`) that aren't in the service's rules
+anymore (ex. a rule file was deleted), so the ruleset only has the current rules. The removed
+rules keep their `meta:rule` node (and its `-(matches)>` edges until the files are scanned
+again). Its edges to other nodes are left alone.
 
 ### When rules are imported
 
 The import is keyed by the rules' **sync key**, `guid((<rules sha256>, <capa:rules:version>,
-<capa:rules:url>, MODEL_VERSION))` (`MODEL_VERSION = 2`). The last imported key is the Cortex
+<capa:rules:url>, MODEL_VERSION))` (`MODEL_VERSION = 3`). The last imported key is the Cortex
 global `slib:capa:sync:rules`. The import runs when the key differs (or the ruleset node is
 missing), or with `slib.capa.admin.sync --force`. Each import sets every prop again, so
 edits to imported rule nodes are overwritten by the next import.

@@ -643,6 +643,14 @@ class TestStormUrlhaus(s_tests.SynTest):
             msgs = await core.stormlist("[ ou:org=* ] | slib.abusech.urlhaus.lookup")
             self.stormIsInWarn("is not supported", msgs)
 
+            # URLhaus doesn't support IPv6 hosts: an inet:ipv6 is warned about without a request.
+            nreqs = len(fake.requests)
+            msgs = await core.stormlist("[ inet:ipv6=2001:db8::2 ] | slib.abusech.urlhaus.lookup")
+            self.stormIsInWarn("The node form inet:ipv6 is not supported", msgs)
+            assert len(fake.requests) == nreqs
+            msgs = await core.stormlist("slib.abusech.urlhaus.lookup --host 2001:db8::2")
+            self.stormIsInWarn("only support FQDNs and IPv4 addresses", msgs)
+
     async def test_search(self):
         async with abusechSvc(self) as (core, svc, fake):
             msgs = await core.stormlist("slib.abusech.urlhaus.search tag Mozi")
@@ -1309,6 +1317,17 @@ class TestStormPerms(s_tests.SynTest):
             msgs = await core.stormlist("$lib.print($lib.service.get(slib.abusech))", opts=opts)
             self.stormIsInErr("permission", msgs)
 
+            # Importing the user API needs slib.abusech.user (via its priv module), and the
+            # family merge module needs slib.abusech.admin.
+            msgs = await core.stormlist("$lib.import(slib.abusech.families)", opts=opts)
+            self.stormIsInErr("requires the slib.abusech.admin permission", msgs)
+            await user.addRule((True, ("slib", "abusech", "admin")))
+            msgs = await core.stormlist("$lib.import(slib.abusech.families)", opts=opts)
+            self.stormHasNoErr(msgs)
+            other = await core.auth.addUser("nobody")
+            msgs = await core.stormlist("$lib.import(slib.abusech.lib)", opts={"user": other.iden})
+            self.stormIsInErr("permission", msgs)
+
 
 class TestStormAudit(s_tests.SynTest):
     """Endpoints and behaviors added after auditing the service against abuse.ch's docs and live APIs."""
@@ -1352,7 +1371,7 @@ class TestStormAudit(s_tests.SynTest):
             assert fake.last("/yaraify")["json"] == {"query": "list_tasks", "identifier": "ident"}
 
             msgs = await core.stormlist("[ inet:ipv6=2001:db8::1 ] | slib.abusech.urlhaus.lookup")
-            self.stormIsInWarn("only support FQDNs and IPv4", msgs)
+            self.stormIsInWarn("The node form inet:ipv6 is not supported", msgs)
 
             # Submitting a file only known by its SHA1.
             await core.nodes(

@@ -12,25 +12,35 @@ no tag prefixes to configure.
 | `file:bytes` | primary value, `:sha256` | `:sha256` is the key used to pull the bytes from the Axon. The primary value becomes the match's `:file`. |
 
 The whole rule node is sent to the service with `$node.pack()`; the service only uses the form,
-the primary value and `props["text"]`. Other `it:app:yara:rule` props (`:name`, `:author`,
-`:version`, `:family`, ...) aren't used.
+the primary value and `props["text"]`. `slib.yara.scan` reads the rule's `:version` in the Cortex
+for the match. Other `it:app:yara:rule` props (`:name`, `:author`, `:family`, ...) aren't
+used.
 
 ## Forms and props written
 
 | Node | Written by | Props / edges |
 | --- | --- | --- |
 | `it:app:yara:rule` | `slib.yara.enable`, `slib.yara.disable` | `:enabled=(true)` after a successful compile, `:enabled=(false)` after a successful removal |
-| `it:app:yara:match=(<rule>, <file>)` | `slib.yara.scan` | `:rule` and `:file` (comp fields, read-only), `.seen=now` |
+| `it:app:yara:match=(<rule>, <file>)` | `slib.yara.scan` | `:rule` and `:file` (comp fields, read-only), `.seen=now`, `:version` (the rule's `:version`, when it has one) |
 | `meta:source=12bc0c8c1a37a29808d97972875d3913` | service `add` event, `slib.yara.scan` | `:name=slib.yara` |
 | edge `meta:source -(seen)> it:app:yara:match` | `slib.yara.scan` | one per match node |
 
-`it:app:yara:match` is a `comp` of `(rule: it:app:yara:rule, file: file:bytes)`. Its
-`:version` prop is never set. The Storm that writes it ({src}`svcs/yarastorm/src/yarastorm/pkgproto/storm/modules/slib.yara.ingest.storm`):
+`it:app:yara:match` is a `comp` of `(rule: it:app:yara:rule, file: file:bytes)`. Its `:version`
+("the most recent version of the rule evaluated as a match") is set to the rule node's
+`:version` at scan time, and left unset for a rule without one. The service doesn't know which
+version of the rule it compiled, so this is only accurate if the rule was enabled or synced after
+its last `:text` change. The Storm that writes it
+({src}`svcs/yarastorm/src/yarastorm/pkgproto/storm/modules/slib.yara.ingest.storm`):
 
 ```text
+$vers = $ruleVersion($rule)
 [ it:app:yara:match=($rule, $file) .seen=now ]
+if ($vers != $lib.null) { [ :version=$vers ] }
 [ <(seen)+ { [ meta:source=$srcguid :name=slib.yara ] } ]
 ```
+
+Matching is per `it:app:yara:rule` node: a node whose `:text` holds several Yara `rule` blocks
+gets one match if any of them matches. Which Yara rule names or strings matched isn't recorded.
 
 ## Mapping from scan results
 
@@ -46,6 +56,7 @@ the primary value and `props["text"]`. Other `it:app:yara:rule` props (`:name`, 
 | --- | --- |
 | `$node.repr()` of the scanned `file:bytes` | `it:app:yara:match:file` |
 | scan time | `.seen` (an interval; repeated scans extend it) |
+| the rule's `:version` | `it:app:yara:match:version` (each scan sets it again) |
 
 ## Meta source
 

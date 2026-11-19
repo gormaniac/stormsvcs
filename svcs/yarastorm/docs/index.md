@@ -30,7 +30,8 @@ to send to the service and how to model the results.
   (`slib.yara.sync`).
 - Scan `file:bytes` nodes, by `:sha256`, with every compiled rule, and create an
   `it:app:yara:match` node for each matching rule (`slib.yara.scan`).
-- An optional per-file size limit (`max_size`) for what the service pulls from the Axon.
+- An optional per-file size limit (`max_size`) for what the service pulls from the Axon, and a
+  per-rule scan timeout (`scan_timeout`). Scans run off the event loop, in a worker thread.
 - A `slib.yara.admin` permission gating every command that changes the rule set, enforced in
   the Cortex (Storm) and again in the service (Telepath).
 

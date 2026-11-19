@@ -6,7 +6,7 @@ The package has no public Storm library API. Its modules exist to serve its comm
 
 | Module | Privilege | Contents |
 | --- | --- | --- |
-| `slib.malpedia.priv.user` | `asroot`, for holders of `slib.malpedia.user` | `status()`, `find(kind, needle)`, `record(kind, key)`, which wrap the service calls. They return the raw `TelepathRetn`. |
+| `slib.malpedia.priv.user` | `asroot`, for holders of `slib.malpedia.user` | `status()` and `find(kind, needle)`, which wrap the service calls. They return the raw `TelepathRetn`. |
 | `slib.malpedia.priv.sync` | `asroot`, for `slib.malpedia.sync` | `refreshLimit()`, `reqEdit(name)`, `pull(force=false)`, `sync(force=false, full=false, pull=true, progress=false)`, `refresh(actors, families, nolimit=false)`. |
 | `slib.malpedia.priv.admin` | `asroot`, for `slib.malpedia.admin` | `cron()`, `schedule(period)`, `enable(enabled=true)`, `unschedule()`, `autoSchedule()`, `tagSettings()`, `setTagPrefix(name, prefix)`, `resetView()`. |
 | `slib.malpedia.model` | none | The modeling functions, see [Data model](model.md). |
@@ -141,7 +141,14 @@ view's new sync info:
 
 #### resetView(view)
 
-Delete the view's per-record state and its sync info. `data` is `true`.
+Mark every record the view synced as unsynced, and forget its sync time and version. `data`
+is `true`.
+
+The view's version of each record stays stored, with its hash cleared, so the next
+`changes()` sends every record again (as `new: false`, with the usual `drop` diff), and still
+sends the ones Malpedia removed since as `removed`. The tag prefixes the view last synced with
+(`tags`) are kept, so `viewInfo()` returns `{"tags": ...}` afterwards, or `{}` if there were
+none. `status(view)` doesn't count the unsynced records.
 
 #### status(view=None)
 
@@ -161,12 +168,7 @@ Delete the view's per-record state and its sync info. `data` is `true`.
 
 Times are epoch milliseconds. `requests` is the running total of requests sent by successful
 pulls. With a `view`, `view` holds that view's sync info plus a `counts` dict of the records it
-has synced.
-
-#### record(kind, key)
-
-A record from the snapshot, or `null`. A `news` record can be looked up by its 64-hex key or by
-its URL.
+has synced (not counting the ones a reset marked unsynced).
 
 #### find(kind, needle)
 

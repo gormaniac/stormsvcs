@@ -25,8 +25,11 @@ and generators yield one per item, ending after a single `status=False` item on 
   `stormlibpp.svc.SvcError`, so their message is returned as-is. `AuthDeny` also keeps its
   message. `ValueError`, `TypeError` and `BadArg` return `Invalid input: <error>`. Anything else
   is logged with its traceback and returned as `Unexpected error: <type>: <error>`.
-- `_retnRedact()` isn't overridden. Feed errors are redacted by the service itself before they
-  are raised (see [Rules and feeds](rules.md#secrets-in-feed-urls)).
+- `_retnRedact()` replaces every `pcap:feeds:secrets` value (and its URL-quoted form) in every
+  error message with its `${name}` placeholder (`pcapsvc.feeds.redact`), so an unexpected error
+  carrying a feed URL with its secrets filled in (ex. from aiohttp) doesn't reach Storm. Feed
+  errors are also redacted by the service itself before they are saved and raised (see
+  [Rules and feeds](rules.md#secrets-in-feed-urls)).
 - `flows`, `checkNetVars` and `checkDecodeAs` are written by hand and build their own
   `TelepathRetn`s, `RetnApi` still guards them so they never raise.
 
@@ -246,7 +249,7 @@ the given SHA-256 (`The <name> feed was downloaded again during the sync.`).
 | `slib.pcap.model` | | Node edits (`flow`, `hit`, `cert`, `rule`, `ruleRefs`, `fileNode`, ...), see [Data model](model.md). |
 | `slib.pcap.util` | | `failed`, `data`, `table`, `when`, `printBuild`, `warnNoAxon`, `warnAll`. |
 | `slib.pcap.priv.user` | `asroot` with `slib.pcap.user` | Service wrappers for users, Axon streaming, the globals. |
-| `slib.pcap.priv.rules` | `asroot` with `slib.pcap.rules` | `rulesView()`, `update(rules, dels)`. |
+| `slib.pcap.priv.rules` | `asroot` with `slib.pcap.rules` | `rulesView()`, `denied()` (why this view can't change the rules, or null), `update(rules, dels)`. |
 | `slib.pcap.priv.sync` | `asroot` with `slib.pcap.sync` | `feeds()`, `syncFeed(feed, force)`, `push(force)`. |
 | `slib.pcap.priv.admin` | `asroot` with `slib.pcap.admin` | Feed admin, `schedule(period)`, `enable(enabled)`, the vars and decode globals. |
 

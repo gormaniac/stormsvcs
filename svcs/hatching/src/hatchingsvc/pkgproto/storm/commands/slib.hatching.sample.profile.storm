@@ -2,6 +2,11 @@ init {
     $psub = $lib.import(slib.hatching.priv.submit)
     $util = $lib.import(slib.hatching.util)
 
+    // The API takes either profiles, or auto (with files to pick), and ignores the other.
+    if ($cmdopts.profile and ($cmdopts.auto or $cmdopts.pick)) {
+        $lib.raise(BadArg, 'slib.hatching.sample.profile: --profile cannot be used with --auto or --pick, use --profile "profile:file" to run a file with a profile.')
+    }
+
     if ((not $cmdopts.auto) and (not $cmdopts.profile) and (not $cmdopts.pick)) {
         $lib.warn("slib.hatching.sample.profile: Use --profile or --pick at least once, or --auto.")
     }

@@ -150,7 +150,7 @@ There are two timeouts:
 | Error | What happens |
 | --- | --- |
 | `QueryCanceledError` (57014) whose message has "statement timeout" | Retried after 5s, up to `crtsh:timeout:retries` (1) times, logged as a warning (a heavy query can time out on crt.sh's cold cache and finish when rerun). Then `crt.sh canceled the query (statement timeout) after <n>s, try a narrower search: <error>`. |
-| `QueryCanceledError` for another reason (ex. "canceling statement due to user request") | Not retried, raised with the same message. |
+| `QueryCanceledError` for another reason (ex. "canceling statement due to user request") | Not retried, raised as `crt.sh canceled the query after <n>s: <error>`. |
 | Client-side `TimeoutError` | The connection is mid-query, so it's dropped. Raised as `crt.sh query timed out after <crtsh:timeout>s.` |
 | `SerializationError` (the replica canceled the query to apply replication) | Retried on the same connection. |
 | A connection error (`ConnectionDoesNotExistError`, `InterfaceError`, `ConnectionError`, `OSError`) or a message from the reconnect/backoff lists above | The connection is dropped and the query retried on a new one. |
@@ -253,7 +253,7 @@ The name types (as crt.sh's own `web_apis` uses them):
 
 | Field | `NAME_TYPE`s | `ILIKE` pattern |
 | --- | --- | --- |
-| `dns` | `san:dNSName`, `2.5.4.3` | `%<domain>` (just `<domain>` with `--exact`) |
+| `dns` | `san:dNSName`, `2.5.4.3` | `%<domain>` (a leading `*.`/`.` removed), or the whole value with `--exact` (a wildcard name like `*.vertex.link` included) |
 | `cn` | `2.5.4.3` | `%<value>%` |
 | `org` | `2.5.4.10` | `%<value>%` |
 | `ou` | `2.5.4.11` | `%<value>%` |

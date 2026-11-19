@@ -368,7 +368,11 @@ class AbuseChSvc(s_cell.Cell):
         "abusech:timeout": {
             "type": "number",
             "default": 120,
-            "description": "Timeout, in seconds, for a single abuse.ch request.",
+            "description": (
+                "Timeout, in seconds, for a single abuse.ch request. Streamed downloads (the "
+                "exports, --bulk pulls, and the YARAhub rule export) use it as the connect and "
+                "per-read timeout instead, with no total timeout."
+            ),
         },
         "abusech:maxsize": {
             "type": "integer",
@@ -382,8 +386,9 @@ class AbuseChSvc(s_cell.Cell):
             "type": "integer",
             "default": BULK_MAX_SIZE,
             "description": (
-                "The max size, in bytes, of an export streamed to disk: a bulk import's staged "
-                "copy, and the CSV exports the export commands read without --bulk."
+                "The max size, in bytes, of an export streamed to disk: a bulk import's pull "
+                "into the Axon and its staged copy, and the CSV exports the export commands "
+                "read without --bulk."
             ),
         },
         "abusech:bulk:maxjobs": {
@@ -1363,8 +1368,8 @@ class AbuseChSvc(s_cell.Cell):
     async def _ruleText(self, rules: list[dict], apikey: str | None = None) -> list[dict]:
         """Fill in the text of rules listed without it, by downloading each one (``get_yara_rule``).
 
-        Only rules whose author shares them (TLP:WHITE) can be downloaded, the
-        rest keep their metadata only.
+        Only rules whose author shares them (TLP:CLEAR, formerly TLP:WHITE) can be downloaded,
+        the rest keep their metadata only.
         """
 
         for rule in rules:
@@ -1730,10 +1735,20 @@ class AbuseChSvc(s_cell.Cell):
     ) -> AsyncIterator[bytes]:
         """
         Stream an export's raw bytes (as abuse.ch serves them, zipped or not), to save in an Axon.
+
+        The download stops with an error once it's larger than ``abusech:bulk:maxsize`` (the
+        most ``bulkStage`` would accept), before the chunk that crosses it is yielded.
         """
 
         base, path = self._bulkExport(plat, kind)
+        size = 0
         async for byts in self.client.stream(base, path, apikey=self.getApiKey(apikey)):
+            size += len(byts)
+            if size > self.bulkmaxsize:
+                raise AbuseChApiError(
+                    f"The {plat} {kind} export is larger than the max of {self.bulkmaxsize} "
+                    "bytes (abusech:bulk:maxsize)."
+                )
             yield byts
 
     async def bulkStart(self, plat: str, kind: str, sha256: str, owner: str | None = None) -> str:

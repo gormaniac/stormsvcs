@@ -249,7 +249,6 @@ The package declares two permissions, both gated on the Cortex:
 ```text
 auth.user.addrule analyst slib.capa.user
 auth.user.addrule capaadmin slib.capa.admin
-auth.user.addrule capaadmin slib.capa.user
 ```
 
 :::{important}
@@ -262,9 +261,10 @@ in unprivileged modules, as the calling user. So:
   rule isn't imported yet), setting their props, `-(matches)>`, `-(refs)>` and `-(seen)>` edges,
   tags under the prefix (and removing them), and node data on `file:bytes`. The tests grant
   `node`.
-- `slib.capa.admin.sync` and `slib.capa.admin.tags` import `slib.capa.priv.user`, which requires
-  `slib.capa.user`. Grant admins both permissions, plus node permissions for the rule import
-  (`meta:rule`, `meta:ruleset`, `syn:tag` and the nodes above).
+- The admin commands only use `slib.capa.priv.admin`, so `slib.capa.admin` is enough for them
+  (it doesn't allow scanning, that needs `slib.capa.user`). Admins also need node permissions
+  for the rule import (`meta:rule`, `meta:ruleset`, `syn:tag`, and the `-(has)>` edges it adds
+  and removes) and the contact migration.
 :::
 
 ## Upgrades
@@ -273,7 +273,7 @@ in unprivileged modules, as the calling user. So:
    empties `capa/work/` and `capa/custom/` at startup.
 2. When the service reconnects, the Cortex loads the new Storm package and its `onload`
    re-imports the rules if their sync key changed. The key is a guid of the rules' SHA256,
-   `capa:rules:version`, `capa:rules:url` and the service's model version (`MODEL_VERSION = 2`),
+   `capa:rules:version`, `capa:rules:url` and the service's model version (`MODEL_VERSION = 3`),
    so a new rules release or a change in what the package models from a rule triggers it.
 3. Upgrading from 0.4.x imports the rules again (model version 2 added the MBC behaviors and
    the `@handle` `:user` contacts). Run

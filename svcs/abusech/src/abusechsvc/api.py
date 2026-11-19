@@ -26,7 +26,8 @@ class AbuseChCellApi(RetnApi, s_cell.CellApi, s_stormsvc.StormSvc):
     RETN_METHS = (
         "rawRequest",
         "maxSize",
-        # Bulk imports (bulkStart, bulkStage, and bulkDone are hand-written below)
+        # Bulk imports (bulkStart, bulkStage, bulkBuild, bulkNodes, and bulkDone are hand-written
+        # below)
         "bulkExports",
         # MalwareBazaar
         "bazaarQuery",

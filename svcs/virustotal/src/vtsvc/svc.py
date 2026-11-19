@@ -12,7 +12,7 @@ unless ``vt:community`` is false.
 import asyncio
 import logging
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import aiohttp
 import synapse.lib.cell as s_cell
@@ -32,8 +32,9 @@ COLLECTIONS = {
     "ip_address": "ip_addresses",
 }
 
-# The relationships of each collection that a Public API key can read. Others (ex. a file's
-# execution_parents) need a premium key. With vt:community false, every relationship is allowed.
+# The relationships of each collection that a Public API key can read: the ones VirusTotal's docs
+# mark as available to "Everyone". Others (ex. a file's itw_urls or similar_files, a URL's
+# downloaded_files) need a premium (VT Enterprise) key. With vt:community false, every relationship is allowed.
 PUBLIC_RELS = {
     "files": (
         "comments", "votes", "graphs", "collections", "behaviours", "bundled_files",
@@ -218,6 +219,24 @@ class VtSvc(s_cell.Cell):
     async def hasApiKey(self) -> bool:
         return bool(self.getApiKey())
 
+    async def apiKeySource(self) -> str | None:
+        """Which service-wide key is in use: "stored" (slib.vt.admin.apikey), "config"
+        (vt:apikey), or None."""
+
+        if self.vtinfo.get("apikey"):
+            return "stored"
+        if self.conf.get("vt:apikey"):
+            return "config"
+        return None
+
+    def redact(self, mesg: str) -> str:
+        """Scrub the service's stored and configured API keys from a message."""
+
+        for key in (self.vtinfo.get("apikey"), self.conf.get("vt:apikey")):
+            if key:
+                mesg = mesg.replace(key, "<redacted>").replace(_seg(key), "<redacted>")
+        return mesg
+
     async def _api(self, method: str, path: str, apikey=None, cache: bool = False, **kwargs):
         return await self.client.request(
             method, path, apikey=self.getApiKey(apikey), cache=cache, **kwargs
@@ -234,9 +253,19 @@ class VtSvc(s_cell.Cell):
     ):
         """Send an arbitrary request to the VirusTotal API. An escape hatch for new endpoints.
 
-        It's still rate limited like every other request.
+        ``path`` is relative to ``vt:url``. A full ``http(s)://`` URL is only accepted if it's on
+        the ``vt:url`` host (and scheme), so the API key is never sent anywhere else. It's still
+        rate limited like every other request.
         """
 
+        have = urlsplit(path)
+        if have.scheme or have.netloc:
+            want = urlsplit(self.client.url)
+            if (have.scheme.lower(), have.netloc.lower()) != (want.scheme, want.netloc.lower()):
+                raise VtSvcError(
+                    f"Only requests to the VirusTotal API ({want.scheme}://{want.netloc}) are "
+                    "allowed, use a path like /files/<sha256>."
+                )
         return await self._api(
             method, path, apikey=apikey, params=params, json_data=json_data, form=form
         )
@@ -297,10 +326,13 @@ class VtSvc(s_cell.Cell):
             return None
         return norm.normObject((data or {}).get("data") or {}, malicious=self.malicious)
 
-    def rels(self, coll: str) -> tuple:
-        """The relationships of a collection the service allows."""
-
+    def _rels(self, coll: str) -> tuple:
         return PUBLIC_RELS.get(self._coll(coll), ())
+
+    async def rels(self, coll: str) -> list:
+        """The relationships of a collection a Public API key can read (``PUBLIC_RELS``)."""
+
+        return list(self._rels(coll))
 
     async def getRelated(
         self,
@@ -315,10 +347,10 @@ class VtSvc(s_cell.Cell):
         """GET /{collection}/{id}/{relationship} - one page of related objects."""
 
         coll = self._coll(kind)
-        if self.community and rel not in self.rels(coll):
+        if self.community and rel not in self._rels(coll):
             raise VtSvcError(
                 f"The {rel} relationship of {coll} isn't available to VirusTotal Public API "
-                f"keys. Available: {', '.join(self.rels(coll))}."
+                f"keys. Available: {', '.join(self._rels(coll))}."
             )
         limit = max(1, min(int(limit), MAX_PAGE))
         path = f"/{coll}/{_seg(self._ident(kind, ident))}/{_seg(rel)}"
@@ -465,7 +497,7 @@ class VtSvc(s_cell.Cell):
         )
 
     async def waitAnalysis(
-        self, ident: str, timeout: float = 600, interval: float = 60, apikey=None
+        self, ident: str, timeout: float = 600, interval: float = 30, apikey=None
     ) -> dict:
         """Poll an analysis until it completes or ``timeout`` seconds pass.
 

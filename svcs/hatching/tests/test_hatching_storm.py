@@ -291,6 +291,18 @@ class TestStormEnrich(s_tests.SynTest):
                 and proc.get("sandbox:file") == f"sha256:{zipsha}"
             )
 
+        async with hatchingSvc(self) as (core, svc, fake):
+            # A member the task ran, that the overview doesn't list, is still linked to the source.
+            overview["targets"] = []
+            fake.overviews[SID] = overview
+            del fake.statics[SID]
+            msgs = await core.stormlist(f"slib.hatching.enrich --sample {SID} --tasks")
+            self.stormHasNoWarnErr(msgs)
+            assert await core.count(f"file:subfile:parent=sha256:{zipsha}") == 0
+            (proc,) = await core.nodes("it:exec:proc:pid=2044")
+            assert proc.get("exe") == f"sha256:{ft.SAMPLE_SHA256}"
+            assert await core.count(f"meta:source={SOURCE_GUID} -(seen)> {SAMPLE}") == 1
+
     async def test_enrich_nodes(self):
         async with hatchingSvc(self) as (core, svc, fake):
             # By file:bytes, hash, and URL.
@@ -522,13 +534,24 @@ class TestStormSamples(s_tests.SynTest):
                 and node.get("mime") == "application/vnd.tcpdump.pcap"
             )
 
-            # Failed tasks have no pcap to download.
-            fake.samples[SID]["tasks"][1]["status"] = "failed"
+            # Failed tasks have no pcap to download. The tasks come from the overview report
+            # (like --dumped and modeling), not the sample's metadata.
+            fake.overviews[SID]["tasks"][1]["status"] = "failed"
             count = len(fake.requests)
             msgs = await core.stormlist(f"slib.hatching.download --sample {SID} --pcap --yield")
             self.stormHasNoWarnErr(msgs)
             assert yielded(msgs) == [] and not any(
                 r["path"].endswith("dump.pcap") for r in fake.requests[count:]
+            )
+            fake.overviews[SID]["tasks"][1]["status"] = "reported"
+            fake.samples[SID]["tasks"][1]["status"] = "failed"
+            msgs = await core.stormlist(
+                f"slib.hatching.download --sample {ft.SAMPLE_SHA256} --pcap --yield"
+            )
+            self.stormHasNoWarnErr(msgs)
+            assert yielded(msgs) == [("file:bytes", f"sha256:{pcap}")]
+            assert fake.last("get", "/dump.pcap")["path"] == (
+                f"/api/v0/samples/{SID}/behavioral1/dump.pcap"
             )
             fake.samples[SID]["tasks"][1]["status"] = "reported"
 
@@ -696,6 +719,12 @@ class TestStormSubmit(s_tests.SynTest):
             self.stormIsInWarn("PROFILE_NOT_SETTABLE", msgs)
             msgs = await core.stormlist("slib.hatching.sample.profile 261031-new000002")
             self.stormIsInWarn("Use --profile or --pick at least once, or --auto.", msgs)
+            # --profile can't be combined with --auto or --pick, the API would ignore one.
+            count = len(fake.requests)
+            for opts in ("--profile w10 --auto", "--profile w10 --pick a.exe"):
+                msgs = await core.stormlist(f"slib.hatching.sample.profile 261031-new000002 {opts}")
+                self.stormIsInErr("--profile cannot be used with --auto or --pick", msgs)
+            assert len(fake.requests) == count
             # Picking files without profiles lets the sandbox pick their profiles.
             fake.samples["261031-new000002"]["status"] = "static_analysis"
             msgs = await core.stormlist(
@@ -798,6 +827,12 @@ class TestStormManage(s_tests.SynTest):
             msgs = await core.stormlist("slib.hatching.yara.get fake_rule.yara --yield")
             (node,) = [m[1] for m in msgs if m[0] == "node"]
             assert node[0][0] == "it:app:yara:rule" and node[1]["props"]["name"] == "fake_rule.yara"
+            assert (
+                await core.count(
+                    f"meta:source={SOURCE_GUID} -(seen)> it:app:yara:rule:name=fake_rule.yara"
+                )
+                == 1
+            )
             msgs = await core.stormlist("slib.hatching.yara.get nope")
             self.stormIsInWarn("NOT_FOUND", msgs)
 
@@ -1252,6 +1287,21 @@ class TestStormPaths(s_tests.SynTest):
             (node,) = await core.nodes(f"file:bytes={yielded(msgs)[0][1]}")
             assert node.get("name") == f"{SID}.tar"
             assert fake.last("get", f"/samples/{SID}/archive") is not None
+
+            # A hash is resolved first, so the archive is named by the sample's ID.
+            await core.nodes(f"file:bytes={yielded(msgs)[0][1]} [ -:name ]")
+            msgs = await core.stormlist(
+                f"slib.hatching.download --sample {ft.SAMPLE_SHA256} --archive tar --yield"
+            )
+            self.stormHasNoWarnErr(msgs)
+            self.stormIsInPrint(f"Saved the tar archive of {SID}", msgs)
+            (node,) = await core.nodes(f"file:bytes={yielded(msgs)[0][1]}")
+            assert node.get("name") == f"{SID}.tar"
+            msgs = await core.stormlist(
+                f"slib.hatching.download --sample {'a' * 64} --archive tar --yield"
+            )
+            self.stormIsInWarn(f"Finding the sample of {'a' * 64} failed", msgs)
+            assert yielded(msgs) == []
 
             # --task picks the task, instead of every reported behavioral task of the sample.
             count = len(fake.requests)

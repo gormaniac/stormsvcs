@@ -9,6 +9,7 @@ from stormlibpp.svc import RetnApi
 from stormlibpp.telepath import TelepathRetn
 from stormlibpp.utils import normver
 
+from . import feeds as p_feeds
 from .defs import PKGDEFS, SVC_EVTS, SVC_NAME, SVC_VER
 
 FLOW_OPTS = (
@@ -36,7 +37,8 @@ class PcapCellApi(RetnApi, s_cell.CellApi, s_stormsvc.StormSvc):
     returned as ``status=False``, never raised, so Storm can always report them (see
     ``stormlibpp.svc.RetnApi``). The service's own errors (``PcapSvcError``, ``RuleSvcError``,
     ``SnortError``, ``SuricataError`` and ``FeedError``) are ``stormlibpp.svc.SvcError``s and
-    keep their message, anything else is logged and returned as an "Unexpected error".
+    keep their message, anything else is logged and returned as an "Unexpected error". Every
+    message has the ``pcap:feeds:secrets`` values scrubbed (see ``_retnRedact``).
     """
 
     # PcapSvc methods exposed over Telepath as-is, wrapped in a TelepathRetn. See PcapSvc for
@@ -75,6 +77,16 @@ class PcapCellApi(RetnApi, s_cell.CellApi, s_stormsvc.StormSvc):
     _storm_svc_vers = normver(SVC_VER)[1]
     _storm_svc_evts = SVC_EVTS
     _storm_svc_pkgs = PKGDEFS
+
+    def _retnRedact(self, mesg: str) -> str:
+        """Replace every ``pcap:feeds:secrets`` value in an error message with its ``${name}``.
+
+        Feed URLs are sent with their secrets filled in, and an unexpected error (ex. from
+        aiohttp) can include the URL, so every message returned to Storm is scrubbed, not just
+        the ``FeedError``s the feed code redacts itself.
+        """
+
+        return p_feeds.redact(mesg, self.cell.conf.get("pcap:feeds:secrets"))
 
     async def flows(self, sha256: str, **opts: Any) -> AsyncIterator[TelepathRetn]:
         """Yield the flows in a capture, see ``PcapSvc.flows`` (and ``FLOW_OPTS``)."""

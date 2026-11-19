@@ -34,6 +34,14 @@ function _reqRulesView() {
     return()
 }
 
+// Why the current view can't change the service's rules (the message), or null if it can.
+// Commands check this before they edit rule nodes, so a refused push leaves no edits behind.
+function denied() {
+    $deny = $_reqRulesView()
+    if $deny { return($deny.mesg) }
+    return()
+}
+
 // Add/update (guid, form, text, engine) rules in the service and remove rules (by guid), then rebuild its rules.
 function update(rules=(null), dels=(null)) {
     $deny = $_reqRulesView()

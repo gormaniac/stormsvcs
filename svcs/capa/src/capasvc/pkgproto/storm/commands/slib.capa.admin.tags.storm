@@ -1,31 +1,46 @@
 init {
-    $priv = $lib.import(slib.capa.priv.user)
     $privadmin = $lib.import(slib.capa.priv.admin)
     $sync = $lib.import(slib.capa.sync)
     $util = $lib.import(slib.capa.util)
+    $cmd = "slib.capa.admin.tags"
 
+    // A bad option is warned about, and nothing is changed.
+    $ok = (true)
     if ($cmdopts.enable and $cmdopts.disable) {
-        $lib.raise(BadArg, "slib.capa.admin.tags: Use --enable or --disable, not both.")
+        $lib.warn(`{$cmd}: Use --enable or --disable, not both. Nothing was changed.`)
+        $ok = (false)
     }
 
+    $prefix = (null)
     if ($cmdopts.prefix != null) {
-        // An invalid prefix (ex. "" or one with spaces) would make every tag edit fail.
-        ($ok, $prefix) = $lib.trycast(syn:tag, $cmdopts.prefix)
-        if ((not $ok) or ($prefix != $lib.cast(str, $cmdopts.prefix).strip().lower())) {
-            $lib.raise(BadArg, `slib.capa.admin.tags: {$cmdopts.prefix} isn't a valid tag name.`)
+        // Normalized as a tag (ex. lowercased). An invalid prefix (ex. "" or "my..capa") would
+        // make every tag edit fail.
+        ($valid, $norm) = $lib.trycast(syn:tag, $cmdopts.prefix)
+        if $valid {
+            $prefix = $norm
+        } else {
+            $lib.warn(`{$cmd}: {$cmdopts.prefix} isn't a valid tag name. Nothing was changed.`)
+            $ok = (false)
         }
     }
 
-    if $cmdopts.enable { $privadmin.setTagsEnabled((true)) }
-    if $cmdopts.disable { $privadmin.setTagsEnabled((false)) }
+    if $ok {
+        if $cmdopts.enable { $privadmin.setTagsEnabled((true)) }
+        if $cmdopts.disable { $privadmin.setTagsEnabled((false)) }
 
-    if ($cmdopts.prefix != null) {
-        $privadmin.setTagPrefix($prefix)
-        // Document the tags under the new prefix.
-        $retn = $priv.rulesInfo()
-        if (not $util.failed($retn, "Getting the capa rules info")) { $sync.syncTags($retn.data) }
+        if ($prefix != null) {
+            if ($prefix != $cmdopts.prefix) {
+                $lib.print(`{$cmd}: Using the normalized prefix {$prefix}.`)
+            }
+            $privadmin.setTagPrefix($prefix)
+            // Document the tags under the new prefix.
+            $retn = $privadmin.rulesInfo()
+            if (not $util.failed($retn, "Getting the capa rules info")) {
+                $sync.syncTags($retn.data)
+            }
+        }
     }
 
-    $settings = $priv.tagSettings()
+    $settings = $privadmin.tagSettings()
     $lib.print(`slib.capa tags: enabled={$settings.enabled} prefix={$settings.prefix}`)
 }

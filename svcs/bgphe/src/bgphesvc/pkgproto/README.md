@@ -17,10 +17,10 @@ bgp.he.net needs no account or API key. It has no documented API either: the ser
 | `slib.bgphe.certs.subdomains` | `inet:fqdn` | `inet:fqdn` | the domain and its subdomains |
 | `slib.bgphe.certs.ip` | `inet:ipv4`, `inet:ipv6`, `inet:cidr4`, `inet:cidr6` | `inet:dns:a`, `inet:dns:aaaa` | the DNS nodes |
 | `slib.bgphe.whois` | `inet:fqdn` | `inet:whois:rec`, `inet:whois:recns`, `inet:whois:contact`, `inet:whois:email` | the whois record |
-| `slib.bgphe.asn` | `inet:asn` | `inet:asn` (`:name`, `:owner`), `ou:org` | the `ou:org` |
+| `slib.bgphe.asn` | `inet:asn` | `inet:asn` (`:name`, `:owner`), `ou:org` | the `ou:org` (values yield the `inet:asn`) |
 | `slib.bgphe.asn.prefixes` | `inet:asn` | `inet:asnet4`, `inet:asnet6` | the prefixes |
 
-Every command takes values as arguments instead of inbound nodes, and then yields what it modeled. With inbound nodes, they're passed through unless `--yield` is given. Unsupported inbound nodes are passed through with a warning (or dropped, with `--yield`).
+Every command takes values as arguments instead of inbound nodes, and then yields what it modeled (for `slib.bgphe.asn`, the `inet:asn` nodes). Values are looked up once per command, and any inbound nodes are dropped. With inbound nodes, they're passed through unless `--yield` is given. Unsupported inbound nodes are passed through with a warning (or dropped, with `--yield`).
 
 ```
 // Every certificate for a domain, then for each of its subdomains.
@@ -40,7 +40,7 @@ The `slib.bgphe.lib` module has the same functionality for use from Storm (ex. `
 
 ## Modeling
 
-Every node the service models is linked to the `slib.bgphe` `meta:source` with a `-(seen)>` edge.
+Every node the service models is linked to the `slib.bgphe` `meta:source` with a `-(seen)>` edge. The `meta:source` is created by the service's `add` event and isn't edited by the commands (they only recreate it if it was deleted).
 
 ### Certificates
 
@@ -53,7 +53,7 @@ Every node the service models is linked to the `slib.bgphe` `meta:source` with a
 
 **Precertificates.** bgp.he.net only has the TBSCertificate of a precertificate (what's in the CT log, without its signature), so a precertificate has no fingerprints. Those `crypto:x509:cert` nodes are deconflicted by the TBSCertificate's SHA-256 (`(slib.bgphe, tbs, <sha256>)`) instead of `:sha256`, and have every other prop. Popular domains have far more precertificates than certificates, `--no-precerts` skips them.
 
-`--limit` (default 200, at most 10000) caps the certificates per domain, and so the requests (one per 200). `--valid` only models currently valid certificates.
+`--limit` (default 200, at most 10000) caps the certificates per domain, and so the requests (one per 200). `--valid` only models currently valid certificates. `$lib.debug` prints a summary for each domain: the certificates modeled, filtered (by `--valid` or `--no-precerts`), and unparsable (entries without a usable DER, which are dropped), the pages read, and the total in bgp.he.net.
 
 ### Subdomains and IPs
 
@@ -66,7 +66,7 @@ Every node the service models is linked to the `slib.bgphe` `meta:source` with a
 `slib.bgphe.whois` models a domain's whois record as an `inet:whois:rec` with its `:created`, `:updated`, and `:expires` times, `:registrar`, and `:registrant:name`, plus:
 
 - an `inet:whois:recns` for each nameserver,
-- an `inet:whois:contact` for each registrant/admin/tech/billing contact that isn't redacted, and one for the registrar (`:orgname`, abuse `:email`/`:phone`, `:url`, `:whois:fqdn`, and the IANA ID as `:id`),
+- an `inet:whois:contact` for each registrant/admin/tech/billing contact that isn't redacted (its postal code is parsed, but `inet:whois:contact` has no prop for it, so it's only in the record's `slib:bgphe` node data), and one for the registrar (`:orgname`, abuse `:email`/`:phone`, `:url`, `:whois:fqdn`, and the IANA ID as `:id`),
 - an `inet:whois:email` for each contact's email. (Synapse also adds one for every email in the record's text.)
 
 The record comes from **RDAP** when bgp.he.net has it (`/rdap/dns/<domain>`): the TLD registry's RDAP record, plus the registrar's own RDAP record it links to, which usually has the registrant and other contacts. RDAP often has more than the whois text, ex. the registrant (or the privacy service standing in for it) that the text redacts. The registry is preferred for the domain's dates, status, and nameservers, the registrar for contacts.
@@ -87,7 +87,7 @@ Whois text has no single format, the parser handles ICANN style records, section
 - the `ou:org` (deconflicted by name, like `gen.ou.org`) with its `:country:code`,
 - the record's raw text and everything parsed from it (handle, description, org ID and address, registration dates, status, and the abuse/admin/tech/NOC contacts and emails) in the `inet:asn`'s `slib:bgphe:whois` node data.
 
-`slib.bgphe.asn.prefixes` models each prefix an ASN originates as an `inet:asnet4`/`inet:asnet6` and extends its `.seen` to now. bgp.he.net reports each prefix's visibility, which is stored in its `slib:bgphe` node data as `{"count": ..., "total": ...}`. HE doesn't document these numbers, they appear to be how many of the Super Looking Glass's peers see the route originated by the ASN, out of how many carry the prefix.
+`slib.bgphe.asn.prefixes` models each prefix an ASN originates as an `inet:asnet4`/`inet:asnet6` and extends its `.seen` to now. `$lib.debug` prints how many IPv4 and IPv6 prefixes the ASN originates. bgp.he.net reports each prefix's visibility, which is stored in its `slib:bgphe` node data as `{"count": ..., "total": ...}`. HE doesn't document these numbers, they appear to be how many of the Super Looking Glass's peers see the route originated by the ASN, out of how many carry the prefix.
 
 ## Permissions
 

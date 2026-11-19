@@ -219,12 +219,14 @@ returns `{status, mesg, data: {sha256, size}}`.
 - Storm checks every return with `slib.hatching.util.failed()`, which warns
   `slib.hatching: <what> failed: <mesg>` and lets the command continue with the next item.
 - Only invalid option combinations raise (`BadArg`): `download --file` without `--task`,
+  `sample.profile --profile` with `--auto` or `--pick`,
   `yara.add --rename` without `--name`, `admin.tags --enable --disable`, and an invalid
   `admin.tags --prefix`.
 - Secrets: the service-wide key is only in the service's slab and never returned (only
   `hasApiKey`); users' keys are only read from their own user scoped vault; `admin.user.keys`
-  and `admin.user.key.add` print only the first 4 characters of a key unless `--show`. The
-  service doesn't redact error messages (`_retnRedact()` isn't overridden).
+  and `admin.user.key.add` print only the first 4 characters of a key unless `--show`.
+  `HatchingCellApi._retnRedact()` replaces the stored and configured keys with `<redacted>` in
+  every error message returned to Storm.
 
 ## Tests
 

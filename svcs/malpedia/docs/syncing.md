@@ -14,8 +14,9 @@ then modeled.
    `:name=malpedia :type=slib.malpedia :url=https://malpedia.caad.fkie.fraunhofer.de`.
 2. It sets the global `slib:malpedia:tag:prefix` to `rep.malpedia` if unset, and
    `slib:malpedia:tag:tlp` to `rep.malpedia.tlp` if unset.
-3. It starts a one-time cron job that runs immediately: `$lib.cron.at(query=..., now=(true))`,
-   named `slib.malpedia (initial setup and sync)`. Its query is:
+3. It deletes any cron job named `slib.malpedia (initial setup and sync)` (one an earlier
+   `service.del` couldn't delete), then starts a one-time cron job with that name that runs
+   immediately: `$lib.cron.at(query=..., now=(true))`. Its query is:
 
    ```text
    if $lib.import(slib.malpedia.priv.admin).autoSchedule() { slib.malpedia.sync }
@@ -23,7 +24,9 @@ then modeled.
 
 A one-time job is used because the service isn't ready to answer Telepath calls while its own
 `add` event runs. The job runs as root in the Cortex's default view, and `service.add`
-returns without waiting for it.
+returns without waiting for it. The job is created, and runs, even when `malpedia:autosync` is
+off, because only the service can read its config. The finished job stays in `cron.list` until
+`service.del` deletes it.
 
 `autoSchedule()` then does the following:
 
@@ -31,8 +34,11 @@ returns without waiting for it.
    `slib.malpedia: Unable to read the sync schedule: ...` and returns `false`. No sync runs.
 2. If `malpedia:autosync` is `false`, it returns `false`. Nothing is scheduled and no sync
    runs.
-3. Otherwise, if there is no sync cron job yet, it calls `schedule(<period>)` with the
-   service's random daily period. It returns `true`, and the job runs `slib.malpedia.sync`.
+3. Otherwise, if there is no sync cron job yet, it looks for a cron job named
+   `slib.malpedia.sync` with the query `slib.malpedia.sync` (one left behind by a
+   `service.del` that couldn't delete it) and adopts it. If there is none, it calls
+   `schedule(<period>)` with the service's random daily period. It returns `true`, and the
+   job runs `slib.malpedia.sync`.
 
 That first `slib.malpedia.sync` is the **bulk pull**. The snapshot isn't `complete` yet, so the
 pull ignores `malpedia:pull:minage` and the version comparison. It downloads every bulk
@@ -43,12 +49,15 @@ progress shows in `slib.malpedia.status`.
 A Cortex only does this bulk download once. New views, `--full` syncs and tag prefix changes
 all re-model the local snapshot instead.
 
-`autoSchedule()` only schedules when `cron()` finds no job, so an existing daily job is never
-duplicated. `service.del` deletes the daily job. Adding the service again then creates a new
-job, at the same stored time, and starts another setup job and sync. That sync follows the
-normal pull decision below, so it's cheap when the service's snapshot is already complete.
+`autoSchedule()` only schedules when there's no job to use, so an existing daily job is never
+duplicated. `service.del` deletes the daily job. Adding the service again runs the `add` event
+again (the Cortex gives the re-added service a new iden), so it creates a new daily job, at the
+same stored time and in the default view (an earlier `--period` or view isn't kept), and starts
+another setup job and sync. That sync follows the normal pull decision below, so it's cheap
+when the service's snapshot is already complete.
 
-With `malpedia:autosync: false`, nothing is scheduled or synced. Run `slib.malpedia.sync` and
+With `malpedia:autosync: false`, the setup job still runs once, but nothing is scheduled or
+synced. Run `slib.malpedia.sync` and
 `slib.malpedia.admin.schedule --period ...` by hand.
 
 ## The daily schedule

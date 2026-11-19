@@ -22,11 +22,12 @@ RULE_TYPE = "capa"
 LIB_RULE_TYPE = "capa.lib"
 """The ``meta:rule:type`` of capa library rules, which are only used by other rules."""
 
-MODEL_VERSION = 2
+MODEL_VERSION = 3
 """The version of what slib.capa.sync models from a rule, part of the rules' sync ``key``.
 
 Bump it when the model of a rule changes, so the next package load imports the rules again.
 2: MBC behaviors as ``ou:technique`` nodes, ``@handle`` authors as ``ps:contact:user``.
+3: The ATT&CK techniques and author contacts are ``-(seen)>`` by the ``meta:source``.
 """
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")

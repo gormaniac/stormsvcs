@@ -149,11 +149,15 @@ def feedUrl(url: str, secrets: dict[str, dict] | None = None) -> str:
 def redact(text: str, secrets: dict[str, dict] | None = None) -> str:
     """Replace any secret's value in text (ex. an error message) with its placeholder."""
 
+    valus = []
     for name, secret in (secrets or {}).items():
         valu = secret.get("value") if isinstance(secret, dict) else None
         if valu:
-            text = text.replace(str(valu), f"${{{name}}}")
-            text = text.replace(urllib.parse.quote(str(valu), safe=""), f"${{{name}}}")
+            valus.append((str(valu), name))
+    # Longest first, so a secret that contains another is replaced whole.
+    for valu, name in sorted(valus, key=lambda item: len(item[0]), reverse=True):
+        text = text.replace(valu, f"${{{name}}}")
+        text = text.replace(urllib.parse.quote(valu, safe=""), f"${{{name}}}")
     return text
 
 

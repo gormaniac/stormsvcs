@@ -21,7 +21,7 @@ they're safe to call from automation. The rest return the service's `TelepathRet
 | `ruleCount()` | none | `TelepathRetn`, `data` is an int | `$svc.getRuleCount()`. |
 | `enableRule(rule)` | `rule`: node | `TelepathRetn` | `reqAdmin()`, compile and save, then `[ :enabled=(true) ]` on success. |
 | `disableRule(rule)` | `rule`: node | `TelepathRetn` | `reqAdmin()`, `removeRule($rule.repr())`, then `[ :enabled=(false) ]` on success. |
-| `sync()` | none | dict | `reqAdmin()`, then the reconcile described in [slib.yara.sync](commands.md#slibyarasync). Raises `StormRaise` if `listRules()` fails. |
+| `sync()` | none | dict | `reqAdmin()`, then the reconcile described in [slib.yara.sync](commands.md#slibyarasync). Raises a `YaraError` (a `StormRaise` with `errname` `YaraError`, catch it with `catch YaraError as err`) if `listRules()` fails, after the enabled rules were compiled. |
 
 `sync()` returns:
 
@@ -53,7 +53,8 @@ for $r in $yara.match(:sha256) {
 
 | Function | Args | Returns | Notes |
 | --- | --- | --- | --- |
-| `yaraMatch(rule, file)` | `rule`: `it:app:yara:rule` guid, `file`: `file:bytes` value (its repr) | `$lib.null` | Creates `it:app:yara:match=($rule, $file)` with `.seen=now` and a `seen` edge from the service's `meta:source`. See [Data Model](model.md). |
+| `ruleVersion(rule)` | `rule`: `it:app:yara:rule` guid | the rule's `:version`, or `$lib.null` | `$lib.null` if the rule has no `:version` or doesn't exist. |
+| `yaraMatch(rule, file)` | `rule`: `it:app:yara:rule` guid, `file`: `file:bytes` value (its repr) | `$lib.null` | Creates `it:app:yara:match=($rule, $file)` with `.seen=now`, `:version` set to `ruleVersion($rule)` when it isn't `$lib.null`, and a `seen` edge from the service's `meta:source`. See [Data Model](model.md). |
 
 ## Telepath API
 
@@ -154,7 +155,9 @@ listRules() -> ListRetn
 {"status": true, "mesg": "", "data": ["<guid>", "<guid>"]}
 ```
 
-The sorted guids of the rules loaded in memory (the ones scans use). No permission needed.
+The sorted guids of the rule files in `rule_dir`, read from disk on every call (rule files
+added or removed outside the service are reflected). Includes rule files that can't be loaded, so
+`slib.yara.sync` can recompile or remove them. No permission needed.
 
 ### getRuleCount
 
@@ -166,14 +169,20 @@ getRuleCount() -> TelepathRetn
 {"status": true, "mesg": "", "data": 2}
 ```
 
+The number of rules that loaded (the ones scans use), read from disk on every call like
+`listRules`. Rule files that can't be loaded aren't counted.
+
 ### matchFile
 
 ```python
 matchFile(file_sha256: str) -> AsyncGenerator[MatchRetn]
 ```
 
-A generator. Pulls the file from the Axon, then yields one `MatchRetn` per rule loaded in the
-service, in the order of the in-memory rule dict. Never raises.
+A generator. Pulls the file from the Axon, then brings the in-memory rules in line with the
+rule files in `rule_dir` (see [Internals](internals.md#yararules)), yields one `status=false`
+result per rule file that can't be loaded, then one `MatchRetn` per loaded rule. Each rule's scan
+runs in a worker thread (off the event loop) with a `scan_timeout` second yara-x timeout. Never
+raises.
 
 `data` is a `YaraMatch` for per-rule results, or `None` for a file-level error (which is the only
 item yielded):
@@ -187,11 +196,14 @@ item yielded):
 
 Per-rule error messages:
 
-- `Couldn't load it:app:yara:rule=<guid> from the service's storage.`
+- `Couldn't load it:app:yara:rule=<guid> from the service's storage: <error>` - the rule file is
+  corrupt or from an incompatible `yara-x`. `slib.yara.sync` recompiles (or removes) it.
+- `Scanning with it:app:yara:rule=<guid> timed out after <n> seconds (scan_timeout).`
 - `Error scanning with it:app:yara:rule=<guid>: <error>`
 
 File-level messages are listed under [slib.yara.scan](commands.md#slibyarascan). With zero rules
 loaded and a readable file, the generator yields nothing.
 
 `matched` is `true` when the compiled `:text` has at least one matching rule
-(`bool(rules.scan(bytes).matching_rules)`).
+(`bool(scanner.scan(bytes).matching_rules)`). Which Yara rules or strings matched is not
+returned.

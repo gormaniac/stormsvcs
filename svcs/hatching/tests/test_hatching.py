@@ -500,6 +500,41 @@ class TestHatchingSvc(s_tests.SynTest):
                 retn = await prox.search("family:cobaltstrike")
                 assert not retn["status"] and "No Hatching Triage API key" in retn["mesg"]
 
+    async def test_api_redacts_apikey(self):
+        # The service's keys (configured and stored) never reach Storm in an error message, ex.
+        # from an HTTP library error that includes a request header.
+        async with hatchingSvc(self, apikey="confkey") as (core, svc, fake):
+
+            async def boom(*args, **kwargs):
+                raise RuntimeError(f"bad header X-Api-Key: {svc.getApiKey()}")
+
+            async def apierr(*args, **kwargs):
+                raise HatchingApiError(f"Hatching Triage: {svc.getApiKey()} and confkey")
+
+            svc.search = boom
+            svc.sample = apierr
+            async with svc.getLocalProxy() as prox:
+                retn = await prox.search("x")
+                self.eq(
+                    "Unexpected error: RuntimeError: bad header X-Api-Key: <redacted>", retn["mesg"]
+                )
+
+                # The stored key, which takes over from the configured one.
+                await prox.setApiKey("storedkey")
+                retn = await prox.sample(ft.SAMPLE_ID)
+                self.eq("Hatching Triage: <redacted> and <redacted>", retn["mesg"])
+                retn = await prox.search("x")
+                assert "storedkey" not in retn["mesg"] and "<redacted>" in retn["mesg"]
+
+            # Messages that don't have a key are left alone.
+            async def plain(*args, **kwargs):
+                raise HatchingApiError("Hatching Triage: NOT_FOUND - no such sample")
+
+            svc.sample = plain
+            async with svc.getLocalProxy() as prox:
+                retn = await prox.sample(ft.SAMPLE_ID)
+                self.eq("Hatching Triage: NOT_FOUND - no such sample", retn["mesg"])
+
     async def test_client_cache(self):
         async with hatchingSvc(self) as (core, svc, fake):
             first = await svc.getClient("k0")
@@ -734,6 +769,14 @@ class TestHatchingSvc(s_tests.SynTest):
             with self.raises(HatchingApiError):
                 await svc.setProfile(sample["id"], auto=True)
 
+            # Profiles with auto or pick are rejected (the API ignores one), before any request.
+            count = len(fake.requests)
+            for kwargs in ({"auto": True}, {"pick": ["a.exe"]}):
+                with self.raises(HatchingApiError) as cm:
+                    await svc.setProfile(sample["id"], profiles=["w10"], **kwargs)
+                assert "can't be combined with auto or pick" in cm.exception.mesg
+            assert len(fake.requests) == count
+
             assert await svc.deleteSample(sample["id"])
             assert sample["id"] not in fake.samples
 
@@ -815,6 +858,13 @@ class TestHatchingSvc(s_tests.SynTest):
                 ]
             }
             assert svc.behavioralTasks("s", overview) == ["behavioral1"]
+
+            # sampleTasks resolves a hash, and takes the tasks from the overview.
+            assert await svc.sampleTasks(ft.SAMPLE_SHA256) == {
+                "id": ft.SAMPLE_ID,
+                "tasks": ["behavioral1"],
+            }
+            assert fake.last("get", "/overview.json") is not None
 
     async def test_downloads(self):
         async with hatchingSvc(self) as (core, svc, fake):

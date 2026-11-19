@@ -1,7 +1,9 @@
 // Model capa rules, rule namespaces (as tags), and capa results in Synapse.
 //
-// Node edits here run as the calling user. Every node created is linked to the
-// slib.capa meta:source node with a -(seen)> edge.
+// Node edits here run as the calling user. The nodes made from the rules and results (the
+// meta:rule, meta:ruleset, ATT&CK and MBC techniques, rule author ps:contact, and scanned
+// file:bytes nodes) are linked to the slib.capa meta:source node with a -(seen)> edge. The
+// syn:tag nodes of the rule namespaces aren't, see tag.
 
 init {
     $sourceGuid = "ee5999b4059645168272e22d7cd087e3"
@@ -48,6 +50,12 @@ function unref(n, other) {
 function has(n, other) {
     yield $n
     [ +(has)> $other ]
+    return($n)
+}
+
+function unhas(n, other) {
+    yield $n
+    [ -(has)> $other ]
     return($n)
 }
 
@@ -103,7 +111,13 @@ function ruleset(info) {
 
 function technique(tid) {
     [ it:mitre:attack:technique=$tid ]
-    return($node)
+    return($seen($node))
+}
+
+// The ps:contact of a rule's first author (see capasvc.rules.contact, a guid ctor).
+function contact(ctor) {
+    [ ps:contact=$ctor ]  // noqa: M001
+    return($seen($node))
 }
 
 // The ou:technique of an MBC behavior or method (see capasvc.rules.mbc), by its MBC ID (its
@@ -144,7 +158,10 @@ function ruleNode(r) {
         :text?=$r.text
         :url?=$r.url
     ]
-    if $r.authors { [ :author={[ ps:contact=$r.authors.index(0) ]} ] }  // noqa: M001
+    if $r.authors {
+        $author = $contact($r.authors.index(0))
+        [ :author=$author ]
+    }
     $node.data.set("slib:capa", $r.meta)
     return($seen($node))
 }
@@ -171,7 +188,30 @@ function rule(r, ruleset=(null)) {
     return($n)
 }
 
-// Model the syn:tag of a rule namespace (see CapaRules.tagRecords) under a prefix.
+// The capa rules (meta:rule +:type^=capa.) a ruleset -(has)>.
+function members(set) {
+    yield $set
+    -(has)> meta:rule +:type^=capa.
+    emit $node
+}
+
+// Remove the ruleset's -(has)> edges to the capa rules that aren't in guids (a set of the
+// guids of the rules it has now), ex. a rule whose file was deleted from the rules directory
+// without a new capa:rules:version (which would be a new ruleset). Their meta:rule nodes are
+// kept, scan results may reference them. Returns how many were removed.
+function prune(set, guids) {
+    // Collected first, so the edges aren't removed while they're being walked.
+    $stale = ([])
+    for $n in $members($set) {
+        if (not $guids.has($n.value())) { $stale.append($n) }
+    }
+    for $n in $stale { $unhas($set, $n) }
+    return($stale.size())
+}
+
+// Model the syn:tag of a rule namespace (see CapaRules.tagRecords) under a prefix. It isn't
+// linked to the meta:source: a tag's node is shared by every node with the tag, and isn't
+// something the rules made (it's only documented).
 function tag(prefix, t) {
     if $t.tag { $name = `{$prefix}.{$t.tag}` } else { $name = $prefix }
     [ syn:tag=$name :title=$t.title :doc=$t.doc ]
