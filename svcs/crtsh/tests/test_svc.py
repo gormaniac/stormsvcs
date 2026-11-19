@@ -713,9 +713,9 @@ class TestCrtshSvc(s_tests.SynTest):
             "crtsh:sql:limit": 0,
             "crtsh:candidates": 0,
         }
-        for name, valu in bad.items():
+        for opt, valu in bad.items():
             with pytest.raises(s_exc.BadConfValu):
-                async with self.getTestCell(CrtshSvc, conf={name: valu}):
+                async with self.getTestCell(CrtshSvc, conf={opt: valu}):
                     pass  # pragma: no cover
         # 0 still means none for the timeouts and retries.
         conf = {

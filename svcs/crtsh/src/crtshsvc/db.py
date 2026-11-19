@@ -76,6 +76,7 @@ def dsnSecrets(dsn: str | None) -> list[str]:
             found.add(re.sub(r"\\(.)", r"\1", quoted) if quoted else bare)
     return sorted(filter(None, found), key=lambda s: (-len(s), s))
 
+
 NAME_TYPES = {
     "dns": ["san:dNSName", "2.5.4.3"],
     "cn": ["2.5.4.3"],
