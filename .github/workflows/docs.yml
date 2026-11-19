@@ -1,0 +1,103 @@
+name: Docs
+
+# Builds the documentation site (scripts/build_docs.py: docs/ plus every service's docs/) on
+# PRs that touch it, with Sphinx warnings as errors, so a broken page or link fails the PR.
+#
+# On main it also publishes the site for docs.gormo.co, the way StormLib++ does: the built site
+# is the docs.tar.gz asset of this repo's latest GitHub release, and a doc-release
+# repository_dispatch tells docs.gormo.co to rebuild. Its `make pull-docs` downloads that asset
+# from every repo in its projects.txt and serves it at https://docs.gormo.co/<repo>/.
+# stormsvcs has no versioned releases (each service is versioned on its own), so the site lives
+# on one rolling release, tagged `docs`, that's moved to each published commit.
+on:
+  pull_request:
+    paths: &paths
+      - "docs/**"
+      - "svcs/*/docs/**"
+      # The service index shows each service's name, version and Storm package.
+      - "services.toml"
+      - "svcs/*/pyproject.toml"
+      - "svcs/*/src/*/pkgproto/*.yaml"
+      - "scripts/build_docs.py"
+      # The docs dependency group, and its lock.
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/docs.yml"
+  push:
+    branches: [main]
+    paths: *paths
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v9.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Build the docs site
+        run: uv run --locked --group docs python scripts/build_docs.py --tar build/docs.tar.gz
+
+      - name: Upload the site
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: docs
+          path: build/docs.tar.gz
+          retention-days: 7
+
+  publish:
+    needs: build
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: docs
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v7.0.1
+
+      - name: Download the site
+        uses: actions/download-artifact@v8.0.1
+        with:
+          name: docs
+
+      - name: Publish docs.tar.gz on the docs release
+        run: |
+          notes="The stormsvcs documentation site, built from ${GITHUB_SHA}. Served at https://docs.gormo.co/stormsvcs/."
+          git tag -f "$TAG" "$GITHUB_SHA"
+          git push -f origin "refs/tags/${TAG}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" docs.tar.gz --clobber
+            gh release edit "$TAG" --title "Documentation" --notes "$notes" --latest
+          else
+            gh release create "$TAG" docs.tar.gz --title "Documentation" --notes "$notes" --latest
+          fi
+
+      - name: Notify docs.gormo.co
+        env:
+          GH_TOKEN: ${{ secrets.DOCS_DISPATCH_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::DOCS_DISPATCH_TOKEN isn't set, so docs.gormo.co wasn't told to rebuild."
+            exit 0
+          fi
+          gh api repos/gormaniac/docs.gormo.co/dispatches \
+            -f event_type=doc-release \
+            -f "client_payload[tag]=${TAG}" \
+            -f "client_payload[repository]=${GITHUB_REPOSITORY}" \
+            -f "client_payload[github_sha]=${GITHUB_SHA}"

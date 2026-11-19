@@ -253,6 +253,13 @@ def _retnApi(svc: Svc, contract: dict) -> list[str]:
     return ["No CellApi subclasses stormlibpp.svc.RetnApi."]
 
 
+@rule("docs", "Has its documentation in docs/, starting at docs/index.md (see docs/dev/docs.md).")
+def _docs(svc: Svc, contract: dict) -> list[str]:
+    if (svc.path / "docs" / "index.md").is_file():
+        return []
+    return ["No docs/index.md."]
+
+
 def load() -> tuple[dict, list[Svc]]:
     conf = tomllib.loads((ROOT / "services.toml").read_text())
     entries = conf.get("stormsvcs", {})

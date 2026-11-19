@@ -32,3 +32,11 @@ The `[contract]` table in `services.toml` sets the pins and lists the `enforce`d
 fail CI. The other rules are reported only. When every service passes a rule, add it to
 `enforce`. A new service must pass every enforced rule. See
 `.claude/plans/systemic-fixes.md` for the migration plan.
+
+## Docs
+
+Each service's documentation lives in `svcs/<svc>/docs/` (MyST Markdown, starting at `index.md`),
+and the developer guide in `docs/dev/`. A PR that changes a service's behaviour (commands,
+options, config, the data model, the Telepath API) updates its docs in the same PR. Write them
+from the code, not the README. Build with `uv run --group docs python scripts/build_docs.py
+[<svc>]`, which fails on any Sphinx warning. See `docs/dev/docs.md`.

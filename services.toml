@@ -1,50 +1,62 @@
+# Each service: its display name, a one line summary (shown in the docs site's service index
+# and Services menu), its source folder, and its CI workflow.
 [stormsvcs.yarastorm]
 name = "Yara Storm"
+summary = "Scan file:bytes nodes in the Axon with it:app:yara:rule nodes, using YARA-X."
 src = "svcs/yarastorm/"
 workflow = ".github/workflows/yarastorm.yml"
 
 [stormsvcs.shodan]
 name = "Shodan"
+summary = "Every Shodan API: hosts, search, scans, alerts, DNS, streams, InternetDB, CVEDB, exploits, and trends."
 src = "svcs/shodan/"
 workflow = ".github/workflows/shodan.yml"
 
 [stormsvcs.abusech]
 name = "abuse.ch"
+summary = "Every abuse.ch platform: MalwareBazaar, URLhaus, ThreatFox, YARAify, Feodo Tracker, SSL Blacklist, and the false positive list."
 src = "svcs/abusech/"
 workflow = ".github/workflows/abusech.yml"
 
 [stormsvcs.crtsh]
 name = "crt.sh"
+summary = "Look up, search, and pivot on certificates straight from the crt.sh certwatch database."
 src = "svcs/crtsh/"
 workflow = ".github/workflows/crtsh.yml"
 
 [stormsvcs.capa]
 name = "capa"
+summary = "Run Mandiant capa against files in the Axon, model the matched rules, and tag files with their namespaces."
 src = "svcs/capa/"
 workflow = ".github/workflows/capa.yml"
 
 [stormsvcs.pcap]
 name = "PCAP"
+summary = "Model the flows in PCAPs as inet:flow nodes (Suricata, tshark), and match them against Snort and Suricata rules, every engine sandboxed."
 src = "svcs/pcap/"
 workflow = ".github/workflows/pcap.yml"
 
 [stormsvcs.hatching]
 name = "Hatching Triage"
+summary = "The Hatching Triage Sandbox API: submit files and URLs, model analyses, download artifacts, and manage profiles, rules, and users."
 src = "svcs/hatching/"
 workflow = ".github/workflows/hatching.yml"
 
 [stormsvcs.malpedia]
 name = "Malpedia"
+summary = "Keep Malpedia's library, threat actors, malware families, and YARA rules in sync with the Cortex."
 src = "svcs/malpedia/"
 workflow = ".github/workflows/malpedia.yml"
 
 [stormsvcs.bgphe]
 name = "Hurricane Electric BGP Toolkit"
+summary = "Hurricane Electric's BGP Toolkit: CT log certificates, domain and ASN whois, and the prefixes an ASN originates."
 src = "svcs/bgphe/"
 workflow = ".github/workflows/bgphe.yml"
 
 [stormsvcs.virustotal]
 name = "VirusTotal"
+summary = "The VirusTotal Public API: enrich files, URLs, domains, and IPs, pivot on relationships, and submit, rescan, comment, and vote."
 src = "svcs/virustotal/"
 workflow = ".github/workflows/virustotal.yml"
 
@@ -68,4 +80,5 @@ enforce = [
     "version-test",
     "main-test",
     "retn-api",
+    "docs",
 ]
