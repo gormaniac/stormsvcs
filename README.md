@@ -35,6 +35,7 @@ Each service must have the following:
 		- `docker/prod/Dockerfile`, built `FROM ${BASE_IMAGE}` (an `ARG` declared before the first `FROM`, defaulting to the published base image).
 		- `docker/test/Dockerfile`, built `FROM ${BASE_IMAGE}` too (defaulting to the service's published image), which runs the tests in the image.
 	- A LICENSE file that is a symlink of this repo's LICENSE file (`ln -s ../../LICENSE LICENSE`)
+	- A folder named `docs/` with the service's documentation in Markdown (MyST), starting at `docs/index.md`. See [Documentation](#documentation).
 - A CI workflow that tests and builds the service
 	- It must also build the docker image.
 	- It must only run on PRs when the service's folder is changed, AND be callable (`workflow_call`) AND manually runnable (`workflow_dispatch`).
@@ -51,6 +52,21 @@ Each service must have the following:
 - All services, and their storm commands/modules, should namespace under `slib` (ex: `slib.yara`).
 	- This is because all services here should be seen as the Advanced Power-Up extensions for the [StormLib++](https://github.com/gormaniac/stormlibpp) project which uses this same namespace.
 		- Be careful of naming conflicts here.
+
+# Documentation
+
+The documentation site is at [docs.gormo.co/stormsvcs](https://docs.gormo.co/stormsvcs/): a deployment, command, data model, API, and internals reference for every service, plus the stormsvcs developer guide. It's built with Sphinx, MyST, and the Shibuya theme (like StormLib++ and the rest of docs.gormo.co) from:
+
+- `docs/`: the home page, the Sphinx config, and the developer guide (`docs/dev/`).
+- `svcs/<svc>/docs/`: each service's pages.
+
+Build it locally (the output is in `build/docs/`):
+
+```bash
+uv run --group docs python scripts/build_docs.py
+```
+
+The `Docs` workflow builds it on every PR that touches the docs (warnings fail the build) and publishes it from `main`, as the `docs.tar.gz` asset on this repo's rolling `docs` release, which docs.gormo.co pulls. See `docs/dev/docs.md`.
 
 # Services
 

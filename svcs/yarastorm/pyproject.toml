@@ -1,6 +1,6 @@
 [project]
 name = "yarastorm"
-version = "0.8.1"
+version = "0.8.2"
 description = "The yarastorm Python package"
 readme = "README.md"
 license-files = ["LICENSE"]

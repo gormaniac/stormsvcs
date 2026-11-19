@@ -1,6 +1,6 @@
 """The slib.shodan Synapse Service."""
 
-__version__ = "0.17.1"
+__version__ = "0.17.2"
 
 
 from .svc import ShodanSvc

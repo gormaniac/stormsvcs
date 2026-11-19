@@ -32,6 +32,7 @@ Each service in the stormsvcs repo typically consists of the following core comp
   - Located in the `tests/` directory.
 - Extras:
   - A service specific `pyproject.toml` and `uv.lock` file for service dependencies.
+  - A `docs/` folder with the service's full documentation (MyST Markdown, starting at `docs/index.md`: deployment, commands, data model, API, and internals), built into https://docs.gormo.co/stormsvcs/ by `scripts/build_docs.py`. See `docs/dev/docs.md`.
   - A `README.md` file for service specific documentation, which names every Storm command. A copy lives at `src/<service_name>/pkgproto/README.md` so it's packaged into the service's Storm Package and shown to the Storm user; a test checks the two match.
 
 ## Key Patterns and Conventions

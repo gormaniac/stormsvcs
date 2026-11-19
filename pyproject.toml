@@ -19,6 +19,13 @@ dev = [
     "ruff>=0.16.0",
     "vcrpy>=8.3.0",
 ]
+# The documentation site's build tools (scripts/build_docs.py). The same Sphinx, MyST and
+# Shibuya theme as StormLib++ and docs.gormo.co, so the pages match.
+docs = [
+    "myst-parser>=4.0.0",
+    "shibuya>=2025.1.0",
+    "sphinx>=8.1.0",
+]
 
 [tool.ruff]
 # The services run on Python 3.11 (the Synapse base image, see svcs/*/pyproject.toml). Pin the

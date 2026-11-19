@@ -1,6 +1,6 @@
 [project]
 name = "hatchingsvc"
-version = "0.5.0"
+version = "0.5.1"
 description = "A Hatching Triage Sandbox Storm Service"
 readme = "README.md"
 license-files = ["LICENSE"]
