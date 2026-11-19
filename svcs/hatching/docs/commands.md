@@ -400,7 +400,7 @@ with slib.hatching.sample.profile once its static analysis is done.` A `file:byt
 `:sha256`, or one the Axon doesn't have, fails with a warning.
 
 A file is sent to the service 1 MiB at a time and spooled to disk there (see
-[Internals](internals.md#file-uploads)); a file over `hatching:maxsize` fails with `The file is
+[Internals](internals.md#submissions)); a file over `hatching:maxsize` fails with `The file is
 larger than the max of <n> bytes.`, and an empty file with `The file is empty.`
 
 For each submission it prints `Submitted <what> as sample <id> (<status>).` With `--wait`, it
