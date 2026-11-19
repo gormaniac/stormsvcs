@@ -540,6 +540,11 @@ class TestFeedSync(s_tests.SynTest):
                 opts=fopts,
             )
             self.stormIsInWarn(f"The service's rules come from view {main}", msgs)
+            # The view is checked first, so the fork gets no rule node (or any other edit).
+            self.stormIsInWarn("No rules were added.", msgs)
+            self.len(0, [m for m in msgs if m[0] == "node:edits"])
+            self.len(0, await core.nodes("it:app:snort:rule:id=9", opts=fopts))
+            self.len(6, await core.nodes("it:app:snort:rule", opts=fopts))
 
             # Enabling or disabling rules in the fork is refused before any edit, so the
             # fork's rules don't drift from the service's.
