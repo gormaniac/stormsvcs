@@ -32,7 +32,8 @@ to that service.
 - **The Storm package** (`src/<pkg>/pkgproto/`): a Rapid Power-Up in YAML plus `.storm`
   files, loaded by `stormlibpp.StormPkg` (`src/<pkg>/defs.py`). It's the user's entry point.
   Its commands call the service, then turn the returned data into nodes, tags and edges. The
-  goal is for Python to do as much of the computing as possible and for Storm to only orchestrate and model.
+  goal is for Python to do as much of the computing as possible and for Storm to only
+  orchestrate and model.
 - **The image** (`docker/prod/Dockerfile`) is built on the repo's base image and runs
   `python -m <pkg> /vertex/storage` under `tini`.
 
@@ -115,7 +116,7 @@ automation. Library modules can raise. Storm checks `$lib.debug` to log more det
 ## Naming
 
 Everything a service exposes to Synapse lives under the StormLib++ `slib` namespace: the
-service name (`slib.vt`, `slib.yara`), its Storm package, commands (`slib.vt.file`), modules
+service name (`slib.vt`, `slib.yara`), its Storm package, commands (`slib.vt.enrich`), modules
 and permissions (`slib.yara.admin`). stormsvcs is the Advanced Power-Up companion to the
 [StormLib++](https://docs.gormo.co/stormlibpp/) Rapid Power-Ups, which use the same
 namespace. Check StormLib++ for names that are already taken before you pick one.

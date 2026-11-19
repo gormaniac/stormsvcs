@@ -95,9 +95,12 @@ Write `svcs/<svc>/docs/`. See {doc}`docs`. The service joins this site automatic
 
 ## 7. Check
 
+Run these from the repo root (the second line runs in a subshell, so it doesn't change
+directory for the rest):
+
 ```bash
 python3 scripts/check_svcs.py <svc>
-cd svcs/<svc> && uv lock --check && uv run pytest tests
+(cd svcs/<svc> && uv lock --check && uv run pytest tests)
 uvx ruff check svcs/<svc> && uvx ruff format --check svcs/<svc>
 uv run --group docs python scripts/build_docs.py <svc>
 ```

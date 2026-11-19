@@ -10,7 +10,7 @@ workflows call shared, reusable pipelines.
 | `<svc>.yml` | PRs that touch the service (and manual runs), and from `_main.yml` | Calls `_service.yml` for one service |
 | `_service.yml` | `workflow_call` | Lint, test, build the image, test in the image, publish (main only) |
 | `_main.yml` | Every push to `main`, weekly (Mon 03:17 UTC), manual | Rebuilds the base image if needed, then runs every service's workflow |
-| `_base-image.yml` | PRs that touch `docker/`, `LICENSE`, `README.md`, `services.toml`; from `_main.yml` | Builds (and on main, pushes) the base image. In a PR it also builds every service on the new base |
+| `_base-image.yml` | PRs that touch `docker/`, `LICENSE`, `README.md`, `services.toml` or the workflow itself; from `_main.yml`; manual | Builds (and on main, pushes) the base image. In a PR it also builds every service on the new base |
 | `contract.yml` | Every PR and push to `main` | `scripts/check_svcs.py`, see {doc}`contract` |
 | `docs.yml` | PRs and pushes that touch the docs, manual | Builds this site, and on main publishes it, see [Docs](#docs) |
 
@@ -96,7 +96,8 @@ The **docker** job (`needs: test`):
 
 `docker/Dockerfile` builds `ghcr.io/gormaniac/stormsvcs/base`. Its base,
 `vertexproject/vtx-base-image:py311`, is pinned by digest, and Dependabot opens a PR when
-that tag moves. `_main.yml`'s `changes` job rebuilds the base image when `docker/`,
+that tag moves. The root `README.md` and `LICENSE` are copied into the image, which is why
+editing either one rebuilds it. `_main.yml`'s `changes` job rebuilds the base image when `docker/`,
 `LICENSE`, `README.md` or `_base-image.yml` changed since the previous commit on `main`. It
 also rebuilds when that diff can't be computed: manual and scheduled runs, or a force push.
 

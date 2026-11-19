@@ -70,7 +70,7 @@ The `docs` contract rule checks that every service has `docs/index.md`.
   anchors are generated down to `###`.
 - Link to this guide from a service page with an absolute doc path:
   `` {doc}`/dev/testing` ``.
-- Link to a file in the repo with `` {src}`svcs/vt/src/vtsvc/quota.py` ``, and to a PR or issue
+- Link to a file in the repo with `` {src}`svcs/virustotal/src/vtsvc/quota.py` ``, and to a PR or issue
   with `` {gh}`55` ``.
 - Storm code goes in ` ```text ` fences, because Pygments has no Storm lexer and an unknown lexer
   is a build error. Use `bash`, `yaml`, `json` and `python` where they fit.
