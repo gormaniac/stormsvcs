@@ -74,8 +74,7 @@ def _servicesPage(svcs: list[dict]) -> str:
         pkgname = f"`{pkg.stem}`" if pkg else ""
         summary = svc["summary"].replace("|", "\\|")
         lines.append(
-            f"| [{svc['name']}]({svc['key']}/index.md) | {pkgname} | {svc['version']} "
-            f"| {summary} |"
+            f"| [{svc['name']}]({svc['key']}/index.md) | {pkgname} | {svc['version']} | {summary} |"
         )
     lines += ["", "```{toctree}", ":hidden: true", ":maxdepth: 2", ""]
     lines += [f"{svc['name']} <{svc['key']}/index>" for svc in svcs]
