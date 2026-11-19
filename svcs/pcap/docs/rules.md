@@ -134,9 +134,9 @@ The service has one set of rules, so they come from one view: the view the add e
 Installs from before the global existed use the sync cron job's view. `push()` and `update()`
 return `The service's rules come from view <view>, they can't be changed from this view. An
 admin can move them with slib.pcap.admin.schedule --period in another view.` in any other view,
-so a fork can't replace or disable the rules every analysis uses. `slib.pcap.rule.enable` and
-`.disable` call `slib.pcap.priv.rules.denied()` first and, in another view, warn without editing
-`:enabled`. Feeds can still be synced into another view with `slib.pcap.sync --no-push`.
+so a fork can't replace or disable the rules every analysis uses. `slib.pcap.rule.add`,
+`.enable`, and `.disable` call `slib.pcap.priv.rules.denied()` first and, in another view, warn
+without making rule nodes or editing `:enabled`. Feeds can still be synced into another view with `slib.pcap.sync --no-push`.
 
 ## Feeds
 

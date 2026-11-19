@@ -404,7 +404,7 @@ The service has one set of rules, so they come from one view: the view the add e
 default view), or the view of the last `slib.pcap.admin.schedule --period`. Pushes from any other
 view (`slib.pcap.sync`, `slib.pcap.rule.add`, `.enable`, and `.disable` in a fork, for example)
 are refused, so a fork can't replace or disable the rules everyone's analyses use
-(`slib.pcap.rule.enable` and `.disable` check first, and leave `:enabled` as it was). Feeds can
+(`slib.pcap.rule.add`, `.enable`, and `.disable` check first, and make or edit no rule nodes). Feeds can
 still be synced into other views with `slib.pcap.sync --no-push`.
 
 ### Matches
