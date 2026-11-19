@@ -39,7 +39,9 @@ fini {
     if ($cmdopts.issued and $caids) {
         for $n in $crtsh.issued(caids=$caids, valid=$cmdopts.valid, since=$util.toTime($cmdopts.since),
                                 until=$util.toTime($cmdopts.until), precerts=(not $cmdopts.no_precerts),
-                                limit=$cmdopts.limit, chain=$cmdopts.chain) {
+                                limit=$cmdopts.limit, chain=$cmdopts.chain,
+                                expires_after=$util.toTime($cmdopts.expires_after),
+                                expires_before=$util.toTime($cmdopts.expires_before)) {
             yield $n
         }
     }

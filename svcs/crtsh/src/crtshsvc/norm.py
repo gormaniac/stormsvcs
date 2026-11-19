@@ -15,6 +15,7 @@ import datetime
 import hashlib
 import ipaddress
 import json
+import re
 from typing import Any
 
 from cryptography import x509
@@ -470,7 +471,8 @@ def matches(details: dict, field: str, valu: str, mode: str = "contains") -> boo
     """Whether a parsed certificate's ``field`` matches ``valu``.
 
     ``field`` is one of the search fields (see ``fieldValues``) and ``mode`` is
-    ``exact``, ``contains``, or ``suffix`` (for domains: the domain or any subdomain).
+    ``exact``, ``contains``, ``suffix`` (for domains: the domain or any subdomain), or
+    ``prefix`` (a word starts with it: it's at the start or after a non-alphanumeric char).
     """
 
     valu = valu.strip().lower()
@@ -479,6 +481,8 @@ def matches(details: dict, field: str, valu: str, mode: str = "contains") -> boo
         if mode == "exact" and cand == valu:
             return True
         if mode == "contains" and valu in cand:
+            return True
+        if mode == "prefix" and re.search(r"(?<![^\W_])" + re.escape(valu), cand):
             return True
         if mode == "suffix":
             base = cand.removeprefix("*.")

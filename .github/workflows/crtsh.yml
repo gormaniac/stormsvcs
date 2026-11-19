@@ -65,3 +65,34 @@ jobs:
         env:
           SLIB_CRTSH_PGDSN: postgresql://postgres@127.0.0.1:5432/certwatch
         run: uv run pytest tests/test_pg.py
+
+      # crt.sh's PgBouncer pools by statement, which refuses explicit transactions, so the same
+      # tests run again through one in statement pooling mode.
+      - name: Start PgBouncer in statement pooling mode
+        working-directory: ${{ runner.temp }}
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq pgbouncer
+          printf '"postgres" ""\n' > users.txt
+          cat > pgbouncer.ini <<EOF
+          [databases]
+          certwatch = host=127.0.0.1 port=5432 dbname=certwatch
+          [pgbouncer]
+          listen_addr = 127.0.0.1
+          listen_port = 6433
+          auth_type = trust
+          auth_file = $PWD/users.txt
+          pool_mode = statement
+          logfile = $PWD/pgbouncer.log
+          pidfile = $PWD/pgbouncer.pid
+          EOF
+          pgbouncer -d pgbouncer.ini
+
+      - name: Run the PostgreSQL tests through PgBouncer
+        env:
+          SLIB_CRTSH_PGDSN: postgresql://postgres@127.0.0.1:6433/certwatch
+        run: uv run pytest tests/test_pg.py
+
+      - name: Show the PgBouncer log
+        if: failure()
+        run: cat ${{ runner.temp }}/pgbouncer.log || true

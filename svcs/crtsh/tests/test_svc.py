@@ -70,6 +70,13 @@ def test_helpers():
     )
     assert s_svc.identityQuery("dns", "vertex.link", exact=True) == ("vertex.link", "vertex.link")
     assert s_svc.identityQuery("org", "Vertex") == ("Vertex", "%Vertex%")
+    # A trailing * is a prefix: the text keeps it (see db.tsquery), the pattern is a substring.
+    assert s_svc.identityQuery("dns", "*.vert_ex*") == ("vert_ex*", "%vert\\_ex%")
+    assert s_svc.identityQuery("org", " The Vert** ") == ("The Vert*", "%The Vert%")
+    assert s_svc.identityQuery("subject", "O=Vert*") == ("Vert*", None)
+    with pytest.raises(CrtshDbError, match="can't be exact"):
+        s_svc.identityQuery("cn", "vert*", exact=True)
+    assert not s_svc.isPrefix("*") and not s_svc.isPrefix("a -*") and s_svc.isPrefix("a.b*")
 
     assert s_svc.lookupValu("id", "12") == [12]
     with pytest.raises(CrtshDbError, match="Invalid crt.sh ID"):
@@ -240,6 +247,8 @@ class TestCrtshSvc(s_tests.SynTest):
             ]
             assert fake.last("certsByIdentity")["issuer"] == "Issuing CA"
             assert fake.last("certsByIdentity")["caids"] is None
+            # The issuer filters the candidates afterwards, so every candidate is fetched.
+            assert fake.last("certsByIdentity")["limit"] == 10000
             assert await ids(svc.searchGenr(dns="vertex.link", caids=[1])) == []
             assert await ids(svc.searchGenr(issuer="nope")) == []
 
@@ -254,6 +263,95 @@ class TestCrtshSvc(s_tests.SynTest):
 
             with pytest.raises(CrtshDbError, match="at least one"):
                 await ids(svc.searchGenr(dns=""))
+
+    async def test_search_issuer_after_limit(self):
+        # Like crt.sh, an issuer filters the full text search's candidates (up to the limit), it
+        # doesn't find more. The CA certificates with "Test Trust" are, in crt.sh ID order, 1 and
+        # 3 (the roots, CAs 1 and 3), then 2 (issued by CA 1) and 4 (by CA 3).
+        fake = FakeCrtshDb()
+        assert [r["id"] for r in await fake.certsByIdentity("Test Trust", limit=2)] == [1, 3]
+        found = await fake.certsByIdentity("Test Trust", caids=[1], limit=10)
+        assert [r["id"] for r in found] == [1, 2]
+        found = await fake.certsByIdentity("Test Trust", caids=[1], limit=2)
+        assert [r["id"] for r in found] == [1]
+        assert await fake.certsByIdentity("Test Trust", issuer="Root E2", limit=1) == []
+
+    async def test_search_expires(self):
+        def notafter(certid):
+            return int(PKI.certs[certid].not_valid_after_utc.timestamp() * 1000)
+
+        async with svcCtx(self) as (svc, fake):
+            # notAfter bounds: expires after is inclusive, expires before exclusive.
+            assert await ids(svc.searchGenr(dns="vertex.link", expires_after=notafter(11))) == [11]
+            call = fake.last("certsByIdentity")
+            assert (call["expires_after"], call["expires_before"]) == (notafter(11), None)
+            assert await ids(svc.searchGenr(dns="vertex.link", expires_before=notafter(11))) == [
+                10,
+                9,
+                15,
+                12,
+            ]
+            assert await ids(
+                svc.searchGenr(
+                    dns="vertex.link",
+                    expires_after=str(notafter(10)),
+                    expires_before=notafter(11),
+                    valid=True,
+                    since=0,
+                )
+            ) == [10, 9]
+            # The issuer listing too, and pivots by issued (through issuedGenr).
+            assert await ids(svc.searchGenr(caids=[2], expires_before=notafter(10) + 1)) == [
+                10,
+                9,
+                15,
+                12,
+            ]
+            assert fake.last("certsByIssuer")["expires_before"] == notafter(10) + 1
+            assert await ids(svc.issuedGenr(caids=[2], expires_after=notafter(11))) == [11]
+            assert fake.last("certsByIssuer")["expires_after"] == notafter(11)
+
+            for after, before in ((2000, 2000), (3000, 2000)):
+                with pytest.raises(CrtshDbError, match="expires after time must be before"):
+                    await ids(
+                        svc.searchGenr(
+                            dns="vertex.link", expires_after=after, expires_before=before
+                        )
+                    )
+            with pytest.raises(CrtshDbError, match="expires after time must be before"):
+                await ids(svc.issuedGenr(caids=[2], expires_after=2, expires_before=1))
+            with pytest.raises(CrtshDbError, match="Invalid expires_before"):
+                await ids(svc.searchGenr(dns="vertex.link", expires_before="soon"))
+
+    async def test_search_prefix(self):
+        async with svcCtx(self) as (svc, fake):
+            # A trailing * matches indexed words that start with it (crt.sh indexes every parent
+            # domain, so vert* matches vertex.link and so www.vertex.link).
+            assert await ids(svc.searchGenr(cn="vert*")) == [10, 9, 15, 11, 12]
+            call = fake.last("certsByIdentity")
+            assert (call["text"], call["like"]) == ("vert*", "%vert%")
+            assert await ids(svc.searchGenr(dns="*.vertex.l*", valid=True)) == [10, 9, 11]
+            assert fake.last("certsByIdentity")["text"] == "vertex.l*"
+            assert await ids(svc.searchGenr(org="The Vert*", ou="Engin*")) == [10, 9, 15]
+            assert fake.last("certsByIdentity")["text"] == "The Vert*"
+            assert await ids(svc.searchGenr(subject="O=Exam*")) == [14]
+            assert fake.last("certsByIdentity")["text"] == "Exam*"
+            assert await ids(svc.searchGenr(email="visi@vert*")) == [10, 9]
+            # No suffix or substring search: ertex* isn't a word's start, nor is ink* (the
+            # reversed names crt.sh indexes, ex. knil.xetrev, don't count for a field either).
+            assert await ids(svc.searchGenr(cn="ertex*")) == []
+            assert await ids(svc.searchGenr(dns="knil*")) == []
+            assert fake.last("certsByIdentity")["text"] == "knil*"
+            # A * alone isn't a prefix.
+            assert await ids(svc.searchGenr(cn="*")) == []
+            with pytest.raises(CrtshDbError, match="can't be exact"):
+                await ids(svc.searchGenr(cn="vert*", exact=True))
+            with pytest.raises(CrtshDbError, match="can't be exact"):
+                await ids(svc.searchGenr(dns="www.vertex.link", org="vert*", exact=True))
+            # A prefix of a common word can hit crt.sh's statement timeout: the usual error.
+            fake.fail = "crt.sh query failed: canceling statement due to statement timeout"
+            with pytest.raises(CrtshDbError, match="statement timeout"):
+                await ids(svc.searchGenr(cn="micro*", issuer="Let's Encrypt", valid=True))
 
     async def test_round_trips(self):
         # crt.sh is slow per query, every operation is a single query.
@@ -547,10 +645,12 @@ class TestCrtshSvc(s_tests.SynTest):
             "crtsh:idle": 3,
             "crtsh:connect:timeout": 4,
             "crtsh:statement:timeout": 6,
+            "crtsh:timeout:retries": 0,
         }
         # The defaults bound every query, crt.sh cancels it before the client gives up.
         async with self.getTestCell(CrtshSvc) as svc:
             assert (svc.db.timeout, svc.db.statement_timeout) == (660, 600)
+            assert svc.db.timeout_retries == 1
 
         async with self.getTestCell(CrtshSvc, conf=conf) as svc:
             db = svc.db
@@ -562,4 +662,5 @@ class TestCrtshSvc(s_tests.SynTest):
                 db.idle,
                 db.connect_timeout,
                 db.statement_timeout,
-            ) == ("postgresql://u@db.example:5433/certs", 5, 1, 2, 3, 4, 6)
+                db.timeout_retries,
+            ) == ("postgresql://u@db.example:5433/certs", 5, 1, 2, 3, 4, 6, 0)

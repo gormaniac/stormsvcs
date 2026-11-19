@@ -35,15 +35,19 @@ function search(opts) {
                                  subject=$opts.subject, identity=$opts.identity,
                                  issuer=$opts.issuer, caids=$opts.caids, exact=$opts.exact,
                                  valid=$opts.valid, since=$opts.since, until=$opts.until,
+                                 expires_after=$opts.expires_after,
+                                 expires_before=$opts.expires_before,
                                  precerts=$opts.precerts, limit=$opts.limit) {
         emit $retn
     }
 }
 
 function issued(caids=(null), valu=(null), kind=(null), valid=(false), since=(null),
-                until=(null), precerts=(true), limit=(100)) {
+                until=(null), precerts=(true), limit=(100), expires_after=(null),
+                expires_before=(null)) {
     for $retn in $svc.issuedGenr(caids=$caids, valu=$valu, kind=$kind, valid=$valid, since=$since,
-                                 until=$until, precerts=$precerts, limit=$limit) {
+                                 until=$until, precerts=$precerts, limit=$limit,
+                                 expires_after=$expires_after, expires_before=$expires_before) {
         emit $retn
     }
 }

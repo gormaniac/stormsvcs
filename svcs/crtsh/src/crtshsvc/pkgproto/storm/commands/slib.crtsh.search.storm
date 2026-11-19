@@ -18,6 +18,8 @@ init {
         "valid": $cmdopts.valid,
         "since": $util.toTime($cmdopts.since),
         "until": $util.toTime($cmdopts.until),
+        "expires_after": $util.toTime($cmdopts.expires_after),
+        "expires_before": $util.toTime($cmdopts.expires_before),
         "precerts": (not $cmdopts.no_precerts),
         "limit": $cmdopts.limit,
     })

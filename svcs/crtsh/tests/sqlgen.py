@@ -36,6 +36,8 @@ CRTSH = {
         "identity": "comodo.com",
         "subject": "O=Sectigo Limited",
         "domain": "comodo.com",
+        "word": "microsoft",  # A common word (~486M certificates, mostly O=Microsoft Corporation).
+        "rareissuer": "Let's Encrypt",  # An issuer of few of the word's certificates.
     },
 }
 """The values queries are run with against crt.sh."""
@@ -56,6 +58,8 @@ STUB = {
         "identity": "vertex.link",
         "subject": "O=The Vertex Project",
         "domain": "vertex.link",
+        "word": "vert",
+        "rareissuer": "Issuing CA",
     },
 }
 """The values queries are run with against the PostgreSQL stub of crt.sh (see tests.pgstub)."""
@@ -65,6 +69,12 @@ SINCE = 1735689600000
 
 UNTIL = 1798761600000
 """2027-01-01, epoch millis."""
+
+RECENT = 1790812800000
+"""2026-10-01, epoch millis: a recent partition, where prefixes of common words are heaviest."""
+
+Q1_2027 = (1798761600000, 1806537600000)
+"""2027-01-01 to 2027-04-01, epoch millis: crt.sh's c2027q1 partition (notAfter in 2027 Q1)."""
 
 
 class Var:
@@ -195,6 +205,54 @@ async def record(samples: dict, caname: str) -> Recorder:
         db.certsByIdentity(text, like=like, nametypes=NAME_TYPES["dns"], issuer=caname, limit=500),
     )
 
+    # A common word and a rare issuer: the issuer filters the full text search's candidates
+    # (every crtsh:candidates of them), it isn't part of their scan, which timed out.
+    word, rare = samples["word"], samples["rareissuer"]
+    text, like = identityQuery("cn", word)
+    await q(
+        f'Search --cn {word} --issuer "{rare}" (a common word and a rare issuer)',
+        db.certsByIdentity(text, like=like, nametypes=NAME_TYPES["cn"], issuer=rare, limit=10000),
+    )
+    # Prefixes: '<word>':*::tsquery matches indexed words that start with it.
+    text, like = identityQuery("cn", word + "*")
+    await q(
+        f"Search --cn '{word}*' (a prefix)",
+        db.certsByIdentity(text, like=like, nametypes=NAME_TYPES["cn"], limit=500),
+    )
+    await q(
+        f"Search --cn '{word}*' --issuer \"{rare}\" --valid --since 2026-10-01 (a prefix of a"
+        " common word in a recent window: MAY NEED A RETRY, it can hit the statement timeout on"
+        " a cold cache and finish when rerun; the service retries once, crtsh:timeout:retries)",
+        db.certsByIdentity(
+            text,
+            like=like,
+            nametypes=NAME_TYPES["cn"],
+            issuer=rare,
+            valid=True,
+            since=RECENT,
+            limit=10000,
+        ),
+    )
+    await q(
+        f"Search --cn '{word}*' --issuer \"{rare}\" --expires-after 2027-01-01 --expires-before"
+        " 2027-04-01 (a prefix pinned to one partition, c2027q1: MAY NEED A RETRY, it can hit the"
+        " statement timeout on a cold cache and finish when rerun; the service retries once)",
+        db.certsByIdentity(
+            text,
+            like=like,
+            nametypes=NAME_TYPES["cn"],
+            issuer=rare,
+            expires_after=Q1_2027[0],
+            expires_before=Q1_2027[1],
+            limit=10000,
+        ),
+    )
+    text, like = identityQuery("identity", f"login {word}*")
+    await q(
+        f"Search --identity 'login {word}*' (plain words and a prefix)",
+        db.certsByIdentity(text, like=like, limit=500),
+    )
+
     # Issued certificates, every CA source is one query.
     await q(
         "Issued by a CA ID (ca --issued, search --caid)",
@@ -228,7 +286,6 @@ async def record(samples: dict, caname: str) -> Recorder:
 
 SETUP = """\\timing on
 \\pset pager off
-SET statement_timeout = '600s';
 
 -- The sample certificate and the values the lookups use.
 \\set certid {certid}
@@ -248,12 +305,23 @@ SELECT encode(digest(c.CERTIFICATE, 'sha256'), 'hex') AS sha256,
 """
 
 
+TIMEOUT = "SET statement_timeout = '600s' \\;\n"
+"""Sent in front of each query, with ``RESET`` after it: ``\\;`` makes psql send them
+as one message (one implicit transaction, on one server connection), so the timeout reaches
+the query behind crt.sh's PgBouncer statement pooling, like the service's own (see
+``CrtshDb``). A ``SET LOCAL`` doesn't take effect on crt.sh's PostgreSQL 12, and a separate
+``SET statement_timeout`` only reaches whichever server connection ran it, where it stays."""
+
+RESET = " \\; RESET statement_timeout"
+
+
 def main() -> None:
     vals = STUB if "--stub" in sys.argv[1:] else CRTSH
     db = asyncio.run(record(vals["samples"], vals["caname"]))
     out = [SETUP.format(**vals)]
     for num, (title, sql) in enumerate(db.queries, start=1):
-        out.append(f"\\echo '-- {num}. {title}'\n{sql};\n")
+        title = title.replace("'", "''")  # Quoted for psql's \\echo.
+        out.append(f"\\echo '-- {num}. {title}'\n{TIMEOUT}{sql}{RESET};\n")
     sys.stdout.write("\n".join(out))
 
 

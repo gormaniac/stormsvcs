@@ -5,21 +5,33 @@ crt.sh's PgBouncer allows one connection per client, drops idle clients
 """
 
 import asyncio
+import base64
+import json
+import pathlib
+import re
+import struct
 
 import asyncpg
 import pytest
+from cryptography import x509
 
 from crtshsvc.db import (
     LOOKUPS,
     NAME_TYPES,
     NOTAFTER_KEY,
+    PARAM_RE,
+    RAW_SQL,
     CrtshDb,
     CrtshDbError,
+    _copyRows,
+    _inline,
+    _literal,
     likeEscape,
+    prefixQuery,
     tsquery,
 )
 
-from .fakecrtsh import PKI, identityText
+from .fakecrtsh import PKI, identityText, tsTokens
 
 
 class FakeRecord:
@@ -52,14 +64,71 @@ class FakeRecord:
         return iter(self._items.items())
 
 
+# Statements that open an explicit transaction block, which PgBouncer's statement pooling
+# refuses (and then disconnects the client). A SET LOCAL sent on its own isn't refused by
+# PostgreSQL, but outside a transaction it does nothing, so the fakes refuse it too.
+TXN_RE = re.compile(
+    r"(^|;)\s*(BEGIN|START\s+TRANSACTION|SAVEPOINT|ROLLBACK|COMMIT)\b", re.IGNORECASE
+)
+SET_LOCAL_RE = re.compile(r"^\s*SET\s+LOCAL\b", re.IGNORECASE)
+
+# The simple-query message CrtshDb._copy sends for the service's own queries.
+COPY_RE = re.compile(
+    r"SET statement_timeout = (\d+); SET LOCAL bytea_output = hex; "
+    r"SET TRANSACTION READ ONLY; COPY \(SELECT row_to_json\(crtsh_r\)::text FROM \(\n"
+    r"(.*)\n\) crtsh_r\) TO STDOUT \(FORMAT binary\); RESET statement_timeout",
+    re.DOTALL,
+)
+
+
+def copyData(rows: list[dict]) -> bytes:
+    """A binary COPY of one text column holding each row as JSON, as PostgreSQL sends it."""
+
+    data = bytearray(b"PGCOPY\n\xff\r\n\x00" + struct.pack("!II", 0, 0))
+    for row in rows:
+        text = json.dumps(row).encode()
+        data += struct.pack("!hi", 1, len(text)) + text
+    return bytes(data + struct.pack("!h", -1))
+
+
+class FakeProtocol:
+    """The protocol level copy_out CrtshDb._copy uses."""
+
+    def __init__(self, conn):
+        self.conn = conn
+
+    async def copy_out(self, stmt, sink, timeout):
+        conn, server = self.conn, self.conn.server
+        conn.refuse(stmt)
+        server.messages.append(stmt)
+        match = COPY_RE.fullmatch(stmt)
+        assert match, stmt
+        if server.setfail:
+            raise asyncpg.exceptions.InsufficientPrivilegeError(
+                'permission denied to set parameter "statement_timeout"'
+            )
+        server.timeouts.append(int(match.group(1)))
+        rows = await conn.run(match.group(2))
+        # PostgreSQL sends a CopyData message per row, asyncpg may hand them over in chunks.
+        data = copyData(rows)
+        for pos in range(0, len(data), 7):
+            await sink(data[pos : pos + 7])
+        return f"COPY {len(rows)}"
+
+
 class FakeConn:
-    """A fake asyncpg connection that runs scripted results."""
+    """A fake asyncpg connection behind PgBouncer's statement pooling, running scripted results.
+
+    Each message must be one statement, or one implicit transaction (a simple query of
+    several statements): explicit transaction blocks are refused, like crt.sh's PgBouncer.
+    """
 
     def __init__(self, server, num: int):
         self.server = server
         self.num = num
         self.closed = False
         self.pings = 0
+        self._protocol = FakeProtocol(self)
 
     def is_closed(self) -> bool:
         return self.closed
@@ -75,7 +144,21 @@ class FakeConn:
         self.server.open -= 1
         self.server.terminated += 1
 
-    async def fetch(self, sql, *args, timeout=None):
+    def refuse(self, sql: str):
+        """Refuse a transaction block like PgBouncer's statement pooling, disconnecting."""
+
+        assert not self.closed
+        if self.server.statement and (
+            TXN_RE.search(sql) or (SET_LOCAL_RE.match(sql) and ";" not in sql)
+        ):
+            self.server.refused.append(sql)
+            self.closed = True
+            self.server.open -= 1
+            raise asyncpg.exceptions.ProtocolViolationError(
+                "transaction blocks not allowed in statement pooling mode"
+            )
+
+    async def run(self, sql) -> list[dict]:
         assert not self.closed
         assert not self.server.busy, "Queries must never overlap on the single connection."
         self.server.busy = True
@@ -86,23 +169,23 @@ class FakeConn:
                 err = self.server.errors.pop(0)
                 if err is not None:
                     raise err
-            return [FakeRecord(sql=sql, conn=self.num)]
+            return [{"sql": sql, "conn": self.num}]
         finally:
             self.server.busy = False
 
+    async def fetch(self, sql, *args, timeout=None):
+        self.refuse(sql)
+        self.server.fetched.append(sql)
+        return [FakeRecord(**row) for row in await self.run(sql)]
+
     async def execute(self, sql):
-        assert not self.closed
+        self.refuse(sql)
         self.server.executed.append(sql)
-        if self.server.setfail and "SET" in sql:
-            raise asyncpg.exceptions.InsufficientPrivilegeError(
-                "permission denied to set parameter"
-            )
-        if self.server.rollbackfail and sql == "ROLLBACK":
-            raise OSError("connection lost")
         if sql in self.server.failon:
             raise OSError("connection lost")
 
     async def fetchval(self, sql, timeout=None):
+        self.refuse(sql)
         if self.server.pingfail:
             raise asyncpg.exceptions.ProtocolViolationError("client_idle_timeout")
         self.pings += 1
@@ -129,14 +212,19 @@ class FakeServer:
         self.closefail = False
         self.pingfail = False
         self.terminated = 0
+        self.statement = True  # PgBouncer's statement pooling, like crt.sh.
+        self.messages: list[str] = []  # The COPY messages of the service's own queries.
+        self.timeouts: list[int] = []  # Their statement_timeouts, in ms.
+        self.fetched: list[str] = []  # Extended protocol queries (raw, or without COPY).
         self.executed: list[str] = []
+        self.refused: list[str] = []
         self.setfail = False
-        self.rollbackfail = False
         self.failon: set[str] = set()
 
     async def connect(self, dsn, **kwargs):
         self.attempts += 1
         assert kwargs["statement_cache_size"] == 0
+        assert "server_settings" not in kwargs, "PgBouncer rejects unknown startup parameters."
         if self.refusals:
             self.refusals -= 1
             raise asyncpg.exceptions.ProtocolViolationError(self.refusal)
@@ -229,11 +317,46 @@ async def test_retries():
         server.errors = [asyncpg.exceptions.UndefinedTableError('relation "nope" does not exist')]
         with pytest.raises(CrtshDbError, match="nope"):
             await db.fetch("SELECT * FROM nope")
+    finally:
+        await db.close()
+
+
+async def test_retry_statement_timeout(caplog):
+    # A heavy query can time out on crt.sh's cold cache and finish when rerun, so a statement
+    # timeout is retried once (crtsh:timeout:retries), after timeout_delay, on the same connection.
+    server = FakeServer()
+    db = makeDb(server, timeout_delay=0.01)
+    timeout = asyncpg.exceptions.QueryCanceledError("canceling statement due to statement timeout")
+    try:
+        server.errors = [timeout]
+        assert (await db.fetch("SELECT 1"))[0]["conn"] == 0
+        # The canceled query's implicit transaction ended with it, there's nothing to end.
+        assert len(server.conns) == 1 and server.executed == [] and len(server.messages) == 2
+        assert "retrying in 0s (1 of 1)" in caplog.text
+
+        # Twice in a row is the normal error.
+        server.errors = [timeout, timeout]
+        with pytest.raises(CrtshDbError, match="canceled the query \\(statement timeout\\)"):
+            await db.fetch("SELECT 2")
+        assert not server.errors
+
+        # Other cancels aren't retried, the connection stays usable.
         server.errors = [
-            asyncpg.exceptions.QueryCanceledError("canceling statement due to statement timeout")
+            asyncpg.exceptions.QueryCanceledError("canceling statement due to user request"),
+            None,
         ]
-        with pytest.raises(CrtshDbError, match="statement timeout"):
+        with pytest.raises(CrtshDbError, match="user request"):
             await db.fetch("SELECT 3")
+        assert server.errors == [None]
+
+        # Nor are timeouts without retries, and they don't use up connection retries.
+        db.timeout_retries = 0
+        server.errors = [timeout]
+        with pytest.raises(CrtshDbError, match="statement timeout"):
+            await db.fetch("SELECT 4")
+        db.timeout_retries, db.retries = 1, 0
+        server.errors = [timeout]
+        assert (await db.fetch("SELECT 5"))[0]["conn"] == 0
     finally:
         await db.close()
 
@@ -261,77 +384,143 @@ async def test_keepalive_and_idle_close():
     assert server.open == 0
 
 
-BEGIN = "BEGIN READ ONLY; SET LOCAL statement_timeout = {}"
-RAW_END = ["SAVEPOINT raw", "SELECT pg_advisory_unlock_all()", "ROLLBACK"]
-
-
-async def test_statement_timeout():
-    # crt.sh's default statement_timeout cancels big queries, so every query sets its own,
-    # with SET LOCAL in a read-only transaction (a session SET is lost behind transaction pooling).
+async def test_statement_pooling():
+    # crt.sh's PgBouncer pools by statement: explicit transactions are refused and the client
+    # is disconnected (the fakes model it, like the old BEGIN READ ONLY; SET LOCAL prelude got).
     server = FakeServer()
     db = makeDb(server, statement_timeout=90)
     try:
-        await db.fetch("SELECT 1")
-        assert server.executed == [BEGIN.format(90000), "COMMIT"]
-        # A dropped connection's transaction is rolled back, and the retry sets it again.
-        server.executed.clear()
+        conn = await db._ensure()
+        for sql in ("BEGIN READ ONLY; SET LOCAL statement_timeout = 0", "SAVEPOINT raw"):
+            with pytest.raises(
+                asyncpg.exceptions.ProtocolViolationError, match="statement pooling"
+            ):
+                await conn.execute(sql)
+            assert conn.is_closed()
+            conn = await db._ensure()
+        with pytest.raises(asyncpg.exceptions.ProtocolViolationError, match="statement pooling"):
+            await conn.fetch("SET LOCAL statement_timeout = 0")
+        server.refused.clear()
+        db._conn = None
+
+        # So every query is one message, without a transaction block, and nothing else is
+        # sent: the service's own queries set their statement_timeout (SET, then RESET) and read-only
+        # mode in the same simple query as their COPY.
+        assert (await db.fetch("SELECT 1"))[0]["sql"] == "SELECT 1"
+        assert server.messages == [db._copyStmt("SELECT 1", ())]
+        assert server.timeouts == [90000]
+        assert server.executed == server.fetched == server.refused == []
+        # A dropped connection is retried with the same single message.
         server.errors = [asyncpg.exceptions.ProtocolViolationError("client_idle_timeout")]
         await db.fetch("SELECT 2")
-        assert server.executed == [BEGIN.format(90000), "ROLLBACK", BEGIN.format(90000), "COMMIT"]
-        assert len(server.conns) == 2
+        assert server.timeouts == [90000, 90000, 90000]
+        assert server.executed == server.fetched == server.refused == []
     finally:
         await db.close()
 
-    # The default is no limit, and a server that refuses the SET is still used, without it.
+
+async def test_statement_timeout():
+    # The default is no limit, and the arguments are inlined (a simple query has no parameters).
+    server = FakeServer()
+    db = makeDb(server)
+    try:
+        await db.fetch("SELECT $1::text, $2", "it's", 5)
+        assert server.timeouts == [0]
+        assert server.queries[-1][1] == "SELECT E'it''s'::text, 5"
+    finally:
+        await db.close()
+
+    # A server that refuses the SETs is still used, without them, under its own timeout.
     server = FakeServer()
     server.setfail = True
     db = makeDb(server)
     try:
-        assert (await db.fetch("SELECT 1"))[0]["conn"] == 0
-        assert server.executed == [BEGIN.format(0), "ROLLBACK", "BEGIN READ ONLY", "COMMIT"]
-        server.executed.clear()
+        assert (await db.fetch("SELECT $1", 1))[0]["conn"] == 0
+        assert len(server.messages) == 1 and server.fetched == ["SELECT $1"]
         await db.fetch("SELECT 2")
-        assert server.executed == ["BEGIN READ ONLY", "COMMIT"]
+        assert len(server.messages) == 1 and server.fetched == ["SELECT $1", "SELECT 2"]
+        assert len(server.conns) == 1
     finally:
         await db.close()
 
-    # A refused SET whose ROLLBACK fails drops the connection, and the query is retried.
+
+async def test_no_copy_out(caplog):
+    # An asyncpg without the protocol level copy_out gets plain queries.
     server = FakeServer()
-    server.setfail = True
-    server.rollbackfail = True
     db = makeDb(server)
     try:
-        assert (await db.fetch("SELECT 1"))[0]["conn"] == 1
+        conn = await db._ensure()
+        del conn._protocol
+        assert (await db.fetch("SELECT 1"))[0]["sql"] == "SELECT 1"
+        assert server.fetched == ["SELECT 1"] and server.messages == []
+        assert "Unable to COPY with this asyncpg" in caplog.text
     finally:
         await db.close()
 
 
-async def test_transaction_errors():
-    # A failed query rolls its transaction back, and the connection is reused.
+async def test_query_errors():
+    # A failed query ends its own implicit transaction, the connection is reused as is.
     server = FakeServer()
     db = makeDb(server)
     try:
         server.errors = [asyncpg.exceptions.UndefinedTableError('relation "nope" does not exist')]
         with pytest.raises(CrtshDbError, match="nope"):
             await db.fetch("SELECT * FROM nope")
-        assert server.executed[-1] == "ROLLBACK"
         assert (await db.fetch("SELECT 1"))[0]["conn"] == 0
 
-        # crt.sh canceling the query (statement timeout) rolls back too.
+        # crt.sh canceling the query (statement timeout) too.
         server.errors = [asyncpg.exceptions.QueryCanceledError("canceling statement")]
         with pytest.raises(CrtshDbError, match="statement timeout"):
             await db.fetch("SELECT 2")
-        assert server.executed[-1] == "ROLLBACK"
         assert (await db.fetch("SELECT 3"))[0]["conn"] == 0
+        assert server.executed == server.refused == [] and len(server.conns) == 1
 
-        # A ROLLBACK that fails drops the connection.
-        server.rollbackfail = True
-        server.errors = [asyncpg.exceptions.UndefinedTableError('relation "nope" does not exist')]
-        with pytest.raises(CrtshDbError, match="nope"):
-            await db.fetch("SELECT * FROM nope")
-        assert db._conn is None and server.open == 0
+        # Only a refused SET (a "parameter") turns off the COPY, not other privilege errors.
+        server.errors = [asyncpg.exceptions.InsufficientPrivilegeError("permission denied for ca")]
+        with pytest.raises(CrtshDbError, match="permission denied for ca"):
+            await db.fetch("SELECT * FROM ca")
+        assert db._useCopy
     finally:
         await db.close()
+
+
+def test_literals():
+    assert _literal(None) == "NULL"
+    assert _literal(True) == "TRUE" and _literal(False) == "FALSE"
+    assert _literal(2**40) == "1099511627776" and _literal(-1) == "-1"
+    assert _literal(1.5) == "'1.5'::float8" and _literal(1e20) == "'1e+20'::float8"
+    # Escape strings with every backslash and quote escaped, whatever standard_conforming_strings is.
+    assert _literal("it's \\' $1") == "E'it''s \\\\'' $1'"
+    assert _literal(b"\x00\xff") == "E'\\\\x00ff'::bytea"
+    assert _literal([1, 2]) == "ARRAY[1, 2]" and _literal([]) == "'{}'"
+    assert _literal([b"\x01", None]) == "ARRAY[E'\\\\x01'::bytea, NULL]"
+    for valu in (float("nan"), float("inf"), "a\x00b", [[1]], {1: 2}, object()):
+        with pytest.raises(CrtshDbError):
+            _literal(valu)
+
+    # Every $n is replaced once (a literal is never rescanned), $10 isn't $1 then a 0.
+    args = tuple(range(1, 11))
+    assert _inline("$1 $10 $2", args) == "1 10 2"
+    assert _inline("$1 $2", ("$2", "x")) == "E'$2' E'x'"
+    with pytest.raises(CrtshDbError, match=r"\$3 has no argument"):
+        _inline("$3", (1, 2))
+
+
+def test_copy_rows():
+    rows = [{"id": 1, "der": "\\x00ff", "caids": [1, 2], "n": None}, {"id": 2, "name": "\\x01"}]
+    assert _copyRows(copyData(rows)) == [
+        {"id": 1, "der": b"\x00\xff", "caids": [1, 2], "n": None},
+        {"id": 2, "name": "\\x01"},  # Only the bytea columns are decoded.
+    ]
+    assert _copyRows(copyData([])) == []
+    # A CA without a certificate (cas(certs=True)) has a null DER.
+    assert _copyRows(copyData([{"der": None}])) == [{"der": None}]
+    two = copyData([]).replace(b"\xff\xff", struct.pack("!hi", 2, 0) + b"\xff\xff")
+    with pytest.raises(CrtshDbError, match="2 columns"):
+        _copyRows(two)
+    for data in (b"nope", copyData(rows)[:-10]):
+        with pytest.raises((CrtshDbError, struct.error)):
+            _copyRows(data)
 
 
 async def test_cancel_drops_connection():
@@ -414,12 +603,15 @@ class Recorder(CrtshDb):
     def __init__(self, rows=None):
         super().__init__()
         self.queries: list[tuple[str, tuple]] = []
-        self.commits: list[bool] = []
+        self.raws: list[bool] = []
         self.rows = rows or []
 
-    async def fetch(self, sql, *args, commit=True):
+    async def fetch(self, sql, *args, raw=False):
         self.queries.append((sql, args))
-        self.commits.append(commit)
+        self.raws.append(raw)
+        if not raw:
+            # The service's own queries are inlined into a COPY, every $n must have an argument.
+            assert not PARAM_RE.search(_inline(sql, args))
         return self.rows
 
     @property
@@ -498,24 +690,82 @@ async def test_sql_identity():
     assertMeta(sql)
     assert "FROM certificate_and_identities c WHERE" in sql
     assert "c.NAME_VALUE ILIKE $2 AND c.NAME_TYPE = ANY($3::text[])" in sql
-    assert "c.ISSUER_CA_ID = ANY($4::int[])" in sql
-    # The issuer's name is a subquery, not another round trip.
-    assert "c.ISSUER_CA_ID IN (SELECT ca.ID FROM ca WHERE ca.NAME ILIKE $5 LIMIT 1000)" in sql
     assert f"{NOTAFTER_KEY} >= date_trunc('year', now() AT TIME ZONE 'UTC')" in sql
-    assert "x509_notBefore(c.CERTIFICATE) >= to_timestamp($6) AT TIME ZONE 'UTC'" in sql
-    assert f"{NOTAFTER_KEY} >= to_timestamp($6) AT TIME ZONE 'UTC'" in sql
-    assert "x509_notBefore(c.CERTIFICATE) < to_timestamp($7) AT TIME ZONE 'UTC'" in sql
-    assert "LIMIT $8) sub GROUP BY sub.CERTIFICATE_ID, sub.ISSUER_CA_ID, sub.CERTIFICATE" in sql
+    assert "x509_notBefore(c.CERTIFICATE) >= to_timestamp($4) AT TIME ZONE 'UTC'" in sql
+    assert f"{NOTAFTER_KEY} >= to_timestamp($4) AT TIME ZONE 'UTC'" in sql
+    assert "x509_notBefore(c.CERTIFICATE) < to_timestamp($5) AT TIME ZONE 'UTC'" in sql
+    # The issuer filters the materialized candidates, it isn't part of their scan: nothing
+    # indexes a word and an issuer together, so a common word and a rare issuer would recheck
+    # every certificate with the word.
+    cand = sql.split("cand AS MATERIALIZED (", 1)[1].split("LIMIT $6)", 1)[0]
+    assert "ISSUER_CA_ID =" not in cand and "ISSUER_CA_ID IN" not in cand
+    assert (
+        "SELECT cand.ID, cand.ISSUER_CA_ID, cand.CERTIFICATE FROM cand WHERE "
+        "cand.ISSUER_CA_ID = ANY($7::int[]) AND "
+        # The issuer's name is a subquery, not another round trip.
+        "cand.ISSUER_CA_ID IN (SELECT ca.ID FROM ca WHERE ca.NAME ILIKE $8 LIMIT 1000) "
+        "GROUP BY cand.ID, cand.ISSUER_CA_ID, cand.CERTIFICATE"
+    ) in sql
     assert db.args == (
         "vertex.link",
         "%vertex.link",
         ["san:dNSName", "2.5.4.3"],
-        [2, 3],
-        "%Let's\\_Encrypt%",
         1.0,
         2.0,
         50,
+        [2, 3],
+        "%Let's\\_Encrypt%",
     )
+
+    # Identities without an issuer are still grouped from the candidates.
+    await db.certsByIdentity("vertex.link", like="%vertex.link", limit=5)
+    assert "FROM cand GROUP BY cand.ID" in db.sql
+    assert "FROM cand WHERE" not in db.sql
+
+    # Full text search alone with an issuer.
+    await db.certsByIdentity("vertex.link", issuer="Sectigo", limit=5)
+    assert (
+        "cand AS MATERIALIZED (SELECT c.ID, c.ISSUER_CA_ID, c.CERTIFICATE FROM certificate c WHERE "
+        "plainto_tsquery('certwatch', $1) @@ identities(c.CERTIFICATE) LIMIT $2)"
+    ) in db.sql
+    assert "FROM cand WHERE cand.ISSUER_CA_ID IN (SELECT ca.ID" in db.sql
+    assert "GROUP BY" not in db.sql.split("FROM cand", 1)[1].split("SELECT m.ID", 1)[0]
+
+    # Expiry bounds are on notAfter, and on the partition key so partitions are pruned, inside
+    # the candidates' LIMIT. The issuer still filters after it.
+    await db.certsByIdentity(
+        "vertex.link", issuer="Sectigo", expires_after=1000, expires_before=2000, limit=5
+    )
+    cand = db.sql.split("cand AS MATERIALIZED (", 1)[1].split(" LIMIT $4)", 1)[0]
+    assert (
+        "x509_notAfter(c.CERTIFICATE) >= to_timestamp($2) AT TIME ZONE 'UTC' AND "
+        f"{NOTAFTER_KEY} >= to_timestamp($2) AT TIME ZONE 'UTC' AND "
+        "x509_notAfter(c.CERTIFICATE) < to_timestamp($3) AT TIME ZONE 'UTC' AND "
+        f"{NOTAFTER_KEY} < to_timestamp($3) AT TIME ZONE 'UTC'"
+    ) in cand
+    assert "FROM cand WHERE cand.ISSUER_CA_ID IN (SELECT ca.ID" in db.sql
+    assert db.args == ("vertex.link", 1.0, 2.0, 5, "%Sectigo%")
+    await db.certsByIdentity("vertex.link", expires_before=2000, limit=5)
+    assert f"{NOTAFTER_KEY} < to_timestamp($2) AT TIME ZONE 'UTC'" in db.sql
+    assert f"{NOTAFTER_KEY} >=" not in db.sql
+
+    # A prefix is a tsquery literal (not to_tsquery, see prefixQuery), quoted so no user text
+    # is tsquery syntax.
+    await db.certsByIdentity("microsoft*", valid=True, limit=5)
+    assert (
+        "WHERE $1::tsquery @@ identities(c.CERTIFICATE) AND "
+        f"{NOTAFTER_KEY} >= date_trunc('year', now() AT TIME ZONE 'UTC')"
+    ) in db.sql
+    assert db.args == ("'microsoft':*", 5)
+    # With plain words, both are required.
+    await db.certsByIdentity("login micro*", like="%micro%", since=1000, limit=5)
+    assert (
+        "(plainto_tsquery('certwatch', $1) && $2::tsquery) @@ identities(c.CERTIFICATE)"
+        " AND c.NAME_VALUE ILIKE $3 AND x509_notBefore(c.CERTIFICATE) >= to_timestamp($4)"
+    ) in db.sql
+    assert db.args == ("login", "'micro':*", "%micro%", 1.0, 5)
+    await db.certsByIdentity("x') | !('y\\*", limit=5)
+    assert db.args == ("x') |", "'!(''y\\\\':*", 5)
 
     # Name types alone still check each identity.
     await db.certsByIdentity("Sectigo", nametypes=["2.5.4.10"])
@@ -524,6 +774,14 @@ async def test_sql_identity():
 
 async def test_sql_issuer():
     db = Recorder()
+    edb = Recorder()
+    await edb.certsByIssuer(caids=[2], expires_after=1000, expires_before=2000, limit=10)
+    assert (
+        f"{NOTAFTER_KEY} >= to_timestamp($2) AT TIME ZONE 'UTC' AND "
+        "x509_notAfter(c.CERTIFICATE) < to_timestamp($3) AT TIME ZONE 'UTC' AND "
+        f"{NOTAFTER_KEY} < to_timestamp($3) AT TIME ZONE 'UTC' ORDER BY"
+    ) in edb.sql
+
     await db.certsByIssuer(
         caids=[2, 3], issuer="Sectigo", cert={"sha256": [b"\x01"]}, valid=True, until=2000, limit=10
     )
@@ -640,15 +898,16 @@ async def test_sql_raw():
     # Raw SQL is wrapped so it can only be a query, and its rows are capped.
     db = Recorder()
     await db.raw("SELECT $1", [1])
-    assert db.queries[-1] == ("SELECT * FROM (\nSELECT $1\n) q LIMIT $2", (1, 1000))
+    assert db.queries[-1] == (RAW_SQL.format(sql="SELECT $1", limit="$2"), (1, 1000))
+    assert "SELECT * FROM (\nSELECT $1\n) q WHERE (SELECT crtsh_pre.ro" in db.sql
     await db.raw("SELECT 1 -- a comment;\n ;", limit=5)
-    assert db.queries[-1] == ("SELECT * FROM (\nSELECT 1 -- a comment\n) q LIMIT $1", (5,))
+    assert db.queries[-1] == (RAW_SQL.format(sql="SELECT 1 -- a comment", limit="$1"), (5,))
     with pytest.raises(CrtshDbError, match="No SQL"):
         await db.raw(" ; ")
-    # Raw queries are rolled back, the other queries are committed.
-    assert db.commits == [False, False]
+    # Raw queries keep their parameters (they're never inlined), the others are COPYs.
+    assert db.raws == [True, True]
     await db.cas(name="Test")
-    assert db.commits[-1] is True
+    assert db.raws[-1] is False
 
     # Session advisory locks outlive the rollback, so they're refused.
     for sql in (
@@ -673,58 +932,53 @@ async def test_sql_raw():
     await db.raw('SELECT "u&x" FROM t')
 
 
-async def test_raw_rolls_back():
-    # A raw query's transaction is rolled back, undoing any session setting it changed
-    # (ex. set_config(..., false)) before the connection is reused.
+async def test_raw_single_statement():
+    # A raw query is one extended protocol statement (RAW_SQL undoes what it changed, inside
+    # it), with nothing before or after it.
     server = FakeServer()
     db = makeDb(server, statement_timeout=60)
     try:
         rows = await db.raw("SELECT set_config('search_path', 'pg_catalog', false)")
         assert rows == [{"sql": rows[0]["sql"], "conn": 0}]
-        # Session advisory locks outlive the rollback, so they're released in the transaction
-        # first (behind PgBouncer's transaction pooling, a later one may be on another backend).
-        assert server.executed == [BEGIN.format(60000), *RAW_END]
-        await db.fetch("SELECT 1")
-        assert server.executed[-1] == "COMMIT"
-        assert "SAVEPOINT raw" not in server.executed[-2:]
+        assert server.fetched == [rows[0]["sql"]] and rows[0]["sql"].startswith("WITH crtsh_pre")
+        assert server.executed == server.messages == server.refused == []
 
-        # A failed raw query is rolled back to the savepoint (its transaction is aborted) to
-        # release the locks it took before failing.
-        server.executed.clear()
+        # A failed raw query can't release the session locks it took in its statement, so
+        # they're released by the next one (behind statement pooling, maybe on another server
+        # connection), and the connection is reused.
         server.errors = [asyncpg.exceptions.DivisionByZeroError("division by zero")]
         with pytest.raises(CrtshDbError, match="division by zero"):
             await db.raw("SELECT 1/0")
-        assert server.executed == [
-            BEGIN.format(60000),
-            "SAVEPOINT raw",
-            "ROLLBACK TO SAVEPOINT raw",
-            "SELECT pg_advisory_unlock_all()",
-            "ROLLBACK",
-        ]
-        assert db._conn is not None
+        assert server.executed == ["SELECT pg_advisory_unlock_all()"]
+        assert db._conn is not None and server.refused == []
 
-        # If the locks can't be released, the connection is dropped, which releases them.
-        for errors in ([], [asyncpg.exceptions.DivisionByZeroError("division by zero")]):
-            server.failon = {"SELECT pg_advisory_unlock_all()"}
-            server.errors = list(errors)
-            server.executed.clear()
-            if errors:
-                with pytest.raises(CrtshDbError, match="division by zero"):
-                    await db.raw("SELECT 1/0")
-            else:
-                assert len(await db.raw("SELECT 1")) == 1
-            assert db._conn is None and server.open == 0
-            assert "ROLLBACK" not in server.executed
-            server.failon = set()
-            assert (await db.fetch("SELECT 1"))[0]["conn"] == len(server.conns) - 1
+        # If that fails, the connection is dropped (which ends the session outside PgBouncer).
+        server.failon = {"SELECT pg_advisory_unlock_all()"}
+        server.errors = [asyncpg.exceptions.DivisionByZeroError("division by zero")]
+        with pytest.raises(CrtshDbError, match="division by zero"):
+            await db.raw("SELECT 1/0")
+        assert db._conn is None and server.open == 0
+        server.failon = set()
+        assert (await db.fetch("SELECT 1"))[0]["conn"] == 1
     finally:
         await db.close()
 
 
 def test_tsquery():
-    assert tsquery(" *.vertex.link ") == "vertex.link"
-    assert tsquery("%.vertex.link") == "vertex.link"
-    assert tsquery("a%b*c") == "a b c"
+    assert tsquery(" *.vertex.link ") == ("vertex.link", [])
+    assert tsquery("%.vertex.link") == ("vertex.link", [])
+    assert tsquery("a%b*c") == ("a b c", [])
+    # Only a trailing * makes a prefix, and only of a word with something to index.
+    assert tsquery("microsoft*") == ("", ["microsoft"])
+    assert tsquery("*.microsoft*") == ("", ["microsoft"])
+    assert tsquery("login.Microsoft** corp") == ("corp", ["login.Microsoft"])
+    assert tsquery("a*b* c") == ("a c", ["b"])
+    assert tsquery("-* *") == ("-", [])
+    assert prefixQuery(["Microsoft", "it's", "a\\b", "x') | !(y"]) == (
+        "'microsoft':* & 'it''s':* & 'a\\\\b':* & 'x'') | !(y':*"
+    )
+    # Punctuation stays in the one lexeme, it isn't split into a phrase.
+    assert prefixQuery(["Microsoft-Sup"]) == "'microsoft-sup':*"
     assert likeEscape("a_b%c\\") == "a\\_b\\%c\\\\"
 
 
@@ -747,3 +1001,43 @@ def test_identity_text():
         "1.2.3.4", "4.3.2.1",
         "us", "su",
     ]  # fmt: skip
+
+
+# crt.sh's live identities() tokens (strip(identities(CERTIFICATE)) on the live certwatch DB) for
+# a test certificate with every identity type and two real certificates (crt.sh IDs 29550673 and
+# 30258460), captured 2026-11-17 for the identities() port (identityText) and tsTokens().
+LIVE_IDENTITIES = json.loads(
+    (pathlib.Path(__file__).parent / "data" / "live_identities.json").read_text()
+)["certs"]
+
+
+@pytest.mark.parametrize("live", LIVE_IDENTITIES, ids=lambda live: live["name"])
+def test_identity_tokens_live(live):
+    cert = x509.load_der_x509_certificate(base64.b64decode(live["der"]))
+    assert tsTokens(identityText(cert)) == set(live["tokens"])
+
+
+def test_ts_tokens():
+    # PostgreSQL's default parser, as to_tsvector('simple', ...) gives them.
+    cases = {
+        # An @ whose domain has no dot isn't an email address; : separates words.
+        "knil.xetrev@ecila 1111:0:0:0074:6062:": {"knil.xetrev", "ecila", "1111", "0", "0074", "6062"},
+        "visi@mail.vertex.link a+b@x.com": {"visi@mail.vertex.link", "a", "b@x.com"},
+        # A URL is its host/path, host and path; a reversed one is a file path and its scheme.
+        "https://vertex.link:8443/a?b=1": {"vertex.link:8443/a?b=1", "vertex.link:8443", "/a?b=1"},
+        "htap/knil.xetrev.iru//:sptth": {"htap/knil.xetrev.iru", "sptth"},
+        # (A ./ or ~/ only starts a path at the start of a token, not after a blank.)
+        "a.b/c ./x ~/y /etc/passwd": {"a.b/c", "/x", "/y", "/etc/passwd"},
+        "./x": {"./x"},
+        # Hosts need a TLD of 2+ letters, else they're file paths (or numbers).
+        "a.b foo.com1 1.2.3.com 1.1.861.291 1e5.com": {
+            "a.b", "foo.com1", "1.2.3.com", "1.1.861.291", "1e5", "com",
+        },
+        "Let's Encrypt, AT&T Inc. &amp;": {"let", "s", "encrypt", "at", "t", "inc"},
+        "Foo-Bar co-op.coop a-b-12 x -5": {
+            "foo-bar", "foo", "bar", "co-op.coop", "a-b", "a", "b", "12", "x", "-5",
+        },
+        "über-straße 株式会社 naïve2": {"über-straße", "über", "straße", "株式会社", "naïve2"},
+    }  # fmt: skip
+    for text, tokens in cases.items():
+        assert tsTokens(text) == tokens, text

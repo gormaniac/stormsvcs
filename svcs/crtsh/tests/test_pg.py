@@ -7,17 +7,23 @@ with the fake PKI, so this checks every query parses, plans, and returns what th
 FakeCrtshDb-backed tests expect, through asyncpg.
 """
 
+import base64
 import copy
+import datetime
 import os
+import re
 
+import asyncpg
 import pytest
 import synapse.tests.utils as s_tests
+from cryptography import x509
 
 from crtshsvc import CrtshSvc
-from crtshsvc.db import CrtshDbError
+from crtshsvc.db import CrtshDbError, Params, _filters, prefixQuery, tsquery
 
 from . import pgstub
-from .fakecrtsh import PKI
+from .fakecrtsh import PKI, identityText, tsTokens
+from .test_crtsh_db import LIVE_IDENTITIES
 
 DSN = os.environ.get("SLIB_CRTSH_PGDSN")
 
@@ -61,6 +67,36 @@ class TestPostgres(s_tests.SynTest):
             assert await svc.get(999) is None
 
             # Searches.
+            # Expiry bounds on notAfter, through the partition key.
+            def notafter(certid):
+                return int(PKI.certs[certid].not_valid_after_utc.timestamp() * 1000)
+
+            assert await ids(svc.searchGenr(dns="vertex.link", expires_after=notafter(11))) == [11]
+            assert await ids(svc.searchGenr(dns="vertex.link", expires_before=notafter(11))) == [
+                10,
+                9,
+                15,
+                12,
+            ]
+            assert await ids(svc.issuedGenr(caids=[2], expires_after=notafter(11))) == [11]
+            assert await ids(
+                svc.searchGenr(
+                    cn="vert*", issuer="Issuing", expires_after=notafter(10), expires_before=2**52
+                )
+            ) == [10, 9, 11]
+            # A trailing * is a prefix ('vert':*::tsquery), no user text is tsquery syntax.
+            assert await ids(svc.searchGenr(cn="vert*")) == [10, 9, 15, 11, 12]
+            assert await ids(svc.searchGenr(cn="vert*", valid=True, since=0)) == [10, 9, 11]
+            assert await ids(svc.searchGenr(org="The Vert*", issuer="Issuing")) == [
+                10,
+                9,
+                15,
+                11,
+                12,
+            ]
+            assert await ids(svc.searchGenr(cn="ertex*")) == []
+            assert await ids(svc.searchGenr(cn="x') | !('y\\* & z:*")) == []
+            assert await ids(svc.searchGenr(identity="test trust", caids=[1])) == [2, 1]
             assert await ids(svc.searchGenr(dns="vertex.link")) == [10, 9, 15, 11, 12]
             assert await ids(svc.searchGenr(dns="www.vertex.link", exact=True)) == [10, 9, 15]
             assert await ids(svc.searchGenr(dns="vertex.link", valid=True, precerts=False)) == [
@@ -190,12 +226,45 @@ class TestPostgres(s_tests.SynTest):
             dyn = "query_to_xml('SELECT pg_advisory_' || 'lock(7)', false, false, '')"
             assert await svc.rawQuery(f"SELECT {dyn} IS NOT NULL AS ok") == [{"ok": True}]
             assert await svc.db.fetch(locks) == [{"n": 0}]
+            # Even when it returns no rows.
+            assert await svc.rawQuery(f"SELECT 1 AS ok WHERE {dyn} IS NULL") == []
+            assert await svc.db.fetch(locks) == [{"n": 0}]
+            # A query that fails can't release them in its statement, a follow-up statement does.
+            # (pg_locks shows every backend's locks, but behind PgBouncer's statement pooling the
+            # follow-up only reaches the same server connection while nothing else uses the pool.)
+            conn = svc.db._conn
             with pytest.raises(CrtshDbError, match="division by zero"):
                 await svc.rawQuery(f"SELECT {dyn} IS NOT NULL, (random() * 0)::int / 0")
             assert await svc.db.fetch(locks) == [{"n": 0}]
-            # The connection is still usable, on the same backend.
-            pid = await svc.db.fetch("SELECT pg_backend_pid() AS pid")
-            assert await svc.rawQuery("SELECT pg_backend_pid() AS pid") == pid
+            # The connection is still usable, it wasn't dropped.
+            assert (await svc.rawQuery("VALUES (1)")) == [{"column1": 1}]
+            assert svc.db._conn is conn
+
+            # Neither the service's queries nor raw ones can write, even with a writable account.
+            for query in (svc.db.fetch, svc.rawQuery):
+                with pytest.raises(CrtshDbError, match="read-only transaction"):
+                    await query("SELECT nextval('ca_id_seq')")
+            # The service's queries inline their arguments as literals (a simple query has no
+            # parameters), which round trip exactly, whatever they contain.
+            text = "it's \\ a 'test' $1 E'x' \\' ); SELECT pg_sleep(5); -- \u00e9\u682a"
+            args = (text, b"\x00\xff'\\", [1, 2**40], 1.5, [], [b"\x01", None], True, None)
+            rows = await svc.db.fetch(
+                "SELECT $1::text AS t, $2::bytea AS der, $3::bigint[] AS a, $4::float8 AS f, "
+                "$5::text[] AS e, $6::bytea[] IS NOT NULL AS b, $7::bool AS y, $8::int AS n",
+                *args,
+            )
+            assert rows == [
+                {
+                    "t": text,
+                    "der": args[1],
+                    "a": args[2],
+                    "f": 1.5,
+                    "e": [],
+                    "b": True,
+                    "y": True,
+                    "n": None,
+                }
+            ]
 
     async def test_cycles(self):
         # CAs that cross-sign each other: CA 2 (certs 2, 4) is signed by CA 3, whose certificate
@@ -209,8 +278,91 @@ class TestPostgres(s_tests.SynTest):
             assert [c["crtsh"]["id"] for c in chain["certs"]] == [10, 2, 4, 1, 14]
             assert all(len(path) == len(set(path)) for path in chain["paths"])
             assert len(await svc.db.chain({"id": [10]}, maxrows=3)) == 3
-            # Each query sets its own statement_timeout (SET LOCAL), in a read-only transaction.
-            rows = await svc.rawQuery(
-                "SELECT current_setting('statement_timeout') AS st, current_setting('transaction_read_only') AS ro"
+            # The service's queries set their own statement_timeout (SET, then RESET), read-only,
+            # in the same message as the query, so it doesn't outlast it (raw queries, which keep
+            # their parameters, run under the server's).
+            settings = (
+                "SELECT current_setting('statement_timeout') AS st, "
+                "current_setting('transaction_read_only') AS ro"
             )
-            assert rows == [{"st": "30s", "ro": "on"}]
+            assert await svc.db.fetch(settings) == [{"st": "30s", "ro": "on"}]
+            assert await svc.rawQuery(settings) == [{"st": "0", "ro": "on"}]
+
+    async def test_statement_timeout(self):
+        # The statement_timeout applies to the query itself, behind PgBouncer's statement
+        # pooling too (a separate SET, or set_config() in the query, wouldn't), and doesn't stay
+        # on the server connection: RESET after a query that finished, reverted with the aborted
+        # implicit transaction of one that failed (raw queries show the server's, 0).
+        await pgstub.load(DSN)
+        conf = {"crtsh:dsn": DSN, "crtsh:statement:timeout": 0.2, "crtsh:timeout:retries": 0}
+        async with self.getTestCell(CrtshSvc, conf=conf) as svc:
+            setting = "SELECT current_setting('statement_timeout') AS st"
+            with pytest.raises(CrtshDbError, match="statement timeout"):
+                await svc.db.fetch("SELECT pg_sleep(1)")
+            assert await svc.rawQuery(setting) == [{"st": "0"}]
+            assert await svc.db.fetch("SELECT pg_sleep(0.01) IS NULL AS ok") == [{"ok": False}]
+            assert await svc.db.fetch(setting) == [{"st": "200ms"}]
+            assert await svc.rawQuery(setting) == [{"st": "0"}]
+            assert svc.db._useCopy
+
+    async def test_identity_tokens(self):
+        # The fakes decide which certificates a search matches with tsTokens; check it makes the
+        # words PostgreSQL does of every certificate's identities() text (crt.sh's certwatch
+        # config is a copy of simple), and of search text as plainto_tsquery parses it.
+        texts = [identityText(c) for c in PKI.certs.values() if c is not None]
+        for live in LIVE_IDENTITIES:
+            der = base64.b64decode(live["der"])
+            texts.append(identityText(x509.load_der_x509_certificate(der)))
+        conn = await asyncpg.connect(DSN, statement_cache_size=0)
+        try:
+            for text in texts:
+                words = await conn.fetchval(
+                    "SELECT tsvector_to_array(to_tsvector('simple', $1))", text
+                )
+                assert tsTokens(text) == set(words), text
+            for text in ("*.vertex.link", "visi@vertex.link", "https://vertex.link/", "Test Trust"):
+                query = await conn.fetchval(
+                    "SELECT querytree(plainto_tsquery('simple', $1))", tsquery(text)[0]
+                )
+                words = {w.strip("'") for w in query.split(" & ")}
+                assert tsTokens(tsquery(text)[0]) == words, text
+            # A prefix with punctuation matches the one word crt.sh indexes for it, in a
+            # position-stripped vector like identities() returns (to_tsquery made a phrase of
+            # it, which never matched).
+            for text, prefix, match in (
+                ("microsoft-support.ph", "Microsoft-Sup", True),
+                ("foo-bar x", "foo-bar", True),
+                ("bar foo x", "foo-bar", False),
+                ("login.microsoftonline.com microsoftonline.com com", "microsoft", True),
+            ):
+                found = await conn.fetchval(
+                    "SELECT strip(to_tsvector('simple', $1)) @@ $2::tsquery",
+                    text,
+                    prefixQuery([prefix]),
+                )
+                assert found is match, (text, prefix)
+            # What to_tsquery made of the same operand: a phrase a stripped vector never matches.
+            assert not await conn.fetchval(
+                "SELECT strip(to_tsvector('simple', 'foo-bar x')) @@ to_tsquery('simple', $1)",
+                prefixQuery(["foo-bar"]),
+            )
+        finally:
+            await conn.close()
+
+    async def test_partition_pruning(self):
+        # The expiry bounds are on the partition key, so PostgreSQL only scans the partitions in
+        # range (the stub's are yearly; crt.sh's recent ones are quarterly, ex. c2027q1).
+        await pgstub.load(DSN)
+        params = Params()
+        after = int(datetime.datetime(2030, 1, 1, tzinfo=datetime.UTC).timestamp() * 1000)
+        before = int(datetime.datetime(2030, 4, 1, tzinfo=datetime.UTC).timestamp() * 1000)
+        conds = _filters(params, expires_after=after, expires_before=before)
+        conn = await asyncpg.connect(DSN, statement_cache_size=0)
+        try:
+            rows = await conn.fetch(
+                f"EXPLAIN SELECT c.ID FROM certificate c WHERE {' AND '.join(conds)}", *params.args
+            )
+        finally:
+            await conn.close()
+        scanned = set(re.findall(r"on (certificate_\w+)", "\n".join(r[0] for r in rows)))
+        assert scanned == {"certificate_2030"}, scanned

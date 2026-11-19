@@ -209,6 +209,14 @@ class TestCrtshStormCert(s_tests.SynTest):
             self.stormIsInWarn("slib.crtsh: Lookup failed: crt.sh is down", msgs)
             assert not await core.nodes("crypto:x509:cert")
 
+    async def test_search_timeout(self):
+        # A prefix of a common word can time out on crt.sh, which is a warning, not a crash.
+        async with crtshSvc(self) as (core, svc, fake):
+            fake.fail = "crt.sh query failed: canceling statement due to statement timeout"
+            msgs = await core.stormlist("slib.crtsh.search --cn 'micro*' --valid")
+            self.stormIsInWarn("canceling statement due to statement timeout", msgs)
+            assert not await core.nodes("crypto:x509:cert")
+
 
 class TestCrtshStormSearch(s_tests.SynTest):
     async def test_search(self):
@@ -233,6 +241,26 @@ class TestCrtshStormSearch(s_tests.SynTest):
             # Values match whole words, domains, and addresses, like crt.sh's full text search.
             assert await certIds(core, "slib.crtsh.search --cn old") == []
             assert await certIds(core, "slib.crtsh.search --email visi") == []
+            # Expiry (notAfter) bounds, which crt.sh partitions on.
+            na11 = PKI.certs[11].not_valid_after_utc
+            when = na11.strftime("%Y-%m-%d %H:%M:%S")
+            assert await certIds(
+                core, f"slib.crtsh.search --dns vertex.link --expires-after '{when}'"
+            ) == [11]
+            assert fake.last("certsByIdentity")["expires_after"] == int(na11.timestamp() * 1000)
+            ids = await certIds(
+                core, f"slib.crtsh.search --dns vertex.link --valid --expires-before '{when}'"
+            )
+            assert ids == [10, 9]
+            msgs = await core.stormlist(
+                f"slib.crtsh.search --dns vertex.link --expires-after '{when}' --expires-before '{when}'"
+            )
+            self.stormIsInWarn(
+                "The expires after time must be before the expires before time.", msgs
+            )
+            # A trailing * is a prefix of a word.
+            assert await certIds(core, "slib.crtsh.search --cn 'vert*' --valid") == [10, 9, 11]
+            assert await certIds(core, "slib.crtsh.search --cn 'ertex*'") == []
 
             # Issuers, by name or crt.sh CA ID.
             assert await certIds(core, "slib.crtsh.search --issuer 'Root R1'") == [2, 1]
@@ -380,10 +408,16 @@ class TestCrtshStormCa(s_tests.SynTest):
             )
             assert ids == [14, 10]
             assert fake.last("certsByIssuer")["since"] == 946684800000
+            na11 = PKI.certs[11].not_valid_after_utc
+            when = na11.strftime("%Y-%m-%d %H:%M:%S")
+            ids = await certIds(core, f"slib.crtsh.ca --id 2 --issued --expires-after '{when}'")
+            assert ids == [11]
+            assert fake.last("certsByIssuer")["expires_after"] == int(na11.timestamp() * 1000)
+            assert fake.last("certsByIssuer")["expires_before"] is None
 
             msgs = await core.stormlist("slib.crtsh.ca nope --issued")
             self.stormIsInPrint("slib.crtsh.ca: No matching CAs.", msgs)
-            assert fake.called("certsByIssuer") == 2
+            assert fake.called("certsByIssuer") == 3
 
             msgs = await core.stormlist("slib.crtsh.ca")
             self.stormIsInErr("slib.crtsh.ca requires a CA name or --id.", msgs)
