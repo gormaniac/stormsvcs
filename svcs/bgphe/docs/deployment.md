@@ -3,7 +3,7 @@
 ## Docker image
 
 The service is published as `ghcr.io/gormaniac/stormsvcs/bgphe`. CI tags every build with
-`latest`, the service version from {src}`svcs/bgphe/pyproject.toml` (ex. `0.3.1`), and the
+`latest`, the service version from {src}`svcs/bgphe/pyproject.toml`, and the
 commit SHA, and pushes the image only from `main` (see {doc}`/dev/ci`).
 
 ### How the image is built
@@ -135,7 +135,7 @@ service.add slib.bgphe tcp://root:change-me@bgphe:27492/*
 service.list
 ```
 
-`service.list` shows the service as ready, ex. `true (svc) (slib.bgphe @ 0.3.1)`, once the
+`service.list` shows the service as ready, ex. `true (svc) (slib.bgphe @ <version>)`, once the
 Cortex has connected and loaded the `slib.bgphe` Storm package. The first time the service is
 added, its `add` event runs (as root) and creates the service's `meta:source` node:
 

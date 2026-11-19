@@ -4,7 +4,7 @@
 
 | Module | Role |
 | --- | --- |
-| {src}`svcs/malpedia/src/malpediasvc/__init__.py` | `__version__` (`0.3.1`) and the `MalpediaSvc` export. |
+| {src}`svcs/malpedia/src/malpediasvc/__init__.py` | `__version__` (`<version>`) and the `MalpediaSvc` export. |
 | {src}`svcs/malpedia/src/malpediasvc/__main__.py` | `python -m malpediasvc <dirn>` runs `MalpediaSvc.execmain()`. |
 | {src}`svcs/malpedia/src/malpediasvc/defs.py` | `SVC_NAME`, `SVC_VER`, the `meta:source` guid, the `add`/`del` events, `stormStr()`, and the `StormPkg` that loads `pkgproto/slib.malpedia.yaml`. |
 | {src}`svcs/malpedia/src/malpediasvc/api.py` | `MalpediaCellApi`, the `RetnApi` Telepath API. |

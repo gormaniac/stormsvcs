@@ -1,5 +1,5 @@
 name: slib.yara
-version: 0.8.1
+version: 0.8.2
 guid: f418c8589b13201801b9a4bf2b4f7842
 
 # Only tested against the Synapse version in uv.lock.

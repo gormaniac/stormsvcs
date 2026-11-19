@@ -7,7 +7,7 @@ A walkthrough of the code for developers maintaining the service. See the storms
 
 | File | Contents |
 |---|---|
-| {src}`svcs/abusech/src/abusechsvc/__init__.py` | `__version__` (`0.5.0`) and the `AbuseChSvc` export. |
+| {src}`svcs/abusech/src/abusechsvc/__init__.py` | `__version__` (`<version>`) and the `AbuseChSvc` export. |
 | {src}`svcs/abusech/src/abusechsvc/__main__.py` | `python -m abusechsvc <cell dir>` runs `AbuseChSvc.execmain()`. |
 | {src}`svcs/abusech/src/abusechsvc/defs.py` | The Storm service definition: `SVC_NAME`, `SVC_GUID`, `SOURCES`, `EXT_PROPS`, the `add` event Storm (`SVC_EVTS`), and `PKGDEFS` (the package, built by StormLib++'s `StormPkg` from `pkgproto/`). |
 | {src}`svcs/abusech/src/abusechsvc/api.py` | `AbuseChCellApi`, the Telepath API. |
@@ -181,8 +181,8 @@ change.
 
 ## The Storm package
 
-{src}`svcs/abusech/src/abusechsvc/pkgproto/slib.abusech.yaml` declares the package (`version`
-0.5.0, `synapse_version: ">=2.256.0,<3.0.0"`, `genopts.dotstorm: true`, the README as a doc),
+{src}`svcs/abusech/src/abusechsvc/pkgproto/slib.abusech.yaml` declares the package (`version` the
+service version, `synapse_version: ">=2.256.0,<3.0.0"`, `genopts.dotstorm: true`, the README as a doc),
 the five permissions, the modules and the commands. There are no `configvars` and no
 `onload`; settings are Cortex globals, initialized by the service's `add` event.
 

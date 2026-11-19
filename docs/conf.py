@@ -20,7 +20,7 @@ extensions = [
     "sphinx.ext.extlinks",
 ]
 
-exclude_patterns = ["_build", "**/__pycache__"]
+exclude_patterns = ["_build", ".doctrees", "**/__pycache__"]
 
 html_theme = "shibuya"
 html_static_path = ["_static"]

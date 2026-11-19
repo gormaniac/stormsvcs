@@ -104,7 +104,9 @@ def build(src: pathlib.Path, out: pathlib.Path) -> int:
     """Run sphinx-build on the staged tree, with warnings as errors."""
     if out.exists():
         shutil.rmtree(out)
+    # The doctree cache goes in the staging tree, so it isn't published with the site.
     cmd = [sys.executable, "-m", "sphinx", "-b", "dirhtml", "-W", "--keep-going", "-q"]
+    cmd += ["-d", str(src / ".doctrees")]
     return subprocess.call([*cmd, str(src), str(out)])
 
 

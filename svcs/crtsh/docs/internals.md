@@ -9,7 +9,7 @@ For the conventions every service follows, see {doc}`/dev/architecture` and
 
 ```text
 svcs/crtsh/
-  pyproject.toml, uv.lock        version 0.6.0, deps: asyncpg, cryptography, stormlibpp (synapse)
+  pyproject.toml, uv.lock        version <version>, deps: asyncpg, cryptography, stormlibpp (synapse)
   docker/prod/, docker/test/     the images (see Deployment)
   src/crtshsvc/
     __init__.py                  __version__, exports CrtshSvc
@@ -164,7 +164,7 @@ The only background task is the keepalive loop (see [The connection](database.md
 ## Storm package internals
 
 The package ({src}`svcs/crtsh/src/crtshsvc/pkgproto/slib.crtsh.yaml`) has `name: slib.crtsh`,
-`version: 0.6.0`, `synapse_version: ">=2.145.0,<3.0.0"`, `genopts.dotstorm: true` (Storm lives
+`version: <version>`, `synapse_version: ">=2.145.0,<3.0.0"`, `genopts.dotstorm: true` (Storm lives
 in `.storm` files), and the README as its doc. It has no `onload` and no package config vars.
 Settings are Cortex globals.
 

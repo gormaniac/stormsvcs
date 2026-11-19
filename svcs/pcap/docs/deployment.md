@@ -3,7 +3,7 @@
 ## Docker image
 
 The service is published as `ghcr.io/gormaniac/stormsvcs/pcap`. CI pushes it only from `main`,
-tagged `latest`, the service version from `pyproject.toml` (ex. `0.11.1`), and the commit SHA.
+tagged `latest`, the service version from `pyproject.toml`, and the commit SHA.
 Pin a version tag in production.
 
 ### How the image is built
@@ -244,7 +244,7 @@ services:
       - axon-storage:/vertex/storage
 
   pcap:
-    image: ghcr.io/gormaniac/stormsvcs/pcap:0.11.1
+    image: ghcr.io/gormaniac/stormsvcs/pcap:<version>
     environment:
       SYN_PCAPSVC_DMON_LISTEN: tcp://0.0.0.0:27492/
       SYN_PCAPSVC_AUTH_PASSWD: pcapsecret

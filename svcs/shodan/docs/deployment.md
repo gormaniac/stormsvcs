@@ -3,7 +3,7 @@
 ## Docker image
 
 The service is published as `ghcr.io/gormaniac/stormsvcs/shodan`, tagged `latest`, the
-service's version (the `version` in {src}`svcs/shodan/pyproject.toml`, ex. `0.17.1`), and the
+service's version (the `version` in {src}`svcs/shodan/pyproject.toml`), and the
 commit SHA. Images are only pushed from `main`.
 
 The production image ({src}`svcs/shodan/docker/prod/Dockerfile`) builds on the stormsvcs base
@@ -153,7 +153,7 @@ proxy variables, or the base URLs pointed elsewhere with `shodan:urls`.
 ```yaml
 services:
   shodan:
-    image: ghcr.io/gormaniac/stormsvcs/shodan:0.17.1
+    image: ghcr.io/gormaniac/stormsvcs/shodan:<version>
     environment:
       SYN_SHODANSVC_AUTH_PASSWD: shodansecret
       # Optional: a fallback key. slib.shodan.admin.apikey stores one in the service instead.
@@ -180,7 +180,7 @@ service.add slib.shodan tcp://root:shodansecret@shodan:27492/
 service.list
 ```
 
-`service.list` shows the service as ready, ex. `true (slib.shodan) (slib.shodan @ 0.17.1)`.
+`service.list` shows the service as ready, ex. `true (slib.shodan) (slib.shodan @ <version>)`.
 The `slib.shodan` package is loaded when the Cortex connects. The Storm code finds the service
 with `$lib.service.get("slib.shodan")`, which matches the service's own Storm service name, so
 the name given to `service.add` can be anything.

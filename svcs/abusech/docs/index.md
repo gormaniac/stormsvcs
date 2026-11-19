@@ -9,7 +9,7 @@ namespaced under `slib.abusech`.
 |---|---|
 | Python package | `abusechsvc` ({src}`svcs/abusech/src/abusechsvc`) |
 | Cell class | `abusechsvc.AbuseChSvc` |
-| Storm package | `slib.abusech` 0.5.0 (requires Synapse `>=2.256.0,<3.0.0`) |
+| Storm package | `slib.abusech` <version> (requires Synapse `>=2.256.0,<3.0.0`) |
 | Docker image | `ghcr.io/gormaniac/stormsvcs/abusech` |
 | Service name in the Cortex | `slib.abusech` (the Storm code looks the service up by this name) |
 

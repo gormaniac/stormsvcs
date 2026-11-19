@@ -8,7 +8,7 @@ The service is published as `ghcr.io/gormaniac/stormsvcs/malpedia`. CI pushes it
 | Tag | Meaning |
 | --- | --- |
 | `latest` | The newest build from `main`. |
-| `<version>` | The service version from `pyproject.toml`, for example `0.3.1`. |
+| `<version>` | The service version from `pyproject.toml`. |
 | `<commit sha>` | The commit it was built from. |
 
 ### How the image is built
@@ -129,7 +129,7 @@ A daily pull costs either one tiny request (Malpedia is unchanged) or about 8-10
 ```yaml
 services:
   malpedia:
-    image: ghcr.io/gormaniac/stormsvcs/malpedia:0.3.1
+    image: ghcr.io/gormaniac/stormsvcs/malpedia:<version>
     restart: unless-stopped
     environment:
       SYN_MALPEDIASVC_AUTH_PASSWD: "${MALPEDIA_ROOT_PASSWD}"
@@ -156,7 +156,7 @@ service.add slib.malpedia tcp://root:<password>@malpedia:27492/
 service.list
 ```
 
-Once the Cortex connects, it loads the `slib.malpedia` Storm package (version `0.3.1`, needs
+Once the Cortex connects, it loads the `slib.malpedia` Storm package (version `<version>`, needs
 Synapse `>=2.234.0,<3.0.0`) and runs the service's `add` event as root. The event:
 
 1. creates the `malpedia` `meta:source` (`15b7f8ff9cef4e8fa9fedd9f2b10c1a5`),

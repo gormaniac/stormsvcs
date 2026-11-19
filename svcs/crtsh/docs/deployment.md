@@ -3,7 +3,7 @@
 ## Docker image
 
 The published image is `ghcr.io/gormaniac/stormsvcs/crtsh`. CI pushes it only from `main`,
-tagged `latest`, the `pyproject.toml` version (ex. `0.6.0`), and the commit SHA. Pin a version
+tagged `latest`, the `pyproject.toml` version, and the commit SHA. Pin a version
 tag in production.
 
 The production Dockerfile ({src}`svcs/crtsh/docker/prod/Dockerfile`) builds on the stormsvcs
@@ -126,7 +126,7 @@ query. Run only one instance per egress IP.
 ```yaml
 services:
   slib-crtsh:
-    image: ghcr.io/gormaniac/stormsvcs/crtsh:0.6.0
+    image: ghcr.io/gormaniac/stormsvcs/crtsh:<version>
     restart: unless-stopped
     volumes:
       - ./storage/slib-crtsh:/vertex/storage
@@ -147,7 +147,7 @@ service.add slib.crtsh tcp://root:change-me@<host>:27492/*
 service.list
 ```
 
-`service.list` should show `true (svc) (slib.crtsh @ 0.6.0)` for the service. When the Cortex
+`service.list` should show `true (svc) (slib.crtsh @ <version>)` for the service. When the Cortex
 connects, the service pushes the `slib.crtsh` Storm package (`pkg.list` shows it). On
 `service.add`, the service's `add` event runs Storm in the Cortex that:
 

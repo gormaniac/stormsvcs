@@ -3,7 +3,7 @@
 ## The Docker image
 
 The service is published as `ghcr.io/gormaniac/stormsvcs/hatching`, tagged `latest`, with the
-service's version (the `version` in {src}`svcs/hatching/pyproject.toml`, ex. `0.5.0`), and
+service's version (the `version` in {src}`svcs/hatching/pyproject.toml`), and
 with the commit SHA it was built from. Images are only pushed from `main` (see {doc}`/dev/ci`).
 
 The production image ({src}`svcs/hatching/docker/prod/Dockerfile`) is built on the stormsvcs base

@@ -3,7 +3,7 @@
 ## Docker image
 
 The service is published as `ghcr.io/gormaniac/stormsvcs/yarastorm`. CI pushes it only from
-`main`, tagged `latest`, the service version from `pyproject.toml` (ex. `0.8.1`), and the commit
+`main`, tagged `latest`, the service version from `pyproject.toml`, and the commit
 SHA. Pin a version tag in production.
 
 ### How the image is built
@@ -119,7 +119,7 @@ services:
       - axon-storage:/vertex/storage
 
   yarastorm:
-    image: ghcr.io/gormaniac/stormsvcs/yarastorm:0.8.1
+    image: ghcr.io/gormaniac/stormsvcs/yarastorm:<version>
     environment:
       SYN_YARASVC_DMON_LISTEN: tcp://0.0.0.0:27492/
       SYN_YARASVC_AUTH_PASSWD: yarasecret
@@ -146,7 +146,7 @@ service.list
 ```
 
 `service.list` shows the service as ready with the name you gave it, its Storm service name,
-and version, ex. `true (yara) (slib.yara @ 0.8.1)`. The `slib.yara` package (commands and modules) is loaded
+and version, ex. `true (yara) (slib.yara @ <version>)`. The `slib.yara` package (commands and modules) is loaded
 automatically when the Cortex connects. The Storm code looks the service up with
 `$lib.service.get(slib.yara)`, which matches the service's own name, so the name you pass to
 `service.add` can be anything.

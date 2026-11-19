@@ -7,7 +7,7 @@ shape every service shares, see {doc}`/dev/architecture`.
 
 | Module | Contents |
 | --- | --- |
-| {src}`svcs/capa/src/capasvc/__init__.py` | `__version__` (`0.6.0`) and the `CapaSvc` export. |
+| {src}`svcs/capa/src/capasvc/__init__.py` | `__version__` (`<version>`) and the `CapaSvc` export. |
 | {src}`svcs/capa/src/capasvc/__main__.py` | `asyncio.run(CapaSvc.execmain(sys.argv[1:]))`, the entry point (`python -m capasvc <dirn>`). |
 | {src}`svcs/capa/src/capasvc/defs.py` | `SVC_NAME` (`slib.capa`), `SVC_GUID` (the `meta:source` guid), `RULES_VERSION` (`v10.0.0`), `RULES_URL`, `SVC_EVTS` (the `add` event), and `SlibCapaPkg`, a `stormlibpp.StormPkg` that loads `pkgproto/slib.capa.yaml` into `PKGDEFS`. |
 | {src}`svcs/capa/src/capasvc/api.py` | `CapaSvcError` and `CapaCellApi`, see [API](api.md#telepath-api). |
@@ -143,7 +143,7 @@ module and command's Storm is in its own `.storm` file under `storm/`):
 
 | Key | Value |
 | --- | --- |
-| `name` / `version` | `slib.capa` / `0.6.0` |
+| `name` / `version` | `slib.capa` / `<version>` |
 | `synapse_version` | `>=2.145.0,<3.0.0` |
 | `onload` | `$lib.import(slib.capa.sync).onload()` |
 | `perms` | `slib.capa.user`, `slib.capa.admin` (both `gate: cortex`) |

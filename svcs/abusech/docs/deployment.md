@@ -6,8 +6,8 @@ where it keeps state, what it needs to reach, and how to connect it to a Cortex.
 ## Docker image
 
 The image is `ghcr.io/gormaniac/stormsvcs/abusech`. CI ({src}`.github/workflows/abusech.yml`,
-which calls the shared `_service.yml`) tags each build `latest`, the `pyproject.toml` version
-(ex. `0.5.0`), and the commit SHA, and pushes only from `main`.
+which calls the shared `_service.yml`) tags each build `latest`, the `pyproject.toml` version,
+and the commit SHA, and pushes only from `main`.
 
 ### How it's built
 
@@ -169,7 +169,7 @@ the Cortex or its Axon: samples, uploads and bulk files move through the Storm r
 ```yaml
 services:
   slib-abusech:
-    image: ghcr.io/gormaniac/stormsvcs/abusech:0.5.0
+    image: ghcr.io/gormaniac/stormsvcs/abusech:<version>
     restart: unless-stopped
     volumes:
       - ./storage/slib-abusech:/vertex/storage

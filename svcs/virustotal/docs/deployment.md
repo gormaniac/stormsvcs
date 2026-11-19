@@ -3,7 +3,7 @@
 ## Container image
 
 The service is published as `ghcr.io/gormaniac/stormsvcs/virustotal`, tagged `latest`, the
-service version from {src}`svcs/virustotal/pyproject.toml` (ex. `0.3.1`), and the commit SHA.
+service version from {src}`svcs/virustotal/pyproject.toml`, and the commit SHA.
 Images are only pushed from `main`.
 
 The production image ({src}`svcs/virustotal/docker/prod/Dockerfile`) is built on the
@@ -136,7 +136,7 @@ only by the Cortex and protect the service's user credentials.
 ```yaml
 services:
   slib-vt:
-    image: ghcr.io/gormaniac/stormsvcs/virustotal:0.3.1
+    image: ghcr.io/gormaniac/stormsvcs/virustotal:<version>
     restart: unless-stopped
     environment:
       # Bootstraps the root user's password, used in the Cortex's service.add URL.
@@ -165,7 +165,7 @@ service.add slib.vt tcp://root:change-me@slib-vt:27492
 service.list
 ```
 
-`service.list` shows the service as `true (svc) (slib.vt @ 0.3.1)` once the Cortex has
+`service.list` shows the service as `true (svc) (slib.vt @ <version>)` once the Cortex has
 connected and loaded the `slib.vt` Storm package. The package is provided by the service
 (`_storm_svc_pkgs`), so it is loaded and upgraded automatically.
 

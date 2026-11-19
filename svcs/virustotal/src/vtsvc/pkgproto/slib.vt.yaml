@@ -1,5 +1,5 @@
 name: slib.vt
-version: 0.3.1
+version: 0.3.2
 guid: 918e0b7a0cc74c6a957f318056a77f74
 
 synapse_version: ">=2.234.0,<3.0.0"

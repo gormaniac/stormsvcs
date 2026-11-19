@@ -9,7 +9,7 @@ analysis engine. A Storm package then turns the results into nodes in the graph.
 The services are the Advanced Power-Up companion to
 [StormLib++](https://docs.gormo.co/stormlibpp/). They're built on its Python service
 toolkit, and everything they expose to Synapse is under its `slib` namespace (for example
-`slib.vt.file` or `slib.yara.scan`).
+`slib.vt.enrich` or `slib.yara.scan`).
 
 ## Using a service
 
@@ -18,10 +18,11 @@ Every service is deployed the same way:
 1. Run its image, `ghcr.io/gormaniac/stormsvcs/<svc>`, with a persistent volume at
    `/vertex/storage`. Images are tagged `latest`, with each release's version, and with the
    commit SHA.
-2. Add it to the Cortex, which installs its Storm package:
+2. Add it to the Cortex, which installs its Storm package. Use the name from the service's
+   Deployment page, for example `slib.vt`:
 
    ```text
-   service.add slib.<svc> <telepath url of the service>
+   service.add <name> <telepath url of the service>
    service.list
    ```
 

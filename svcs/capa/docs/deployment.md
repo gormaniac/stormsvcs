@@ -3,7 +3,7 @@
 ## Docker image
 
 The service is published as `ghcr.io/gormaniac/stormsvcs/capa`. CI pushes it only from `main`,
-tagged `latest`, the service version from `pyproject.toml` (ex. `0.6.0`), and the commit SHA.
+tagged `latest`, the service version from `pyproject.toml`, and the commit SHA.
 Pin a version tag in production.
 
 ### How the image is built
@@ -181,7 +181,7 @@ services:
       - axon-storage:/vertex/storage
 
   capa:
-    image: ghcr.io/gormaniac/stormsvcs/capa:0.6.0
+    image: ghcr.io/gormaniac/stormsvcs/capa:<version>
     environment:
       SYN_CAPASVC_DMON_LISTEN: tcp://0.0.0.0:27492/
       SYN_CAPASVC_AUTH_PASSWD: capasecret
@@ -220,7 +220,7 @@ When the service is added:
      :url=https://github.com/mandiant/capa)]
    ```
 
-2. The `slib.capa` Storm package (`version: 0.6.0`, `synapse_version: >=2.145.0,<3.0.0`) is
+2. The `slib.capa` Storm package (`version: <version>`, `synapse_version: >=2.145.0,<3.0.0`) is
    loaded, with its commands, modules and permissions.
 3. The package's `onload` runs `$lib.import(slib.capa.sync).onload()` as root, in the default
    view. It waits up to 300 seconds for the service, then imports the rules and tag docs (see

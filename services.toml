@@ -8,7 +8,7 @@ workflow = ".github/workflows/yarastorm.yml"
 
 [stormsvcs.shodan]
 name = "Shodan"
-summary = "Every Shodan API: hosts, search, scans, alerts, DNS, streams, InternetDB, CVEDB, exploits, and trends."
+summary = "Every Shodan API: hosts, search, scans, alerts, DNS, streams, InternetDB, CVEDB, and trends."
 src = "svcs/shodan/"
 workflow = ".github/workflows/shodan.yml"
 

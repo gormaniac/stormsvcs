@@ -9,8 +9,7 @@ database you would reach with:
 psql -h crt.sh -p 5432 -U guest certwatch
 ```
 
-The service registers the `slib.crtsh` Storm package. The Python package is `crtshsvc`. The
-current version is 0.6.0.
+The service registers the `slib.crtsh` Storm package. The Python package is `crtshsvc`.
 
 ## What it does
 

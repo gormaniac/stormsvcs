@@ -77,7 +77,7 @@ when nothing changed since the last import.
      -e SYN_CAPASVC_AUTH_PASSWD=secret \
      -e SYN_CAPASVC_AXON_URL=tcp://root:axonsecret@axon:27492/ \
      -v capa-storage:/vertex/storage \
-     ghcr.io/gormaniac/stormsvcs/capa:0.6.0
+     ghcr.io/gormaniac/stormsvcs/capa:<version>
    ```
 
 2. Add it to the Cortex. The Storm package loads and imports every capa rule and tag doc
