@@ -456,9 +456,7 @@ class YaraSvc(s_cell.Cell):
         for rule_id, rule_obj in list(self.rules.rules.items()):
             try:
                 # Scans are CPU bound, so run them off the event loop.
-                matched = await s_coro.executor(
-                    scanBytes, rule_obj, file_bytes, self.scantimeout
-                )
+                matched = await s_coro.executor(scanBytes, rule_obj, file_bytes, self.scantimeout)
             except asyncio.CancelledError:  # pragma: no cover
                 raise
             except yara_x.TimeoutError:

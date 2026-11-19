@@ -321,7 +321,8 @@ slib.shodan.query.save <query> --name <name> [--desc <desc>] [--yield]
 
 A query whose text is already a local query (any local `meta:rule` with that `:text`) warns
 `<query> is already a local saved query (<name>).` and keeps the existing node. The node is
-linked to the `meta:source` like every other. The command prints `slib.shodan.query.save: Saved <name> (<query>).` Inbound nodes are dropped.
+linked to the `meta:source` like every other. The command prints
+`slib.shodan.query.save: Saved <name> (<query>).` Inbound nodes are dropped.
 
 ```text
 slib.shodan.query.save "ssl.jarm:2ad2ad0002ad2ad00042d42d00000069d641f34fe76acdc05c40262f8815e5" --name "CS JARM"

@@ -83,7 +83,9 @@ def scrubMesg(mesg: str, apikey: str | None = None) -> str:
 
     mesg = URL_QUERY_RE.sub(r"\1?<redacted>", mesg)
     if apikey:
-        for valu in sorted({apikey, quote(apikey, safe=""), quote_plus(apikey)}, key=len, reverse=True):
+        for valu in sorted(
+            {apikey, quote(apikey, safe=""), quote_plus(apikey)}, key=len, reverse=True
+        ):
             mesg = mesg.replace(valu, "<redacted>")
     return mesg
 

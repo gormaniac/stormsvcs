@@ -40,6 +40,19 @@ The service-specific options, from `YaraSvc.confdefs` in {src}`svcs/yarastorm/sr
 | `axon_url` | string | unset | Telepath URL of the Axon that file bytes are pulled from. Unset: the service starts and logs a warning, and every scan returns `The yarastorm service has no axon_url configured.` |
 | `rule_dir` | string | `rules/` | Directory the compiled rules are saved in. A relative path is joined to the cell's `dirn` (so `/vertex/storage/rules/` in the image); an absolute path is used as is. Created on startup if missing. |
 | `max_size` | integer, `minimum: 1` | unset | Largest file, in bytes, the service pulls from the Axon. A larger file isn't scanned and the scan returns an error for it. Unset means no limit. |
+| `scan_timeout` | integer, `minimum: 1` | `60` | Seconds one rule may spend scanning one file (yara-x's scanner timeout). A scan that runs longer is abandoned and reported as an error for that rule; the other rules still run. |
+
+### Memory and CPU
+
+The service reads each file from the Axon into memory in full, then scans it, so one scan holds
+the whole file in memory, and each concurrent scan (one per Storm query running
+`slib.yara.scan`; a query scans its files one at a time) holds its own. With `max_size` unset there's no
+bound. Set `max_size` in production, to the largest file you expect to scan (ex. `52428800` for
+50 MiB), and size the container's memory for a few files that size.
+
+Scans are CPU bound. Each rule's scan of a file runs in a worker thread (Python's default
+executor), so the service keeps answering Telepath calls while it scans, and `scan_timeout` stops
+a single rule that takes too long (ex. a slow regex on a large file).
 
 All the standard Synapse Cell options also apply (`dmon:listen`, `https:port`, `auth:passwd`,
 `aha:*`, `nexslog:en`, ...); see the
@@ -62,6 +75,7 @@ Values are parsed as YAML, so `SYN_YARASVC_MAX_SIZE=52428800` is an integer.
 | `SYN_YARASVC_AXON_URL` | `axon_url` |
 | `SYN_YARASVC_RULE_DIR` | `rule_dir` |
 | `SYN_YARASVC_MAX_SIZE` | `max_size` |
+| `SYN_YARASVC_SCAN_TIMEOUT` | `scan_timeout` |
 | `SYN_YARASVC_DMON_LISTEN` | `dmon:listen` |
 | `SYN_YARASVC_HTTPS_PORT` | `https:port` |
 | `SYN_YARASVC_AUTH_PASSWD` | `auth:passwd` |
@@ -91,6 +105,10 @@ Everything lives in the `/vertex/storage` volume:
 | --- | --- |
 | `/vertex/storage/rules/` (`rule_dir`) | One serialized Yara-X `Rules` file per enabled rule, named by the `it:app:yara:rule` guid. |
 | `/vertex/storage/` (other) | Standard Cell state: auth, nexus log, `cell.yaml`, `cell.guid`. |
+
+The files in the rule directory are the service's rule set. The service reads the directory
+again on every scan, rule list and rule count, so rule files added, replaced or removed while it
+runs (ex. restored from a backup) take effect without a restart.
 
 If the rule directory is lost (ex. a new volume), the Cortex still has `:enabled=(true)` on the
 rules but the service has none. Run [`slib.yara.sync`](commands.md#slibyarasync) to recompile
@@ -181,9 +199,27 @@ Otherwise enable, disable and sync fail with
 | `service.get.<service iden>` | Every command; the modules call `$lib.service.get(slib.yara)`. |
 | `slib.yara.admin` (declared by the package, `gate: cortex`) | `slib.yara.enable`, `slib.yara.disable`, `slib.yara.sync`, and the `slib.yara.lib` functions `enableRule`, `disableRule`, `sync`. |
 | `node.prop.set.it:app:yara:rule.enabled` | `slib.yara.enable` / `slib.yara.disable`. |
-| `node.add.it:app:yara:match`, `node.prop.set.it:app:yara:match.seen`, `node.add.meta:source`, `node.prop.set.meta:source.name`, `node.edge.add.seen` | `slib.yara.scan` writing matches. |
+| `node.add.it:app:yara:match`, `node.prop.set.it:app:yara:match`, `node.edge.add.seen`, `node.add.meta:source`, `node.prop.set.meta:source.name` | `slib.yara.scan` writing matches. All five are needed, even when the `meta:source` and the match already exist. |
 
 `slib.yara.check` and `slib.yara.scan` don't need `slib.yara.admin`.
+
+For the match's `.seen` Synapse checks `node.prop.set.it:app:yara:match..seen` (or
+`node.prop.set` with the full prop `it:app:yara:match.seen`), and for `:version`
+`node.prop.set.it:app:yara:match.version`. `auth.user.addrule` splits a rule on every `.`, so it
+can't grant the universal prop by itself; grant `node.prop.set.it:app:yara:match`, which covers
+both. These were checked against Synapse 2.256.0 (a test runs the scan as a user with only these
+permissions).
+
+```text
+auth.user.addrule analyst1 service.get
+auth.user.addrule analyst1 node.add.it:app:yara:match
+auth.user.addrule analyst1 node.prop.set.it:app:yara:match
+auth.user.addrule analyst1 node.edge.add.seen
+auth.user.addrule analyst1 node.add.meta:source
+auth.user.addrule analyst1 node.prop.set.meta:source.name
+```
+
+Rule managers also need:
 
 ```text
 auth.user.addrule analyst1 slib.yara.admin
@@ -194,5 +230,7 @@ auth.user.addrule analyst1 slib.yara.admin
 Pull the new image tag and recreate the container with the same `/vertex/storage` volume. The
 Cortex reloads the `slib.yara` package from the service on reconnect. Compiled rules in
 `rule_dir` are Yara-X serialized `Rules`; a rule file that a newer `yara-x` can't deserialize is
-logged (`Skipping unreadable compiled Yara rule ...`) and skipped, not fatal. After an upgrade
+logged once (`Skipping unreadable compiled Yara rule ...`) and skipped, not fatal, and every
+scan warns `Couldn't load it:app:yara:rule=<guid> from the service's storage: ...` for it until
+it's recompiled or removed. After an upgrade
 that changes the `yara-x` version, run `slib.yara.sync` to recompile every enabled rule.

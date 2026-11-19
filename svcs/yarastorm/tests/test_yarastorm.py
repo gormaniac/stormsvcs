@@ -402,7 +402,9 @@ class TestYaraStorm(s_tests.SynTest):
                 self.stormIsInPrint(f"it:app:yara:rule={rule_id} matched", msgs)
 
                 # A rule file replaced on disk is reloaded.
-                YaraRules(svc.rules.ruledir).add(rule_id, yara_x.compile("rule m { condition: false }"))
+                YaraRules(svc.rules.ruledir).add(
+                    rule_id, yara_x.compile("rule m { condition: false }")
+                )
                 msgs = await core.stormlist(f"file:bytes | {SVC_NAME}.scan")
                 self.stormNotInPrint("matched", msgs)
 
@@ -435,9 +437,12 @@ class TestYaraStorm(s_tests.SynTest):
             self.stormIsInWarn("Unable to sync the slib.yara rules: Unable to list", msgs)
             self.stormIsInWarn("nope", msgs)
 
-            # The module itself still raises.
+            # The module itself raises a YaraError.
             msgs = await core.stormlist(f"$lib.import({SVC_NAME}.lib).sync()")
             self.stormIsInErr("Unable to list the slib.yara service's rules: nope", msgs)
+            errs = [m[1] for m in msgs if m[0] == "err"]
+            self.eq("StormRaise", errs[0][0])
+            self.eq("YaraError", errs[0][1]["errname"])
 
     def test_scanbytes(self):
         rules = yara_x.compile(HIT_RULE)
@@ -477,7 +482,9 @@ class TestYaraStorm(s_tests.SynTest):
 
                 with mock.patch.object(y_svc, "scanBytes", boom):
                     retns = [r async for r in svc.matchFile(sha256.hex())]
-                self.isin(f"Error scanning with it:app:yara:rule={rule_id}: bad scan", retns[0]["mesg"])
+                self.isin(
+                    f"Error scanning with it:app:yara:rule={rule_id}: bad scan", retns[0]["mesg"]
+                )
 
             async with self.getTestCell(YaraSvc) as svc:
                 self.eq(y_svc.SCAN_TIMEOUT, svc.scantimeout)
@@ -497,7 +504,10 @@ class TestYaraStorm(s_tests.SynTest):
                 self.stormHasNoWarnErr(msgs)
 
                 nodes = await core.nodes(f"it:app:yara:match:rule={versioned}")
-                self.eq(nodes[0].get("version"), (await core.nodes(f"it:app:yara:rule={versioned}"))[0].get("version"))
+                self.eq(
+                    nodes[0].get("version"),
+                    (await core.nodes(f"it:app:yara:rule={versioned}"))[0].get("version"),
+                )
                 self.nn(nodes[0].get("version"))
                 nodes = await core.nodes(f"it:app:yara:match:rule={plain}")
                 self.none(nodes[0].get("version"))

@@ -251,7 +251,7 @@ slib.vt: VirusTotal request limits are enforced (vt:community).
  day      | 2        | 500
 ----------|----------|----------
  month    | 2        | 15500
-Next request can be sent in 0.0s. The daily count resets at 2026-11-20 00:00:00 UTC. 2 responses are cached.
+Next request can be sent in 0.0s. The daily count resets at 2026-11-20 00:00:00 UTC, the monthly count at 2026-12-01 00:00:00 UTC. 2 responses are cached.
 VirusTotal's counts for the key:
  quota                    | used     | allowed
 ==========================|==========|==========
@@ -331,8 +331,8 @@ skipped without a warning.
 - With `--wait`, the analysis is polled and, once completed, modeled like
   `slib.vt.analysis` does with `--engines detected`.
 - With `--yield`: for a `--url`, the analyzed node, or the `inet:url` of the URL when there
-  was no completed analysis (that node is created even if the submission failed); for an
-  inbound node, the node itself.
+  was no completed analysis; for an inbound node, the node itself. A `--url` whose submission
+  failed is only warned about: no node is created for it.
 
 ```text
 file:bytes:sha256=... | slib.vt.submit --wait
@@ -402,16 +402,19 @@ slib.vt.admin.apikey [<apikey>] [--clear]
 | Argument | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `apikey` | str, optional | | The key to store. |
-| `--clear` | flag | false | Remove the stored key. |
+| `--clear` | flag | false | Remove the stored key. It can't remove the `vt:apikey` config option. |
 
-Prints `Set the slib.vt API key.` / `Cleared the slib.vt API key.`, or, without arguments,
-`slib.vt: A service-wide API key is set.` / `slib.vt: No service-wide API key is set.`
+The stored key is used before the `vt:apikey` config option. Prints `Set the slib.vt API
+key.` / `Cleared the slib.vt API key.`, or, without arguments, which service-wide key is in
+use:
 
-:::{note}
-The check reports the stored key *or* the `vt:apikey` config option, and `--clear` only
-removes the stored key, so a configured `vt:apikey` is still used (and still reported as
-set) after `--clear`.
-:::
+- `slib.vt: A service-wide API key is set (with slib.vt.admin.apikey).`
+- `slib.vt: The service-wide API key from the vt:apikey config option is in use. --clear
+  can't remove it, change the service's config instead.`
+- `slib.vt: No service-wide API key is set.`
+
+When `vt:apikey` is set, `--clear` also prints `slib.vt: The vt:apikey config option is still
+set and is now in use. Remove it from the service's config to stop using it.`
 
 ### slib.vt.admin.tags
 
@@ -423,7 +426,7 @@ slib.vt.admin.tags [--prefix <tag>] [--enable | --disable]
 
 | Option | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `--prefix` | str | | The tag prefix. Normalized with `$lib.cast(syn:tag, ...)`; an invalid tag prints `slib.vt.admin.tags: Invalid tag prefix: <error>` and the prefix is unchanged. |
+| `--prefix` | str | | The tag prefix. Normalized with `$lib.cast(syn:tag, ...)`; an invalid tag prints `slib.vt.admin.tags: Invalid tag prefix: <error>. Nothing was changed.`, and neither the prefix nor `--enable` / `--disable` is applied. |
 | `--enable` | flag | false | Enable tagging. |
 | `--disable` | flag | false | Disable tagging. Both together is a warning and changes nothing. |
 
@@ -449,7 +452,7 @@ slib.vt.admin.request <path> [--method <method>] [--param name=value]... [--json
 
 | Argument | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `path` | str | | The API path, relative to `vt:url`, ex. `/files/<sha256>`. |
+| `path` | str | | The API path, relative to `vt:url`, ex. `/files/<sha256>`. A full URL is only allowed on `vt:url`'s scheme and host; any other fails with `Only requests to the VirusTotal API (<scheme>://<host>) are allowed, use a path like /files/<sha256>.` and nothing is sent. |
 | `--method` | str | `get` | The HTTP method. |
 | `--param` | str, repeatable | `[]` | A `name=value` query param, split on the first `=`. A value without `=` is a warning, and nothing is sent. |
 | `--json` | str | | A JSON request body. Invalid JSON is a warning, and nothing is sent. |

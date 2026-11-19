@@ -26,10 +26,12 @@ so no method raises to Storm. Errors become `status=false` returns:
 | `ValueError`, `TypeError`, `s_exc.BadArg` | `Invalid input: <message>` |
 | Anything else | `Unexpected error: <type>: <message>`, logged with its traceback. |
 
-`VtCellApi` does not override `_retnRedact()`, so messages are not redacted. The key is sent
-in the `x-apikey` header, and only `quota(remote=True)` puts it in a URL path
-(`/users/{key}/overall_quotas`): if that response isn't valid JSON, the error `Unable to parse
-the JSON response from GET /users/<key>/overall_quotas` includes the key.
+`VtCellApi._retnRedact()` replaces the service's stored key and the `vt:apikey` key (and
+their URL quoted forms) with `<redacted>` in every error message. The key is sent in the
+`x-apikey` header, and only `quota(remote=True)` puts it in a URL path
+(`/users/{key}/overall_quotas`), so an error such as `Unable to parse the JSON response from
+GET /users/<redacted>/overall_quotas` never shows it. A user's own key (from their vault) is
+not redacted; only they can send requests with it.
 
 Some example error messages:
 
@@ -70,18 +72,11 @@ TelepathRetn.
 | `getRelated(kind, ident, rel, limit=10, cursor=None, cache=True, apikey=None)` | `GET /{collection}/{id}/{rel}?limit=&cursor=` | `cache` | One raw page. `limit` is clamped to 1..40. With `vt:community`, `rel` must be in the Public relationships list. |
 | `related(kind, ident, rel, limit=10, cache=True, apikey=None)` | pages of `getRelated` | `cache` | `{"items": [<normalized>...], "count": <VirusTotal's meta.count or null>, "requests": <pages fetched>, "edge": {"verb": "refs", "dir": "out" \| "in"} or null}` |
 | `comments(kind, ident, limit=10, apikey=None)` | `related(..., "comments")` | yes | As `related`. |
-| `rels(coll)` | none | | Meant to return the allowed relationships of a collection, but see the note below. |
+| `rels(coll)` | none | | The list of relationships of a collection a Public API key can read (`PUBLIC_RELS`), the ones `getRelated()` allows with `vt:community`. An unknown collection fails with `Unknown VirusTotal object type: <coll>`. |
 | `behaviour(sha256, apikey=None)` | `GET /files/{sha256}/behaviour_summary` | yes | The normalized summary, or `null` on a 404 or an empty `data`. |
 | `search(query, limit=10, apikey=None)` | `GET /search?query=&limit=` | yes | `{"items": [<normalized>...], "count": <meta.count, or len(items)>}`. `limit` clamped to 1..40. |
 | `threatCategories(apikey=None)` | `GET /popular_threat_categories` | yes | VirusTotal's `data` list. |
 | `attackTechnique(tid, apikey=None)` | `GET /attack_techniques/{tid}` | yes | VirusTotal's `data` object. |
-
-:::{note}
-`rels()` is a plain (non async) method, but it's listed in `RETN_METHS`, whose wrapper awaits
-the result. Over Telepath it always returns `status=false` with `Invalid input: object tuple
-can't be used in 'await' expression`. No command uses it; `slib.vt.priv.user.rels()` exposes
-it.
-:::
 
 ### Submissions and community
 
@@ -93,7 +88,7 @@ it.
 | `submitUrl(url, apikey=None)` | `POST /urls` (form `url=<url>`) | `{"type": "analysis", "id": <id>}` |
 | `submitFile(chunks, name=None, password=None, apikey=None)` | `POST /files` multipart, or `GET /files/upload_url` then a `POST` to that URL when over 32MB | `{"type": "analysis", "id": <id>}`. `chunks` is a list of bytes joined into the file. Empty files and files over 650MB fail. |
 | `analysis(ident, apikey=None)` | `GET /analyses/{id}` | The normalized analysis. |
-| `waitAnalysis(ident, timeout=600, interval=60, apikey=None)` | `GET /analyses/{id}` per poll | The last normalized analysis; check `done`. `interval` is raised to at least 15 (`vt:community`) or 1. |
+| `waitAnalysis(ident, timeout=600, interval=30, apikey=None)` | `GET /analyses/{id}` per poll | The last normalized analysis; check `done`. `interval` is raised to at least 15 (`vt:community`) or 1. |
 
 A normalized analysis:
 
@@ -119,7 +114,8 @@ A normalized analysis:
 | Method | Request | `data` |
 | --- | --- | --- |
 | `quota(remote=False, apikey=None)` | none, or `GET /users/{key}/overall_quotas` with `remote` | The limiter's status for the resolved key, see below. Fails with `No VirusTotal API key is configured.` without a key. |
-| `rawRequest(method, path, params=None, json_data=None, form=None, apikey=None)` | `method path` | VirusTotal's parsed JSON, or `null` for an empty body. Rate limited, not cached. At most one of `json_data` / `form`. |
+| `rawRequest(method, path, params=None, json_data=None, form=None, apikey=None)` | `method path` | VirusTotal's parsed JSON, or `null` for an empty body. Rate limited, not cached. At most one of `json_data` / `form`. `path` is relative to `vt:url`; a full URL (or `//host/...`) on any other scheme and host fails with `Only requests to the VirusTotal API (<scheme>://<host>) are allowed, ...`, so the key is never sent elsewhere. |
+| `apiKeySource()` | none | `"stored"` (set with `setApiKey`), `"config"` (`vt:apikey`), or `null`: which service-wide key is in use. |
 
 `quota()` data:
 
@@ -130,6 +126,7 @@ A normalized analysis:
   "used": {"minute": 2, "day": 2, "month": 2},
   "wait": 0.0,
   "resets": 1795132800000,
+  "resetsMonth": 1796083200000,
   "cached": 2,
   "remote": {
     "api_requests_hourly": {"allowed": 240, "used": 0},
@@ -181,7 +178,7 @@ Every function returns the service's `{status, mesg, data}` dict, using the call
 | `lookup(kind, ident, cache=(true))` | `lookup()` |
 | `behaviour(sha256)` | `behaviour()` |
 | `related(kind, ident, rel, limit=(10))` | `related()` |
-| `rels(kind)` | `rels()` (always fails, see above) |
+| `rels(kind)` | `rels()` |
 | `comments(kind, ident, limit=(10))` | `comments()` |
 | `search(query, limit=(10))` | `search()` |
 | `analysis(ident)` | `analysis()` |
@@ -206,6 +203,7 @@ Every function returns the service's `{status, mesg, data}` dict, using the call
 | --- | --- |
 | `setApiKey(apikey)` | `setApiKey()` |
 | `hasApiKey()` | `hasApiKey()` |
+| `apiKeySource()` | `apiKeySource()` |
 | `tagSettings()` | `{"enabled": <slib:vt:tag:enabled>, "prefix": <slib:vt:tag:prefix>}` |
 | `setTagPrefix(prefix)` | Casts to `syn:tag` (raises `BadArg` if invalid), stores and returns it. |
 | `setTagsEnabled(enabled)` | Sets `slib:vt:tag:enabled`. |

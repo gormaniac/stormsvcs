@@ -513,7 +513,9 @@ class TestVtStormPkg(s_tests.SynTest):
                 f"{fake.base}@evil.example/api/v3/search",
                 fake.url.replace("http://", "https://") + "/popular_threat_categories",
             ):
-                msgs = await core.stormlist("slib.vt.admin.request $url", opts={"vars": {"url": url}})
+                msgs = await core.stormlist(
+                    "slib.vt.admin.request $url", opts={"vars": {"url": url}}
+                )
                 self.stormIsInWarn("Only requests to the VirusTotal API", msgs)
             assert len(fake.requests) == before
             msgs = await core.stormlist(
@@ -566,7 +568,9 @@ class TestVtStormPkg(s_tests.SynTest):
         async with fv.vtSvc(self) as (core, svc, fake):
             fake.text[f"/users/{fv.APIKEY}/overall_quotas"] = "<html>Oops</html>"
             msgs = await core.stormlist("slib.vt.quota --remote")
-            self.stormIsInWarn("Unable to parse the JSON response from GET /users/<redacted>/", msgs)
+            self.stormIsInWarn(
+                "Unable to parse the JSON response from GET /users/<redacted>/", msgs
+            )
             assert fv.APIKEY not in str(msgs)
 
             await core.stormlist(f"slib.vt.admin.apikey {fv.OTHERKEY}")

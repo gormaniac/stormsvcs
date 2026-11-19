@@ -35,6 +35,10 @@ starts.
 
 - `RULE_FORM = "it:app:yara:rule"`.
 - `AXON_TIMEOUT = 10`: seconds to wait for the Axon Telepath connection per scan.
+- `SCAN_TIMEOUT = 60`: the default `scan_timeout`.
+- `scanBytes(rules, byts, timeout)`: scans with a new `yara_x.Scanner(rules)` after
+  `set_timeout(timeout)`, and returns `bool(results.matching_rules)`. A new scanner per call is
+  what makes it safe to run in a worker thread. Raises `yara_x.TimeoutError` on a timeout.
 - `isRuleId(rule_id)`: `True` only for a `str` that passes `synapse.common.isguid()`. Rule IDs
   are file names, so this is what stops path traversal (`../x`, `/etc/passwd`, ...).
 - `YaraMatch` (`TypedDict`): `rule: str`, `sha256: str`, `matched: bool`.
@@ -43,15 +47,19 @@ starts.
 ### YaraRules
 
 Rule storage. `YaraRules(ruledir)` creates `ruledir` (`os.makedirs(exist_ok=True)`) and loads it.
+The files on disk are the source of truth; the in-memory dicts are a cache of them that `load()`
+refreshes.
 
 | Member | Behaviour |
 | --- | --- |
-| `rules: dict[str, yara_x.Rules]` | The in-memory rule set, keyed by guid. Scans iterate this dict. |
-| `load()` | For each entry in `ruledir`: skip names that aren't a guid, skip anything that isn't a regular file (sub directories), `load_rule()` the rest. |
-| `load_rule(rpath)` | `yara_x.Rules.deserialize_from()`; stored under the file's basename. A missing file is ignored; any other error is logged as `Skipping unreadable compiled Yara rule <path>: <error>` (WARNING) and skipped. |
-| `get(rule_id)` | `None` for a non-guid; otherwise loads from disk on demand if not in memory, and returns the rule or `None`. Never raises. |
-| `add(rule_id, compiled)` | `BadArg` for a non-guid. Serializes to a `mkstemp(prefix=".tmp-")` file in `ruledir`, then `os.replace()`s it over `ruledir/<guid>`, so a crash can't leave a partial rule (and `.tmp-*` names are never loaded as rules). The temp file is removed on any failure. |
-| `remove(rule_id)` | `BadArg` for a non-guid. Pops from memory and deletes the file; returns whether it existed in either place. |
+| `rules: dict[str, yara_x.Rules]` | The loaded rules, keyed by guid. Scans iterate this dict. |
+| `bad: dict[str, str]` | Rule files that couldn't be deserialized, guid to error. Scans report each one. |
+| `_stats` | The `(st_mtime_ns, st_size)` of each rule file when it was last read, loaded or not. |
+| `load()` | Lists `ruledir` (a missing directory reads as empty), keeping regular files with a guid name. Forgets rules whose file is gone, and `load_rule()`s each file whose stat differs from `_stats` (new or changed). So an unchanged file isn't re-read, and an unreadable one is only logged once. Called by `__init__`, and by `matchFile`, `listRules` and `getRuleCount` on every call. |
+| `load_rule(rpath)` | `yara_x.Rules.deserialize_from()`; stored under the file's basename, and its stat in `_stats`. A missing file is forgotten. Any other error is logged as `Skipping unreadable compiled Yara rule <path>: <error>` (WARNING), recorded in `bad`, and drops any previously loaded copy. |
+| `get(rule_id)` | `None` for a non-guid; otherwise loads from disk on demand if not in memory and the file changed since it was last read, and returns the rule or `None`. Never raises. |
+| `add(rule_id, compiled)` | `BadArg` for a non-guid. Serializes to a `mkstemp(prefix=".tmp-")` file in `ruledir`, then `os.replace()`s it over `ruledir/<guid>`, so a crash can't leave a partial rule (and `.tmp-*` names are never loaded as rules). The temp file is removed on any failure. Clears the rule from `bad`. |
+| `remove(rule_id)` | `BadArg` for a non-guid. Forgets the rule (`rules`, `bad`, `_stats`) and deletes the file; returns whether it existed in any of them or on disk. |
 
 On-disk format: one file per rule, the Yara-X serialized form of the compiled `:text`. There is
 no index or metadata file; the file name is the only link to the Cortex node.
@@ -63,7 +71,8 @@ no index or metadata file; the file name is the only link to the Cortex node.
 
 `__anit__`:
 
-1. Reads `axon_url` into `self.axonurl` and `max_size` into `self.maxsize`.
+1. Reads `axon_url` into `self.axonurl`, `max_size` into `self.maxsize`, and `scan_timeout`
+   into `self.scantimeout`.
 2. `self.rules = YaraRules(absjoin(self.dirn, rule_dir))`. `os.path.join` with an absolute
    `rule_dir` discards `dirn`, which is why absolute paths are used as is.
 3. With `axon_url`: one long-lived `synapse.telepath.Client` (`self.axon`), which reconnects on
@@ -89,10 +98,13 @@ bound.
 (`TimeoutError` -> `Unable to connect to the Axon within 10 seconds.`, `SynErr` -> its `mesg`,
 anything else -> `Unable to read the file from the Axon: <error>`; `CancelledError` is
 re-raised), and `None` to `Bytes for file:bytes:sha256=<sha256> are not in the Axon.`. It then
-iterates a snapshot (`list(self.rules.rules)`) of the rule IDs and runs
-`rule.scan(file_bytes)` for each, synchronously on the event loop, with yara-x's default scan
-settings (no timeout set). Each rule is a separately compiled `yara_x.Rules`, so a file is
-scanned once per enabled rule node.
+calls `self.rules.load()` (on the event loop), yields a `Couldn't load ...` result for each entry
+in `rules.bad`, and iterates a snapshot (`list(self.rules.rules.items())`) of the loaded rules,
+running `scanBytes(rule, file_bytes, scan_timeout)` for each in the default thread executor
+(`synapse.lib.coro.executor`), so the event loop isn't blocked. A `yara_x.TimeoutError` becomes
+`Scanning with ... timed out after <n> seconds (scan_timeout).`, any other exception
+`Error scanning with ...: <error>`. Each rule is a separately compiled `yara_x.Rules`, so a file
+is scanned once per enabled rule node.
 
 `compileRule()`, `removeRule()`, `listRules()`, `getRuleCount()`: see [API](api.md#telepath-api).
 `compileRule` unpacks the node with `stormlibpp.node.StormNode.unpack()`; a missing prop reads
@@ -161,9 +173,10 @@ There are no fakes and no live tests: the upstream is a real Axon from Synapse's
 | --- | --- |
 | Packaging | README copies match, versions match in all four places (`assertVersionsMatch`), `python -m yarastorm --help` starts (`assertMainHelp`), package loads, commands and modules exist, `cmdinputs` forms exist, `$srcguid` equals `SVC_GUID`, `add` event creates the `meta:source` |
 | Commands | check / enable / disable / sync / scan happy paths and wrong-form warnings; `$lib.debug` output; sync counts (`1 compiled, 1 removed, 1 failed`) and `:text` pickup; scanning a `guid:` `file:bytes`; missing `:sha256` |
-| Errors | missing / empty file, unloadable rule, no `axon_url`, unreachable Axon (patched `AXON_TIMEOUT`), bad sha256, `max_size` exceeded, unexpected exceptions through `RetnApi` |
-| Permissions | Cortex user without `slib.yara.admin` (warnings, `AuthDeny` from the module), service user without `slib.yara.admin` (`compileRule`/`removeRule` denied, check and reads allowed) |
-| Storage | persistence across `YaraRules` instances, atomic write, on-demand load, corrupt / non-guid / sub-directory files skipped, path traversal refused, service starts with a corrupt rule file |
+| Errors | missing / empty file, a rule file corrupted after startup (warned per scan, logged once, listed, removed by sync), no `axon_url`, unreachable Axon (patched `AXON_TIMEOUT`), bad sha256, `max_size` exceeded, scan timeout and scan errors (patched `scanBytes`), failed rule count in `slib.yara.scan`, failed `listRules` in `slib.yara.sync`, unexpected exceptions through `RetnApi` |
+| Permissions | Cortex user without `slib.yara.admin` (warnings, `AuthDeny` from the module), service user without `slib.yara.admin` (`compileRule`/`removeRule` denied, check and reads allowed), the exact node permissions `slib.yara.scan` needs |
+| Model | match `:version` from the rule's `:version`, unset without one |
+| Storage | persistence across `YaraRules` instances, atomic write, on-demand load, rule files added / replaced / removed on disk after startup (scanned, listed, counted), corrupt / non-guid / sub-directory files skipped, unreadable files logged once and reloaded when fixed, missing `rule_dir`, path traversal refused, service starts with a corrupt rule file |
 
 CI also runs the tests inside the test image built from the production image, and Synapse's
 Storm linter over `src/`; see {doc}`/dev/ci` and {doc}`/dev/contract`.

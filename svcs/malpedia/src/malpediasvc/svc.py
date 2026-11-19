@@ -195,8 +195,9 @@ class MalpediaSvc(s_cell.Cell):
             "type": "boolean",
             "default": True,
             "description": (
-                "When the service is first added to a Cortex, schedule the daily "
-                "slib.malpedia.sync cron job and start the initial sync."
+                "When the service is added to a Cortex, schedule the daily "
+                "slib.malpedia.sync cron job and start the initial sync. The one time setup "
+                "job that checks this is created either way."
             ),
         },
     }
@@ -831,7 +832,9 @@ class MalpediaSvc(s_cell.Cell):
             # Records a reset marked unsynced (see resetView) don't count.
             vinfo["counts"] = {
                 kind: sum(
-                    1 for _, item in self._viewkv(view, kind).items() if item.get("hash") is not None
+                    1
+                    for _, item in self._viewkv(view, kind).items()
+                    if item.get("hash") is not None
                 )
                 for kind in norm.KINDS
             }

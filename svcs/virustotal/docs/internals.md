@@ -34,11 +34,13 @@ from the yaml, and a test checks it matches `__version__` (see {doc}`/dev/versio
 
 `VtCellApi(RetnApi, s_cell.CellApi, s_stormsvc.StormSvc)`:
 
-- `RETN_METHS` lists the 19 `VtSvc` methods exposed as-is; `RetnApi` generates a Telepath
+- `RETN_METHS` lists the 20 `VtSvc` methods exposed as-is; `RetnApi` generates a Telepath
   method for each that awaits `self.cell.<name>(...)` and wraps the result or error.
 - `RETN_ERRORS = (VtApiError, VtQuotaError)`: their messages go to Storm unchanged.
 - `setApiKey`, `hasApiKey`, and `community` are written by hand and return `BoolRetn`s;
   `RetnApi` guards them so they can't raise either.
+- `_retnRedact()` scrubs the stored key and the `vt:apikey` key from every error message
+  (`VtSvc.redact()`).
 - `_storm_svc_name`, `_storm_svc_vers` (from `stormlibpp.utils.normver`), `_storm_svc_evts`,
   and `_storm_svc_pkgs` make it a Storm service that provides its own package.
 
@@ -92,7 +94,8 @@ would be past `timeout`.
 - **Auth**: `x-apikey: <key>` and `accept: application/json` headers. No key raises
   `NoApiKeyError` before anything else.
 - **URL**: `vt:url` (trailing `/` stripped) plus `path`. A `path` that starts with `http://`
-  or `https://` is used as-is (the one time upload URL).
+  or `https://` is used as-is (the one time upload URL). `VtSvc.rawRequest()` only passes a
+  full URL on if it's on `vt:url`'s scheme and host.
 - **Params**: `normParams()` drops `None` values, sends booleans as `true`/`false` and lists
   as comma separated strings, and rejects non dict params.
 - **Body**: at most one of `json_data` (JSON), `form` (URL encoded, normalized like params),
@@ -181,7 +184,8 @@ Storm but not modeled; see [Data model](model.md). Other object types become a s
   (users don't need `service.get`), read the caller's own key from their user scoped
   `virustotal` vault, and only pass it on: the service-wide key never comes back to Storm.
 - **Unprivileged modules**: `slib.vt.lib` (command logic), `slib.vt.model` (node edits), and
-  `slib.vt.util`. Node edits run as the caller, so they're subject to the caller's node
+  `slib.vt.util`. They declare no perms (a module's `perms` key isn't enforced by Synapse);
+  `slib.vt.lib` still needs `slib.vt.user`, since its `init` imports `slib.vt.priv.user`. Node edits run as the caller, so they're subject to the caller's node
   permissions.
 - **Commands** are thin: each parses its options, calls `slib.vt.lib` or a `priv` module,
   and reports failures with `slib.vt.util.failed()`. Commands with `--yield` collect nodes

@@ -268,7 +268,9 @@ class TestCapaStormSync(s_tests.SynTest):
             self.stormIsInPrint(
                 "Removed 1 rules that aren't in the capa rules anymore from the ruleset", msgs
             )
-            members = {n.ndef[1] for n in await core.nodes(f"{rset} -(has)> meta:rule +:type^=capa.")}
+            members = {
+                n.ndef[1] for n in await core.nodes(f"{rset} -(has)> meta:rule +:type^=capa.")
+            }
             assert len(members) == 5 and guid not in members
             assert len(await core.nodes(f"{rset} -(has)> meta:rule +:type=other")) == 1
             assert len(await core.nodes(f"meta:rule={guid}")) == 1

@@ -14,7 +14,7 @@ init {
             $nremoved = $lib.len($retn.removed)
             $lib.print(`Synced the slib.yara rules: {$retn.compiled} compiled, {$nremoved} removed, {$nfail} failed.`)
         }
-        catch StormRaise as err {
+        catch YaraError as err {
             $lib.warn(`Unable to sync the slib.yara rules: {$err.mesg}`)
         }
     }

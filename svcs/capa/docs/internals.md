@@ -45,7 +45,7 @@ Helpers that build the records:
 | `ruleRecord(...)` | The full record, see [`rules()`](api.md#rules). |
 | `rulesStat(path)` | SHA256 of every rule file's path, size and `st_mtime_ns`: a cheap "did anything change" check that doesn't read the rules. |
 
-`CapaRules.info()` builds the rules info (the sync `key` includes `MODEL_VERSION = 2`; bump it
+`CapaRules.info()` builds the rules info (the sync `key` includes `MODEL_VERSION = 3`; bump it
 when what the package models from a rule changes, so the next package load re-imports the
 rules). `namespaces()` and `tagRecords()` build the tag docs.
 
@@ -151,12 +151,17 @@ module and command's Storm is in its own `.storm` file under `storm/`):
 
 There are no `configvars`: the settings are Cortex globals (`slib:capa:tag:prefix`,
 `slib:capa:tag:enabled`, `slib:capa:sync:rules`, `slib:capa:sync:tags`), read through
-`$lib.globals.get()` in `slib.capa.priv.user` and written by `slib.capa.priv.admin`.
+`$lib.globals.get()` in `slib.capa.priv.user` (which `slib.capa.priv.admin` re-exports) and
+written by `slib.capa.priv.admin`.
 
 Privilege is split so that only the two `priv` modules (`asroot:perms`) call the service or
 write globals, and every node edit (in `slib.capa.model`, `slib.capa.sync`,
 `slib.capa.contacts`) runs as the calling user, subject to their node permissions.
-The `onload` runs as root.
+The `onload` runs as root. `slib.capa.priv.admin` imports `slib.capa.priv.user` in its own
+(root) runtime and re-exports its read-only calls, so the admin commands and `slib.capa.sync`
+only need `slib.capa.admin`, while `scan()` and `custom()` stay behind `slib.capa.user`. The
+unprivileged modules have no `perms` key: Synapse doesn't check one on import, so they're gated
+by the commands' `perms` and the `priv` module they import.
 
 Storm notes from the code:
 
@@ -167,7 +172,8 @@ Storm notes from the code:
   `file:bytes`, then uses `divert $cmdopts.yield` to yield either the matched rules or the
   inbound nodes.
 - `syncRules()` clears `slib:capa:sync:rules` before importing and sets it only at the end, so
-  an import that fails partway is done again by the next package load.
+  an import that fails partway is done again by the next package load. Only an import that
+  finishes removes the ruleset's edges to rules that are gone (`slib.capa.model.prune()`).
 - The Storm code lints clean with `python -m synapse.tools.storm.lint`; CI runs it with
   `storm_lint: block` in {src}`.github/workflows/capa.yml`. The `noqa` comments mark the lint
   rules kept on purpose for Synapse 2.x (`$node.form()`, `$lib.globals.get/set`).

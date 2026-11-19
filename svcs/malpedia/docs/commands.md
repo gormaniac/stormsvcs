@@ -28,13 +28,14 @@ slib.malpedia.sync [--force] [--full] [--no-pull]
 
 | Option | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `--force` | flag | `false` | Pull now even if Malpedia was checked within `malpedia:pull:minage` hours or its version is unchanged. Also downloads every YARA rule (the zip), and applies the pull even if it would remove more than half of a kind (the shrink guard). Needs `slib.malpedia.admin`. |
+| `--force` | flag | `false` | Pull now even if Malpedia was checked within `malpedia:pull:minage` hours or its version is unchanged. Also downloads every YARA rule (the zip), and applies the pull even if it would remove more than half of a kind (the shrink guard) or is the version an earlier pull refused for that. Needs `slib.malpedia.admin`. With `--no-pull` it does nothing (and needs nothing). |
 | `--full` | flag | `false` | Model every record into this view, not only the ones that changed since its last sync. |
 | `--no-pull` | flag | `false` | Don't contact Malpedia, only model the service's snapshot. |
 
 **Permissions:** `slib.malpedia.sync`, plus `node.add.<form>` on the current view's layer for
 `media:news`, `risk:threat`, `risk:tool:software` and `it:app:yara:rule`. `--force` also needs
-`slib.malpedia.admin`. The check runs even when `--no-pull` is used.
+`slib.malpedia.admin`, unless `--no-pull` is used: then there's no pull to force, so the
+command only warns `--force does nothing with --no-pull, there's no pull to force.`
 
 **Input:** none, inbound nodes are ignored. **Output:** none, the command only prints.
 
@@ -249,6 +250,10 @@ How the options combine:
 
 A job deleted outside this command (for example with `cron.del`) is treated as missing.
 
+`service.del` deletes the job. Adding the service again schedules a new one, at the service's
+stored random time in the default view (not the old `--period` or view), and runs a sync
+there. See [Syncing](syncing.md#registration-and-the-initial-bulk-pull).
+
 Malpedia is a free community resource, so please don't sync more often than daily. Syncs
 within `malpedia:pull:minage` hours of the last check don't contact Malpedia anyway.
 
@@ -286,7 +291,9 @@ for the view, so the next sync does it again. Records Malpedia removed aren't mo
 so they keep their old tags.
 
 The TLP prefix is its own setting. Changing `--prefix` doesn't move it, even though its
-default lives under `rep.malpedia`.
+default (`rep.malpedia.tlp`) lives under `rep.malpedia`: the add event always sets
+`slib:malpedia:tag:tlp`, so the model's `<prefix>.tlp` fallback (for an unset global) doesn't
+apply. Use `--tlp-prefix` to move it too, for example `--prefix rep.mp --tlp-prefix rep.mp.tlp`.
 
 ```text
 slib.malpedia.admin.tags
@@ -309,6 +316,9 @@ slib.malpedia.admin.reset --yes
 
 **Permissions:** `slib.malpedia.admin`.
 
-This calls `resetView(<view>)`, which deletes the view's per-record state and its sync info,
-including the tag prefixes it last used. Because the view forgets which records it had
-modeled, records Malpedia removed in the meantime aren't tagged `removed` in this view.
+This calls `resetView(<view>)`, which marks every record the view synced as unsynced and
+forgets the view's sync time and version (so `slib.malpedia.status` says the view hasn't been
+synced yet). The view's last synced version of each record is kept, as are the tag prefixes it
+last synced with. So the next sync still tags the records Malpedia removed in the meantime
+`removed`, counts the others as `updated`, undoes what they lost since, and removes the tags
+under a prefix that changed since.

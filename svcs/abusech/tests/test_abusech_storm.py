@@ -645,10 +645,10 @@ class TestStormUrlhaus(s_tests.SynTest):
 
             # URLhaus doesn't support IPv6 hosts: an inet:ipv6 is warned about without a request.
             nreqs = len(fake.requests)
-            msgs = await core.stormlist("[ inet:ipv6=::1 ] | slib.abusech.urlhaus.lookup")
+            msgs = await core.stormlist("[ inet:ipv6=2001:db8::2 ] | slib.abusech.urlhaus.lookup")
             self.stormIsInWarn("The node form inet:ipv6 is not supported", msgs)
             assert len(fake.requests) == nreqs
-            msgs = await core.stormlist("slib.abusech.urlhaus.lookup --host ::1")
+            msgs = await core.stormlist("slib.abusech.urlhaus.lookup --host 2001:db8::2")
             self.stormIsInWarn("only support FQDNs and IPv4 addresses", msgs)
 
     async def test_search(self):
@@ -1371,7 +1371,7 @@ class TestStormAudit(s_tests.SynTest):
             assert fake.last("/yaraify")["json"] == {"query": "list_tasks", "identifier": "ident"}
 
             msgs = await core.stormlist("[ inet:ipv6=2001:db8::1 ] | slib.abusech.urlhaus.lookup")
-            self.stormIsInWarn("only support FQDNs and IPv4", msgs)
+            self.stormIsInWarn("The node form inet:ipv6 is not supported", msgs)
 
             # Submitting a file only known by its SHA1.
             await core.nodes(

@@ -1,5 +1,5 @@
 name: slib.yara
-version: 0.8.2
+version: 0.9.0
 guid: f418c8589b13201801b9a4bf2b4f7842
 
 # Only tested against the Synapse version in uv.lock.
@@ -36,8 +36,11 @@ commands:
       Scan file:bytes nodes with every Yara rule saved in the slib.yara service.
 
       The file's bytes are pulled from the service's Axon by :sha256, so file:bytes
-      nodes without a :sha256 can't be scanned. Each match is modeled as an
-      it:app:yara:match node, linked to the service's meta:source with a seen edge.
+      nodes without a :sha256 can't be scanned. Each matching it:app:yara:rule node is
+      modeled as an it:app:yara:match node (with :version set to the rule's :version, if
+      it has one), linked to the service's meta:source with a seen edge. A rule node
+      matches if any Yara rule in its :text matches; which Yara rules or strings matched
+      is not recorded.
 
       Examples:
 
