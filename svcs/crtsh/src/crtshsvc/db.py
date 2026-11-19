@@ -672,7 +672,7 @@ class CrtshDb:
             attempt = 0
             while attempt <= self.retries:
                 conn = await self._ensure()
-                self._lastUsed = loop.time()
+                self._lastUsed = started = loop.time()
                 try:
                     return await self._run(conn, sql, args, raw=raw)
                 except asyncio.CancelledError:
@@ -683,15 +683,18 @@ class CrtshDb:
                     # A heavy query can time out on crt.sh's cold cache and finish when rerun.
                     # Only the server's statement timeout is retried, not other cancels (57014
                     # is also "canceling statement due to user request").
+                    took = loop.time() - started
                     if "statement timeout" not in str(err) or canceled >= self.timeout_retries:
                         raise CrtshDbError(
-                            f"crt.sh canceled the query (statement timeout), try a narrower search: {err}"
+                            f"crt.sh canceled the query (statement timeout) after {took:.0f}s, "
+                            f"try a narrower search: {err}"
                         ) from err
                     canceled += 1
                     delay = self.timeout_delay
                     logger.warning(
-                        "crt.sh canceled the query (statement timeout), retrying in %.0fs (%d of %d), "
-                        "its cache may be warm now: %s",
+                        "crt.sh canceled the query (statement timeout) after %.0fs, retrying in "
+                        "%.0fs (%d of %d), its cache may be warm now: %s",
+                        took,
                         delay,
                         canceled,
                         self.timeout_retries,

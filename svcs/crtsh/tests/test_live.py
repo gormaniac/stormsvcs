@@ -86,21 +86,22 @@ class TestLive(s_tests.SynTest):
                 assert norm.matches(details, "cn", "microsoftonl", "prefix"), norm.fieldValues(
                     details, "cn"
                 )
-            # A prefix of a common word with an issuer, pinned to one partition (c2027q1) with
-            # expiry bounds on its key. Without the expiry bounds (ex. --valid --since a recent
-            # date) it scans every partition from this year on, and times out on crt.sh even with
-            # the service's statement timeout and retry (checked live 2026-11-18); that's what
-            # the expiry options are for. tests/live_queries.sql still has it, to run by hand.
-            async for details in svc.searchGenr(
-                cn="microsoft*",
-                issuer="Let's Encrypt",
-                expires_after=Q1_2027[0],
-                expires_before=Q1_2027[1],
-                limit=20,
-            ):
-                assert "Let's Encrypt" in details["crtsh"]["issuer"]["name"]
+            # Expiry bounds on the partition key pin a search to one partition (c2027q1). The
+            # heavy form, microsoft* with a Let's Encrypt issuer, timed out live (2026-11-18) even
+            # pinned; tests/live_queries.sql still has it, to run by hand.
+            found = [
+                d
+                async for d in svc.searchGenr(
+                    cn="microsoftonl*",
+                    expires_after=Q1_2027[0],
+                    expires_before=Q1_2027[1],
+                    limit=20,
+                )
+            ]
+            assert found, "microsoftonline.com has certificates expiring in 2027 Q1."
+            for details in found:
                 assert Q1_2027[0] <= details["notafter"] < Q1_2027[1]
-                assert norm.matches(details, "cn", "microsoft", "prefix"), norm.fieldValues(
+                assert norm.matches(details, "cn", "microsoftonl", "prefix"), norm.fieldValues(
                     details, "cn"
                 )
 
